@@ -8,7 +8,7 @@
     </div>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Open an agent to see its run history, connections, and prompt configuration.
+    Open an agent to see its autorun history, connections, and prompt configuration.
   </p>
   {% if agents %}
     <div style="margin-top: 20px; overflow-x: auto;">
@@ -18,8 +18,8 @@
             <th>Name</th>
             <th>Type</th>
             <th>Role</th>
-            <th>Status</th>
-            <th class="table-actions-cell">Start/Stop</th>
+            <th>Autorun</th>
+            <th class="table-actions-cell">Autorun</th>
             <th class="table-actions-cell">Delete</th>
           </tr>
         </thead>
@@ -44,11 +44,13 @@
                 {% set agent_status = agent_status_by_id.get(agent.id, "stopped") %}
                 {% set agent_active = agent_status in ["starting", "running", "stopping"] %}
                 {% if agent_status in ["running", "starting"] %}
-                  <span class="status status-running">{{ agent_status }}</span>
+                  <span class="status status-running">on</span>
                 {% elif agent_status == "stopping" %}
-                  <span class="status status-warning">{{ agent_status }}</span>
+                  <span class="status status-warning">stopping</span>
+                {% elif agent_status == "error" %}
+                  <span class="status status-failed">error</span>
                 {% else %}
-                  <span class="status status-idle">{{ agent_status }}</span>
+                  <span class="status status-idle">off</span>
                 {% endif %}
               </td>
               <td class="table-actions-cell">
@@ -58,7 +60,7 @@
                     action="{{ url_for('agents.stop_agent', agent_id=agent.id) }}"
                   >
                     <input type="hidden" name="next" value="{{ request.path }}" />
-                    <button type="submit" class="btn btn-danger" aria-label="Stop agent">
+                    <button type="submit" class="btn btn-danger" aria-label="Disable autorun">
                       <i class="fa-solid fa-stop"></i>
                     </button>
                   </form>
@@ -68,7 +70,7 @@
                     action="{{ url_for('agents.start_agent', agent_id=agent.id) }}"
                   >
                     <input type="hidden" name="next" value="{{ request.path }}" />
-                    <button type="submit" class="btn btn-primary" aria-label="Start agent">
+                    <button type="submit" class="btn btn-primary" aria-label="Enable autorun">
                       <i class="fa-solid fa-play"></i>
                     </button>
                   </form>

@@ -6,7 +6,7 @@ TASK_STAGE_ORDER: list[tuple[str, str]] = [
     ("init", "Init"),
     ("post_init", "Post Init"),
     ("llm_query", "LLM Query"),
-    ("post_run", "Post Run"),
+    ("post_run", "Post Autorun"),
 ]
 
 TASK_STAGE_LABELS = dict(TASK_STAGE_ORDER)

@@ -3,11 +3,11 @@
 {% block topbar_actions %}
   <a class="btn btn-secondary" href="{{ url_for('agents.view_run', run_id=run.id) }}">
     <i class="fa-solid fa-arrow-left"></i>
-    back to run
+    back to autorun
   </a>
   <a class="btn btn-secondary" href="{{ url_for('agents.runs') }}">
     <i class="fa-solid fa-list"></i>
-    all runs
+    all autoruns
   </a>
 {% endblock %}
 
@@ -15,84 +15,23 @@
 <section class="card">
   <div class="card-header">
     <div>
-      <p class="eyebrow">run</p>
-      <h2 class="section-title">Edit Run</h2>
+      <p class="eyebrow">autorun</p>
+      <h2 class="section-title">Autoruns are read-only</h2>
     </div>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Configure the run loop behavior for the selected agent.
+    Autoruns are created and managed by toggling autorun on the agent. Update
+    agent settings to adjust autorun behavior.
   </p>
-  <form
-    method="post"
-    action="{{ url_for('agents.update_run', run_id=run.id) }}"
-    class="form-grid"
-    style="margin-top: 20px;"
-  >
-    <label class="label">
-      run name
-      <input
-        type="text"
-        name="name"
-        class="input"
-        maxlength="255"
-        value="{{ run.name or '' }}"
-        placeholder="optional"
-      />
-      <span class="muted" style="font-size: 12px; margin-top: 6px;">
-        Optional label to make runs easier to find later.
-      </span>
-    </label>
-    <label class="label">
-      agent
-      <select name="agent_id" class="input" required>
-        {% for item in agents %}
-          <option value="{{ item.id }}" {% if item.id == run.agent_id %}selected{% endif %}>
-            {{ item.name }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="label">
-      run mode
-      <select name="run_mode" class="input">
-        <option value="forever" {% if run_is_forever %}selected{% endif %}>
-          run forever
-        </option>
-        <option value="limit" {% if not run_is_forever %}selected{% endif %}>
-          limit loops
-        </option>
-      </select>
-    </label>
-    <label class="label">
-      max loops
-      <input
-        type="number"
-        name="run_max_loops"
-        min="1"
-        class="input"
-        value="{% if run_is_forever %}{% else %}{{ run_max_loops }}{% endif %}"
-      />
-      <span class="muted" style="font-size: 12px; margin-top: 6px;">
-        Used only when run mode is set to limit loops.
-      </span>
-    </label>
-    <p class="muted" style="margin-top: 4px; font-size: 12px;">
-      Autoprompt is pulled from the agent. Update it on the
-      <a href="{{ url_for('agents.edit_agent', agent_id=agent.id) }}" style="text-decoration: underline;">
-        agent edit
-      </a>
-      page.
-    </p>
-    <div class="form-actions">
-      <button type="submit" class="btn btn-primary">
-        <i class="fa-solid fa-floppy-disk"></i>
-        save
-      </button>
-      <a class="btn btn-secondary" href="{{ url_for('agents.view_run', run_id=run.id) }}">
-        <i class="fa-solid fa-arrow-left"></i>
-        cancel
-      </a>
-    </div>
-  </form>
+  <div class="form-actions" style="margin-top: 20px;">
+    <a class="btn btn-primary" href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">
+      <i class="fa-solid fa-robot"></i>
+      view agent
+    </a>
+    <a class="btn btn-secondary" href="{{ url_for('agents.runs') }}">
+      <i class="fa-solid fa-arrow-left"></i>
+      back to autoruns
+    </a>
+  </div>
 </section>
 {% endblock %}

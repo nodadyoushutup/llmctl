@@ -34,7 +34,7 @@ SCRIPT_TYPE_CHOICES = [
     (SCRIPT_TYPE_PRE_INIT, "Pre-Init Script"),
     (SCRIPT_TYPE_INIT, "Init Script"),
     (SCRIPT_TYPE_POST_INIT, "Post-Init Script"),
-    (SCRIPT_TYPE_POST_RUN, "Post-Run Script"),
+    (SCRIPT_TYPE_POST_RUN, "Post-Autorun Script"),
     (SCRIPT_TYPE_SKILL, "Skill Script"),
 ]
 
@@ -444,6 +444,12 @@ class PipelineRun(BaseModel):
     )
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 

@@ -14,6 +14,13 @@ celery_config = {
     "result_serializer": "json",
     "timezone": "UTC",
 }
+if Config.WORKSPACE_CLEANUP_ENABLED and Config.WORKSPACE_CLEANUP_INTERVAL_SECONDS > 0:
+    celery_config["beat_schedule"] = {
+        "workspace_cleanup": {
+            "task": "services.tasks.cleanup_workspaces",
+            "schedule": Config.WORKSPACE_CLEANUP_INTERVAL_SECONDS,
+        }
+    }
 if Config.CELERY_BROKER_TRANSPORT_OPTIONS:
     celery_config["broker_transport_options"] = Config.CELERY_BROKER_TRANSPORT_OPTIONS
 celery_app.conf.update(celery_config)

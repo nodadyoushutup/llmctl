@@ -6,11 +6,11 @@ Task type docs:
 - quick.md
 - pipeline.md
 - github.md
-- run.md
+- autorun.md
 
 ## Execution Path (all tasks)
 
-- An `AgentTask` is created (quick, pipeline, github, or run loop).
+- An `AgentTask` is created (quick, pipeline, github, or autorun loop).
 - `_execute_agent_task` in `app/llmctl-studio/src/services/tasks.py` formats the prompt, injects GitHub repo context when a repo is configured, injects integration settings, and builds the final payload.
 - If scripts are attached to the agent, they are staged into the task workspace and run per stage. Task-level scripts are not supported yet.
 - `codex exec` is launched with `--model` and any MCP overrides, and the payload is written to stdin.
@@ -24,7 +24,7 @@ Tasks run through the following stages in order. Script stages run only when scr
 3. Init scripts
 4. Post Init scripts
 5. LLM query (Codex exec)
-6. Post Run scripts
+6. Post Autorun scripts
 
 Skill scripts are not executed. They are injected into the prompt as a helper map of available script paths and descriptions.
 

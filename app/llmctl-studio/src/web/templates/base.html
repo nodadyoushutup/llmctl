@@ -2406,7 +2406,7 @@
     } %}
     {% set nav_runs = {
       "id": "runs",
-      "label": "Runs",
+      "label": "Autoruns",
       "icon": "fa-solid fa-bolt",
       "url": url_for("agents.runs"),
     } %}
@@ -2497,8 +2497,12 @@
         "items": [nav_agents, nav_roles],
       },
       {
+        "label": "Activity",
+        "items": [nav_tasks, nav_runs],
+      },
+      {
         "label": "Workflow",
-        "items": [nav_runs, nav_pipelines, nav_templates, nav_tasks, nav_milestones, nav_quick],
+        "items": [nav_pipelines, nav_templates, nav_milestones, nav_quick],
       },
       {
         "label": "Utility",
@@ -2516,10 +2520,10 @@
     {% set nav_items = [
       nav_agents,
       nav_roles,
+      nav_tasks,
       nav_runs,
       nav_pipelines,
       nav_templates,
-      nav_tasks,
       nav_milestones,
       nav_quick,
       nav_mcps,
@@ -2558,7 +2562,6 @@
               <i class="fa-solid fa-robot"></i>
             </div>
             <div>
-              <p class="eyebrow">control deck</p>
               <p class="brand-title">LLMCTL Studio</p>
             </div>
           </div>

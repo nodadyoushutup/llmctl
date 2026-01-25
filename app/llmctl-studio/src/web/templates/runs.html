@@ -1,28 +1,22 @@
 {% extends "base.html" %}
 
-{% block action_header %}
-  <div class="action-header-actions">
-    <a class="btn btn-primary" href="{{ url_for('agents.new_run') }}">
-      <i class="fa-solid fa-plus"></i>
-      create run
-    </a>
-  </div>
-{% endblock %}
-
 {% block content %}
 <section class="card">
+  <p class="muted" style="margin-top: 12px;">
+    Autoruns are created automatically when you enable autorun on an agent.
+  </p>
   {% if runs %}
     <div style="margin-top: 20px; overflow-x: auto;">
       <table class="table">
         <thead>
           <tr>
-            <th>Run</th>
+            <th>Autorun</th>
             <th>Agent</th>
             <th>Status</th>
-            <th>Run Task</th>
+            <th>Autorun task</th>
             <th>Started</th>
             <th>Finished</th>
-            <th class="table-actions-cell">Run</th>
+            <th class="table-actions-cell">Stop</th>
             <th class="table-actions-cell">Delete</th>
           </tr>
         </thead>
@@ -34,75 +28,53 @@
             >
               <td>
                 <a href="{{ url_for('agents.view_run', run_id=run.id) }}">
-                  {{ run.name or "Untitled run" }}
+                  {{ run.name or ("Autorun for " ~ run.agent.name) }}
                 </a>
-                <div class="muted" style="font-size: 12px; margin-top: 4px;">
-                  run {{ run.id }}
-                </div>
               </td>
               <td>
-                <a href="{{ url_for('agents.view_run', run_id=run.id) }}">
+                <a href="{{ url_for('agents.view_agent', agent_id=run.agent.id) }}">
                   {{ run.agent.name }}
                 </a>
               </td>
               <td>
                 {% if run.status in ["running", "starting"] %}
-                  <span class="status status-running">{{ run.status }}</span>
+                  <span class="status status-running">active</span>
                 {% elif run.status == "stopping" %}
-                  <span class="status status-warning">{{ run.status }}</span>
+                  <span class="status status-warning">stopping</span>
+                {% elif run.status == "error" %}
+                  <span class="status status-failed">error</span>
                 {% else %}
-                  <span class="status status-idle">{{ run.status }}</span>
+                  <span class="status status-idle">off</span>
                 {% endif %}
               </td>
               <td class="muted" style="font-size: 12px;">
-                {{ run.task_id or "-" }}
+                {{ run.task_id or run.last_run_task_id or "-" }}
               </td>
               <td class="muted">{{ human_time(run.last_started_at) }}</td>
               <td class="muted">{{ human_time(run.last_stopped_at) }}</td>
               <td class="table-actions-cell">
-                <div class="table-actions">
-                  {% if run.status in ["running", "starting", "stopping"] %}
-                    <form
-                      method="post"
-                      action="{{ url_for('agents.end_run', run_id=run.id) }}"
-                    >
-                      <input type="hidden" name="next" value="{{ request.path }}" />
-                      <button type="submit" class="btn btn-secondary" aria-label="End run">
-                        <i class="fa-solid fa-flag-checkered"></i>
-                        end
-                      </button>
-                    </form>
-                    <form
-                      method="post"
-                      action="{{ url_for('agents.cancel_run', run_id=run.id) }}"
-                    >
-                      <input type="hidden" name="next" value="{{ request.path }}" />
-                      <button type="submit" class="btn btn-secondary" aria-label="Cancel run">
-                        <i class="fa-solid fa-stop"></i>
-                        cancel
-                      </button>
-                    </form>
-                  {% else %}
-                    <form
-                      method="post"
-                      action="{{ url_for('agents.start_run', run_id=run.id) }}"
-                    >
-                      <input type="hidden" name="next" value="{{ request.path }}" />
-                      <button type="submit" class="btn btn-primary" aria-label="Run agent">
-                        <i class="fa-solid fa-play"></i>
-                      </button>
-                    </form>
-                  {% endif %}
-                </div>
+                {% if run.status in ["running", "starting", "stopping"] %}
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.stop_agent', agent_id=run.agent_id) }}"
+                  >
+                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <button type="submit" class="btn btn-secondary" aria-label="Disable autorun">
+                      <i class="fa-solid fa-stop"></i>
+                    </button>
+                  </form>
+                {% else %}
+                  <span class="muted">-</span>
+                {% endif %}
               </td>
               <td class="table-actions-cell">
                 <form
                   method="post"
                   action="{{ url_for('agents.delete_run', run_id=run.id) }}"
-                  onsubmit="return confirm('Delete this run?');"
+                  onsubmit="return confirm('Delete this autorun?');"
                 >
                   <input type="hidden" name="next" value="{{ request.path }}" />
-                  <button type="submit" class="btn btn-danger" aria-label="Delete run data">
+                  <button type="submit" class="btn btn-danger" aria-label="Delete autorun">
                     <i class="fa-solid fa-trash"></i>
                   </button>
                 </form>
@@ -113,7 +85,7 @@
       </table>
     </div>
   {% else %}
-    <p class="muted" style="margin-top: 16px;">No runs recorded yet.</p>
+    <p class="muted" style="margin-top: 16px;">No autoruns recorded yet.</p>
   {% endif %}
 </section>
 

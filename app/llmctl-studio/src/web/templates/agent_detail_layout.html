@@ -52,11 +52,13 @@
       {% endif %}
       <div class="row agent-hero-badges">
         {% if agent_status in ["running", "starting"] %}
-          <span class="status status-running">{{ agent_status }}</span>
+          <span class="status status-running">autorun on</span>
         {% elif agent_status == "stopping" %}
-          <span class="status status-warning">{{ agent_status }}</span>
+          <span class="status status-warning">autorun stopping</span>
+        {% elif agent_status == "error" %}
+          <span class="status status-failed">autorun error</span>
         {% else %}
-          <span class="status status-idle">{{ agent_status }}</span>
+          <span class="status status-idle">autorun off</span>
         {% endif %}
       </div>
     </div>
@@ -71,7 +73,7 @@
           <input type="hidden" name="next" value="{{ request.path }}" />
           <button type="submit" class="btn btn-danger">
             <i class="fa-solid fa-stop"></i>
-            stop
+            disable autorun
           </button>
         </form>
       {% else %}
@@ -79,7 +81,7 @@
           <input type="hidden" name="next" value="{{ request.path }}" />
           <button type="submit" class="btn btn-primary">
             <i class="fa-solid fa-play"></i>
-            start
+            enable autorun
           </button>
         </form>
       {% endif %}

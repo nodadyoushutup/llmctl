@@ -133,6 +133,12 @@ def _ensure_schema() -> None:
         }
         _ensure_columns(connection, "pipeline_steps", pipeline_step_columns)
 
+        pipeline_run_columns = {
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        }
+        _ensure_columns(connection, "pipeline_runs", pipeline_run_columns)
+
         task_columns = {
             "run_id": "INTEGER",
             "pipeline_id": "INTEGER",

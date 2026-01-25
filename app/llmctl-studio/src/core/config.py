@@ -66,6 +66,12 @@ class Config:
 
     AGENT_POLL_SECONDS = float(os.getenv("AGENT_POLL_SECONDS", "1"))
     CELERY_REVOKE_ON_STOP = os.getenv("CELERY_REVOKE_ON_STOP", "false").lower() == "true"
+    WORKSPACE_CLEANUP_ENABLED = (
+        os.getenv("WORKSPACE_CLEANUP_ENABLED", "true").lower() == "true"
+    )
+    WORKSPACE_CLEANUP_INTERVAL_SECONDS = float(
+        os.getenv("WORKSPACE_CLEANUP_INTERVAL_SECONDS", "300")
+    )
 
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "codex")
     CODEX_CMD = os.getenv("CODEX_CMD", "codex")

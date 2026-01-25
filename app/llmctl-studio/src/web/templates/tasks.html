@@ -117,7 +117,7 @@
             <th>Template</th>
             <th>Type</th>
             <th>Status</th>
-            <th>Run</th>
+            <th>Autorun task</th>
             <th>Started</th>
             <th>Finished</th>
             <th class="table-actions-cell">Actions</th>
@@ -188,22 +188,21 @@
                       action="{{ url_for('agents.cancel_task', task_id=task.id) }}"
                     >
                       <input type="hidden" name="next" value="{{ current_url }}" />
-                      <button type="submit" class="btn btn-secondary">
-                        <i class="fa-solid fa-stop"></i>
-                        cancel
-                      </button>
-                    </form>
-                  {% endif %}
-                  <form
-                    method="post"
-                    action="{{ url_for('agents.delete_task', task_id=task.id) }}"
-                    onsubmit="return confirm('Delete this task?');"
-                  >
-                    <input type="hidden" name="next" value="{{ current_url }}" />
-                    <button type="submit" class="btn btn-danger">
-                      <i class="fa-solid fa-trash"></i>
+                    <button type="submit" class="btn btn-secondary" aria-label="Cancel task">
+                      <i class="fa-solid fa-stop"></i>
                     </button>
                   </form>
+                {% endif %}
+                <form
+                  method="post"
+                  action="{{ url_for('agents.delete_task', task_id=task.id) }}"
+                  onsubmit="return confirm('Delete this task?');"
+                >
+                  <input type="hidden" name="next" value="{{ current_url }}" />
+                  <button type="submit" class="btn btn-danger" aria-label="Delete task">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
                 </div>
               </td>
             </tr>

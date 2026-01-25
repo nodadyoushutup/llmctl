@@ -1,4 +1,4 @@
-# Run Task (agent run loop, kind defaults to "task")
+# Autorun Task (agent autorun loop, kind defaults to "task")
 
 ## Example Payloads
 

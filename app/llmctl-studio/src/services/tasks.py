@@ -380,6 +380,8 @@ def _build_task_workspace(task_id: int) -> Path:
 
 
 SCRIPTS_DIRNAME = "agent-scripts"
+_WORKSPACE_DIR_RE = re.compile(r"^task-(\d+)(-pre-init)?$")
+_ACTIVE_TASK_STATUSES = {"pending", "queued", "running"}
 
 
 def _build_script_staging_dir(task_id: int) -> Path:
@@ -627,6 +629,74 @@ def _cleanup_workspace(task_id: int, workspace: Path | None, label: str = "works
         return
     except Exception:
         logger.exception("Failed to remove workspace %s for task %s", workspace, task_id)
+
+
+def _parse_workspace_entry(entry: Path) -> tuple[int, str] | None:
+    match = _WORKSPACE_DIR_RE.match(entry.name)
+    if not match:
+        return None
+    task_id = int(match.group(1))
+    label = "script staging" if match.group(2) else "workspace"
+    return task_id, label
+
+
+@celery_app.task(bind=True)
+def cleanup_workspaces(self) -> dict[str, int]:
+    init_engine(Config.SQLALCHEMY_DATABASE_URI)
+    init_db()
+
+    root = Path(Config.WORKSPACES_DIR)
+    if not root.exists():
+        logger.info("Workspace cleanup skipped; root not found: %s", root)
+        return {"scanned": 0, "deleted": 0, "skipped_active": 0, "missing_tasks": 0}
+
+    entries: list[tuple[Path, int, str]] = []
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        parsed = _parse_workspace_entry(entry)
+        if parsed is None:
+            continue
+        task_id, label = parsed
+        entries.append((entry, task_id, label))
+
+    if not entries:
+        return {"scanned": 0, "deleted": 0, "skipped_active": 0, "missing_tasks": 0}
+
+    task_ids = {task_id for _, task_id, _ in entries}
+    with session_scope() as session:
+        rows = session.execute(
+            select(AgentTask.id, AgentTask.status).where(AgentTask.id.in_(task_ids))
+        ).all()
+    status_by_task_id = {row[0]: row[1] for row in rows}
+
+    deleted = 0
+    skipped_active = 0
+    missing_tasks = 0
+
+    for entry, task_id, label in entries:
+        status = status_by_task_id.get(task_id)
+        if status in _ACTIVE_TASK_STATUSES:
+            skipped_active += 1
+            continue
+        if status is None:
+            missing_tasks += 1
+        _cleanup_workspace(task_id, entry, label=label)
+        deleted += 1
+
+    logger.info(
+        "Workspace cleanup scanned %s entries; deleted=%s skipped_active=%s missing_tasks=%s",
+        len(entries),
+        deleted,
+        skipped_active,
+        missing_tasks,
+    )
+    return {
+        "scanned": len(entries),
+        "deleted": deleted,
+        "skipped_active": skipped_active,
+        "missing_tasks": missing_tasks,
+    }
 
 
 def _load_prompt_payload(prompt_json: str | None, prompt_text: str | None) -> object | None:
@@ -1446,7 +1516,7 @@ def run_agent(self, run_id: int) -> None:
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
-            logger.warning("Run %s not found", run_id)
+            logger.warning("Autorun %s not found", run_id)
             return
         agent = session.get(Agent, run.agent_id)
         if agent is None:
@@ -1461,7 +1531,7 @@ def run_agent(self, run_id: int) -> None:
             )
             return
         if run.status not in RUN_ACTIVE_STATUSES:
-            logger.info("Run %s is not active before start; skipping", run_id)
+            logger.info("Autorun %s is not active before start; skipping", run_id)
             return
         end_requested = run.run_end_requested or run.status == "stopping"
         run.status = "stopping" if end_requested else "running"
@@ -1479,7 +1549,7 @@ def run_agent(self, run_id: int) -> None:
         with session_scope() as session:
             run = session.get(Run, run_id)
             if run is None:
-                logger.warning("Run %s disappeared", run_id)
+                logger.warning("Autorun %s disappeared", run_id)
                 return
             agent = session.get(Agent, run.agent_id)
             if agent is None:
@@ -1614,14 +1684,14 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             if run is None:
                 now = _utcnow()
                 task.status = "canceled"
-                task.error = "Run not found."
+                task.error = "Autorun not found."
                 task.started_at = now
                 task.finished_at = now
                 return
             if run.status not in RUN_ACTIVE_STATUSES and task.pipeline_run_id is None:
                 now = _utcnow()
                 task.status = "canceled"
-                task.error = "Run is inactive."
+                task.error = "Autorun is inactive."
                 task.started_at = now
                 task.finished_at = now
                 return

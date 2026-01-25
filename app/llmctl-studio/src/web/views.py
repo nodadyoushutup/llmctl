@@ -617,13 +617,13 @@ def _parse_run_settings(run_mode: str, run_max_loops_raw: str) -> tuple[int | No
     if run_mode == "forever":
         return None, None
     if not run_max_loops_raw:
-        return None, "Run limit is required unless running forever."
+        return None, "Autorun limit is required unless running forever."
     try:
         run_max_loops = int(run_max_loops_raw)
     except ValueError:
-        return None, "Run limit must be a number."
+        return None, "Autorun limit must be a number."
     if run_max_loops < 1:
-        return None, "Run limit must be at least 1."
+        return None, "Autorun limit must be at least 1."
     return run_max_loops, None
 
 
@@ -3094,7 +3094,7 @@ def start_agent(agent_id: int):
             .limit(1)
         ).scalar_one_or_none()
         if active_run_id:
-            flash("Agent already has an active run.", "info")
+            flash("Autorun is already enabled for this agent.", "info")
             return redirect(url_for("agents.view_run", run_id=active_run_id))
         run = Run.create(
             session,
@@ -3120,7 +3120,7 @@ def start_agent(agent_id: int):
         if agent is not None:
             agent.task_id = task.id
 
-    flash("Agent started.", "success")
+    flash("Autorun enabled.", "success")
     return redirect(redirect_target)
 
 
@@ -3149,21 +3149,26 @@ def stop_agent(agent_id: int):
         )
         if run is None:
             agent.run_end_requested = False
-            flash("Agent is already stopped.", "info")
+            flash("Autorun is already off.", "info")
             return redirect(redirect_target)
-        run.status = "stopping" if run.task_id else "stopped"
-        run.run_end_requested = False
+        if run.task_id:
+            run.run_end_requested = True
+            if run.status in {"starting", "running"}:
+                run.status = "stopping"
+        else:
+            run.status = "stopped"
+            run.run_end_requested = False
         if run.task_id:
             run.last_run_task_id = run.task_id
         task_id = run.task_id
-        agent.run_end_requested = False
+        agent.run_end_requested = run.run_end_requested
         if run.task_id:
             agent.last_run_task_id = run.task_id
 
     if task_id and Config.CELERY_REVOKE_ON_STOP:
         celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
 
-    flash("Agent stop requested.", "success")
+    flash("Autorun disable requested.", "success")
     return redirect(redirect_target)
 
 
@@ -3190,7 +3195,7 @@ def delete_agent(agent_id: int):
             .first()
         )
         if active_run_id:
-            flash("Stop the agent before deleting.", "error")
+            flash("Disable autorun before deleting.", "error")
             return redirect(next_url)
         agent.mcp_servers = []
         agent.scripts = []
@@ -3226,112 +3231,35 @@ def delete_agent(agent_id: int):
 
 @bp.post("/runs/<int:run_id>/start")
 def start_run(run_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.view_run", run_id=run_id)
-    )
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
             abort(404)
-        if run.status in RUN_ACTIVE_STATUSES:
-            flash("Run is already running.", "info")
-            return redirect(redirect_target)
-        agent = session.get(Agent, run.agent_id)
-        if agent is None:
-            flash("Agent not found.", "error")
-            return redirect(redirect_target)
-        active_run_id = session.execute(
-            select(Run.id).where(
-                Run.agent_id == agent.id,
-                Run.status.in_(RUN_ACTIVE_STATUSES),
-                Run.id != run_id,
-            )
-        ).scalar_one_or_none()
-        if active_run_id:
-            flash("Agent already has an active run.", "info")
-            return redirect(url_for("agents.view_run", run_id=active_run_id))
-        run.status = "starting"
-        run.last_started_at = utcnow()
-        run.run_end_requested = False
-        agent.last_started_at = run.last_started_at
-        agent.run_end_requested = False
-        session.flush()
-        run_id = run.id
-
-    task = run_agent.delay(run_id)
-
-    with session_scope() as session:
-        run = session.get(Run, run_id)
-        if run is None:
-            return redirect(redirect_target)
-        run.task_id = task.id
-        agent = session.get(Agent, run.agent_id)
-        if agent is not None:
-            agent.task_id = task.id
-
-    flash("Run started.", "success")
-    return redirect(redirect_target)
+        target = url_for("agents.view_agent", agent_id=run.agent_id)
+    flash("Autoruns are managed from the agent.", "info")
+    return redirect(target)
 
 
 @bp.post("/runs/<int:run_id>/cancel")
 def cancel_run(run_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.runs")
-    )
-    task_id = None
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
             abort(404)
-        if run.status not in RUN_ACTIVE_STATUSES:
-            flash("Run is already stopped.", "info")
-            return redirect(redirect_target)
-        stopped_at = utcnow()
-        run.status = "stopped"
-        run.run_end_requested = False
-        task_id = run.task_id
-        if task_id:
-            run.last_run_task_id = task_id
-            run.task_id = None
-        run.last_stopped_at = stopped_at
-        agent = session.get(Agent, run.agent_id)
-        if agent is not None:
-            agent.run_end_requested = False
-            if task_id:
-                agent.last_run_task_id = task_id
-            agent.task_id = None
-            agent.last_stopped_at = stopped_at
-
-    if task_id:
-        try:
-            celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
-        except Exception as exc:
-            logger.warning("Failed to revoke run task %s: %s", task_id, exc)
-
-    flash("Run canceled.", "success")
-    return redirect(redirect_target)
+        target = url_for("agents.view_agent", agent_id=run.agent_id)
+    flash("Autoruns are managed from the agent.", "info")
+    return redirect(target)
 
 
 @bp.post("/runs/<int:run_id>/end")
 def end_run(run_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.view_run", run_id=run_id)
-    )
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
             abort(404)
-        if run.status not in RUN_ACTIVE_STATUSES:
-            flash("Run is already stopped.", "info")
-            return redirect(redirect_target)
-        run.run_end_requested = True
-        if run.status in {"starting", "running"}:
-            run.status = "stopping"
-        agent = session.get(Agent, run.agent_id)
-        if agent is not None:
-            agent.run_end_requested = True
-    flash("Run will end after the current task finishes.", "success")
-    return redirect(redirect_target)
+        target = url_for("agents.view_agent", agent_id=run.agent_id)
+    flash("Autoruns are managed from the agent.", "info")
+    return redirect(target)
 
 
 @bp.post("/runs/<int:run_id>/delete")
@@ -3344,7 +3272,7 @@ def delete_run(run_id: int):
         if run is None:
             abort(404)
         if run.status in RUN_ACTIVE_STATUSES:
-            flash("Stop the run before deleting.", "error")
+            flash("Disable autorun before deleting.", "error")
             return redirect(next_url)
         session.execute(
             update(AgentTask)
@@ -3352,7 +3280,7 @@ def delete_run(run_id: int):
             .values(run_id=None)
         )
         session.delete(run)
-    flash("Run deleted.", "success")
+    flash("Autorun deleted.", "success")
     return redirect(next_url)
 
 
@@ -3369,7 +3297,7 @@ def new_run():
         agents=agents,
         selected_agent_id=selected_agent,
         summary=summary,
-        page_title="Create Run",
+        page_title="Autoruns",
         active_page="runs",
     )
 
@@ -3435,7 +3363,7 @@ def view_run(run_id: int):
         run_is_forever=run_is_forever,
         run_max_loops=run_max_loops,
         summary=summary,
-        page_title=run.name or f"Run {run.id}",
+        page_title=run.name or f"Autorun {run.id}",
         active_page="runs",
     )
 
@@ -3461,101 +3389,26 @@ def edit_run(run_id: int):
         run_max_loops=run_max_loops,
         run_is_forever=run_is_forever,
         summary=summary,
-        page_title=f"Edit Run - {run.name or agent.name}",
+        page_title=f"Autorun - {run.name or agent.name}",
         active_page="runs",
     )
 
 
 @bp.post("/runs/<int:run_id>")
 def update_run(run_id: int):
-    run_name = request.form.get("name", "").strip()
-    if not run_name:
-        run_name = None
-    run_mode = request.form.get("run_mode", "forever")
-    run_max_loops_raw = request.form.get("run_max_loops", "").strip()
-    run_max_loops, error = _parse_run_settings(run_mode, run_max_loops_raw)
-    if error:
-        flash(error, "error")
-        return redirect(url_for("agents.edit_run", run_id=run_id))
-
-    agent_id_raw = request.form.get("agent_id", "").strip()
-    target_agent_id = None
-    if agent_id_raw:
-        if not agent_id_raw.isdigit():
-            flash("Select a valid agent.", "error")
-            return redirect(url_for("agents.edit_run", run_id=run_id))
-        target_agent_id = int(agent_id_raw)
-
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
             abort(404)
-        if target_agent_id is None:
-            target_agent_id = run.agent_id
-        if run.status in RUN_ACTIVE_STATUSES and target_agent_id != run.agent_id:
-            flash("Stop the run before changing the agent.", "error")
-            return redirect(url_for("agents.edit_run", run_id=run_id))
-        agent = session.get(Agent, target_agent_id)
-        if agent is None:
-            flash("Agent not found.", "error")
-            return redirect(url_for("agents.edit_run", run_id=run_id))
-        run.agent_id = target_agent_id
-        run.name = run_name
-        run.run_max_loops = run_max_loops
-
-    flash("Run settings updated.", "success")
-    return redirect(url_for("agents.view_run", run_id=run_id))
+        target = url_for("agents.view_agent", agent_id=run.agent_id)
+    flash("Autoruns are managed from the agent.", "info")
+    return redirect(target)
 
 
 @bp.post("/runs")
 def create_run():
-    agent_id_raw = request.form.get("agent_id", "").strip()
-    run_name = request.form.get("name", "").strip()
-    run_mode = request.form.get("run_mode", "forever")
-    run_max_loops_raw = request.form.get("run_max_loops", "").strip()
-
-    if not run_name:
-        run_name = None
-    if not agent_id_raw:
-        flash("Agent selection is required.", "error")
-        return redirect(url_for("agents.new_run"))
-    if not agent_id_raw.isdigit():
-        flash("Select a valid agent.", "error")
-        return redirect(url_for("agents.new_run"))
-
-    run_max_loops, error = _parse_run_settings(run_mode, run_max_loops_raw)
-    if error:
-        flash(error, "error")
-        return redirect(url_for("agents.new_run", agent_id=agent_id_raw))
-
-    agent_id = int(agent_id_raw)
-    with session_scope() as session:
-        agent = session.get(Agent, agent_id)
-        if agent is None:
-            flash("Agent not found.", "error")
-            return redirect(url_for("agents.new_run"))
-        active_run_id = session.execute(
-            select(Run.id).where(
-                Run.agent_id == agent_id,
-                Run.status.in_(RUN_ACTIVE_STATUSES),
-            )
-        ).scalar_one_or_none()
-        if active_run_id:
-            flash("Agent already has an active run.", "info")
-            return redirect(url_for("agents.view_run", run_id=active_run_id))
-        run = Run.create(
-            session,
-            agent_id=agent_id,
-            name=run_name,
-            run_max_loops=run_max_loops,
-            status="stopped",
-            run_end_requested=False,
-        )
-        session.flush()
-        run_id = run.id
-
-    flash("Run created.", "success")
-    return redirect(url_for("agents.view_run", run_id=run_id))
+    flash("Autoruns are created automatically when you enable autorun on an agent.", "info")
+    return redirect(url_for("agents.list_agents"))
 
 
 @bp.get("/runs")
@@ -3568,7 +3421,7 @@ def runs():
         runs=runs,
         summary=summary,
         human_time=_human_time,
-        page_title="Runs",
+        page_title="Autoruns",
         active_page="runs",
     )
 
