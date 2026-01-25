@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_milestone') }}">
+      <i class="fa-solid fa-plus"></i>
+      create milestone
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Milestones</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Track delivery checkpoints and expected completion dates.
+  </p>
+  {% if milestones %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Completed</th>
+            <th>Description</th>
+            <th>Due date</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for milestone in milestones %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_milestone', milestone_id=milestone.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_milestone', milestone_id=milestone.id) }}">
+                  <p>{{ milestone.name }}</p>
+                </a>
+              </td>
+              <td>
+                {% if milestone.completed %}
+                  <span class="status status-success">completed</span>
+                {% else %}
+                  <span class="status status-idle">open</span>
+                {% endif %}
+              </td>
+              <td class="muted" style="font-size: 12px;">
+                {{ milestone.description | default("-", true) | truncate(140, True, "...") }}
+              </td>
+              <td class="muted">
+                {{ human_time(milestone.due_date) }}
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.delete_milestone', milestone_id=milestone.id) }}"
+                  onsubmit="return confirm('Delete this milestone?');"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button type="submit" class="btn btn-danger" aria-label="Delete milestone">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No milestones created yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const milestoneRows = document.querySelectorAll(".table-row-link");
+  milestoneRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

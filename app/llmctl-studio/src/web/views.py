@@ -45,7 +45,9 @@ from core.models import (
     Agent,
     AgentTask,
     Attachment,
+    Memory,
     MCPServer,
+    Milestone,
     Pipeline,
     PipelineRun,
     PipelineStep,
@@ -467,6 +469,26 @@ def _human_time(value: datetime | None) -> str:
     if value is None:
         return "-"
     return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_milestone_due_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if cleaned.endswith("Z"):
+        cleaned = f"{cleaned[:-1]}+00:00"
+    try:
+        if "T" in cleaned:
+            parsed = datetime.fromisoformat(cleaned)
+        else:
+            parsed = datetime.fromisoformat(f"{cleaned}T00:00:00")
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _format_bytes(value: int | None) -> str:
@@ -2588,6 +2610,15 @@ def _load_scripts() -> list[Script]:
         )
 
 
+def _load_memories() -> list[Memory]:
+    with session_scope() as session:
+        return (
+            session.execute(select(Memory).order_by(Memory.created_at.desc()))
+            .scalars()
+            .all()
+        )
+
+
 def _load_attachments() -> list[Attachment]:
     with session_scope() as session:
         return (
@@ -2599,6 +2630,17 @@ def _load_attachments() -> list[Attachment]:
                     selectinload(Attachment.pipeline_steps),
                 )
                 .order_by(Attachment.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+
+
+def _load_milestones() -> list[Milestone]:
+    with session_scope() as session:
+        return (
+            session.execute(
+                select(Milestone).order_by(Milestone.created_at.desc())
             )
             .scalars()
             .all()
@@ -3975,6 +4017,85 @@ def create_task():
     return redirect(url_for("agents.list_tasks"))
 
 
+@bp.get("/milestones")
+def list_milestones():
+    milestones = _load_milestones()
+    return render_template(
+        "milestones.html",
+        milestones=milestones,
+        human_time=_human_time,
+        page_title="Milestones",
+        active_page="milestones",
+    )
+
+
+@bp.get("/milestones/new")
+def new_milestone():
+    return render_template(
+        "milestone_new.html",
+        page_title="Create Milestone",
+        active_page="milestones",
+    )
+
+
+@bp.post("/milestones")
+def create_milestone():
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Name is required.", "error")
+        return redirect(url_for("agents.new_milestone"))
+
+    description = request.form.get("description", "").strip() or None
+    due_date_raw = request.form.get("due_date", "").strip()
+    due_date = _parse_milestone_due_date(due_date_raw)
+    if due_date_raw and due_date is None:
+        flash("Due date must be a valid date.", "error")
+        return redirect(url_for("agents.new_milestone"))
+
+    completed = bool(request.form.get("completed"))
+
+    with session_scope() as session:
+        milestone = Milestone.create(
+            session,
+            name=name,
+            description=description,
+            due_date=due_date,
+            completed=completed,
+        )
+
+    flash(f"Milestone {milestone.id} created.", "success")
+    return redirect(url_for("agents.view_milestone", milestone_id=milestone.id))
+
+
+@bp.get("/milestones/<int:milestone_id>")
+def view_milestone(milestone_id: int):
+    with session_scope() as session:
+        milestone = session.get(Milestone, milestone_id)
+        if milestone is None:
+            abort(404)
+    return render_template(
+        "milestone_detail.html",
+        milestone=milestone,
+        human_time=_human_time,
+        page_title=f"Milestone - {milestone.name}",
+        active_page="milestones",
+    )
+
+
+@bp.post("/milestones/<int:milestone_id>/delete")
+def delete_milestone(milestone_id: int):
+    next_url = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.list_milestones")
+    )
+    with session_scope() as session:
+        milestone = session.get(Milestone, milestone_id)
+        if milestone is None:
+            abort(404)
+        session.delete(milestone)
+    flash("Milestone deleted.", "success")
+    return redirect(next_url)
+
+
 @bp.get("/task-templates")
 def list_task_templates():
     agents = _load_agents()
@@ -4677,6 +4798,102 @@ def delete_attachment(attachment_id: int):
     if removed_path:
         remove_attachment_file(removed_path)
     flash("Attachment deleted.", "success")
+    return redirect(next_url)
+
+
+@bp.get("/memories")
+def list_memories():
+    memories = _load_memories()
+    return render_template(
+        "memories.html",
+        memories=memories,
+        human_time=_human_time,
+        page_title="Memories",
+        active_page="memories",
+    )
+
+
+@bp.get("/memories/new")
+def new_memory():
+    return render_template(
+        "memory_new.html",
+        page_title="Create Memory",
+        active_page="memories",
+    )
+
+
+@bp.post("/memories")
+def create_memory():
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Description is required.", "error")
+        return redirect(url_for("agents.new_memory"))
+
+    with session_scope() as session:
+        memory = Memory.create(session, description=description)
+
+    flash(f"Memory {memory.id} created.", "success")
+    return redirect(url_for("agents.view_memory", memory_id=memory.id))
+
+
+@bp.get("/memories/<int:memory_id>")
+def view_memory(memory_id: int):
+    with session_scope() as session:
+        memory = session.get(Memory, memory_id)
+        if memory is None:
+            abort(404)
+    return render_template(
+        "memory_detail.html",
+        memory=memory,
+        human_time=_human_time,
+        page_title="Memory",
+        active_page="memories",
+    )
+
+
+@bp.get("/memories/<int:memory_id>/edit")
+def edit_memory(memory_id: int):
+    with session_scope() as session:
+        memory = session.get(Memory, memory_id)
+        if memory is None:
+            abort(404)
+    return render_template(
+        "memory_edit.html",
+        memory=memory,
+        page_title="Edit Memory",
+        active_page="memories",
+    )
+
+
+@bp.post("/memories/<int:memory_id>")
+def update_memory(memory_id: int):
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Description is required.", "error")
+        return redirect(url_for("agents.edit_memory", memory_id=memory_id))
+
+    with session_scope() as session:
+        memory = session.get(Memory, memory_id)
+        if memory is None:
+            abort(404)
+        memory.description = description
+
+    flash("Memory updated.", "success")
+    return redirect(url_for("agents.view_memory", memory_id=memory_id))
+
+
+@bp.post("/memories/<int:memory_id>/delete")
+def delete_memory(memory_id: int):
+    next_url = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.list_memories")
+    )
+    with session_scope() as session:
+        memory = session.get(Memory, memory_id)
+        if memory is None:
+            abort(404)
+        session.delete(memory)
+
+    flash("Memory deleted.", "success")
     return redirect(next_url)
 
 

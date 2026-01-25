@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_memory') }}">
+      <i class="fa-solid fa-plus"></i>
+      create memory
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Memories</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Capture simple facts to reuse across tasks and workflows.
+  </p>
+  {% if memories %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Created</th>
+            <th class="table-actions-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for memory in memories %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_memory', memory_id=memory.id) }}"
+            >
+              <td>
+                <p style="white-space: pre-wrap;">{{ memory.description }}</p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ human_time(memory.created_at) }}
+                </p>
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  <a
+                    class="icon-button"
+                    href="{{ url_for('agents.edit_memory', memory_id=memory.id) }}"
+                    aria-label="Edit memory"
+                  >
+                    <i class="fa-solid fa-pen-to-square"></i>
+                  </a>
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.delete_memory', memory_id=memory.id) }}"
+                    onsubmit="return confirm('Delete this memory?');"
+                  >
+                    <input type="hidden" name="next" value="{{ url_for('agents.list_memories') }}" />
+                    <button
+                      type="submit"
+                      class="icon-button icon-button-danger"
+                      aria-label="Delete memory"
+                    >
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No memories saved yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const memoryRows = document.querySelectorAll(".table-row-link");
+  memoryRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

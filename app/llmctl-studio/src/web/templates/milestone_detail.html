@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_milestones') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+  <form
+    method="post"
+    action="{{ url_for('agents.delete_milestone', milestone_id=milestone.id) }}"
+    onsubmit="return confirm('Delete this milestone?');"
+  >
+    <input type="hidden" name="next" value="{{ url_for('agents.list_milestones') }}" />
+    <button
+      type="submit"
+      class="icon-button icon-button-danger"
+      aria-label="Delete milestone"
+    >
+      <i class="fa-solid fa-trash"></i>
+    </button>
+  </form>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">milestone</p>
+      <h2 class="section-title">{{ milestone.name }}</h2>
+    </div>
+    {% if milestone.completed %}
+      <span class="status status-success">completed</span>
+    {% else %}
+      <span class="status status-idle">open</span>
+    {% endif %}
+  </div>
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">details</p>
+      <div class="stack" style="margin-top: 12px; font-size: 12px;">
+        <p class="muted">Status: {{ "completed" if milestone.completed else "open" }}</p>
+        <p class="muted">Due date: {{ human_time(milestone.due_date) }}</p>
+        <p class="muted">Created: {{ human_time(milestone.created_at) }}</p>
+        <p class="muted">Updated: {{ human_time(milestone.updated_at) }}</p>
+      </div>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">description</p>
+      {% if milestone.description %}
+        <p class="muted" style="margin-top: 12px; font-size: 12px; white-space: pre-wrap;">
+          {{ milestone.description }}
+        </p>
+      {% else %}
+        <p class="muted" style="margin-top: 12px;">No description yet.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -2428,6 +2428,12 @@
       "icon": "fa-solid fa-list-check",
       "url": url_for("agents.list_tasks"),
     } %}
+    {% set nav_milestones = {
+      "id": "milestones",
+      "label": "Milestones",
+      "icon": "fa-solid fa-flag-checkered",
+      "url": url_for("agents.list_milestones"),
+    } %}
     {% set nav_quick = {
       "id": "quick",
       "label": "Quick Tasks",
@@ -2451,6 +2457,12 @@
       "label": "Attachments",
       "icon": "fa-solid fa-paperclip",
       "url": url_for("agents.list_attachments"),
+    } %}
+    {% set nav_memories = {
+      "id": "memories",
+      "label": "Memories",
+      "icon": "fa-solid fa-brain",
+      "url": url_for("agents.list_memories"),
     } %}
     {% set nav_github = {
       "id": "github",
@@ -2486,11 +2498,11 @@
       },
       {
         "label": "Workflow",
-        "items": [nav_runs, nav_pipelines, nav_templates, nav_tasks, nav_quick],
+        "items": [nav_runs, nav_pipelines, nav_templates, nav_tasks, nav_milestones, nav_quick],
       },
       {
         "label": "Utility",
-        "items": [nav_mcps, nav_scripts, nav_attachments],
+        "items": [nav_mcps, nav_scripts, nav_attachments, nav_memories],
       },
       {
         "label": "Integration",
@@ -2508,10 +2520,12 @@
       nav_pipelines,
       nav_templates,
       nav_tasks,
+      nav_milestones,
       nav_quick,
       nav_mcps,
       nav_scripts,
       nav_attachments,
+      nav_memories,
       nav_github,
       nav_jira,
       nav_confluence,

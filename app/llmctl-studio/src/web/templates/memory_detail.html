@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_memories') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+{% endblock %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('agents.edit_memory', memory_id=memory.id) }}">
+      <i class="fa-solid fa-pen-to-square"></i>
+      edit
+    </a>
+    <form
+      method="post"
+      action="{{ url_for('agents.delete_memory', memory_id=memory.id) }}"
+      onsubmit="return confirm('Delete this memory?');"
+    >
+      <input
+        type="hidden"
+        name="next"
+        value="{{ url_for('agents.list_memories') }}"
+      />
+      <button type="submit" class="btn btn-danger">
+        <i class="fa-solid fa-trash"></i>
+        delete
+      </button>
+    </form>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">memory {{ memory.id }}</p>
+      <h2 class="section-title">Memory</h2>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">details</p>
+      <div class="stack" style="margin-top: 12px; font-size: 12px;">
+        <p class="muted">Created: {{ human_time(memory.created_at) }}</p>
+        <p class="muted">Updated: {{ human_time(memory.updated_at) }}</p>
+      </div>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">description</p>
+      <p class="muted" style="margin-top: 12px; white-space: pre-wrap;">
+        {{ memory.description }}
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}

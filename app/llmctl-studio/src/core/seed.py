@@ -1129,6 +1129,26 @@ MCP_SERVER_SEEDS = [
             "url = \"http://localhost:9000/mcp\"\n"
         ),
     },
+    {
+        "name": "Chroma MCP",
+        "server_key": "chroma",
+        "description": "Chroma MCP server from docker compose.",
+        "config_toml": (
+            "[mcp_servers.chroma]\n"
+            "transport = \"streamable-http\"\n"
+            "url = \"http://localhost:9010/mcp\"\n"
+        ),
+    },
+    {
+        "name": "LLMCTL MCP",
+        "server_key": "llmctl-mcp",
+        "description": "LLMCTL MCP server.",
+        "config_toml": (
+            "[mcp_servers.llmctl-mcp]\n"
+            "transport = \"streamable-http\"\n"
+            "url = \"http://192.168.1.36:9020/mcp\"\n"
+        ),
+    },
 ]
 
 INDEX_FILES_NOTE = (
