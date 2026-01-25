@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_mcps') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+{% endblock %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('agents.edit_mcp', mcp_id=mcp_server.id) }}">
+      <i class="fa-solid fa-pen-to-square"></i>
+      edit
+    </a>
+    <form
+      method="post"
+      action="{{ url_for('agents.delete_mcp', mcp_id=mcp_server.id) }}"
+      onsubmit="return confirm('Delete this MCP server?');"
+    >
+      <input
+        type="hidden"
+        name="next"
+        value="{{ url_for('agents.list_mcps') }}"
+      />
+      <button type="submit" class="btn btn-danger">
+        <i class="fa-solid fa-trash"></i>
+        delete
+      </button>
+    </form>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">mcp server {{ mcp_server.id }}</p>
+      <h2 class="section-title">{{ mcp_server.name }}</h2>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">details</p>
+      <div class="stack" style="margin-top: 12px; font-size: 12px;">
+        <p class="muted">Key: {{ mcp_server.server_key }}</p>
+        <p class="muted">Description: {{ mcp_server.description or "-" }}</p>
+        <p class="muted">Agents: {{ attached_agents | length }}</p>
+        <p class="muted">Created: {{ human_time(mcp_server.created_at) }}</p>
+        <p class="muted">Updated: {{ human_time(mcp_server.updated_at) }}</p>
+      </div>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">config toml</p>
+      <pre style="margin-top: 12px; white-space: pre-wrap;">{{ mcp_server.config_json }}</pre>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Attached Agents</h2>
+  </div>
+  {% if attached_agents %}
+    <div class="grid grid-2" style="margin-top: 20px;">
+      {% for agent in attached_agents %}
+        <div class="subcard">
+          <p class="eyebrow">agent {{ agent.id }}</p>
+          <a href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">{{ agent.name }}</h3>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No agents attached yet.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

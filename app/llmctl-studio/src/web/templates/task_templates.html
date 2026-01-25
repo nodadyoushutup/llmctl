@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_task_template') }}">
+      <i class="fa-solid fa-plus"></i>
+      create template
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  {% if templates %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Template</th>
+            <th>Agent</th>
+            <th>Description</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for template in templates %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_task_template', template_id=template.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+                  <p>{{ template.name }}</p>
+                </a>
+              </td>
+              <td class="muted">
+                {{ agents_by_id.get(template.agent_id, "Unassigned") }}
+              </td>
+              <td class="muted">
+                {{ template.description or "-" }}
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.delete_task_template', template_id=template.id) }}"
+                  onsubmit="return confirm('Delete this template?');"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button type="submit" class="btn btn-danger" aria-label="Delete template">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No templates yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const templateRows = document.querySelectorAll(".table-row-link");
+  templateRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

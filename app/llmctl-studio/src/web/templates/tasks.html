@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+
+{% macro pagination_controls() %}
+  <nav class="pagination" aria-label="Tasks pages">
+    {% if page > 1 %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('agents.list_tasks', page=page - 1, per_page=per_page, agent_id=agent_filter, kind=kind_filter, status=status_filter) }}"
+      >
+        Prev
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+    {% endif %}
+    <div class="pagination-pages">
+      {% for item in pagination_items %}
+        {% if item.type == "gap" %}
+          <span class="pagination-ellipsis">&hellip;</span>
+        {% else %}
+          {% if item.page == page %}
+            <span class="pagination-link is-active" aria-current="page">
+              {{ item.page }}
+            </span>
+          {% else %}
+            <a
+              class="pagination-link"
+              href="{{ url_for('agents.list_tasks', page=item.page, per_page=per_page, agent_id=agent_filter, kind=kind_filter, status=status_filter) }}"
+            >
+              {{ item.page }}
+            </a>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if page < total_pages %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('agents.list_tasks', page=page + 1, per_page=per_page, agent_id=agent_filter, kind=kind_filter, status=status_filter) }}"
+      >
+        Next
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+{% endmacro %}
+
+{% block action_header %}
+  <div class="pagination-bar pagination-bar-header">
+    {{ pagination_controls() }}
+    <div class="pagination-bar-actions">
+      <form class="task-filters" method="get" action="{{ url_for('agents.list_tasks') }}">
+        <input type="hidden" name="page" value="1" />
+        <input type="hidden" name="per_page" value="{{ per_page }}" />
+        <label for="filter-agent">Agent</label>
+        <select name="agent_id" id="filter-agent" onchange="this.form.submit()">
+          <option value="">All agents</option>
+          {% for option in agent_filter_options %}
+            <option value="{{ option.value }}" {% if option.value == agent_filter %}selected{% endif %}>
+              {{ option.label }}
+            </option>
+          {% endfor %}
+        </select>
+        <label for="filter-kind">Type</label>
+        <select name="kind" id="filter-kind" onchange="this.form.submit()">
+          <option value="">All types</option>
+          {% for option in task_kind_options %}
+            <option value="{{ option.value }}" {% if option.value == kind_filter %}selected{% endif %}>
+              {{ option.label }}
+            </option>
+          {% endfor %}
+        </select>
+        <label for="filter-status">Status</label>
+        <select name="status" id="filter-status" onchange="this.form.submit()">
+          <option value="">All statuses</option>
+          {% for option in task_status_options %}
+            <option value="{{ option.value }}" {% if option.value == status_filter %}selected{% endif %}>
+              {{ option.label }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+      <form class="pagination-size" method="get" action="{{ url_for('agents.list_tasks') }}">
+        <input type="hidden" name="page" value="1" />
+        {% if agent_filter %}
+          <input type="hidden" name="agent_id" value="{{ agent_filter }}" />
+        {% endif %}
+        {% if kind_filter %}
+          <input type="hidden" name="kind" value="{{ kind_filter }}" />
+        {% endif %}
+        {% if status_filter %}
+          <input type="hidden" name="status" value="{{ status_filter }}" />
+        {% endif %}
+        <label for="per-page">Rows per page</label>
+        <select name="per_page" id="per-page" onchange="this.form.submit()">
+          {% for option in per_page_options %}
+            <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>
+              {{ option }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  {% if tasks %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Agent</th>
+            <th>Pipeline</th>
+            <th>Template</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Run</th>
+            <th>Started</th>
+            <th>Finished</th>
+            <th class="table-actions-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+            <tr
+              class="table-row-link task-row"
+              data-task-id="{{ task.id }}"
+              data-task-url="{{ url_for('agents.task_status', task_id=task.id) }}"
+              data-href="{{ url_for('agents.view_task', task_id=task.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_task', task_id=task.id) }}">
+                  {{ task.id }}
+                </a>
+              </td>
+              <td>
+                {% if task.agent_id is not none %}
+                  {{ agents_by_id.get(task.agent_id, "Agent " ~ task.agent_id) }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="muted">
+                {% if task.pipeline_id %}
+                  {{ pipelines_by_id.get(task.pipeline_id, "Pipeline " ~ task.pipeline_id) }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="muted">
+                {% if task.task_template_id %}
+                  <a href="{{ url_for('agents.view_task_template', template_id=task.task_template_id) }}">
+                    {{ templates_by_id.get(task.task_template_id, "Template " ~ task.task_template_id) }}
+                  </a>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="muted">{{ task_kind_label(task.kind) }}</td>
+              <td>
+                {% if task.status == "running" %}
+                  <span class="status status-running" data-task-status>running</span>
+                {% elif task.status == "queued" %}
+                  <span class="status status-queued" data-task-status>queued</span>
+                {% elif task.status == "pending" %}
+                  <span class="status status-queued" data-task-status>pending</span>
+                {% elif task.status == "succeeded" %}
+                  <span class="status status-success" data-task-status>succeeded</span>
+                {% elif task.status == "failed" %}
+                  <span class="status status-failed" data-task-status>failed</span>
+                {% else %}
+                  <span class="status status-idle" data-task-status>{{ task.status }}</span>
+                {% endif %}
+              </td>
+              <td class="muted" style="font-size: 12px;" data-task-run>
+                {{ task.run_task_id or "-" }}
+              </td>
+              <td class="muted" data-task-started>{{ human_time(task.started_at) }}</td>
+              <td class="muted" data-task-finished>{{ human_time(task.finished_at) }}</td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  {% if task.status == "running" %}
+                    <form
+                      method="post"
+                      action="{{ url_for('agents.cancel_task', task_id=task.id) }}"
+                    >
+                      <input type="hidden" name="next" value="{{ current_url }}" />
+                      <button type="submit" class="btn btn-secondary">
+                        <i class="fa-solid fa-stop"></i>
+                        cancel
+                      </button>
+                    </form>
+                  {% endif %}
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.delete_task', task_id=task.id) }}"
+                    onsubmit="return confirm('Delete this task?');"
+                  >
+                    <input type="hidden" name="next" value="{{ current_url }}" />
+                    <button type="submit" class="btn btn-danger">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No tasks recorded yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const taskRows = document.querySelectorAll(".task-row");
+
+  const isInteractiveTarget = (target) =>
+    target.closest(
+      "a, button, input, select, textarea, label, summary, details"
+    );
+
+  taskRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (isInteractiveTarget(event.target)) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <button
+      type="submit"
+      class="btn btn-primary"
+      form="quick-task-form"
+      {% if not agents %}disabled{% endif %}
+    >
+      <i class="fa-solid fa-paper-plane"></i>
+      send to cli
+    </button>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Quick Task</h2>
+    <a class="btn btn-secondary" href="{{ url_for('agents.list_tasks') }}">
+      <i class="fa-solid fa-arrow-left"></i>
+      back to tasks
+    </a>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Send a free-form prompt through the CLI wrapper and track it as a Quick Task.
+  </p>
+  <form method="post" action="{{ url_for('agents.create_quick_task') }}" class="form-grid" style="margin-top: 20px;" id="quick-task-form" enctype="multipart/form-data">
+    <label class="label">
+      agent (required)
+      <select name="agent_id" class="input" {% if not agents %}disabled{% endif %} required>
+        {% for agent in agents %}
+          <option value="{{ agent.id }}" {% if default_agent_id == agent.id %}selected{% endif %}>{{ agent.name }}</option>
+        {% endfor %}
+      </select>
+      {% if agents %}
+        <span class="muted" style="font-size: 12px; margin-top: 6px;">
+          Select the agent that should run this task.
+        </span>
+      {% else %}
+        <span class="muted" style="font-size: 12px; margin-top: 6px;">
+          No agents created yet. Create one before sending a task.
+        </span>
+      {% endif %}
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      prompt
+      <textarea
+        name="prompt"
+        placeholder="Ask anything."
+        class="textarea"
+        style="min-height: 320px;"
+        data-attachment-paste
+        data-attachment-input-id="quick-attachments"
+      ></textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      attachments (optional)
+      <input
+        type="file"
+        name="attachments"
+        id="quick-attachments"
+        class="input"
+        multiple
+        data-attachment-input
+      />
+      <span class="muted" style="font-size: 12px; margin-top: 6px;">
+        Paste images into the prompt or choose files. Saved to <code>data/attachments</code>.
+      </span>
+      <div class="muted" style="font-size: 12px; margin-top: 6px;" data-attachment-list="quick-attachments"></div>
+    </label>
+  </form>
+</section>
+
+<script>
+  (() => {
+    const form = document.querySelector("#quick-task-form");
+    const textarea = form?.querySelector("textarea[name='prompt']");
+    const submitButton = document.querySelector(
+      "button[form='quick-task-form'][type='submit']"
+    );
+
+    if (!form || !textarea) {
+      return;
+    }
+
+    textarea.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.key !== "Enter" || event.shiftKey) {
+        return;
+      }
+
+      if (submitButton?.disabled) {
+        return;
+      }
+
+      event.preventDefault();
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit(submitButton || undefined);
+      } else {
+        form.submit();
+      }
+    });
+  })();
+</script>
+{% endblock %}

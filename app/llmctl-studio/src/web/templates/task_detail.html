@@ -1,0 +1,521 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_tasks') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to tasks
+  </a>
+{% endblock %}
+
+{% block content %}
+<div
+  class="task-detail-panels"
+  id="task-detail-root"
+  data-task-id="{{ task.id }}"
+  data-task-status="{{ task.status }}"
+>
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">task {{ task.id }}</p>
+        <h2 class="section-title">{{ task_kind_label(task.kind) }}</h2>
+      </div>
+      <div class="row">
+        {% if task.status == "running" %}
+          <span class="status status-running" id="task-status">running</span>
+        {% elif task.status == "queued" %}
+          <span class="status status-queued" id="task-status">queued</span>
+        {% elif task.status == "pending" %}
+          <span class="status status-queued" id="task-status">pending</span>
+        {% elif task.status == "succeeded" %}
+          <span class="status status-success" id="task-status">succeeded</span>
+        {% elif task.status == "failed" %}
+          <span class="status status-failed" id="task-status">failed</span>
+        {% else %}
+          <span class="status status-idle" id="task-status">{{ task.status }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if task.status in ["queued", "running"] %}
+      <div class="row" style="margin-top: 16px; gap: 10px; flex-wrap: wrap;">
+        <form
+          method="post"
+          action="{{ url_for('agents.cancel_task', task_id=task.id) }}"
+        >
+          <input type="hidden" name="next" value="{{ request.path }}" />
+          <button type="submit" class="btn btn-secondary">
+            <i class="fa-solid fa-stop"></i>
+            cancel
+          </button>
+        </form>
+      </div>
+    {% endif %}
+    <div class="grid grid-2" style="margin-top: 20px;">
+      <div class="subcard">
+        <p class="eyebrow">context</p>
+        <div class="stack" style="margin-top: 12px; font-size: 12px;">
+          <p class="muted">
+            Agent:
+            {% if agent %}
+              <a href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">{{ agent.name }}</a>
+            {% elif task.agent_id is none %}
+              -
+            {% else %}
+              Agent {{ task.agent_id }}
+            {% endif %}
+          </p>
+          <p class="muted">
+            Pipeline:
+            {% if pipeline %}
+              <a href="{{ url_for('agents.view_pipeline', pipeline_id=pipeline.id) }}">{{ pipeline.name }}</a>
+            {% elif task.pipeline_id %}
+              Pipeline {{ task.pipeline_id }}
+            {% else %}
+              -
+            {% endif %}
+          </p>
+          <p class="muted">
+            Template:
+            {% if template %}
+              <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">{{ template.name }}</a>
+            {% elif task.task_template_id %}
+              Template {{ task.task_template_id }}
+            {% else %}
+              -
+            {% endif %}
+          </p>
+          <p class="muted">
+            Task scripts:
+            {% if task.scripts %}
+              {% for script in task.scripts %}
+                <a href="{{ url_for('agents.view_script', script_id=script.id) }}">
+                  {{ script.file_name }}
+                </a>
+                ({{ script_type_label(script.script_type) }}){% if not loop.last %}, {% endif %}
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </p>
+          <p class="muted">
+            Agent scripts:
+            {% if agent and agent.scripts %}
+              {% for script in agent.scripts %}
+                <a href="{{ url_for('agents.view_script', script_id=script.id) }}">
+                  {{ script.file_name }}
+                </a>
+                ({{ script_type_label(script.script_type) }}){% if not loop.last %}, {% endif %}
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </p>
+          {% if task.attachments %}
+            <p class="muted">Attachments:</p>
+            {% for attachment in task.attachments %}
+              <div class="row" style="gap: 8px; align-items: center;">
+                <p class="muted" style="margin: 0;">
+                  {{ attachment.file_name }} {% if attachment.file_path %}({{ attachment.file_path }}){% endif %}
+                </p>
+                {% if is_quick_task %}
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.remove_task_attachment', task_id=task.id, attachment_id=attachment.id) }}"
+                    onsubmit="return confirm('Remove this attachment?');"
+                  >
+                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <button type="submit" class="btn btn-secondary" style="padding: 4px 10px;">
+                      remove
+                    </button>
+                  </form>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="muted">Attachments: -</p>
+          {% endif %}
+          <p class="muted">
+            Run task:
+            <span id="task-run-task-id">{{ task.run_task_id or "-" }}</span>
+          </p>
+        </div>
+      </div>
+      <div class="subcard">
+        <p class="eyebrow">timing</p>
+        <div class="stack" style="margin-top: 12px; font-size: 12px;">
+          <p class="muted">
+            Created:
+            <span id="task-created-at">{{ human_time(task.created_at) }}</span>
+          </p>
+          <p class="muted">
+            Started:
+            <span id="task-started-at">{{ human_time(task.started_at) }}</span>
+          </p>
+          <p class="muted">
+            Finished:
+            <span id="task-finished-at">{{ human_time(task.finished_at) }}</span>
+          </p>
+          <p class="muted">
+            Celery task:
+            <span id="task-celery-id">{{ task.celery_task_id or "-" }}</span>
+          </p>
+        </div>
+      </div>
+    </div>
+    {% if task.status in ["queued", "running"] %}
+      <p class="muted" id="task-auto-refresh" style="margin-top: 16px;">
+        Auto-updating every 2 seconds while the task runs.
+      </p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <details id="task-prompt-details" data-task-id="{{ task.id }}">
+      <summary class="card-header collapse-summary">
+        <div class="row" style="gap: 10px; align-items: center;">
+          <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+          <h2 class="section-title">Prompt</h2>
+        </div>
+      </summary>
+      {% if task.prompt %}
+        <pre style="margin-top: 12px; white-space: pre-wrap;">{{ task.prompt }}</pre>
+      {% else %}
+        <p class="muted" style="margin-top: 12px;">No prompt recorded.</p>
+      {% endif %}
+    </details>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Output</h2>
+  </div>
+  <pre
+    id="task-output"
+    style="margin-top: 12px; white-space: pre-wrap;{% if not task.output %} display: none;{% endif %}"
+  >{{ task.output }}</pre>
+  <p
+    class="muted"
+    id="task-output-empty"
+    style="margin-top: 12px;{% if task.output %} display: none;{% endif %}"
+  >
+    No output yet.
+  </p>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Stages</h2>
+  </div>
+  {% if stage_entries %}
+    <div class="stack" id="task-stage-list" style="margin-top: 12px; gap: 12px;">
+      {% for stage in stage_entries %}
+        <details
+          class="subcard"
+          data-stage-key="{{ stage.key }}"
+          {% if task.status in ["succeeded", "failed", "canceled", "stopped"] or stage.status == "running" %}
+            open
+          {% endif %}
+        >
+          <summary class="row collapse-summary" style="justify-content: space-between; align-items: center;">
+            <div class="row" style="gap: 8px; align-items: center;">
+              <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+              <p class="eyebrow">{{ stage.label }}</p>
+            </div>
+            <div class="row" style="gap: 8px; align-items: center;">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-action="copy-stage-logs"
+                data-copy-label="copy"
+                data-copy-success="copied"
+                aria-label="Copy {{ stage.label }} logs"
+                style="padding: 6px 12px; font-size: 10px; letter-spacing: 0.2em;"
+              >
+                copy
+              </button>
+              <span class="status {{ stage.status_class }}" data-role="stage-status">
+                {{ stage.status_label }}
+              </span>
+            </div>
+          </summary>
+          <pre
+            class="log-output"
+            data-role="stage-logs"
+            style="margin-top: 12px;{% if not stage.logs %} display: none;{% endif %}"
+          >{{ stage.logs }}</pre>
+          <p
+            class="muted"
+            data-role="stage-empty"
+            style="margin-top: 12px;{% if stage.logs %} display: none;{% endif %}"
+          >
+            No logs yet.
+          </p>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No stage data yet.</p>
+  {% endif %}
+</section>
+<script>
+  (() => {
+    const stageList = document.getElementById("task-stage-list");
+    if (!stageList) {
+      return;
+    }
+
+    const copyText = async (text) => {
+      if (window.navigator?.clipboard?.writeText) {
+        try {
+          await window.navigator.clipboard.writeText(text);
+          return true;
+        } catch (error) {
+        }
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch (error) {
+        copied = false;
+      }
+      document.body.removeChild(textarea);
+      return copied;
+    };
+
+    stageList.addEventListener("click", async (event) => {
+      const button = event.target.closest('[data-action="copy-stage-logs"]');
+      if (!button) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+
+      const details = button.closest("[data-stage-key]");
+      if (!details) {
+        return;
+      }
+      const logsEl = details.querySelector('[data-role="stage-logs"]');
+      const logsText = logsEl ? logsEl.textContent : "";
+      const defaultLabel = button.getAttribute("data-copy-label") || "copy";
+      const successLabel = button.getAttribute("data-copy-success") || "copied";
+
+      const copied = await copyText(logsText);
+      if (!copied) {
+        return;
+      }
+      button.textContent = successLabel;
+      button.disabled = true;
+      window.setTimeout(() => {
+        button.textContent = defaultLabel;
+        button.disabled = false;
+      }, 1200);
+    });
+  })();
+</script>
+<script>
+  (() => {
+    const promptDetails = document.getElementById("task-prompt-details");
+    if (!promptDetails) {
+      return;
+    }
+    const taskId = promptDetails.getAttribute("data-task-id");
+    if (!taskId) {
+      return;
+    }
+    const storageKey = `task-detail:${taskId}:prompt-open`;
+    const storedState = window.localStorage.getItem(storageKey);
+    if (storedState === "open") {
+      promptDetails.open = true;
+    } else if (storedState === "closed") {
+      promptDetails.open = false;
+    }
+    promptDetails.addEventListener("toggle", () => {
+      window.localStorage.setItem(storageKey, promptDetails.open ? "open" : "closed");
+    });
+  })();
+</script>
+{% if task.status in ["queued", "running"] %}
+  <script>
+    (() => {
+      const root = document.getElementById("task-detail-root");
+      if (!root) {
+        return;
+      }
+      const taskId = root.getAttribute("data-task-id");
+      if (!taskId) {
+        return;
+      }
+      const statusEl = document.getElementById("task-status");
+      const outputEl = document.getElementById("task-output");
+      const outputEmptyEl = document.getElementById("task-output-empty");
+      const autoRefreshEl = document.getElementById("task-auto-refresh");
+      const startedAtEl = document.getElementById("task-started-at");
+      const finishedAtEl = document.getElementById("task-finished-at");
+      const createdAtEl = document.getElementById("task-created-at");
+      const runTaskIdEl = document.getElementById("task-run-task-id");
+      const celeryIdEl = document.getElementById("task-celery-id");
+      const stageNodes = new Map();
+
+      document.querySelectorAll("[data-stage-key]").forEach((details) => {
+        const key = details.getAttribute("data-stage-key");
+        if (!key) {
+          return;
+        }
+        stageNodes.set(key, {
+          details,
+          statusEl: details.querySelector('[data-role="stage-status"]'),
+          logsEl: details.querySelector('[data-role="stage-logs"]'),
+          emptyEl: details.querySelector('[data-role="stage-empty"]'),
+        });
+      });
+
+      const statusClasses = {
+        running: "status-running",
+        queued: "status-queued",
+        pending: "status-queued",
+        succeeded: "status-success",
+        failed: "status-failed",
+        canceled: "status-idle",
+        stopped: "status-idle",
+      };
+
+      const updateText = (el, value, fallback = "-") => {
+        if (!el) {
+          return;
+        }
+        if (value === null || value === undefined || value === "") {
+          el.textContent = fallback;
+        } else {
+          el.textContent = value;
+        }
+      };
+
+      const updateStatus = (status) => {
+        if (!statusEl) {
+          return;
+        }
+        statusEl.textContent = status || "-";
+        const className = statusClasses[status] || "status-idle";
+        statusEl.className = `status ${className}`;
+      };
+
+      const updateOutput = (output) => {
+        const value = output || "";
+        const hasOutput = value.length > 0;
+        if (outputEl) {
+          outputEl.textContent = value;
+          outputEl.style.display = hasOutput ? "" : "none";
+        }
+        if (outputEmptyEl) {
+          outputEmptyEl.style.display = hasOutput ? "none" : "";
+        }
+      };
+
+      const updateStages = (entries, currentStage, taskStatus) => {
+        if (!Array.isArray(entries)) {
+          return;
+        }
+        entries.forEach((entry) => {
+          if (!entry || !entry.key) {
+            return;
+          }
+          const nodes = stageNodes.get(entry.key);
+          if (!nodes) {
+            return;
+          }
+          if (nodes.statusEl) {
+            nodes.statusEl.textContent =
+              entry.status_label || entry.status || "-";
+            if (entry.status_class) {
+              nodes.statusEl.className = `status ${entry.status_class}`;
+            }
+          }
+          const logsText = entry.logs || "";
+          const hasLogs = logsText.length > 0;
+          if (nodes.logsEl) {
+            nodes.logsEl.textContent = logsText;
+            nodes.logsEl.style.display = hasLogs ? "" : "none";
+          }
+          if (nodes.emptyEl) {
+            nodes.emptyEl.style.display = hasLogs ? "none" : "";
+          }
+          if (
+            entry.key === currentStage &&
+            taskStatus === "running" &&
+            nodes.logsEl &&
+            hasLogs
+          ) {
+            nodes.logsEl.scrollTop = nodes.logsEl.scrollHeight;
+          }
+        });
+      };
+
+      let pollTimer = null;
+      let polling = true;
+
+      const schedulePoll = () => {
+        if (!polling) {
+          return;
+        }
+        pollTimer = window.setTimeout(poll, 1000);
+      };
+
+      const stopPolling = () => {
+        polling = false;
+        if (pollTimer) {
+          window.clearTimeout(pollTimer);
+          pollTimer = null;
+        }
+        if (autoRefreshEl) {
+          autoRefreshEl.style.display = "none";
+        }
+      };
+
+      const poll = async () => {
+        if (!polling) {
+          return;
+        }
+        try {
+          const response = await window.fetch(`/tasks/${taskId}/status`, {
+            cache: "no-store",
+            headers: {
+              Accept: "application/json",
+            },
+          });
+          if (!response.ok) {
+            schedulePoll();
+            return;
+          }
+          const data = await response.json();
+          updateStatus(data.status);
+          updateText(startedAtEl, data.started_at);
+          updateText(finishedAtEl, data.finished_at);
+          updateText(createdAtEl, data.created_at);
+          updateText(runTaskIdEl, data.run_task_id);
+          updateText(celeryIdEl, data.celery_task_id);
+          updateOutput(data.output);
+          updateStages(data.stage_entries, data.current_stage, data.status);
+          root.setAttribute("data-task-status", data.status || "");
+          if (!["queued", "running"].includes(data.status)) {
+            stopPolling();
+          }
+        } catch (error) {
+          schedulePoll();
+          return;
+        }
+        schedulePoll();
+      };
+
+      poll();
+    })();
+  </script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="section-title">All Agents</h2>
+    </div>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Open an agent to see its run history, connections, and prompt configuration.
+  </p>
+  {% if agents %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th class="table-actions-cell">Start/Stop</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for agent in agents %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_agent', agent_id=agent.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">
+                  <p>{{ agent.name }}</p>
+                </a>
+              </td>
+              <td>
+                <span class="chip">{{ "system" if agent.is_system else "user" }}</span>
+              </td>
+              <td class="muted">
+                {{ roles_by_id.get(agent.role_id, "-") }}
+              </td>
+              <td>
+                {% set agent_status = agent_status_by_id.get(agent.id, "stopped") %}
+                {% set agent_active = agent_status in ["starting", "running", "stopping"] %}
+                {% if agent_status in ["running", "starting"] %}
+                  <span class="status status-running">{{ agent_status }}</span>
+                {% elif agent_status == "stopping" %}
+                  <span class="status status-warning">{{ agent_status }}</span>
+                {% else %}
+                  <span class="status status-idle">{{ agent_status }}</span>
+                {% endif %}
+              </td>
+              <td class="table-actions-cell">
+                {% if agent_active %}
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.stop_agent', agent_id=agent.id) }}"
+                  >
+                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <button type="submit" class="btn btn-danger" aria-label="Stop agent">
+                      <i class="fa-solid fa-stop"></i>
+                    </button>
+                  </form>
+                {% else %}
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.start_agent', agent_id=agent.id) }}"
+                  >
+                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <button type="submit" class="btn btn-primary" aria-label="Start agent">
+                      <i class="fa-solid fa-play"></i>
+                    </button>
+                  </form>
+                {% endif %}
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.delete_agent', agent_id=agent.id) }}"
+                  onsubmit="return confirm('Delete this agent?');"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button type="submit" class="btn btn-danger" aria-label="Delete agent">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No agents created yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const agentRows = document.querySelectorAll(".table-row-link");
+  agentRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

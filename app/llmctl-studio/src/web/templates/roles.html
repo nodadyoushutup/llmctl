@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-primary" href="{{ url_for('agents.new_role') }}">
+    <i class="fa-solid fa-plus"></i>
+    create
+  </a>
+{% endblock %}
+
+{% block content %}
+{% macro render_pagination(pagination, show_page_size=False) %}
+  <div class="pagination">
+    <div class="pagination-info">
+      <span class="muted">
+        {% if pagination.total_count %}
+          Showing {{ pagination.start_index }}-{{ pagination.end_index }} of {{ pagination.total_count }}
+        {% else %}
+          No roles to show.
+        {% endif %}
+      </span>
+    </div>
+    <div class="pagination-controls">
+      {% if pagination.prev_url %}
+        <a class="pagination-link" href="{{ pagination.prev_url }}">Prev</a>
+      {% else %}
+        <span class="pagination-link is-disabled">Prev</span>
+      {% endif %}
+      <div class="pagination-pages">
+        {% for item in pagination.page_items %}
+          {% if item.is_gap %}
+            <span class="pagination-ellipsis">...</span>
+          {% else %}
+            <a
+              class="pagination-link {% if item.is_current %}is-current{% endif %}"
+              href="{{ item.url }}"
+            >
+              {{ item.label }}
+            </a>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% if pagination.next_url %}
+        <a class="pagination-link" href="{{ pagination.next_url }}">Next</a>
+      {% else %}
+        <span class="pagination-link is-disabled">Next</span>
+      {% endif %}
+    </div>
+    {% if show_page_size %}
+      <form method="get" action="{{ pagination.base_path }}" class="pagination-size">
+        <input type="hidden" name="page" value="1" />
+        <span class="muted">Rows per page</span>
+        <select name="per_page" class="input" onchange="this.form.submit()">
+          {% for size in pagination.page_sizes %}
+            <option value="{{ size }}" {% if size == pagination.per_page %}selected{% endif %}>
+              {{ size }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Roles</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Define shared role profiles with descriptions and extra JSON details.
+  </p>
+  {% if roles %}
+    {{ render_pagination(pagination) }}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role in roles %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_role', role_id=role.id) }}"
+            >
+              <td>
+                <p>{{ role.name }}</p>
+                {% if role.description %}
+                  <p class="muted" style="margin-top: 6px; font-size: 12px;">
+                    {{ role.description | truncate(120, True, "...") }}
+                  </p>
+                {% endif %}
+              </td>
+              <td>
+                <span class="chip">{{ "system" if role.is_system else "user" }}</span>
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.delete_role', role_id=role.id) }}"
+                    onsubmit="return confirm('Delete this role?');"
+                  >
+                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <button type="submit" class="btn btn-danger" aria-label="Delete role">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {{ render_pagination(pagination, true) }}
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No roles created yet.</p>
+  {% endif %}
+</section>
+
+<style>
+  .pagination {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .pagination-controls,
+  .pagination-pages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pagination-pages {
+    gap: 6px;
+  }
+
+  .pagination-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(24, 33, 43, 0.6);
+    color: var(--muted);
+    font-size: 12px;
+    text-decoration: none;
+    transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+  }
+
+  .pagination-link:hover {
+    border-color: rgba(255, 122, 24, 0.4);
+    color: #fff;
+  }
+
+  .pagination-link.is-current {
+    border-color: rgba(255, 122, 24, 0.6);
+    background: rgba(255, 122, 24, 0.2);
+    color: #fff;
+  }
+
+  .pagination-link.is-disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  .pagination-ellipsis {
+    color: var(--muted);
+    padding: 0 4px;
+    font-size: 12px;
+  }
+
+  .pagination-size {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .pagination-size .input {
+    width: auto;
+    min-width: 110px;
+  }
+</style>
+
+<script>
+  const roleRows = document.querySelectorAll(".table-row-link");
+  roleRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

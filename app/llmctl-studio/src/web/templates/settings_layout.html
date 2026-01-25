@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  {% set settings_nav = [
+    {
+      "id": "overview",
+      "label": "Overview",
+      "icon": "fa-solid fa-compass",
+      "url": url_for("agents.settings"),
+    },
+    {
+      "id": "core",
+      "label": "Core",
+      "icon": "fa-solid fa-gear",
+      "url": url_for("agents.settings_core"),
+    },
+    {
+      "id": "provider",
+      "label": "Provider",
+      "icon": "fa-solid fa-wave-square",
+      "url": url_for("agents.settings_provider"),
+    },
+    {
+      "id": "gitconfig",
+      "label": "GitConfig",
+      "icon": "fa-solid fa-code-branch",
+      "url": url_for("agents.settings_gitconfig"),
+    },
+    {
+      "id": "integrations",
+      "label": "Integrations",
+      "icon": "fa-solid fa-plug",
+      "url": url_for("agents.settings_integrations"),
+    },
+    {
+      "id": "celery",
+      "label": "Celery",
+      "icon": "fa-solid fa-network-wired",
+      "url": url_for("agents.settings_celery"),
+    },
+    {
+      "id": "runtime",
+      "label": "Runtime",
+      "icon": "fa-solid fa-circle-info",
+      "url": url_for("agents.settings_runtime"),
+    },
+  ] %}
+  <div class="settings-nav">
+    {% for item in settings_nav %}
+      {% set is_active = settings_section == item.id %}
+      <a
+        href="{{ item.url }}"
+        class="settings-link{% if is_active %} is-active{% endif %}"
+      >
+        <i class="{{ item.icon }}"></i>
+        {{ item.label }}
+      </a>
+    {% endfor %}
+  </div>
+  {{ super() }}
+{% endblock %}
+
+{% block content %}
+{% block settings_content %}{% endblock %}
+{% endblock %}

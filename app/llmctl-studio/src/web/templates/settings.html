@@ -1,0 +1,197 @@
+{% extends "settings_layout.html" %}
+
+{% block settings_content %}
+<section class="grid grid-2">
+  <div class="card">
+    <div class="card-header">
+      <h3 class="section-title">Core</h3>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Paths, polling, and provider defaults.
+    </p>
+    <div class="stack" style="margin-top: 20px;">
+      {% for key, value in core_overview.items() %}
+        <div class="subcard">
+          <p class="eyebrow">{{ key }}</p>
+          <p class="muted" style="margin-top: 8px; font-size: 12px;">
+            {{ value }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+    <div style="margin-top: 18px;">
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_core') }}">
+        <i class="fa-solid fa-arrow-right"></i>
+        open
+      </a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="section-title">Provider</h3>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Choose which CLI powers agent runs.
+    </p>
+    <div class="stack" style="margin-top: 20px;">
+      <div class="subcard">
+        <p class="eyebrow">active</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ provider_overview.label }}
+        </p>
+      </div>
+      <div class="subcard">
+        <p class="eyebrow">command</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ provider_overview.command }}
+        </p>
+      </div>
+      <div class="subcard">
+        <p class="eyebrow">model</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ provider_overview.model }}
+        </p>
+      </div>
+    </div>
+    <div style="margin-top: 18px;">
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_provider') }}">
+        <i class="fa-solid fa-arrow-right"></i>
+        open
+      </a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h3 class="section-title">GitConfig</h3>
+      </div>
+      <span class="status {% if gitconfig_overview.exists %}status-success{% else %}status-warning{% endif %}">
+        {% if gitconfig_overview.exists %}present{% else %}missing{% endif %}
+      </span>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Edit ~/.gitconfig for this host.
+    </p>
+    <div class="stack" style="margin-top: 20px;">
+      <div class="subcard">
+        <p class="eyebrow">path</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ gitconfig_overview.path }}
+        </p>
+      </div>
+    </div>
+    <div style="margin-top: 18px;">
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_gitconfig') }}">
+        <i class="fa-solid fa-arrow-right"></i>
+        open
+      </a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="section-title">Integrations</h3>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Connect delivery systems and sync work.
+    </p>
+    <div class="stack" style="margin-top: 20px;">
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">GitHub</p>
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              Repo: {{ integration_overview.github.repo }}
+            </p>
+          </div>
+          <span
+            class="status {% if integration_overview.github.connected %}status-success{% else %}status-warning{% endif %}"
+          >
+            {% if integration_overview.github.connected %}connected{% else %}needs token{% endif %}
+          </span>
+        </div>
+      </div>
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">Atlassian</p>
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              Jira board: {{ integration_overview.jira.board }}
+            </p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              Jira project: {{ integration_overview.jira.project_key }}
+            </p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              Confluence space: {{ integration_overview.confluence.space }}
+            </p>
+          </div>
+          {% set atlassian_connected = integration_overview.jira.connected or integration_overview.confluence.connected %}
+          <span
+            class="status {% if atlassian_connected %}status-success{% else %}status-warning{% endif %}"
+          >
+            {% if atlassian_connected %}connected{% else %}needs key{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top: 18px;">
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_integrations') }}">
+        <i class="fa-solid fa-arrow-right"></i>
+        open
+      </a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="section-title">Celery</h3>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Broker, backend, and transport settings.
+    </p>
+    <div class="stack" style="margin-top: 20px;">
+      {% for key, value in celery_overview.items() %}
+        <div class="subcard">
+          <p class="eyebrow">{{ key }}</p>
+          <p class="muted" style="margin-top: 8px; font-size: 12px;">
+            {{ value }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+    <div style="margin-top: 18px;">
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_celery') }}">
+        <i class="fa-solid fa-arrow-right"></i>
+        open
+      </a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3 class="section-title">Runtime</h3>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Agent loop cadence and stop behavior.
+    </p>
+    <div class="stack" style="margin-top: 20px;">
+      {% for key, value in runtime_overview.items() %}
+        <div class="subcard">
+          <p class="eyebrow">{{ key }}</p>
+          <p class="muted" style="margin-top: 8px; font-size: 12px;">
+            {{ value }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+    <div style="margin-top: 18px;">
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_runtime') }}">
+        <i class="fa-solid fa-arrow-right"></i>
+        open
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}

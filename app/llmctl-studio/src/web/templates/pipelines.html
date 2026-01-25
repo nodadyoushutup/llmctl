@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_pipeline') }}">
+      <i class="fa-solid fa-plus"></i>
+      create pipeline
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  {% if pipelines %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table table-pipelines">
+        <thead>
+          <tr>
+            <th>Pipeline</th>
+            <th>Description</th>
+            <th class="steps-cell">Steps</th>
+            <th class="table-actions-cell">Run</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pipeline in pipelines %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_pipeline', pipeline_id=pipeline.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_pipeline', pipeline_id=pipeline.id) }}">
+                  <p class="pipeline-name">{{ pipeline.name }}</p>
+                </a>
+              </td>
+              <td class="muted pipeline-description">
+                {{ pipeline.description or "-" }}
+              </td>
+              <td class="steps-cell">
+                <span class="steps-badge">{{ step_counts.get(pipeline.id, 0) }}</span>
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.start_pipeline', pipeline_id=pipeline.id) }}"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button type="submit" class="btn btn-primary" aria-label="Run pipeline">
+                    <i class="fa-solid fa-play"></i>
+                  </button>
+                </form>
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.delete_pipeline', pipeline_id=pipeline.id) }}"
+                  onsubmit="return confirm('Delete this pipeline?');"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button type="submit" class="btn btn-danger" aria-label="Delete pipeline">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No pipelines yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const pipelineRows = document.querySelectorAll(".table-row-link");
+  pipelineRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

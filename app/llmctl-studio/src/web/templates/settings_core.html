@@ -1,0 +1,25 @@
+{% extends "settings_layout.html" %}
+
+{% block settings_content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Core Settings</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Paths, polling, and provider defaults.
+  </p>
+  <div class="stack" style="margin-top: 20px;">
+    {% for key, value in core_config.items() %}
+      <div class="subcard">
+        <p class="eyebrow">{{ key }}</p>
+        <p
+          class="muted"
+          style="margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px;"
+        >
+          {{ value }}
+        </p>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

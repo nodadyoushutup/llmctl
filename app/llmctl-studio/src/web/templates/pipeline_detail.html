@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_pipelines') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to pipelines
+  </a>
+{% endblock %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('agents.edit_pipeline', pipeline_id=pipeline.id) }}">
+      <i class="fa-solid fa-pen-to-square"></i>
+      edit
+    </a>
+    <form method="post" action="{{ url_for('agents.toggle_pipeline_loop', pipeline_id=pipeline.id) }}">
+      <input type="hidden" name="next" value="{{ request.path }}" />
+      <input
+        type="hidden"
+        name="loop_enabled"
+        value="{% if pipeline.loop_enabled %}0{% else %}1{% endif %}"
+      />
+      <button
+        type="submit"
+        class="btn {% if pipeline.loop_enabled %}btn-primary{% else %}btn-secondary{% endif %}"
+      >
+        <i class="fa-solid fa-arrows-rotate"></i>
+        loop {% if pipeline.loop_enabled %}on{% else %}off{% endif %}
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('agents.start_pipeline', pipeline_id=pipeline.id) }}">
+      <input type="hidden" name="next" value="{{ request.path }}" />
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-play"></i>
+        run
+      </button>
+    </form>
+    <form
+      method="post"
+      action="{{ url_for('agents.delete_pipeline', pipeline_id=pipeline.id) }}"
+      onsubmit="return confirm('Delete this pipeline?');"
+    >
+      <input
+        type="hidden"
+        name="next"
+        value="{{ url_for('agents.list_pipelines') }}"
+      />
+      <button type="submit" class="btn btn-danger">
+        <i class="fa-solid fa-trash"></i>
+        delete
+      </button>
+    </form>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">pipeline {{ pipeline.id }}</p>
+      <h2 class="section-title">{{ pipeline.name }}</h2>
+    </div>
+  </div>
+  <dl class="meta-list meta-list-compact">
+    <div class="meta-span">
+      <dt>Description</dt>
+      <dd>{{ pipeline.description or "-" }}</dd>
+    </div>
+    <div>
+      <dt>Created</dt>
+      <dd>{{ human_time(pipeline.created_at) }}</dd>
+    </div>
+    <div>
+      <dt>Updated</dt>
+      <dd>{{ human_time(pipeline.updated_at) }}</dd>
+    </div>
+    <div>
+      <dt>Steps</dt>
+      <dd>{{ steps|length }}</dd>
+    </div>
+    <div>
+      <dt>Templates</dt>
+      <dd>{{ templates|length }}</dd>
+    </div>
+    <div>
+      <dt>Loop</dt>
+      <dd>{% if pipeline.loop_enabled %}Enabled{% else %}Disabled{% endif %}</dd>
+    </div>
+  </dl>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Add Step</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Add a template to the pipeline. You can reorder steps with the arrows below.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.add_pipeline_step', pipeline_id=pipeline.id) }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+    enctype="multipart/form-data"
+  >
+    <input type="hidden" name="next" value="{{ request.path }}" />
+    <label class="label">
+      template
+      <select name="template_id" class="input">
+        <option value="">Select template</option>
+        {% for template in templates %}
+          <option value="{{ template.id }}">{{ template.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not templates %}
+        <span class="muted" style="font-size: 12px; margin-top: 6px;">
+          Create a template in
+          <a href="{{ url_for('agents.list_task_templates') }}" style="text-decoration: underline;">
+            templates
+          </a>
+          to add pipeline steps.
+        </span>
+      {% endif %}
+    </label>
+    <label class="label">
+      additional prompt
+      <textarea
+        name="additional_prompt"
+        class="input"
+        rows="4"
+        placeholder="Optional context appended to the template prompt."
+        data-attachment-paste
+        data-attachment-input-id="pipeline-step-attachments-new"
+      ></textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      attachments (optional)
+      <input
+        type="file"
+        name="attachments"
+        id="pipeline-step-attachments-new"
+        class="input"
+        multiple
+        data-attachment-input
+      />
+      <span class="muted" style="font-size: 12px; margin-top: 6px;">
+        Paste images into the prompt or choose files. Saved to <code>data/attachments</code>.
+      </span>
+      <div class="muted" style="font-size: 12px; margin-top: 6px;" data-attachment-list="pipeline-step-attachments-new"></div>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-secondary">
+        <i class="fa-solid fa-plus"></i>
+        add step
+      </button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Pipeline Steps</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Ordered templates that make up this pipeline.
+  </p>
+  {% if steps %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Template</th>
+            <th>Additional Prompt</th>
+            <th>Agent</th>
+            <th>Template ID</th>
+            <th class="table-actions-cell">Up</th>
+            <th class="table-actions-cell">Down</th>
+            <th class="table-actions-cell"><i class="fa-solid fa-trash" aria-hidden="true"></i></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for step in steps %}
+            {% set template = templates_by_id.get(step.task_template_id) %}
+            <tr>
+              <td>
+                {% if template %}
+                  <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+                    <p>{{ template.name }}</p>
+                  </a>
+                {% else %}
+                  <p>Template {{ step.task_template_id }}</p>
+                {% endif %}
+                {% if template and template.description %}
+                  <p class="muted" style="font-size: 12px; margin-top: 4px;">
+                    {{ template.description }}
+                  </p>
+                {% endif %}
+              </td>
+              <td>
+                <form
+                  method="post"
+                  action="{{ url_for('agents.update_pipeline_step_prompt', pipeline_id=pipeline.id, step_id=step.id) }}"
+                  enctype="multipart/form-data"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <textarea
+                    name="additional_prompt"
+                    class="input"
+                    rows="3"
+                    placeholder="Optional context appended to the template prompt."
+                    data-attachment-paste
+                    data-attachment-input-id="pipeline-step-attachments-{{ step.id }}"
+                  >{{ step.additional_prompt or "" }}</textarea>
+                  <input
+                    type="file"
+                    name="attachments"
+                    id="pipeline-step-attachments-{{ step.id }}"
+                    class="input"
+                    style="margin-top: 8px;"
+                    multiple
+                    data-attachment-input
+                  />
+                  <div class="muted" style="font-size: 12px; margin-top: 6px;" data-attachment-list="pipeline-step-attachments-{{ step.id }}"></div>
+                  <div style="margin-top: 8px;">
+                    <button type="submit" class="btn btn-secondary">save</button>
+                  </div>
+                </form>
+                {% if step.attachments %}
+                  <div class="stack" style="margin-top: 8px;">
+                    <p class="muted" style="font-size: 12px;">Existing attachments:</p>
+                    {% for attachment in step.attachments %}
+                      <div class="row" style="gap: 8px; align-items: center;">
+                        <p class="muted" style="font-size: 12px; margin: 0;">
+                          {{ attachment.file_name }} {% if attachment.file_path %}({{ attachment.file_path }}){% endif %}
+                        </p>
+                        <form
+                          method="post"
+                          action="{{ url_for('agents.remove_pipeline_step_attachment', pipeline_id=pipeline.id, step_id=step.id, attachment_id=attachment.id) }}"
+                          onsubmit="return confirm('Remove this attachment?');"
+                        >
+                          <input type="hidden" name="next" value="{{ request.path }}" />
+                          <button type="submit" class="btn btn-secondary" style="padding: 4px 10px;">
+                            remove
+                          </button>
+                        </form>
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </td>
+              <td class="muted">
+                {% if template %}
+                  {{ agents_by_id.get(template.agent_id, "Unassigned") }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="muted">{{ step.task_template_id }}</td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.move_pipeline_step_up', pipeline_id=pipeline.id, step_id=step.id) }}"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button
+                    type="submit"
+                    class="btn btn-secondary"
+                    aria-label="Move step up"
+                    {% if loop.first %}disabled{% endif %}
+                  >
+                    <i class="fa-solid fa-arrow-up"></i>
+                  </button>
+                </form>
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.move_pipeline_step_down', pipeline_id=pipeline.id, step_id=step.id) }}"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button
+                    type="submit"
+                    class="btn btn-secondary"
+                    aria-label="Move step down"
+                    {% if loop.last %}disabled{% endif %}
+                  >
+                    <i class="fa-solid fa-arrow-down"></i>
+                  </button>
+                </form>
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.delete_pipeline_step', pipeline_id=pipeline.id, step_id=step.id) }}"
+                  onsubmit="return confirm('Delete this pipeline step?');"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button type="submit" class="btn btn-danger" aria-label="Delete step">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No steps yet.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

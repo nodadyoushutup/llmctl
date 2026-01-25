@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.runs') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to runs
+  </a>
+{% endblock %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('agents.edit_run', run_id=run.id) }}">
+      <i class="fa-solid fa-pen-to-square"></i>
+      edit run
+    </a>
+    {% if run.status in ["running", "starting", "stopping"] %}
+      <form
+        method="post"
+        action="{{ url_for('agents.end_run', run_id=run.id) }}"
+      >
+        <input type="hidden" name="next" value="{{ request.path }}" />
+        <button type="submit" class="btn btn-secondary">
+          <i class="fa-solid fa-flag-checkered"></i>
+          end
+        </button>
+      </form>
+      <form
+        method="post"
+        action="{{ url_for('agents.cancel_run', run_id=run.id) }}"
+      >
+        <input type="hidden" name="next" value="{{ request.path }}" />
+        <button type="submit" class="btn btn-secondary">
+          <i class="fa-solid fa-stop"></i>
+          cancel
+        </button>
+      </form>
+    {% else %}
+      <form
+        method="post"
+        action="{{ url_for('agents.start_run', run_id=run.id) }}"
+      >
+        <input type="hidden" name="next" value="{{ request.path }}" />
+        <button type="submit" class="btn btn-primary">
+          <i class="fa-solid fa-play"></i>
+          start
+        </button>
+      </form>
+    {% endif %}
+    <form
+      method="post"
+      action="{{ url_for('agents.delete_run', run_id=run.id) }}"
+      onsubmit="return confirm('Delete this run?');"
+    >
+      <input type="hidden" name="next" value="{{ url_for('agents.runs') }}" />
+      <button type="submit" class="btn btn-danger">
+        <i class="fa-solid fa-trash"></i>
+        delete
+      </button>
+    </form>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">run</p>
+      <h2 class="section-title">{{ run.name or "Untitled run" }}</h2>
+    </div>
+  </div>
+  <div style="margin-top: 20px; overflow-x: auto;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Status</th>
+          <th>Run ID</th>
+          <th>Run task</th>
+          <th>Run mode</th>
+          <th>Loops completed</th>
+          <th>Remaining</th>
+          <th>Last started</th>
+          <th>Last stopped</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <a href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">
+              {{ agent.name }}
+            </a>
+          </td>
+          <td>
+            {% if run.status in ["running", "starting"] %}
+              <span class="status status-running">{{ run.status }}</span>
+            {% elif run.status == "stopping" %}
+              <span class="status status-warning">{{ run.status }}</span>
+            {% else %}
+              <span class="status status-idle">{{ run.status }}</span>
+            {% endif %}
+          </td>
+          <td>{{ run.id }}</td>
+          <td class="muted">{{ run_task_id or "-" }}</td>
+          <td>
+            {% if run_is_forever %}
+              forever
+            {% else %}
+              limit {{ run_max_loops }}
+            {% endif %}
+          </td>
+          <td>{{ loops_completed }}</td>
+          <td>
+            {% if loops_remaining is none %}
+              -
+            {% else %}
+              {{ loops_remaining }}
+            {% endif %}
+          </td>
+          <td class="muted">{{ human_time(run.last_started_at) }}</td>
+          <td class="muted">{{ human_time(run.last_stopped_at) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% if run.run_end_requested %}
+    <p class="muted" style="margin-top: 12px;">
+      End requested. This run will stop after the current task finishes.
+    </p>
+  {% endif %}
+  {% if run.status in ["running", "starting", "stopping"] %}
+    <p class="muted" style="margin-top: 12px;">
+      Auto-refreshing every 5 seconds while the run is active.
+    </p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Tasks</h2>
+  </div>
+  {% if run_tasks %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>Finished</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in run_tasks %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_task', task_id=task.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_task', task_id=task.id) }}">
+                  {{ task.id }}
+                </a>
+              </td>
+              <td>
+                {% if task.status == "running" %}
+                  <span class="status status-running">running</span>
+                {% elif task.status == "queued" %}
+                  <span class="status status-queued">queued</span>
+                {% elif task.status == "pending" %}
+                  <span class="status status-queued">pending</span>
+                {% elif task.status == "succeeded" %}
+                  <span class="status status-success">succeeded</span>
+                {% elif task.status == "failed" %}
+                  <span class="status status-failed">failed</span>
+                {% else %}
+                  <span class="status status-idle">{{ task.status }}</span>
+                {% endif %}
+              </td>
+              <td class="muted">{{ human_time(task.started_at) }}</td>
+              <td class="muted">{{ human_time(task.finished_at) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No tasks recorded for this run yet.</p>
+  {% endif %}
+</section>
+
+{% if run.status in ["running", "starting", "stopping"] %}
+  <script>
+    setTimeout(() => {
+      window.location.reload();
+    }, 5000);
+  </script>
+{% endif %}
+
+<script>
+  const runTaskRows = document.querySelectorAll(".table-row-link");
+  const isInteractiveTarget = (target) =>
+    target.closest(
+      "a, button, input, select, textarea, label, summary, details"
+    );
+  runTaskRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (isInteractiveTarget(event.target)) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

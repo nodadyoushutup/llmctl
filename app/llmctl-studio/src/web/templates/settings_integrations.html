@@ -1,0 +1,340 @@
+{% extends "settings_layout.html" %}
+
+{% block settings_content %}
+<section class="grid grid-2">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">GitHub</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Personal access token for API access, or an SSH key for cloning.
+        </p>
+      </div>
+      <span class="status {% if github_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if github_connected %}connected{% else %}needs token{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_github_settings') }}" class="form-grid" enctype="multipart/form-data">
+      <label class="label" style="grid-column: 1 / -1;">
+        GitHub PAT
+        <div class="input-row">
+          <input
+            class="input"
+            type="text"
+            name="github_pat"
+            id="github-pat-input"
+            value="{{ github_settings.get('pat', '') }}"
+            placeholder="enter PAT"
+          />
+          <button class="btn btn-secondary" type="submit" name="action" value="refresh">
+            <i class="fa-solid fa-rotate"></i>
+            refresh
+          </button>
+        </div>
+      </label>
+      <div
+        id="github-repo-block"
+        style="grid-column: 1 / -1;{% if not github_connected %} display: none;{% endif %}"
+      >
+        <label class="label">
+          Repository
+          {% if github_repo_options %}
+            <select class="input" name="github_repo">
+              {% set selected_repo = github_settings.get('repo', '') %}
+              {% for repo in github_repo_options %}
+                <option value="{{ repo }}" {% if repo == selected_repo %}selected{% endif %}>
+                  {{ repo }}
+                </option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <span class="muted" style="font-size: 12px;">
+              Refresh to load repositories.
+            </span>
+          {% endif %}
+        </label>
+      </div>
+      <label class="label" style="grid-column: 1 / -1;">
+        SSH private key (.pem)
+        <input
+          class="input"
+          type="file"
+          name="github_ssh_key"
+        />
+        <div class="muted" style="margin-top: 6px; font-size: 12px;">
+          {% if github_settings.get('ssh_key_path') %}
+            SSH key uploaded.
+          {% else %}
+            No SSH key uploaded. HTTPS cloning will be used.
+          {% endif %}
+        </div>
+      </label>
+      <label class="label" style="grid-column: 1 / -1; margin-top: -4px;">
+        <input type="checkbox" name="github_ssh_key_clear" value="true" />
+        remove SSH key
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save github
+        </button>
+        <a class="btn btn-secondary" href="{{ url_for('agents.github_workspace') }}">
+          <i class="fa-solid fa-arrow-right"></i>
+          open github
+        </a>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Atlassian</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Jira + Confluence credentials and workspace selection.
+        </p>
+      </div>
+      {% set atlassian_connected = jira_connected or confluence_connected %}
+      <span class="status {% if atlassian_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if atlassian_connected %}connected{% else %}needs key{% endif %}
+      </span>
+    </div>
+    <div class="stack" style="margin-top: 12px;">
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">Jira</p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              API token, email, site, and board selection.
+            </p>
+          </div>
+          <span class="status {% if jira_connected %}status-success{% else %}status-warning{% endif %}">
+            {% if jira_connected %}connected{% else %}needs key{% endif %}
+          </span>
+        </div>
+        <form method="post" action="{{ url_for('agents.update_jira_settings') }}" class="form-grid" style="margin-top: 16px;" id="jira-settings-form">
+          <label class="label" style="grid-column: 1 / -1;">
+            Jira API Key
+            <div class="input-row">
+              <input
+                class="input"
+                type="password"
+                name="jira_api_key"
+                value="{{ jira_settings.get('api_key', '') }}"
+                placeholder="api_key_xxxxxxxxxx"
+              />
+              <button class="btn btn-secondary" type="submit" name="action" value="refresh">
+                <i class="fa-solid fa-rotate"></i>
+                refresh
+              </button>
+            </div>
+          </label>
+          <label class="label" style="grid-column: 1 / -1;">
+            Atlassian email
+            <input
+              class="input"
+              type="email"
+              name="jira_email"
+              value="{{ jira_settings.get('email', '') }}"
+              placeholder="me@company.com"
+            />
+          </label>
+          <label class="label" style="grid-column: 1 / -1;">
+            Jira site URL
+            <input
+              class="input"
+              type="text"
+              name="jira_site"
+              value="{{ jira_settings.get('site', '') }}"
+              placeholder="https://your-domain.atlassian.net"
+            />
+          </label>
+          <label class="label" style="grid-column: 1 / -1;">
+            Project
+            {% if jira_project_options %}
+              <select class="input" name="jira_project_key" id="jira-project-select">
+                {% set selected_project = jira_settings.get('project_key', '') %}
+                {% for project in jira_project_options %}
+                  {% if project.value is defined %}
+                    <option value="{{ project.value }}" {% if project.value == selected_project %}selected{% endif %}>
+                      {{ project.label }}
+                    </option>
+                  {% else %}
+                    <option value="{{ project }}" {% if project == selected_project %}selected{% endif %}>
+                      {{ project }}
+                    </option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            {% else %}
+              <span class="muted" style="font-size: 12px;">
+                Refresh to load projects.
+              </span>
+            {% endif %}
+          </label>
+          <label class="label" style="grid-column: 1 / -1;">
+            Board name
+            {% if jira_board_options %}
+              <select class="input" name="jira_board">
+                {% set selected_board = jira_settings.get('board', '') %}
+                {% for board in jira_board_options %}
+                  {% if board.value is defined %}
+                    <option value="{{ board.value }}" {% if board.value == selected_board %}selected{% endif %}>
+                      {{ board.label }}
+                    </option>
+                  {% else %}
+                    <option value="{{ board }}" {% if board == selected_board %}selected{% endif %}>
+                      {{ board }}
+                    </option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            {% else %}
+              <span class="muted" style="font-size: 12px;">
+                Select a project and refresh to load boards.
+              </span>
+            {% endif %}
+          </label>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">
+              <i class="fa-solid fa-floppy-disk"></i>
+              save jira
+            </button>
+            <a class="btn btn-secondary" href="{{ url_for('agents.jira_workspace') }}">
+              <i class="fa-solid fa-arrow-right"></i>
+              open jira
+            </a>
+          </div>
+        </form>
+      </div>
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">Confluence</p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              API token, email, site, and space selection.
+            </p>
+          </div>
+          <span class="status {% if confluence_connected %}status-success{% else %}status-warning{% endif %}">
+            {% if confluence_connected %}connected{% else %}needs key{% endif %}
+          </span>
+        </div>
+        <form method="post" action="{{ url_for('agents.update_confluence_settings') }}" class="form-grid" style="margin-top: 16px;">
+          <label class="label" style="grid-column: 1 / -1;">
+            Confluence API Key
+            <div class="input-row">
+              <input
+                class="input"
+                type="password"
+                name="confluence_api_key"
+                value="{{ confluence_settings.get('api_key', '') }}"
+                placeholder="api_key_xxxxxxxxxx"
+              />
+              <button class="btn btn-secondary" type="submit" name="action" value="refresh">
+                <i class="fa-solid fa-rotate"></i>
+                refresh
+              </button>
+            </div>
+          </label>
+          <label class="label" style="grid-column: 1 / -1;">
+            Atlassian email
+            <input
+              class="input"
+              type="email"
+              name="confluence_email"
+              value="{{ confluence_settings.get('email', '') }}"
+              placeholder="me@company.com"
+            />
+          </label>
+          <label class="label" style="grid-column: 1 / -1;">
+            Confluence site URL
+            <input
+              class="input"
+              type="text"
+              name="confluence_site"
+              value="{{ confluence_settings.get('site', '') }}"
+              placeholder="https://your-domain.atlassian.net/wiki"
+            />
+          </label>
+          <label class="label" style="grid-column: 1 / -1;">
+            Space key or name
+            {% if confluence_space_options %}
+              <select class="input" name="confluence_space">
+                {% set selected_space = confluence_settings.get('space', '') %}
+                {% for space in confluence_space_options %}
+                  {% if space.value is defined %}
+                    <option value="{{ space.value }}" {% if space.value == selected_space %}selected{% endif %}>
+                      {{ space.label }}
+                    </option>
+                  {% else %}
+                    <option value="{{ space }}" {% if space == selected_space %}selected{% endif %}>
+                      {{ space }}
+                    </option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            {% else %}
+              <span class="muted" style="font-size: 12px;">
+                Refresh to load spaces.
+              </span>
+            {% endif %}
+          </label>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">
+              <i class="fa-solid fa-floppy-disk"></i>
+              save confluence
+            </button>
+            <a class="btn btn-secondary" href="{{ url_for('agents.confluence_workspace') }}">
+              <i class="fa-solid fa-arrow-right"></i>
+              open confluence
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const githubPatInput = document.getElementById("github-pat-input");
+  const githubRepoBlock = document.getElementById("github-repo-block");
+
+  const toggleRepoBlock = () => {
+    if (!githubPatInput || !githubRepoBlock) {
+      return;
+    }
+    const hasPat = githubPatInput.value.trim().length > 0;
+    githubRepoBlock.style.display = hasPat ? "block" : "none";
+  };
+
+  if (githubPatInput) {
+    githubPatInput.addEventListener("input", toggleRepoBlock);
+    toggleRepoBlock();
+  }
+
+  const jiraForm = document.getElementById("jira-settings-form");
+  const jiraProjectSelect = document.getElementById("jira-project-select");
+
+  if (jiraForm && jiraProjectSelect) {
+    const refreshButton = jiraForm.querySelector(
+      "button[name='action'][value='refresh']"
+    );
+    jiraProjectSelect.addEventListener("change", () => {
+      if (jiraForm.requestSubmit && refreshButton) {
+        jiraForm.requestSubmit(refreshButton);
+        return;
+      }
+      if (refreshButton) {
+        refreshButton.click();
+        return;
+      }
+      const hiddenAction = document.createElement("input");
+      hiddenAction.type = "hidden";
+      hiddenAction.name = "action";
+      hiddenAction.value = "refresh";
+      jiraForm.appendChild(hiddenAction);
+      jiraForm.submit();
+    });
+  }
+</script>
+{% endblock %}

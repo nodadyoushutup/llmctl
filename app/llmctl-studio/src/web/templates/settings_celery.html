@@ -1,0 +1,55 @@
+{% extends "settings_layout.html" %}
+
+{% block settings_content %}
+<section class="grid grid-2">
+  <div class="card">
+    <div class="card-header">
+      <h2 class="section-title">Celery Settings</h2>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Broker, backend, and revoke defaults.
+    </p>
+    <div class="stack" style="margin-top: 20px;">
+      {% for key, value in celery_config.items() %}
+        <div class="subcard">
+          <p class="eyebrow">{{ key }}</p>
+          <p
+            class="muted"
+            style="margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px;"
+          >
+            {{ value }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2 class="section-title">Broker Options</h2>
+    </div>
+    <p class="muted" style="margin-top: 12px;">
+      Filesystem broker overrides, when enabled.
+    </p>
+    {% if broker_options %}
+      <div class="stack" style="margin-top: 20px;">
+        {% for key, value in broker_options.items() %}
+          <div class="subcard">
+            <p class="eyebrow">{{ key }}</p>
+            <p
+              class="muted"
+              style="margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px;"
+            >
+              {{ value }}
+            </p>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted" style="margin-top: 16px;">
+        No transport overrides detected for this broker.
+      </p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

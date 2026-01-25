@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">space</p>
+      <h2 class="section-title">{{ confluence_space }}</h2>
+      <p class="muted" style="margin-top: 6px;">Site: {{ confluence_site }}</p>
+    </div>
+    <div class="stack">
+      <span class="status {% if confluence_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if confluence_connected %}connected{% else %}needs key{% endif %}
+      </span>
+    </div>
+  </div>
+  <div class="subcard">
+    <p class="eyebrow">knowledge base</p>
+    <p class="muted" style="margin-top: 8px; font-size: 12px;">
+      {% if confluence_space_selected %}
+        No space data loaded.
+      {% else %}
+        Select a Confluence space to load pages and insights.
+      {% endif %}
+    </p>
+  </div>
+</section>
+{% endblock %}

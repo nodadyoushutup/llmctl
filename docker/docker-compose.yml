@@ -1,0 +1,74 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--port", "6380"]
+    dns:
+      - 192.168.1.1
+      - 1.1.1.1
+      - 8.8.8.8
+    ports:
+      - "6380:6380"
+  github-mcp:
+    build:
+      context: ..
+      dockerfile: docker/github-mcp-proxy.Dockerfile
+    container_name: github-mcp
+    environment:
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
+      - GITHUB_HOST=${GITHUB_HOST:-}
+    dns:
+      - 192.168.1.1
+      - 1.1.1.1
+      - 8.8.8.8
+    command:
+      [
+        "--pass-environment",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "9001",
+        "--",
+        "github-mcp-server",
+        "stdio"
+      ]
+    ports:
+      - "9001:9001"
+    restart: unless-stopped
+  jira-mcp:
+    image: ghcr.io/sooperset/mcp-atlassian:latest
+    container_name: jira-mcp
+    environment:
+      - JIRA_URL=${JIRA_URL}
+      - JIRA_USERNAME=${JIRA_USERNAME}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+      - CONFLUENCE_URL=${CONFLUENCE_URL}
+      - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
+      - CONFLUENCE_API_TOKEN=${CONFLUENCE_API_TOKEN}
+    dns:
+      - 192.168.1.1
+      - 1.1.1.1
+      - 8.8.8.8
+    command: ["--transport", "streamable-http", "--port", "9000"]
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+  llmctl-studio:
+    image: llmctl-studio:latest
+    container_name: llmctl-studio
+    user: "1000:1000"
+    environment:
+      - CELERY_REDIS_HOST=192.168.1.36
+      - CELERY_REDIS_PORT=6380
+      - CELERY_REDIS_BROKER_DB=0
+      - CELERY_REDIS_BACKEND_DB=1
+    dns:
+      - 192.168.1.1
+      - 1.1.1.1
+      - 8.8.8.8
+    ports:
+      - "5055:5055"
+    volumes:
+      - ../app/llmctl-studio/run.py:/app/app/llmctl-studio/run.py
+      - ../app/llmctl-studio/src:/app/app/llmctl-studio/src
+      - ../data:/app/data
+      - ${HOME}/.gitconfig:/home/app/.gitconfig:ro

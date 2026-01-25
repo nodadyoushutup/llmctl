@@ -1,0 +1,43 @@
+{% extends "agent_detail_layout.html" %}
+
+{% block agent_detail_content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Scripts</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Attached scripts run at different stages of the agent lifecycle.
+    <a href="{{ url_for('agents.edit_agent', agent_id=agent.id) }}" style="text-decoration: underline;">
+      Manage scripts
+    </a>
+  </p>
+  {% if agent.scripts %}
+    <div style="margin-top: 16px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Script</th>
+            <th>Type</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for script in agent.scripts %}
+            <tr>
+              <td>
+                <a href="{{ url_for('agents.view_script', script_id=script.id) }}">
+                  {{ script.file_name }}
+                </a>
+              </td>
+              <td class="muted">{{ script_type_label(script.script_type) }}</td>
+              <td class="muted">{{ script.description or "-" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No scripts attached yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

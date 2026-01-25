@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div>
+    <p class="eyebrow">filters</p>
+    <p class="muted" style="margin-top: 6px; font-size: 12px;">
+      Narrow by issue type, status, or assignee.
+    </p>
+  </div>
+  <div class="action-header-actions">
+    <div class="task-filters jira-filters" data-jira-filters>
+      <label for="jira-filter-type">Issue type</label>
+      <select id="jira-filter-type" data-jira-filter="type">
+        <option value="all" data-fixed>All types</option>
+      </select>
+      <label for="jira-filter-status">Status</label>
+      <select id="jira-filter-status" data-jira-filter="status">
+        <option value="all" data-fixed>All statuses</option>
+      </select>
+      <label for="jira-filter-assignee">Assignee</label>
+      <select id="jira-filter-assignee" data-jira-filter="assignee">
+        <option value="all" data-fixed>All assignees</option>
+      </select>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="jira-shell">
+  {% set issue_type_icons = {
+    "bug": "fa-bug",
+    "story": "fa-book-open",
+    "task": "fa-list-check",
+    "sub-task": "fa-code-branch",
+    "subtask": "fa-code-branch",
+    "epic": "fa-crown"
+  } %}
+  {% set priority_icons = {
+    "highest": "fa-angles-up",
+    "high": "fa-angle-up",
+    "medium": "fa-minus",
+    "low": "fa-angle-down",
+    "lowest": "fa-angles-down"
+  } %}
+  {% set status_icons = {
+    "done": "fa-circle-check",
+    "indeterminate": "fa-spinner",
+    "new": "fa-circle-dot"
+  } %}
+  <div class="card">
+    <div class="jira-header">
+      <div>
+        <p class="eyebrow">board</p>
+        <h2 class="section-title">{{ jira_board }}</h2>
+        <p class="muted" style="margin-top: 6px;">Site: {{ jira_site }}</p>
+        {% if jira_board_type or jira_board_issue_total is not none %}
+          <div class="row" style="margin-top: 12px;">
+            {% if jira_board_type %}
+              <span class="jira-tag">{{ jira_board_type }}</span>
+            {% endif %}
+            {% if jira_board_issue_total is not none %}
+              <span class="jira-tag">{{ jira_board_issue_total }} issues</span>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+      <div class="stack">
+        <span class="status {% if jira_connected %}status-success{% else %}status-warning{% endif %}">
+          {% if jira_connected %}connected{% else %}needs key{% endif %}
+        </span>
+        {% if jira_board_url %}
+          <a class="btn btn-secondary" href="{{ jira_board_url }}" target="_blank" rel="noreferrer">
+            open in jira
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="eyebrow">kanban board</p>
+    {% if jira_board_error %}
+      <p class="muted" style="margin-top: 8px; font-size: 12px;">
+        {{ jira_board_error }}
+      </p>
+    {% elif not jira_board_selected %}
+      <p class="muted" style="margin-top: 8px; font-size: 12px;">
+        Select a Jira board to load columns and cards.
+      </p>
+    {% elif jira_board_columns %}
+      <div class="jira-board" style="margin-top: 12px; --jira-columns: {{ jira_board_column_count or jira_board_columns|length }};">
+        {% for column in jira_board_columns %}
+          <div class="jira-column">
+            <div class="row-between">
+              <span class="jira-column-title">{{ column.name }}</span>
+              <span class="jira-tag">{{ column.issues|length }}</span>
+            </div>
+            {% if column.issues %}
+              {% for issue in column.issues %}
+                <a
+                  class="jira-card"
+                  href="{{ url_for('agents.jira_issue_detail', issue_key=issue.key) }}"
+                  data-jira-card
+                  data-issue-type="{{ issue.issue_type or 'Unspecified' }}"
+                  data-status="{{ issue.status or 'Unspecified' }}"
+                  data-assignee="{{ issue.assignee or 'Unassigned' }}"
+                >
+                  <div class="jira-card-header">
+                    <span class="jira-card-key">{{ issue.key }}</span>
+                    <div class="jira-card-icons">
+                      {% if issue.issue_type %}
+                        {% set issue_type_slug = issue.issue_type|lower|replace(' ', '-')|replace('/', '-') %}
+                        {% set issue_type_icon = issue_type_icons.get(issue_type_slug, "fa-ticket") %}
+                        <span
+                          class="jira-card-icon jira-icon-type jira-icon-type-{{ issue_type_slug }}"
+                          title="Issue type: {{ issue.issue_type }}"
+                          role="img"
+                          aria-label="Issue type: {{ issue.issue_type }}"
+                        >
+                          <i class="fa-solid {{ issue_type_icon }}" aria-hidden="true"></i>
+                        </span>
+                      {% endif %}
+                      {% if issue.status %}
+                        {% set status_category = issue.status_category or "" %}
+                        {% set status_slug = status_category|lower|replace(' ', '-')|replace('/', '-') %}
+                        {% if not status_slug %}
+                          {% set status_slug = (issue.status or "")|lower|replace(' ', '-')|replace('/', '-') %}
+                        {% endif %}
+                        {% set status_icon = status_icons.get(status_slug, "fa-circle") %}
+                        <span
+                          class="jira-card-icon jira-icon-status jira-icon-status-{{ status_slug }}"
+                          title="Status: {{ issue.status }}"
+                          role="img"
+                          aria-label="Status: {{ issue.status }}"
+                        >
+                          <i class="fa-solid {{ status_icon }}" aria-hidden="true"></i>
+                        </span>
+                      {% endif %}
+                      {% if issue.priority %}
+                        {% set priority_slug = issue.priority|lower|replace(' ', '-')|replace('/', '-') %}
+                        {% set priority_icon = priority_icons.get(priority_slug, "fa-flag") %}
+                        <span
+                          class="jira-card-icon jira-icon-priority jira-icon-priority-{{ priority_slug }}"
+                          title="Priority: {{ issue.priority }}"
+                          role="img"
+                          aria-label="Priority: {{ issue.priority }}"
+                        >
+                          <i class="fa-solid {{ priority_icon }}" aria-hidden="true"></i>
+                        </span>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="jira-card-title">{{ issue.summary }}</div>
+                  {% if issue.assignee %}
+                    <div class="row">
+                      <span class="jira-tag">{{ issue.assignee }}</span>
+                    </div>
+                  {% endif %}
+                </a>
+              {% endfor %}
+            {% else %}
+              <p class="muted" style="font-size: 12px;">No issues in this column.</p>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% if jira_board_unmapped %}
+          <div class="jira-column">
+            <div class="row-between">
+              <span class="jira-column-title">Other</span>
+              <span class="jira-tag">{{ jira_board_unmapped|length }}</span>
+            </div>
+            {% for issue in jira_board_unmapped %}
+            <a
+              class="jira-card"
+              href="{{ url_for('agents.jira_issue_detail', issue_key=issue.key) }}"
+              data-jira-card
+              data-issue-type="{{ issue.issue_type or 'Unspecified' }}"
+              data-status="{{ issue.status or 'Unspecified' }}"
+              data-assignee="{{ issue.assignee or 'Unassigned' }}"
+            >
+              <div class="jira-card-header">
+                <span class="jira-card-key">{{ issue.key }}</span>
+                <div class="jira-card-icons">
+                  {% if issue.issue_type %}
+                    {% set issue_type_slug = issue.issue_type|lower|replace(' ', '-')|replace('/', '-') %}
+                    {% set issue_type_icon = issue_type_icons.get(issue_type_slug, "fa-ticket") %}
+                    <span
+                      class="jira-card-icon jira-icon-type jira-icon-type-{{ issue_type_slug }}"
+                      title="Issue type: {{ issue.issue_type }}"
+                      role="img"
+                      aria-label="Issue type: {{ issue.issue_type }}"
+                    >
+                      <i class="fa-solid {{ issue_type_icon }}" aria-hidden="true"></i>
+                    </span>
+                  {% endif %}
+                  {% if issue.status %}
+                    {% set status_category = issue.status_category or "" %}
+                    {% set status_slug = status_category|lower|replace(' ', '-')|replace('/', '-') %}
+                    {% if not status_slug %}
+                      {% set status_slug = (issue.status or "")|lower|replace(' ', '-')|replace('/', '-') %}
+                    {% endif %}
+                    {% set status_icon = status_icons.get(status_slug, "fa-circle") %}
+                    <span
+                      class="jira-card-icon jira-icon-status jira-icon-status-{{ status_slug }}"
+                      title="Status: {{ issue.status }}"
+                      role="img"
+                      aria-label="Status: {{ issue.status }}"
+                    >
+                      <i class="fa-solid {{ status_icon }}" aria-hidden="true"></i>
+                    </span>
+                  {% endif %}
+                  {% if issue.priority %}
+                    {% set priority_slug = issue.priority|lower|replace(' ', '-')|replace('/', '-') %}
+                    {% set priority_icon = priority_icons.get(priority_slug, "fa-flag") %}
+                    <span
+                      class="jira-card-icon jira-icon-priority jira-icon-priority-{{ priority_slug }}"
+                      title="Priority: {{ issue.priority }}"
+                      role="img"
+                      aria-label="Priority: {{ issue.priority }}"
+                    >
+                      <i class="fa-solid {{ priority_icon }}" aria-hidden="true"></i>
+                    </span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="jira-card-title">{{ issue.summary }}</div>
+              {% if issue.assignee %}
+                <div class="row">
+                  <span class="jira-tag">{{ issue.assignee }}</span>
+                </div>
+              {% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+    {% else %}
+      <p class="muted" style="margin-top: 8px; font-size: 12px;">
+        No board data loaded.
+      </p>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+  (() => {
+    const filterContainer = document.querySelector("[data-jira-filters]");
+    if (!filterContainer) {
+      return;
+    }
+    const cards = Array.from(document.querySelectorAll("[data-jira-card]"));
+    const selects = {
+      type: filterContainer.querySelector("[data-jira-filter='type']"),
+      status: filterContainer.querySelector("[data-jira-filter='status']"),
+      assignee: filterContainer.querySelector("[data-jira-filter='assignee']"),
+    };
+    const normalize = (value) => (value || "").trim().toLowerCase();
+    const buildOptions = (datasetKey) => {
+      const values = new Map();
+      cards.forEach((card) => {
+        const raw = (card.dataset[datasetKey] || "").trim();
+        if (!raw) {
+          return;
+        }
+        const key = normalize(raw);
+        if (!values.has(key)) {
+          values.set(key, raw);
+        }
+      });
+      return Array.from(values.entries()).sort((a, b) =>
+        a[1].localeCompare(b[1])
+      );
+    };
+    const hydrateSelect = (select, entries) => {
+      if (!select) {
+        return;
+      }
+      select.querySelectorAll("option:not([data-fixed])").forEach((option) => {
+        option.remove();
+      });
+      entries.forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+      });
+    };
+    const hasCards = cards.length > 0;
+    Object.values(selects).forEach((select) => {
+      if (select) {
+        select.disabled = !hasCards;
+      }
+    });
+    if (!hasCards) {
+      return;
+    }
+    hydrateSelect(selects.type, buildOptions("issueType"));
+    hydrateSelect(selects.status, buildOptions("status"));
+    hydrateSelect(selects.assignee, buildOptions("assignee"));
+    const applyFilters = () => {
+      const typeValue = selects.type ? normalize(selects.type.value) : "all";
+      const statusValue = selects.status ? normalize(selects.status.value) : "all";
+      const assigneeValue = selects.assignee
+        ? normalize(selects.assignee.value)
+        : "all";
+      cards.forEach((card) => {
+        const matchesType =
+          typeValue === "all" ||
+          normalize(card.dataset.issueType) === typeValue;
+        const matchesStatus =
+          statusValue === "all" ||
+          normalize(card.dataset.status) === statusValue;
+        const matchesAssignee =
+          assigneeValue === "all" ||
+          normalize(card.dataset.assignee) === assigneeValue;
+        card.classList.toggle(
+          "is-filtered",
+          !(matchesType && matchesStatus && matchesAssignee)
+        );
+      });
+    };
+    Object.values(selects).forEach((select) => {
+      if (!select) {
+        return;
+      }
+      select.addEventListener("change", applyFilters);
+    });
+    applyFilters();
+  })();
+</script>
+{% endblock %}

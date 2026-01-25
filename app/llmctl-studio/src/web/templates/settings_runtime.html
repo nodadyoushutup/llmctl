@@ -1,0 +1,33 @@
+{% extends "settings_layout.html" %}
+
+{% block settings_content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Runtime Hints</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Expectations for polling, revocation, and provider defaults.
+  </p>
+  <div class="grid grid-3" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">polling</p>
+      <p style="margin-top: 8px;">
+        Agents check in every {{ config.AGENT_POLL_SECONDS }} seconds.
+      </p>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">revocation</p>
+      <p style="margin-top: 8px;">
+        Revoke on stop is
+        {{ "enabled" if config.CELERY_REVOKE_ON_STOP else "disabled" }}.
+      </p>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">provider</p>
+      <p style="margin-top: 8px;">
+        Using {{ llm_config.label }} via {{ llm_config.command }} (model {{ llm_config.model }}).
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}

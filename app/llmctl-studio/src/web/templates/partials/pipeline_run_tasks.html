@@ -1,0 +1,73 @@
+{% if tasks %}
+  <div style="margin-top: 20px; overflow-x: auto;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Step</th>
+          <th>Agent</th>
+          <th>Template</th>
+          <th>Status</th>
+          <th>Started</th>
+          <th>Finished</th>
+          <th>Task</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for task in tasks %}
+          <tr
+            class="table-row-link"
+            data-href="{{ url_for('agents.view_task', task_id=task.id) }}"
+          >
+            <td class="muted">
+              {% if task.pipeline_step_id and steps_by_id.get(task.pipeline_step_id) %}
+                {{ steps_by_id[task.pipeline_step_id].step_order }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if task.agent_id is not none %}
+                {{ agents_by_id.get(task.agent_id, "Agent " ~ task.agent_id) }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td class="muted">
+              {% if task.task_template_id %}
+                <a href="{{ url_for('agents.view_task_template', template_id=task.task_template_id) }}">
+                  {{ templates_by_id.get(task.task_template_id, "Template " ~ task.task_template_id) }}
+                </a>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if task.status == "running" %}
+                <span class="status status-running">running</span>
+              {% elif task.status == "queued" %}
+                <span class="status status-queued">queued</span>
+              {% elif task.status == "pending" %}
+                <span class="status status-queued">pending</span>
+              {% elif task.status == "succeeded" %}
+                <span class="status status-success">succeeded</span>
+              {% elif task.status == "failed" %}
+                <span class="status status-failed">failed</span>
+              {% elif task.status == "canceled" %}
+                <span class="status status-canceled">canceled</span>
+              {% else %}
+                <span class="status status-idle">{{ task.status }}</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ human_time(task.started_at) }}</td>
+            <td class="muted">{{ human_time(task.finished_at) }}</td>
+            <td>
+              <a href="{{ url_for('agents.view_task', task_id=task.id) }}">{{ task.id }}</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted" style="margin-top: 12px;">No tasks recorded for this run yet.</p>
+{% endif %}

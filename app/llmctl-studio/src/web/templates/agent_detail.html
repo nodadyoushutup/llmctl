@@ -1,0 +1,14 @@
+{% extends "agent_detail_layout.html" %}
+
+{% block agent_detail_content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Autoprompt</h2>
+  </div>
+  {% if agent.autonomous_prompt %}
+    <pre class="code-block code-scroll">{{ agent.autonomous_prompt }}</pre>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No autoprompt set.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_run') }}">
+      <i class="fa-solid fa-plus"></i>
+      create run
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  {% if runs %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Agent</th>
+            <th>Status</th>
+            <th>Run Task</th>
+            <th>Started</th>
+            <th>Finished</th>
+            <th class="table-actions-cell">Run</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in runs %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_run', run_id=run.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_run', run_id=run.id) }}">
+                  {{ run.name or "Untitled run" }}
+                </a>
+                <div class="muted" style="font-size: 12px; margin-top: 4px;">
+                  run {{ run.id }}
+                </div>
+              </td>
+              <td>
+                <a href="{{ url_for('agents.view_run', run_id=run.id) }}">
+                  {{ run.agent.name }}
+                </a>
+              </td>
+              <td>
+                {% if run.status in ["running", "starting"] %}
+                  <span class="status status-running">{{ run.status }}</span>
+                {% elif run.status == "stopping" %}
+                  <span class="status status-warning">{{ run.status }}</span>
+                {% else %}
+                  <span class="status status-idle">{{ run.status }}</span>
+                {% endif %}
+              </td>
+              <td class="muted" style="font-size: 12px;">
+                {{ run.task_id or "-" }}
+              </td>
+              <td class="muted">{{ human_time(run.last_started_at) }}</td>
+              <td class="muted">{{ human_time(run.last_stopped_at) }}</td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  {% if run.status in ["running", "starting", "stopping"] %}
+                    <form
+                      method="post"
+                      action="{{ url_for('agents.end_run', run_id=run.id) }}"
+                    >
+                      <input type="hidden" name="next" value="{{ request.path }}" />
+                      <button type="submit" class="btn btn-secondary" aria-label="End run">
+                        <i class="fa-solid fa-flag-checkered"></i>
+                        end
+                      </button>
+                    </form>
+                    <form
+                      method="post"
+                      action="{{ url_for('agents.cancel_run', run_id=run.id) }}"
+                    >
+                      <input type="hidden" name="next" value="{{ request.path }}" />
+                      <button type="submit" class="btn btn-secondary" aria-label="Cancel run">
+                        <i class="fa-solid fa-stop"></i>
+                        cancel
+                      </button>
+                    </form>
+                  {% else %}
+                    <form
+                      method="post"
+                      action="{{ url_for('agents.start_run', run_id=run.id) }}"
+                    >
+                      <input type="hidden" name="next" value="{{ request.path }}" />
+                      <button type="submit" class="btn btn-primary" aria-label="Run agent">
+                        <i class="fa-solid fa-play"></i>
+                      </button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+              <td class="table-actions-cell">
+                <form
+                  method="post"
+                  action="{{ url_for('agents.delete_run', run_id=run.id) }}"
+                  onsubmit="return confirm('Delete this run?');"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <button type="submit" class="btn btn-danger" aria-label="Delete run data">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No runs recorded yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const runRows = document.querySelectorAll(".table-row-link");
+
+  const isInteractiveTarget = (target) =>
+    target.closest(
+      "a, button, input, select, textarea, label, summary, details"
+    );
+
+  runRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (isInteractiveTarget(event.target)) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

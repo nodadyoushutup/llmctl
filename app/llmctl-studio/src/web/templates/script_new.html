@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_scripts') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    all scripts
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Create Script</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Upload a script file or paste content to attach to agents.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.create_script') }}"
+    class="form-grid"
+    enctype="multipart/form-data"
+  >
+    <label class="label">
+      file name
+      <input type="text" name="file_name" placeholder="helper.sh" class="input" />
+    </label>
+    <label class="label">
+      script type
+      <select name="script_type" class="input">
+        {% for value, label in script_types %}
+          <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      description (optional)
+      <input type="text" name="description" placeholder="What this script does" class="input" />
+    </label>
+    <label class="label">
+      upload file (optional)
+      <input type="file" name="script_file" class="input" />
+      <span class="muted" style="font-size: 12px; margin-top: 6px;">
+        Uploading overrides the content field below.
+      </span>
+    </label>
+    <label class="label">
+      script content
+      <textarea
+        name="content"
+        placeholder="#!/usr/bin/env bash"
+        class="textarea"
+      ></textarea>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-plus"></i>
+        create
+      </button>
+      <button type="reset" class="btn btn-secondary">
+        <i class="fa-solid fa-rotate-right"></i>
+        reset
+      </button>
+    </div>
+  </form>
+</section>
+{% endblock %}

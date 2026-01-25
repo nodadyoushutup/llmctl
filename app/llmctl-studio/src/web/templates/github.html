@@ -1,0 +1,389 @@
+{% extends "base.html" %}
+{% set active_tab = github_active_tab or "pulls" %}
+
+{% block topbar_actions %}
+  <div class="github-tabs" role="tablist" aria-label="GitHub views">
+    <button
+      class="github-tab{% if active_tab == 'pulls' %} is-active{% endif %}"
+      type="button"
+      data-tab="pulls"
+    >
+      <i class="fa-solid fa-code-pull-request"></i>
+      pull requests
+    </button>
+    <button
+      class="github-tab{% if active_tab == 'actions' %} is-active{% endif %}"
+      type="button"
+      data-tab="actions"
+    >
+      <i class="fa-solid fa-bolt"></i>
+      actions
+    </button>
+    <button
+      class="github-tab{% if active_tab == 'code' %} is-active{% endif %}"
+      type="button"
+      data-tab="code"
+    >
+      <i class="fa-solid fa-code"></i>
+      code
+    </button>
+  </div>
+{% endblock %}
+
+{% block action_header %}
+  {% if github_repo_selected and github_connected and not github_pr_error %}
+    <div class="github-action-header" data-github-action-header>
+      <div class="action-header-actions">
+        <label class="label" for="github-pr-status">
+          status
+          <select id="github-pr-status" class="input" data-pr-status-filter>
+            <option value="all" {% if github_pr_status == "all" %}selected{% endif %}>
+              all
+            </option>
+            <option value="open" {% if github_pr_status == "open" %}selected{% endif %}>
+              open
+            </option>
+            <option value="draft" {% if github_pr_status == "draft" %}selected{% endif %}>
+              draft
+            </option>
+            <option value="merged" {% if github_pr_status == "merged" %}selected{% endif %}>
+              merged
+            </option>
+            <option value="closed" {% if github_pr_status == "closed" %}selected{% endif %}>
+              closed
+            </option>
+          </select>
+        </label>
+        <label class="label" for="github-pr-author">
+          author
+          <select id="github-pr-author" class="input" data-pr-author-filter>
+            <option value="all" {% if github_pr_author == "all" %}selected{% endif %}>
+              all
+            </option>
+            {% for author in github_pr_authors %}
+              <option value="{{ author }}" {% if github_pr_author == author %}selected{% endif %}>
+                {{ author }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="card github-shell">
+  <div class="github-header">
+    <div>
+      <p class="eyebrow">repository</p>
+      <h2 class="section-title">{{ github_repo }}</h2>
+    </div>
+    <div class="stack">
+      <span class="status {% if github_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if github_connected %}connected{% else %}needs token{% endif %}
+      </span>
+    </div>
+  </div>
+
+  <div class="github-panel{% if active_tab == 'pulls' %} is-active{% endif %}" data-panel="pulls">
+    {% if not github_repo_selected %}
+      <div class="subcard">
+        <p class="eyebrow">pull requests</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Select a repository to load pull requests.
+        </p>
+      </div>
+    {% elif not github_connected %}
+      <div class="subcard">
+        <p class="eyebrow">pull requests</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Add a GitHub PAT to load pull requests.
+        </p>
+      </div>
+    {% elif github_pr_error %}
+      <div class="subcard">
+        <p class="eyebrow">pull requests</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ github_pr_error }}
+        </p>
+      </div>
+    {% else %}
+      {% if github_pull_requests %}
+        <div style="overflow-x: auto;">
+          <table class="table github-pr-table">
+            <thead>
+              <tr>
+                <th>Pull Request</th>
+                <th>ID</th>
+                <th>Author</th>
+                <th>Labels</th>
+                <th>Status</th>
+                <th>Updated</th>
+                <th>Comments</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pr in github_pull_requests %}
+                <tr
+                  class="table-row-link"
+                  data-href="{{ url_for('agents.github_pull_request', pr_number=pr.number) }}"
+                >
+                  <td>
+                    <a href="{{ url_for('agents.github_pull_request', pr_number=pr.number) }}">
+                      <p class="github-pr-title">{{ pr.title }}</p>
+                    </a>
+                  </td>
+                  <td class="muted">#{{ pr.number }}</td>
+                  <td class="muted">{{ pr.author }}</td>
+                  <td>
+                    {% if pr.labels %}
+                      <div class="github-pr-labels">
+                        {% for label in pr.labels %}
+                          <span class="github-label" style="{{ label.style }}">
+                            {{ label.name }}
+                          </span>
+                        {% endfor %}
+                      </div>
+                    {% else %}
+                      <span class="muted">-</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <span class="status {{ pr.status_class }}">{{ pr.status_label }}</span>
+                  </td>
+                  <td class="muted">{{ pr.updated_at }}</td>
+                  <td class="muted">{{ pr.comment_count }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="subcard">
+          <p class="eyebrow">pull requests</p>
+          <p class="muted" style="margin-top: 8px; font-size: 12px;">
+            No pull requests found for this repository.
+          </p>
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="github-panel{% if active_tab == 'actions' %} is-active{% endif %}" data-panel="actions">
+    {% if not github_repo_selected %}
+      <div class="subcard">
+        <p class="eyebrow">actions</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Select a repository to load workflow runs.
+        </p>
+      </div>
+    {% elif not github_connected %}
+      <div class="subcard">
+        <p class="eyebrow">actions</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Add a GitHub PAT to load workflow runs.
+        </p>
+      </div>
+    {% elif github_actions_error %}
+      <div class="subcard">
+        <p class="eyebrow">actions</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ github_actions_error }}
+        </p>
+      </div>
+    {% elif github_actions %}
+      <div class="github-action-list">
+        {% for run in github_actions %}
+          <div class="github-action">
+            <div class="row-between">
+              <div>
+                <p class="section-title" style="font-size: 16px;">
+                  {{ run.name }}
+                </p>
+                <p class="muted" style="margin-top: 6px; font-size: 12px;">
+                  {{ run.event }} {% if run.branch %}on {{ run.branch }}{% endif %}
+                </p>
+              </div>
+              <span class="status {{ run.status_class }}">{{ run.status_label }}</span>
+            </div>
+            <div class="github-meta">
+              <span>updated {{ run.updated_at }}</span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="subcard">
+        <p class="eyebrow">actions</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          No workflow runs found for this repository.
+        </p>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="github-panel{% if active_tab == 'code' %} is-active{% endif %}" data-panel="code">
+    {% if not github_repo_selected %}
+      <div class="subcard">
+        <p class="eyebrow">code</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Select a repository to view files.
+        </p>
+      </div>
+    {% elif not github_connected %}
+      <div class="subcard">
+        <p class="eyebrow">code</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Add a GitHub PAT to load repository files.
+        </p>
+      </div>
+    {% elif github_code_error %}
+      <div class="subcard">
+        <p class="eyebrow">code</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ github_code_error }}
+        </p>
+      </div>
+    {% else %}
+      <div class="github-code">
+        <div class="subcard">
+          <div class="row-between">
+            <p class="eyebrow">files</p>
+            {% if github_code_parent %}
+              <a
+                class="chip"
+                href="{{ url_for('agents.github_workspace', tab='code', path=github_code_parent) }}"
+              >
+                up one level
+              </a>
+            {% endif %}
+          </div>
+          {% if github_code_path %}
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              {{ github_code_path }}
+            </p>
+          {% endif %}
+          <ul class="github-file-list" style="margin-top: 12px;">
+            {% if github_code_entries %}
+              {% for entry in github_code_entries %}
+                <li>
+                  <a
+                    class="github-file{% if entry.path == github_code_selected_path %} is-active{% endif %}"
+                    href="{{ url_for('agents.github_workspace', tab='code', path=entry.path) }}"
+                  >
+                    {{ entry.name }}
+                    {% if entry.type == "dir" %}
+                      <i class="fa-solid fa-folder"></i>
+                    {% else %}
+                      <i class="fa-solid fa-file-code"></i>
+                    {% endif %}
+                  </a>
+                </li>
+              {% endfor %}
+            {% else %}
+              <li class="muted" style="font-size: 12px;">
+                No files found at this path.
+              </li>
+            {% endif %}
+          </ul>
+        </div>
+        <div class="github-code-viewer">
+          <div class="github-code-header">
+            <div>
+              <p class="eyebrow">path</p>
+              <p class="muted github-code-title" style="margin-top: 6px;">
+                {% if github_code_selected_path %}
+                  {{ github_code_selected_path }}
+                {% else %}
+                  select a file
+                {% endif %}
+              </p>
+            </div>
+            <span class="chip">view only</span>
+          </div>
+          <div class="github-code-content">
+            {% if github_code_file %}
+              <pre>{{ github_code_file.content }}</pre>
+            {% else %}
+              <p class="muted" style="font-size: 12px;">
+                Select a file to view its contents.
+              </p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+  const githubTabs = document.querySelectorAll(".github-tab");
+  const githubPanels = document.querySelectorAll(".github-panel");
+  const githubActionHeader = document.querySelector("[data-github-action-header]");
+  const actionHeader = document.getElementById("action-header");
+  const searchParams = new URLSearchParams(window.location.search);
+  const urlTab = searchParams.get("tab");
+  const defaultTab =
+    document.querySelector(".github-tab.is-active")?.dataset.tab || "pulls";
+  const knownTabs = new Set(
+    Array.from(githubTabs, (item) => item.dataset.tab || "")
+  );
+  const resolveTab = (tab) => (knownTabs.has(tab) ? tab : defaultTab);
+  const setGithubTab = (target) => {
+    githubTabs.forEach((item) => {
+      item.classList.toggle("is-active", item.dataset.tab === target);
+    });
+    githubPanels.forEach((panel) => {
+      panel.classList.toggle("is-active", panel.dataset.panel === target);
+    });
+    if (githubActionHeader && actionHeader) {
+      actionHeader.classList.toggle("is-hidden", target !== "pulls");
+    }
+  };
+  setGithubTab(resolveTab(urlTab || defaultTab));
+  githubTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.tab;
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set("tab", target);
+      window.history.replaceState({}, "", nextUrl);
+      setGithubTab(target);
+    });
+  });
+
+  const prRows = document.querySelectorAll(".github-pr-table .table-row-link");
+  prRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (target.closest("a") || target.closest("button")) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+
+  const prStatusFilter = document.querySelector("[data-pr-status-filter]");
+  const prAuthorFilter = document.querySelector("[data-pr-author-filter]");
+  const updatePrFilters = () => {
+    const nextUrl = new URL(window.location.href);
+    if (prStatusFilter) {
+      nextUrl.searchParams.set("pr_status", prStatusFilter.value);
+    }
+    if (prAuthorFilter) {
+      nextUrl.searchParams.set("pr_author", prAuthorFilter.value);
+    }
+    nextUrl.searchParams.set("tab", "pulls");
+    window.location.href = nextUrl;
+  };
+  if (prStatusFilter) {
+    prStatusFilter.addEventListener("change", updatePrFilters);
+  }
+  if (prAuthorFilter) {
+    prAuthorFilter.addEventListener("change", updatePrFilters);
+  }
+</script>
+{% endblock %}

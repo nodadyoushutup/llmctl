@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_roles') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to roles
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.edit_role', role_id=role.id) }}">
+    <i class="fa-solid fa-pen-to-square"></i>
+    edit role
+  </a>
+  <form
+    method="post"
+    action="{{ url_for('agents.delete_role', role_id=role.id) }}"
+    onsubmit="return confirm('Delete this role?');"
+  >
+    <input
+      type="hidden"
+      name="next"
+      value="{{ url_for('agents.list_roles') }}"
+    />
+    <button type="submit" class="btn btn-danger">
+      <i class="fa-solid fa-trash"></i>
+      delete
+    </button>
+  </form>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">role</p>
+      <h2 class="section-title">{{ role.name }}</h2>
+      {% if role.description %}
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ role.description }}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">details json</p>
+      <h2 class="section-title">Role Details</h2>
+    </div>
+  </div>
+  {% if role.details_json %}
+    <pre class="log-output" style="margin-top: 12px;">{{ role.details_json }}</pre>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No details JSON stored yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
