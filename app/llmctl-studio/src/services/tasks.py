@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import selectors
 import subprocess
@@ -21,7 +22,10 @@ from core.config import Config
 from core.db import init_db, init_engine, session_scope
 from services.integrations import (
     LLM_PROVIDER_LABELS,
+    LLM_PROVIDERS,
     load_integration_settings,
+    resolve_default_model_id,
+    resolve_enabled_llm_providers,
     resolve_llm_provider,
 )
 from core.mcp_config import build_mcp_overrides, parse_mcp_config
@@ -30,6 +34,7 @@ from core.models import (
     AgentTask,
     Attachment,
     IntegrationSetting,
+    LLMModel,
     MCPServer,
     Pipeline,
     PipelineRun,
@@ -123,12 +128,26 @@ def _codex_override(key_path: list[str], value: Any) -> str:
     return f"{_format_codex_key_path(key_path)}={_toml_value(value)}"
 
 
-def _load_codex_settings() -> dict[str, Any]:
+def _load_codex_auth_key() -> str:
+    settings = load_integration_settings("llm")
+    return (settings.get("codex_api_key") or "").strip()
+
+
+def _load_gemini_auth_key() -> str:
+    settings = load_integration_settings("llm")
+    return (settings.get("gemini_api_key") or "").strip()
+
+
+def _load_claude_auth_key() -> str:
+    settings = load_integration_settings("llm")
+    return (settings.get("claude_api_key") or "").strip()
+
+
+def _load_legacy_codex_model_config() -> dict[str, Any]:
     settings = load_integration_settings("llm")
     ignore_excludes_raw = settings.get("codex_shell_env_ignore_default_excludes")
     notice_hide_enabled_raw = settings.get("codex_notice_hide_enabled")
     return {
-        "api_key": (settings.get("codex_api_key") or "").strip(),
         "model": (settings.get("codex_model") or "").strip(),
         "approval_policy": (settings.get("codex_approval_policy") or "").strip(),
         "sandbox_mode": (settings.get("codex_sandbox_mode") or "").strip(),
@@ -136,9 +155,7 @@ def _load_codex_settings() -> dict[str, Any]:
         "model_reasoning_effort": (
             (settings.get("codex_model_reasoning_effort") or "").strip()
         ),
-        "shell_env_inherit": (
-            (settings.get("codex_shell_env_inherit") or "").strip()
-        ),
+        "shell_env_inherit": (settings.get("codex_shell_env_inherit") or "").strip(),
         "shell_env_ignore_default_excludes": None
         if ignore_excludes_raw is None
         else ignore_excludes_raw.strip().lower() == "true",
@@ -150,6 +167,113 @@ def _load_codex_settings() -> dict[str, Any]:
             (settings.get("codex_notice_migration_from") or "").strip()
         ),
         "notice_migration_to": (settings.get("codex_notice_migration_to") or "").strip(),
+    }
+
+
+def _parse_model_config(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_runtime_payload(
+    provider: str,
+    model_config: dict[str, Any] | None,
+) -> dict[str, object]:
+    model_name = ""
+    if provider == "codex":
+        config = model_config or _load_legacy_codex_model_config()
+        model_name = str(config.get("model") or "").strip()
+        if not model_name:
+            model_name = Config.CODEX_MODEL or ""
+    elif provider == "gemini":
+        model_name = str((model_config or {}).get("model") or "").strip()
+        if not model_name:
+            model_name = Config.GEMINI_MODEL or ""
+    elif provider == "claude":
+        model_name = str((model_config or {}).get("model") or "").strip()
+        if not model_name:
+            model_name = Config.CLAUDE_MODEL or ""
+    payload: dict[str, object] = {"provider": provider}
+    if model_name:
+        payload["model"] = model_name
+    return payload
+
+
+def _inject_runtime_metadata(
+    prompt: str,
+    runtime: dict[str, object] | None,
+) -> str:
+    if not runtime:
+        return prompt
+    stripped = prompt.strip()
+    if not stripped.startswith("{"):
+        return prompt
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return prompt
+    if not isinstance(payload, dict):
+        return prompt
+    payload["runtime"] = runtime
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _as_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
+
+
+def _codex_settings_from_model_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "model": str(config.get("model") or "").strip(),
+        "approval_policy": str(config.get("approval_policy") or "").strip(),
+        "sandbox_mode": str(config.get("sandbox_mode") or "").strip(),
+        "network_access": str(config.get("network_access") or "").strip(),
+        "model_reasoning_effort": str(
+            config.get("model_reasoning_effort") or ""
+        ).strip(),
+        "shell_env_inherit": str(config.get("shell_env_inherit") or "").strip(),
+        "shell_env_ignore_default_excludes": _as_optional_bool(
+            config.get("shell_env_ignore_default_excludes")
+        ),
+        "notice_hide_key": str(config.get("notice_hide_key") or "").strip(),
+        "notice_hide_enabled": _as_optional_bool(config.get("notice_hide_enabled")),
+        "notice_migration_from": str(
+            config.get("notice_migration_from") or ""
+        ).strip(),
+        "notice_migration_to": str(config.get("notice_migration_to") or "").strip(),
+    }
+
+
+def _parse_gemini_extra_args(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        return shlex.split(raw)
+    return [str(value)]
+
+
+def _gemini_settings_from_model_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "model": str(config.get("model") or "").strip(),
+        "approval_mode": str(config.get("approval_mode") or "").strip(),
+        "sandbox": _as_optional_bool(config.get("sandbox")),
+        "extra_args": _parse_gemini_extra_args(config.get("extra_args")),
     }
 
 
@@ -222,20 +346,34 @@ def _build_codex_cmd(
     return cmd
 
 
-def _build_gemini_cmd(mcp_server_names: list[str]) -> list[str]:
+def _build_gemini_cmd(
+    mcp_server_names: list[str],
+    model: str | None = None,
+    approval_mode: str | None = None,
+    extra_args: list[str] | None = None,
+) -> list[str]:
     cmd = [Config.GEMINI_CMD]
-    if Config.GEMINI_MODEL:
-        cmd.extend(["--model", Config.GEMINI_MODEL])
+    selected_model = model or Config.GEMINI_MODEL
+    if selected_model:
+        cmd.extend(["--model", selected_model])
+    if approval_mode:
+        cmd.extend(["--approval-mode", approval_mode])
+    if extra_args:
+        cmd.extend(extra_args)
     if mcp_server_names:
         cmd.append("--allowed-mcp-server-names")
         cmd.extend(mcp_server_names)
     return cmd
 
 
-def _build_claude_cmd(mcp_config: str | None = None) -> list[str]:
+def _build_claude_cmd(
+    mcp_config: str | None = None,
+    model: str | None = None,
+) -> list[str]:
     cmd = [Config.CLAUDE_CMD, "--print"]
-    if Config.CLAUDE_MODEL:
-        cmd.extend(["--model", Config.CLAUDE_MODEL])
+    selected_model = model or Config.CLAUDE_MODEL
+    if selected_model:
+        cmd.extend(["--model", selected_model])
     if mcp_config:
         cmd.extend(["--mcp-config", mcp_config, "--strict-mcp-config"])
     return cmd
@@ -1462,14 +1600,17 @@ def _run_llm(
     provider: str,
     prompt: str | None,
     mcp_configs: dict[str, dict[str, Any]],
+    model_config: dict[str, Any] | None = None,
     on_update: Callable[[str, str], None] | None = None,
     on_log: Callable[[str], None] | None = None,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if model_config is None and provider == "codex":
+        model_config = _load_legacy_codex_model_config()
     provider_label = _provider_label(provider)
     if provider == "codex":
-        codex_settings = _load_codex_settings()
+        codex_settings = _codex_settings_from_model_config(model_config or {})
         mcp_overrides = _build_mcp_overrides_from_configs(mcp_configs)
         codex_overrides = _build_codex_overrides(codex_settings)
         cmd = _build_codex_cmd(
@@ -1478,11 +1619,23 @@ def _run_llm(
             model=codex_settings.get("model"),
         )
     elif provider == "gemini":
+        gemini_settings = _gemini_settings_from_model_config(model_config or {})
         _ensure_gemini_mcp_servers(mcp_configs, on_log=on_log, cwd=cwd)
-        cmd = _build_gemini_cmd(sorted(mcp_configs))
+        if gemini_settings.get("sandbox") is not None:
+            env = dict(env or os.environ)
+            env["GEMINI_SANDBOX"] = (
+                "true" if gemini_settings.get("sandbox") else "false"
+            )
+        cmd = _build_gemini_cmd(
+            sorted(mcp_configs),
+            model=gemini_settings.get("model"),
+            approval_mode=gemini_settings.get("approval_mode"),
+            extra_args=gemini_settings.get("extra_args"),
+        )
     elif provider == "claude":
         mcp_config = _build_claude_mcp_config(mcp_configs)
-        cmd = _build_claude_cmd(mcp_config)
+        model_name = str((model_config or {}).get("model") or "").strip()
+        cmd = _build_claude_cmd(mcp_config, model=model_name)
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
     logger.info("Running %s: %s", provider_label, " ".join(cmd))
@@ -1643,8 +1796,13 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
     init_engine(Config.SQLALCHEMY_DATABASE_URI)
     init_db()
 
-    provider = resolve_llm_provider()
-    provider_label = _provider_label(provider)
+    llm_settings = load_integration_settings("llm")
+    enabled_providers = resolve_enabled_llm_providers(llm_settings)
+    provider = resolve_llm_provider(
+        settings=llm_settings, enabled_providers=enabled_providers
+    )
+    default_model_id = resolve_default_model_id(llm_settings)
+    model_config: dict[str, Any] | None = None
     mcp_configs: dict[str, dict[str, Any]] = {}
     agent_id: int | None = None
     run_id: int | None = None
@@ -1719,6 +1877,116 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 run.task_id = None
                 run.last_stopped_at = now
             return
+        model: LLMModel | None = None
+        if agent.model_id is not None:
+            model = session.get(LLMModel, agent.model_id)
+            if model is None:
+                now = _utcnow()
+                task.status = "failed"
+                task.error = "Model not found."
+                task.started_at = now
+                task.finished_at = now
+                agent.last_run_at = now
+                agent.last_error = "Model not found."
+                agent.task_id = None
+                agent.last_stopped_at = now
+                if run is not None:
+                    run.last_run_at = now
+                    run.last_error = "Model not found."
+                    run.status = "error"
+                    run.task_id = None
+                    run.last_stopped_at = now
+                return
+        elif default_model_id is not None:
+            model = session.get(LLMModel, default_model_id)
+            if model is None:
+                now = _utcnow()
+                task.status = "failed"
+                task.error = "Default model not found."
+                task.started_at = now
+                task.finished_at = now
+                agent.last_run_at = now
+                agent.last_error = "Default model not found."
+                agent.task_id = None
+                agent.last_stopped_at = now
+                if run is not None:
+                    run.last_run_at = now
+                    run.last_error = "Default model not found."
+                    run.status = "error"
+                    run.task_id = None
+                    run.last_stopped_at = now
+                return
+        if model is None:
+            now = _utcnow()
+            task.status = "failed"
+            task.error = "Model required."
+            task.started_at = now
+            task.finished_at = now
+            agent.last_run_at = now
+            agent.last_error = task.error
+            agent.task_id = None
+            agent.last_stopped_at = now
+            if run is not None:
+                run.last_run_at = now
+                run.last_error = task.error
+                run.status = "error"
+                run.task_id = None
+                run.last_stopped_at = now
+            return
+        if model is not None:
+            if model.provider not in LLM_PROVIDERS:
+                now = _utcnow()
+                task.status = "failed"
+                task.error = f"Unknown model provider: {model.provider}."
+                task.started_at = now
+                task.finished_at = now
+                agent.last_run_at = now
+                agent.last_error = task.error
+                agent.task_id = None
+                agent.last_stopped_at = now
+                if run is not None:
+                    run.last_run_at = now
+                    run.last_error = task.error
+                    run.status = "error"
+                    run.task_id = None
+                    run.last_stopped_at = now
+                return
+            if model.provider not in enabled_providers:
+                now = _utcnow()
+                task.status = "failed"
+                task.error = f"Provider disabled: {model.provider}."
+                task.started_at = now
+                task.finished_at = now
+                agent.last_run_at = now
+                agent.last_error = task.error
+                agent.task_id = None
+                agent.last_stopped_at = now
+                if run is not None:
+                    run.last_run_at = now
+                    run.last_error = task.error
+                    run.status = "error"
+                    run.task_id = None
+                    run.last_stopped_at = now
+                return
+            provider = model.provider
+            model_config = _parse_model_config(model.config_json)
+        if provider is None:
+            now = _utcnow()
+            task.status = "failed"
+            task.error = "No default provider or model configured."
+            task.started_at = now
+            task.finished_at = now
+            agent.last_run_at = now
+            agent.last_error = task.error
+            agent.task_id = None
+            agent.last_stopped_at = now
+            if run is not None:
+                run.last_run_at = now
+                run.last_error = task.error
+                run.status = "error"
+                run.task_id = None
+                run.last_stopped_at = now
+            return
         agent_id = agent.id
         agent_scripts = list(agent.scripts)
         task_scripts = list(task.scripts)
@@ -1741,6 +2009,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             prompt = _render_prompt(agent)
         if prompt is None:
             prompt = ""
+        runtime_payload = _build_runtime_payload(provider, model_config)
         repo_value = session.execute(
             select(IntegrationSetting.value).where(
                 IntegrationSetting.provider == "github",
@@ -1775,6 +2044,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             payload,
             _build_integrations_payload(),
         )
+        payload = _inject_runtime_metadata(payload, runtime_payload)
         attachment_entries = _build_attachment_entries(task_attachments)
         if task_kind == "pipeline" and isinstance(pipeline_payload, dict):
             pipeline_entries = pipeline_payload.get("attachments")
@@ -1810,6 +2080,8 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     run.run_end_requested = False
                 logger.error("Invalid MCP config for agent %s: %s", agent.id, exc)
                 return
+
+    provider_label = _provider_label(provider)
 
     def _split_scripts(
         scripts: list[Script],
@@ -2112,14 +2384,24 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 llm_env["WORKSPACE_PATH"] = str(workspace)
                 llm_env["LLMCTL_STUDIO_WORKSPACE"] = str(workspace)
             if provider == "codex":
-                codex_api_key = _load_codex_settings().get("api_key")
+                codex_api_key = _load_codex_auth_key()
                 if codex_api_key:
                     llm_env["OPENAI_API_KEY"] = codex_api_key
                     llm_env["CODEX_API_KEY"] = codex_api_key
+            elif provider == "gemini":
+                gemini_api_key = _load_gemini_auth_key()
+                if gemini_api_key:
+                    llm_env["GEMINI_API_KEY"] = gemini_api_key
+                    llm_env["GOOGLE_API_KEY"] = gemini_api_key
+            elif provider == "claude":
+                claude_api_key = _load_claude_auth_key()
+                if claude_api_key:
+                    llm_env["ANTHROPIC_API_KEY"] = claude_api_key
             result = _run_llm(
                 provider,
                 payload,
                 mcp_configs=mcp_configs,
+                model_config=model_config,
                 on_update=_persist_logs,
                 on_log=_append_task_log,
                 cwd=workspace,

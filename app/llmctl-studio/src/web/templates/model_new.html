@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_models') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    all models
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Create Model</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Bind a provider with model and reasoning policies.
+  </p>
+  <form method="post" action="{{ url_for('agents.create_model') }}" class="form-grid">
+    <label class="label">
+      name
+      <input type="text" name="name" placeholder="Model name" class="input" required />
+    </label>
+    <label class="label">
+      description (optional)
+      <textarea
+        name="description"
+        placeholder="Explain when to use this model."
+        class="textarea"
+      ></textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      provider
+      <select name="provider" class="input">
+        {% for option in provider_options %}
+          <option value="{{ option.value }}" {% if option.value == selected_provider %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    {% set codex_models = model_options.get("codex", []) %}
+    <label class="label" data-provider="codex" style="grid-column: 1 / -1;">
+      Codex model
+      <select class="input" name="codex_model">
+        {% for option in codex_models %}
+          <option value="{{ option }}" {% if option == codex_config.model %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="codex">
+      Approval policy
+      <select class="input" name="codex_approval_policy">
+        {% set approval_selected = codex_config.approval_policy %}
+        {% for option in ["never", "on-failure", "on-request", "untrusted"] %}
+          <option value="{{ option }}" {% if option == approval_selected %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="codex">
+      Sandbox mode
+      <select class="input" name="codex_sandbox_mode">
+        {% set sandbox_selected = codex_config.sandbox_mode %}
+        {% for option in ["danger-full-access", "workspace-write", "read-only"] %}
+          <option value="{{ option }}" {% if option == sandbox_selected %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="codex">
+      Network access
+      <select class="input" name="codex_network_access">
+        {% set network_selected = codex_config.network_access %}
+        {% for option in ["enabled", "disabled"] %}
+          <option value="{{ option }}" {% if option == network_selected %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="codex">
+      Reasoning effort
+      <select class="input" name="codex_model_reasoning_effort">
+        {% set effort_selected = codex_config.model_reasoning_effort %}
+        {% for option in ["high", "medium", "low", "none"] %}
+          <option value="{{ option }}" {% if option == effort_selected %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="codex">
+      Shell env inherit
+      <select class="input" name="codex_shell_env_inherit">
+        {% set inherit_selected = codex_config.shell_env_inherit %}
+        {% for option in ["all", "safe", "none"] %}
+          <option value="{{ option }}" {% if option == inherit_selected %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="codex" style="grid-column: 1 / -1;">
+      <input
+        type="checkbox"
+        name="codex_shell_env_ignore_default_excludes"
+        value="true"
+        {% if codex_config.shell_env_ignore_default_excludes %}checked{% endif %}
+      />
+      ignore default excludes
+    </label>
+    <div data-provider="codex" style="grid-column: 1 / -1; margin-top: 8px;">
+      <p class="eyebrow">Notice overrides</p>
+      <p class="muted" style="margin-top: 6px; font-size: 12px;">
+        Optional suppression and migration prompts for specific models.
+      </p>
+    </div>
+    <label class="label" data-provider="codex" style="grid-column: 1 / -1;">
+      Hide migration prompt key
+      <input
+        class="input"
+        type="text"
+        name="codex_notice_hide_key"
+        value="{{ codex_config.notice_hide_key }}"
+        placeholder="hide_gpt-5.1-codex-max_migration_prompt"
+      />
+    </label>
+    <label class="label" data-provider="codex" style="grid-column: 1 / -1;">
+      <input
+        type="checkbox"
+        name="codex_notice_hide_enabled"
+        value="true"
+        {% if codex_config.notice_hide_enabled %}checked{% endif %}
+      />
+      enable hide migration prompt
+    </label>
+    <label class="label" data-provider="codex">
+      Migration from
+      <input
+        class="input"
+        type="text"
+        name="codex_notice_migration_from"
+        value="{{ codex_config.notice_migration_from }}"
+        placeholder="gpt-5.1-codex-max"
+      />
+    </label>
+    <label class="label" data-provider="codex">
+      Migration to
+      <input
+        class="input"
+        type="text"
+        name="codex_notice_migration_to"
+        value="{{ codex_config.notice_migration_to }}"
+        placeholder="gpt-5.2-codex"
+      />
+    </label>
+
+    {% set gemini_models = model_options.get("gemini", []) %}
+    <label class="label" data-provider="gemini" style="grid-column: 1 / -1;">
+      Gemini model
+      <select class="input" name="gemini_model">
+        <option value="" {% if not gemini_config.model %}selected{% endif %}>select model</option>
+        {% for option in gemini_models %}
+          <option value="{{ option }}" {% if option == gemini_config.model %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="gemini">
+      Approval mode
+      <select class="input" name="gemini_approval_mode">
+        {% set approval_selected = gemini_config.approval_mode %}
+        <option value="" {% if approval_selected == "" %}selected{% endif %}>inherit</option>
+        {% for option in ["default", "auto_edit", "yolo", "plan"] %}
+          <option value="{{ option }}" {% if option == approval_selected %}selected{% endif %}>
+            {{ option }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label" data-provider="gemini">
+      Sandbox
+      <select class="input" name="gemini_sandbox">
+        {% set sandbox_selected = gemini_config.sandbox %}
+        <option value="" {% if sandbox_selected == "" %}selected{% endif %}>inherit</option>
+        <option value="true" {% if sandbox_selected == "true" %}selected{% endif %}>
+          enabled
+        </option>
+        <option value="false" {% if sandbox_selected == "false" %}selected{% endif %}>
+          disabled
+        </option>
+      </select>
+    </label>
+    <label class="label" data-provider="gemini" style="grid-column: 1 / -1;">
+      Extra CLI args
+      <textarea
+        name="gemini_extra_args"
+        class="textarea"
+        placeholder="--flag value"
+      >{{ gemini_config.extra_args }}</textarea>
+    </label>
+
+    {% set claude_models = model_options.get("claude", []) %}
+    <label class="label" data-provider="claude" style="grid-column: 1 / -1;">
+      Claude model
+      <input
+        class="input"
+        type="text"
+        name="claude_model"
+        value="{{ claude_config.model }}"
+        list="claude-model-options"
+        placeholder="claude-3.7-sonnet"
+      />
+      <datalist id="claude-model-options">
+        {% for option in claude_models %}
+          <option value="{{ option }}"></option>
+        {% endfor %}
+      </datalist>
+    </label>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-plus"></i>
+        create
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.list_models') }}">
+        <i class="fa-solid fa-arrow-left"></i>
+        cancel
+      </a>
+    </div>
+  </form>
+</section>
+
+<script>
+  const providerSelect = document.querySelector('select[name="provider"]');
+  const providerFields = document.querySelectorAll("[data-provider]");
+  if (providerSelect) {
+    const updateFields = () => {
+      const selected = providerSelect.value;
+      providerFields.forEach((field) => {
+        field.style.display = field.dataset.provider === selected ? "" : "none";
+      });
+    };
+    providerSelect.addEventListener("change", updateFields);
+    updateFields();
+  }
+</script>
+{% endblock %}

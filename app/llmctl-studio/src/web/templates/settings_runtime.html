@@ -25,7 +25,11 @@
     <div class="subcard">
       <p class="eyebrow">provider</p>
       <p style="margin-top: 8px;">
-        Using {{ llm_config.label }} via {{ llm_config.command }} (model {{ llm_config.model }}).
+        {% if llm_config.provider %}
+          Using {{ llm_config.label }} via {{ llm_config.command }} (model {{ llm_config.model }}).
+        {% else %}
+          No default provider configured. Agents use the default model if set.
+        {% endif %}
       </p>
     </div>
   </div>

@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH="/app/app/llmctl-mcp/src"
 
 WORKDIR /app
 

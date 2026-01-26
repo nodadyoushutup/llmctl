@@ -38,6 +38,8 @@ from services.integrations import (
     LLM_PROVIDERS,
     integration_overview as _integration_overview,
     load_integration_settings as _load_integration_settings,
+    resolve_default_model_id,
+    resolve_enabled_llm_providers,
     resolve_llm_provider,
     save_integration_settings as _save_integration_settings,
 )
@@ -45,6 +47,7 @@ from core.models import (
     Agent,
     AgentTask,
     Attachment,
+    LLMModel,
     Memory,
     MCPServer,
     Milestone,
@@ -86,6 +89,23 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TASKS_PER_PAGE = 10
 TASKS_PER_PAGE_OPTIONS = (10, 25, 50, 100)
+DEFAULT_RUNS_PER_PAGE = DEFAULT_TASKS_PER_PAGE
+RUNS_PER_PAGE_OPTIONS = TASKS_PER_PAGE_OPTIONS
+CODEX_MODEL_PREFERENCE = (
+    "gpt-5.2-codex",
+    "gpt-5.2",
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex-mini",
+)
+GEMINI_MODEL_OPTIONS = (
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+)
 IMAGE_ATTACHMENT_EXTENSIONS = {
     ".bmp",
     ".gif",
@@ -668,6 +688,26 @@ def _load_runs(limit: int | None = None) -> list[Run]:
         return session.execute(stmt).scalars().all()
 
 
+def _load_runs_page(page: int, per_page: int) -> tuple[list[Run], int, int, int]:
+    with session_scope() as session:
+        total_runs = session.execute(select(func.count(Run.id))).scalar_one()
+        total_pages = (
+            max(1, (total_runs + per_page - 1) // per_page) if total_runs else 1
+        )
+        page = max(1, min(page, total_pages))
+        runs: list[Run] = []
+        if total_runs:
+            stmt = (
+                select(Run)
+                .options(selectinload(Run.agent))
+                .order_by(Run.created_at.desc())
+                .limit(per_page)
+                .offset((page - 1) * per_page)
+            )
+            runs = session.execute(stmt).scalars().all()
+        return runs, total_runs, page, total_pages
+
+
 def _active_agent_ids(agent_ids: list[int]) -> set[int]:
     if not agent_ids:
         return set()
@@ -756,7 +796,7 @@ def _settings_summary() -> dict[str, object]:
     return summary
 
 
-def _provider_command(provider: str) -> str:
+def _provider_command(provider: str | None) -> str:
     if provider == "codex":
         return f"{Config.CODEX_CMD} exec"
     if provider == "gemini":
@@ -766,11 +806,11 @@ def _provider_command(provider: str) -> str:
     return "-"
 
 
-def _provider_model(provider: str) -> str:
+def _provider_model(provider: str | None, settings: dict[str, str] | None = None) -> str:
     if provider == "codex":
-        settings = _load_integration_settings("llm")
+        settings = settings or _load_integration_settings("llm")
         model = (settings.get("codex_model") or "").strip()
-        return model or Config.CODEX_MODEL or "default"
+        return model or Config.CODEX_MODEL or _codex_default_model()
     if provider == "gemini":
         return Config.GEMINI_MODEL or "default"
     if provider == "claude":
@@ -778,14 +818,23 @@ def _provider_model(provider: str) -> str:
     return "default"
 
 
-def _provider_summary(provider: str | None = None) -> dict[str, str]:
-    selected = provider or resolve_llm_provider()
-    label = LLM_PROVIDER_LABELS.get(selected, selected)
+def _provider_summary(
+    provider: str | None = None,
+    *,
+    settings: dict[str, str] | None = None,
+    enabled_providers: set[str] | None = None,
+) -> dict[str, str | None]:
+    settings = settings or _load_integration_settings("llm")
+    enabled = enabled_providers or resolve_enabled_llm_providers(settings)
+    selected = provider or resolve_llm_provider(
+        settings=settings, enabled_providers=enabled
+    )
+    label = LLM_PROVIDER_LABELS.get(selected, selected) if selected else "not set"
     return {
         "provider": selected,
         "label": label,
         "command": _provider_command(selected),
-        "model": _provider_model(selected),
+        "model": _provider_model(selected, settings),
     }
 
 
@@ -800,24 +849,289 @@ def _as_bool(value: str | None) -> bool:
     return (value or "").strip().lower() == "true"
 
 
+def _default_model_overview(
+    settings: dict[str, str] | None = None,
+) -> dict[str, object]:
+    settings = settings or _load_integration_settings("llm")
+    default_model_id = resolve_default_model_id(settings)
+    if default_model_id is None:
+        return {
+            "id": None,
+            "label": "not set",
+            "provider_label": None,
+            "model_name": None,
+            "name": None,
+        }
+    with session_scope() as session:
+        model = session.get(LLMModel, default_model_id)
+        if model is None:
+            return {
+                "id": default_model_id,
+                "label": "missing",
+                "provider_label": None,
+                "model_name": None,
+                "name": None,
+            }
+        model_name = _model_display_name(model)
+        provider_label = LLM_PROVIDER_LABELS.get(model.provider, model.provider)
+        label = f"{model.name} ({provider_label} / {model_name})"
+        return {
+            "id": model.id,
+            "label": label,
+            "provider_label": provider_label,
+            "model_name": model_name,
+            "name": model.name,
+        }
+
+
+def _decode_model_config(raw: str | None) -> dict[str, object]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _codex_model_config_defaults(
+    config: dict[str, object],
+    *,
+    default_model: str | None = None,
+) -> dict[str, object]:
+    model = str(config.get("model") or "").strip()
+    if not model:
+        model = default_model or _codex_default_model()
+    return {
+        "model": model,
+        "approval_policy": config.get("approval_policy") or "never",
+        "sandbox_mode": config.get("sandbox_mode") or "danger-full-access",
+        "network_access": config.get("network_access") or "enabled",
+        "model_reasoning_effort": config.get("model_reasoning_effort") or "high",
+        "shell_env_inherit": config.get("shell_env_inherit") or "all",
+        "shell_env_ignore_default_excludes": _as_bool(
+            str(config.get("shell_env_ignore_default_excludes"))
+            if config.get("shell_env_ignore_default_excludes") is not None
+            else ""
+        ),
+        "notice_hide_key": config.get("notice_hide_key") or "",
+        "notice_hide_enabled": _as_bool(
+            str(config.get("notice_hide_enabled"))
+            if config.get("notice_hide_enabled") is not None
+            else ""
+        ),
+        "notice_migration_from": config.get("notice_migration_from") or "",
+        "notice_migration_to": config.get("notice_migration_to") or "",
+    }
+
+
+def _normalize_optional_bool(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "false"}:
+            return normalized
+    return ""
+
+
+def _normalize_args_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value]
+        return "\n".join(part for part in parts if part)
+    return str(value)
+
+
+def _gemini_model_config_defaults(config: dict[str, object]) -> dict[str, object]:
+    return {
+        "model": config.get("model") or "",
+        "approval_mode": config.get("approval_mode") or "",
+        "sandbox": _normalize_optional_bool(config.get("sandbox")),
+        "extra_args": _normalize_args_text(config.get("extra_args")),
+    }
+
+
+def _simple_model_config_defaults(config: dict[str, object]) -> dict[str, object]:
+    return {"model": config.get("model") or ""}
+
+
+def _parse_model_list(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    parts = []
+    for chunk in raw.replace(",", "\n").splitlines():
+        value = chunk.strip()
+        if value:
+            parts.append(value)
+    return parts
+
+
+def _codex_default_model(options: list[str] | None = None) -> str:
+    if options:
+        for model in CODEX_MODEL_PREFERENCE:
+            if model in options:
+                return model
+        return options[0]
+    return CODEX_MODEL_PREFERENCE[0]
+
+
+def _ordered_codex_models(options: set[str]) -> list[str]:
+    ordered = []
+    seen = set()
+    for model in CODEX_MODEL_PREFERENCE:
+        if model in options:
+            ordered.append(model)
+            seen.add(model)
+    remainder = sorted([model for model in options if model not in seen], key=str.lower)
+    ordered.extend(remainder)
+    return ordered
+
+
+def _ordered_gemini_models(options: set[str]) -> list[str]:
+    ordered = []
+    seen = set()
+    for model in GEMINI_MODEL_OPTIONS:
+        if model in options:
+            ordered.append(model)
+            seen.add(model)
+    remainder = sorted([model for model in options if model not in seen], key=str.lower)
+    ordered.extend(remainder)
+    return ordered
+
+
+def _provider_default_model(provider: str) -> str:
+    if provider == "codex":
+        return Config.CODEX_MODEL or _codex_default_model()
+    if provider == "gemini":
+        return Config.GEMINI_MODEL or ""
+    if provider == "claude":
+        return Config.CLAUDE_MODEL or ""
+    return ""
+
+
+def _provider_model_options(
+    settings: dict[str, str] | None = None,
+    models: list[LLMModel] | None = None,
+) -> dict[str, list[str]]:
+    settings = settings or _load_integration_settings("llm")
+    models = models or _load_llm_models()
+    options: dict[str, set[str]] = {provider: set() for provider in LLM_PROVIDERS}
+    if "codex" in options:
+        options["codex"].update(CODEX_MODEL_PREFERENCE)
+    if "gemini" in options:
+        options["gemini"].update(GEMINI_MODEL_OPTIONS)
+    for provider in LLM_PROVIDERS:
+        options[provider].update(
+            _parse_model_list(settings.get(f"{provider}_models"))
+        )
+        settings_model = (settings.get(f"{provider}_model") or "").strip()
+        if settings_model:
+            options[provider].add(settings_model)
+        default_model = _provider_default_model(provider)
+        if default_model:
+            options[provider].add(default_model.strip())
+    for model in models:
+        if model.provider not in options:
+            continue
+        config = _decode_model_config(model.config_json)
+        model_name = str(config.get("model") or "").strip()
+        if model_name:
+            options[model.provider].add(model_name)
+    ordered: dict[str, list[str]] = {}
+    for provider, values in options.items():
+        if provider == "codex":
+            ordered[provider] = _ordered_codex_models(values)
+        elif provider == "gemini":
+            ordered[provider] = _ordered_gemini_models(values)
+        else:
+            ordered[provider] = sorted(values, key=str.lower)
+    return ordered
+
+
+def _model_option_allowed(
+    provider: str,
+    model_name: str,
+    model_options: dict[str, list[str]],
+) -> bool:
+    if not model_name:
+        return True
+    return model_name in model_options.get(provider, [])
+
+
+def _model_config_payload(provider: str, form: dict[str, str]) -> dict[str, object]:
+    if provider == "codex":
+        return {
+            "model": form.get("codex_model", "").strip(),
+            "approval_policy": form.get("codex_approval_policy", "").strip(),
+            "sandbox_mode": form.get("codex_sandbox_mode", "").strip(),
+            "network_access": form.get("codex_network_access", "").strip(),
+            "model_reasoning_effort": form.get("codex_model_reasoning_effort", "").strip(),
+            "shell_env_inherit": form.get("codex_shell_env_inherit", "").strip(),
+            "shell_env_ignore_default_excludes": (
+                form.get("codex_shell_env_ignore_default_excludes", "")
+                .strip()
+                .lower()
+                == "true"
+            ),
+            "notice_hide_key": form.get("codex_notice_hide_key", "").strip(),
+            "notice_hide_enabled": (
+                form.get("codex_notice_hide_enabled", "").strip().lower() == "true"
+            ),
+            "notice_migration_from": form.get("codex_notice_migration_from", "").strip(),
+            "notice_migration_to": form.get("codex_notice_migration_to", "").strip(),
+        }
+    if provider == "gemini":
+        sandbox_raw = form.get("gemini_sandbox", "").strip().lower()
+        sandbox_value = None
+        if sandbox_raw == "true":
+            sandbox_value = True
+        elif sandbox_raw == "false":
+            sandbox_value = False
+        return {
+            "model": form.get("gemini_model", "").strip(),
+            "approval_mode": form.get("gemini_approval_mode", "").strip(),
+            "sandbox": sandbox_value,
+            "extra_args": form.get("gemini_extra_args", "").strip(),
+        }
+    if provider == "claude":
+        return {"model": form.get("claude_model", "").strip()}
+    return {}
+
+
+def _load_llm_models() -> list[LLMModel]:
+    with session_scope() as session:
+        return (
+            session.execute(select(LLMModel).order_by(LLMModel.created_at.desc()))
+            .scalars()
+            .all()
+        )
+
+
+def _model_display_name(model: LLMModel) -> str:
+    config = _decode_model_config(model.config_json)
+    model_name = str(config.get("model") or "").strip()
+    return model_name or "default"
+
+
 def _codex_settings_payload(settings: dict[str, str]) -> dict[str, object]:
     return {
         "api_key": settings.get("codex_api_key") or "",
-        "model": settings.get("codex_model") or "",
-        "approval_policy": settings.get("codex_approval_policy") or "never",
-        "sandbox_mode": settings.get("codex_sandbox_mode") or "danger-full-access",
-        "network_access": settings.get("codex_network_access") or "enabled",
-        "model_reasoning_effort": (
-            settings.get("codex_model_reasoning_effort") or "high"
-        ),
-        "shell_env_inherit": settings.get("codex_shell_env_inherit") or "all",
-        "shell_env_ignore_default_excludes": _as_bool(
-            settings.get("codex_shell_env_ignore_default_excludes")
-        ),
-        "notice_hide_key": settings.get("codex_notice_hide_key") or "",
-        "notice_hide_enabled": _as_bool(settings.get("codex_notice_hide_enabled")),
-        "notice_migration_from": settings.get("codex_notice_migration_from") or "",
-        "notice_migration_to": settings.get("codex_notice_migration_to") or "",
+    }
+
+
+def _gemini_settings_payload(settings: dict[str, str]) -> dict[str, object]:
+    return {
+        "api_key": settings.get("gemini_api_key") or "",
+    }
+
+
+def _claude_settings_payload(settings: dict[str, str]) -> dict[str, object]:
+    return {
+        "api_key": settings.get("claude_api_key") or "",
     }
 
 
@@ -2724,12 +3038,14 @@ def list_agents():
 @bp.get("/agents/new")
 def new_agent():
     roles = _load_roles()
+    models = _load_llm_models()
     scripts = _load_scripts()
     scripts_by_type = _group_scripts_by_type(scripts)
     selected_scripts_by_type = {script_type: [] for script_type in SCRIPT_TYPE_FIELDS}
     return render_template(
         "agent_new.html",
         roles=roles,
+        models=models,
         scripts_by_type=scripts_by_type,
         selected_scripts_by_type=selected_scripts_by_type,
         script_type_fields=SCRIPT_TYPE_FIELDS,
@@ -2745,6 +3061,7 @@ def create_agent():
     description = request.form.get("description", "").strip()
     autonomous_prompt = request.form.get("autonomous_prompt", "").strip()
     role_raw = request.form.get("role_id", "").strip()
+    model_raw = request.form.get("model_id", "").strip()
     script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
 
     if not description:
@@ -2764,11 +3081,23 @@ def create_agent():
         except ValueError:
             flash("Role must be a number.", "error")
             return redirect(url_for("agents.new_agent"))
+    model_id = None
+    if model_raw:
+        try:
+            model_id = int(model_raw)
+        except ValueError:
+            flash("Model must be a number.", "error")
+            return redirect(url_for("agents.new_agent"))
     with session_scope() as session:
         if role_id is not None:
             role = session.get(Role, role_id)
             if role is None:
                 flash("Role not found.", "error")
+                return redirect(url_for("agents.new_agent"))
+        if model_id is not None:
+            model = session.get(LLMModel, model_id)
+            if model is None:
+                flash("Model not found.", "error")
                 return redirect(url_for("agents.new_agent"))
         script_ids_by_type, script_error = _resolve_script_selection(
             session,
@@ -2786,6 +3115,7 @@ def create_agent():
             session,
             name=name,
             role_id=role_id,
+            model_id=model_id,
             description=description,
             prompt_json=prompt_json,
             prompt_text=None,
@@ -2907,6 +3237,7 @@ def view_agent_mcp(agent_id: int):
 @bp.get("/agents/<int:agent_id>/edit")
 def edit_agent(agent_id: int):
     roles = _load_roles()
+    models = _load_llm_models()
     scripts = _load_scripts()
     scripts_by_type = _group_scripts_by_type(scripts)
     with session_scope() as session:
@@ -2926,6 +3257,7 @@ def edit_agent(agent_id: int):
         "agent_edit.html",
         agent=agent,
         roles=roles,
+        models=models,
         scripts_by_type=scripts_by_type,
         selected_scripts_by_type=selected_scripts_by_type,
         script_type_fields=SCRIPT_TYPE_FIELDS,
@@ -2941,6 +3273,7 @@ def update_agent(agent_id: int):
     description = request.form.get("description", "").strip()
     autonomous_prompt = request.form.get("autonomous_prompt", "").strip()
     role_raw = request.form.get("role_id", "").strip()
+    model_raw = request.form.get("model_id", "").strip()
     script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
 
     if not description:
@@ -2957,6 +3290,13 @@ def update_agent(agent_id: int):
         except ValueError:
             flash("Role must be a number.", "error")
             return redirect(url_for("agents.edit_agent", agent_id=agent_id))
+    model_id = None
+    if model_raw:
+        try:
+            model_id = int(model_raw)
+        except ValueError:
+            flash("Model must be a number.", "error")
+            return redirect(url_for("agents.edit_agent", agent_id=agent_id))
 
     with session_scope() as session:
         agent = session.get(Agent, agent_id)
@@ -2966,6 +3306,11 @@ def update_agent(agent_id: int):
             role = session.get(Role, role_id)
             if role is None:
                 flash("Role not found.", "error")
+                return redirect(url_for("agents.edit_agent", agent_id=agent_id))
+        if model_id is not None:
+            model = session.get(LLMModel, model_id)
+            if model is None:
+                flash("Model not found.", "error")
                 return redirect(url_for("agents.edit_agent", agent_id=agent_id))
         script_ids_by_type, script_error = _resolve_script_selection(
             session,
@@ -2987,6 +3332,7 @@ def update_agent(agent_id: int):
         agent.prompt_text = None
         agent.autonomous_prompt = autonomous_prompt or None
         agent.role_id = role_id
+        agent.model_id = model_id
         _set_agent_scripts(session, agent.id, script_ids_by_type)
 
     flash("Agent updated.", "success")
@@ -3077,7 +3423,7 @@ def create_role():
 
 @bp.post("/agents/<int:agent_id>/start")
 def start_agent(agent_id: int):
-    redirect_target = _safe_redirect_target(
+    fallback_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_agents")
     )
     with session_scope() as session:
@@ -3114,14 +3460,14 @@ def start_agent(agent_id: int):
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
-            return redirect(redirect_target)
+            return redirect(fallback_target)
         run.task_id = task.id
         agent = session.get(Agent, run.agent_id)
         if agent is not None:
             agent.task_id = task.id
 
     flash("Autorun enabled.", "success")
-    return redirect(redirect_target)
+    return redirect(url_for("agents.view_run", run_id=run_id))
 
 
 @bp.post("/agents/<int:agent_id>/stop")
@@ -3415,10 +3761,25 @@ def create_run():
 def runs():
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
-    runs = _load_runs()
+    page = _parse_positive_int(request.args.get("page"), 1)
+    per_page = _parse_positive_int(request.args.get("per_page"), DEFAULT_RUNS_PER_PAGE)
+    if per_page not in RUNS_PER_PAGE_OPTIONS:
+        per_page = DEFAULT_RUNS_PER_PAGE
+    runs, total_runs, page, total_pages = _load_runs_page(page, per_page)
+    pagination_items = _build_pagination_items(page, total_pages)
+    current_url = request.full_path
+    if current_url.endswith("?"):
+        current_url = current_url[:-1]
     return render_template(
         "runs.html",
         runs=runs,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        total_runs=total_runs,
+        per_page_options=RUNS_PER_PAGE_OPTIONS,
+        pagination_items=pagination_items,
+        current_url=current_url,
         summary=summary,
         human_time=_human_time,
         page_title="Autoruns",
@@ -4336,6 +4697,242 @@ def list_mcps():
         page_title="MCP Servers",
         active_page="mcps",
     )
+
+
+@bp.get("/models")
+def list_models():
+    models = _load_llm_models()
+    llm_settings = _load_integration_settings("llm")
+    default_model_id = resolve_default_model_id(llm_settings)
+    model_rows = []
+    for model in models:
+        model_rows.append(
+            {
+                "id": model.id,
+                "name": model.name,
+                "description": model.description,
+                "provider": model.provider,
+                "provider_label": LLM_PROVIDER_LABELS.get(model.provider, model.provider),
+                "model_name": _model_display_name(model),
+                "is_default": model.id == default_model_id,
+            }
+        )
+    return render_template(
+        "models.html",
+        models=model_rows,
+        default_model_id=default_model_id,
+        page_title="Models",
+        active_page="models",
+    )
+
+
+@bp.get("/models/new")
+def new_model():
+    model_options = _provider_model_options()
+    codex_default_model = _codex_default_model(model_options.get("codex"))
+    return render_template(
+        "model_new.html",
+        provider_options=_provider_options(),
+        selected_provider="codex",
+        codex_config=_codex_model_config_defaults(
+            {},
+            default_model=codex_default_model,
+        ),
+        gemini_config=_gemini_model_config_defaults({}),
+        claude_config=_simple_model_config_defaults({}),
+        model_options=model_options,
+        page_title="Create Model",
+        active_page="models",
+    )
+
+
+@bp.post("/models")
+def create_model():
+    name = request.form.get("name", "").strip()
+    description = request.form.get("description", "").strip()
+    provider = (request.form.get("provider") or "").strip().lower()
+
+    if not name:
+        flash("Model name is required.", "error")
+        return redirect(url_for("agents.new_model"))
+    if provider not in LLM_PROVIDERS:
+        flash("Unknown provider selection.", "error")
+        return redirect(url_for("agents.new_model"))
+
+    config_payload = _model_config_payload(provider, request.form)
+    model_options = _provider_model_options()
+    model_name = str(config_payload.get("model") or "").strip()
+    if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
+        flash("Codex model must be selected from the configured options.", "error")
+        return redirect(url_for("agents.new_model"))
+    config_json = json.dumps(config_payload, indent=2, sort_keys=True)
+
+    with session_scope() as session:
+        model = LLMModel.create(
+            session,
+            name=name,
+            description=description or None,
+            provider=provider,
+            config_json=config_json,
+        )
+
+    flash(f"Model {model.id} created.", "success")
+    return redirect(url_for("agents.view_model", model_id=model.id))
+
+
+@bp.get("/models/<int:model_id>")
+def view_model(model_id: int):
+    with session_scope() as session:
+        model = session.get(LLMModel, model_id)
+        if model is None:
+            abort(404)
+        attached_agents = (
+            session.execute(
+                select(Agent)
+                .where(Agent.model_id == model_id)
+                .order_by(Agent.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+    llm_settings = _load_integration_settings("llm")
+    default_model_id = resolve_default_model_id(llm_settings)
+    is_default = default_model_id == model_id
+    config = _decode_model_config(model.config_json)
+    formatted_config = json.dumps(config, indent=2, sort_keys=True)
+    provider_label = LLM_PROVIDER_LABELS.get(model.provider, model.provider)
+    return render_template(
+        "model_detail.html",
+        model=model,
+        provider_label=provider_label,
+        model_name=_model_display_name(model),
+        config_json=formatted_config,
+        attached_agents=attached_agents,
+        is_default=is_default,
+        page_title=f"Model - {model.name}",
+        active_page="models",
+    )
+
+
+@bp.get("/models/<int:model_id>/edit")
+def edit_model(model_id: int):
+    with session_scope() as session:
+        model = session.get(LLMModel, model_id)
+        if model is None:
+            abort(404)
+    config = _decode_model_config(model.config_json)
+    model_options = _provider_model_options()
+    codex_default_model = _codex_default_model(model_options.get("codex"))
+    return render_template(
+        "model_edit.html",
+        model=model,
+        provider_options=_provider_options(),
+        selected_provider=model.provider,
+        codex_config=_codex_model_config_defaults(
+            config if model.provider == "codex" else {},
+            default_model=codex_default_model,
+        ),
+        gemini_config=_gemini_model_config_defaults(
+            config if model.provider == "gemini" else {}
+        ),
+        claude_config=_simple_model_config_defaults(
+            config if model.provider == "claude" else {}
+        ),
+        model_options=model_options,
+        page_title=f"Edit Model - {model.name}",
+        active_page="models",
+    )
+
+
+@bp.post("/models/<int:model_id>")
+def update_model(model_id: int):
+    name = request.form.get("name", "").strip()
+    description = request.form.get("description", "").strip()
+    provider = (request.form.get("provider") or "").strip().lower()
+
+    if not name:
+        flash("Model name is required.", "error")
+        return redirect(url_for("agents.edit_model", model_id=model_id))
+    if provider not in LLM_PROVIDERS:
+        flash("Unknown provider selection.", "error")
+        return redirect(url_for("agents.edit_model", model_id=model_id))
+
+    config_payload = _model_config_payload(provider, request.form)
+    model_options = _provider_model_options()
+    model_name = str(config_payload.get("model") or "").strip()
+    if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
+        flash("Codex model must be selected from the configured options.", "error")
+        return redirect(url_for("agents.edit_model", model_id=model_id))
+    config_json = json.dumps(config_payload, indent=2, sort_keys=True)
+
+    with session_scope() as session:
+        model = session.get(LLMModel, model_id)
+        if model is None:
+            abort(404)
+        model.name = name
+        model.description = description or None
+        model.provider = provider
+        model.config_json = config_json
+
+    flash("Model updated.", "success")
+    return redirect(url_for("agents.view_model", model_id=model_id))
+
+
+@bp.post("/models/default")
+def update_default_model():
+    next_url = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.list_models")
+    )
+    model_raw = request.form.get("model_id", "").strip()
+    if not model_raw.isdigit():
+        flash("Model selection required.", "error")
+        return redirect(next_url)
+    model_id = int(model_raw)
+    make_default = _as_bool(request.form.get("is_default"))
+    with session_scope() as session:
+        model = session.get(LLMModel, model_id)
+        if model is None:
+            flash("Model not found.", "error")
+            return redirect(next_url)
+    if make_default:
+        payload = {
+            "default_model_id": str(model_id),
+            f"provider_enabled_{model.provider}": "true",
+        }
+        _save_integration_settings("llm", payload)
+        flash("Default model updated.", "success")
+    else:
+        _save_integration_settings("llm", {"default_model_id": ""})
+        flash("Default model cleared.", "success")
+    return redirect(next_url)
+
+
+@bp.post("/models/<int:model_id>/delete")
+def delete_model(model_id: int):
+    next_url = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.list_models")
+    )
+    with session_scope() as session:
+        model = session.get(LLMModel, model_id)
+        if model is None:
+            abort(404)
+        attached_agents = (
+            session.execute(select(Agent).where(Agent.model_id == model_id))
+            .scalars()
+            .all()
+        )
+        for agent in attached_agents:
+            agent.model_id = None
+        session.delete(model)
+
+    flash("Model deleted.", "success")
+    if attached_agents:
+        flash(f"Detached from {len(attached_agents)} agent(s).", "info")
+    llm_settings = _load_integration_settings("llm")
+    if resolve_default_model_id(llm_settings) == model_id:
+        _save_integration_settings("llm", {"default_model_id": ""})
+        flash("Default model cleared.", "info")
+    return redirect(next_url)
 
 
 @bp.get("/mcps/new")
@@ -5800,7 +6397,12 @@ def start_pipeline(pipeline_id: int):
 def settings():
     summary = _settings_summary()
     integration_overview = _integration_overview()
-    provider_overview = _provider_summary()
+    llm_settings = _load_integration_settings("llm")
+    enabled_providers = resolve_enabled_llm_providers(llm_settings)
+    provider_overview = _provider_summary(
+        settings=llm_settings, enabled_providers=enabled_providers
+    )
+    default_model_summary = _default_model_overview(llm_settings)
     gitconfig_path = _gitconfig_path()
     gitconfig_overview = {
         "path": str(gitconfig_path),
@@ -5828,6 +6430,7 @@ def settings():
         runtime_overview=runtime_overview,
         integration_overview=integration_overview,
         provider_overview=provider_overview,
+        default_model_summary=default_model_summary,
         gitconfig_overview=gitconfig_overview,
         summary=summary,
         page_title="Settings",
@@ -5980,7 +6583,7 @@ def settings_core():
         "DATABASE_FILENAME": Config.DATABASE_FILENAME,
         "SQLALCHEMY_DATABASE_URI": Config.SQLALCHEMY_DATABASE_URI,
         "AGENT_POLL_SECONDS": Config.AGENT_POLL_SECONDS,
-        "LLM_PROVIDER": resolve_llm_provider(),
+        "LLM_PROVIDER": resolve_llm_provider() or "not set",
         "CODEX_CMD": Config.CODEX_CMD,
         "CODEX_MODEL": Config.CODEX_MODEL or "default",
         "GEMINI_CMD": Config.GEMINI_CMD,
@@ -6003,9 +6606,15 @@ def settings_core():
 @bp.get("/settings/provider")
 def settings_provider():
     summary = _settings_summary()
-    provider_summary = _provider_summary()
     llm_settings = _load_integration_settings("llm")
+    enabled_providers = resolve_enabled_llm_providers(llm_settings)
+    provider_summary = _provider_summary(
+        settings=llm_settings, enabled_providers=enabled_providers
+    )
+    default_model_summary = _default_model_overview(llm_settings)
     codex_settings = _codex_settings_payload(llm_settings)
+    gemini_settings = _gemini_settings_payload(llm_settings)
+    claude_settings = _claude_settings_payload(llm_settings)
     provider_details = []
     for provider in LLM_PROVIDERS:
         provider_details.append(
@@ -6013,73 +6622,82 @@ def settings_provider():
                 "id": provider,
                 "label": LLM_PROVIDER_LABELS.get(provider, provider),
                 "command": _provider_command(provider),
-                "model": _provider_model(provider),
-                "active": provider == provider_summary["provider"],
+                "model": _provider_model(provider, llm_settings),
+                "enabled": provider in enabled_providers,
+                "is_default": provider == provider_summary["provider"],
             }
         )
     return render_template(
         "settings_provider.html",
         provider_summary=provider_summary,
-        provider_options=_provider_options(),
         provider_details=provider_details,
+        default_model_summary=default_model_summary,
         codex_settings=codex_settings,
+        gemini_settings=gemini_settings,
+        claude_settings=claude_settings,
         summary=summary,
         page_title="Settings - Provider",
         active_page="settings",
         settings_title="Settings",
-        settings_subtitle="Provider Selection",
+        settings_subtitle="Provider Defaults & Auth",
         settings_section="provider",
     )
 
 
 @bp.post("/settings/provider")
 def update_provider_settings():
-    provider = (request.form.get("provider") or "").strip().lower()
-    if provider not in LLM_PROVIDERS:
+    default_provider = (request.form.get("default_provider") or "").strip().lower()
+    if default_provider and default_provider not in LLM_PROVIDERS:
         flash("Unknown provider selection.", "error")
         return redirect(url_for("agents.settings_provider"))
-    _save_integration_settings("llm", {"provider": provider})
-    flash("Provider updated.", "success")
+    enabled: set[str] = set()
+    for provider in LLM_PROVIDERS:
+        if _as_bool(request.form.get(f"provider_enabled_{provider}")):
+            enabled.add(provider)
+    if default_provider:
+        enabled.add(default_provider)
+    payload = {
+        f"provider_enabled_{provider}": "true" if provider in enabled else ""
+        for provider in LLM_PROVIDERS
+    }
+    payload["provider"] = default_provider if default_provider in enabled else ""
+    _save_integration_settings("llm", payload)
+    if not enabled:
+        flash("No providers enabled. Agents require a default model or provider.", "info")
+    flash("Provider settings updated.", "success")
     return redirect(url_for("agents.settings_provider"))
 
 
 @bp.post("/settings/provider/codex")
 def update_codex_settings():
     api_key = request.form.get("codex_api_key", "")
-    model = request.form.get("codex_model", "")
-    approval_policy = request.form.get("codex_approval_policy", "")
-    sandbox_mode = request.form.get("codex_sandbox_mode", "")
-    network_access = request.form.get("codex_network_access", "")
-    model_reasoning_effort = request.form.get("codex_model_reasoning_effort", "")
-    shell_env_inherit = request.form.get("codex_shell_env_inherit", "")
-    shell_env_ignore_default_excludes = (
-        request.form.get("codex_shell_env_ignore_default_excludes", "").strip().lower()
-        == "true"
-    )
-    notice_hide_key = request.form.get("codex_notice_hide_key", "")
-    notice_hide_enabled = (
-        request.form.get("codex_notice_hide_enabled", "").strip().lower() == "true"
-    )
-    notice_migration_from = request.form.get("codex_notice_migration_from", "")
-    notice_migration_to = request.form.get("codex_notice_migration_to", "")
     payload = {
         "codex_api_key": api_key,
-        "codex_model": model,
-        "codex_approval_policy": approval_policy,
-        "codex_sandbox_mode": sandbox_mode,
-        "codex_network_access": network_access,
-        "codex_model_reasoning_effort": model_reasoning_effort,
-        "codex_shell_env_inherit": shell_env_inherit,
-        "codex_shell_env_ignore_default_excludes": "true"
-        if shell_env_ignore_default_excludes
-        else "false",
-        "codex_notice_hide_key": notice_hide_key,
-        "codex_notice_hide_enabled": "true" if notice_hide_enabled else "false",
-        "codex_notice_migration_from": notice_migration_from,
-        "codex_notice_migration_to": notice_migration_to,
     }
     _save_integration_settings("llm", payload)
-    flash("Codex settings updated.", "success")
+    flash("Codex auth settings updated.", "success")
+    return redirect(url_for("agents.settings_provider"))
+
+
+@bp.post("/settings/provider/gemini")
+def update_gemini_settings():
+    api_key = request.form.get("gemini_api_key", "")
+    payload = {
+        "gemini_api_key": api_key,
+    }
+    _save_integration_settings("llm", payload)
+    flash("Gemini auth settings updated.", "success")
+    return redirect(url_for("agents.settings_provider"))
+
+
+@bp.post("/settings/provider/claude")
+def update_claude_settings():
+    api_key = request.form.get("claude_api_key", "")
+    payload = {
+        "claude_api_key": api_key,
+    }
+    _save_integration_settings("llm", payload)
+    flash("Claude auth settings updated.", "success")
     return redirect(url_for("agents.settings_provider"))
 
 
@@ -6112,7 +6730,11 @@ def settings_runtime():
         "AGENT_POLL_SECONDS": Config.AGENT_POLL_SECONDS,
         "CELERY_REVOKE_ON_STOP": Config.CELERY_REVOKE_ON_STOP,
     }
-    llm_config = _provider_summary()
+    llm_settings = _load_integration_settings("llm")
+    enabled_providers = resolve_enabled_llm_providers(llm_settings)
+    llm_config = _provider_summary(
+        settings=llm_settings, enabled_providers=enabled_providers
+    )
     return render_template(
         "settings_runtime.html",
         config=config,

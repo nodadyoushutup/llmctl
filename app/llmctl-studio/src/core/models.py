@@ -190,6 +190,23 @@ class IntegrationSetting(BaseModel):
     )
 
 
+class LLMModel(BaseModel):
+    __tablename__ = "llm_models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
 class Agent(BaseModel):
     __tablename__ = "agents"
 
@@ -199,12 +216,16 @@ class Agent(BaseModel):
     role_id: Mapped[int | None] = mapped_column(
         ForeignKey("roles.id"), nullable=True, index=True
     )
+    model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_models.id"), nullable=True, index=True
+    )
     prompt_json: Mapped[str] = mapped_column(Text, nullable=False)
     prompt_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     autonomous_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     role: Mapped["Role | None"] = relationship(
         "Role", back_populates="agents", lazy="joined"
     )
+    model: Mapped["LLMModel | None"] = relationship("LLMModel", lazy="joined")
     runs: Mapped[list["Run"]] = relationship(
         "Run",
         back_populates="agent",

@@ -73,7 +73,7 @@ class Config:
         os.getenv("WORKSPACE_CLEANUP_INTERVAL_SECONDS", "300")
     )
 
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "codex")
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "")
     CODEX_CMD = os.getenv("CODEX_CMD", "codex")
     CODEX_MODEL = os.getenv("CODEX_MODEL", "")
     CODEX_SKIP_GIT_REPO_CHECK = (

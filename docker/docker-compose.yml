@@ -11,7 +11,7 @@ services:
   github-mcp:
     build:
       context: ..
-      dockerfile: docker/github-mcp-proxy.Dockerfile
+      dockerfile: app/llmctl-mcp/docker/github-mcp-proxy.Dockerfile
     container_name: github-mcp
     environment:
       - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
@@ -52,12 +52,12 @@ services:
     ports:
       - "9000:9000"
     restart: unless-stopped
-  chroma-mcp:
-    image: llmctl-chroma-mcp:latest
+  chromadb-mcp:
+    image: llmctl-chromadb-mcp:latest
     build:
       context: ..
-      dockerfile: docker/chroma-mcp-proxy.Dockerfile
-    container_name: chroma-mcp
+      dockerfile: app/llmctl-mcp/docker/chromadb-mcp-proxy.Dockerfile
+    container_name: chromadb-mcp
     environment:
       - CHROMA_CLIENT_TYPE=${CHROMA_CLIENT_TYPE:-http}
       - CHROMA_HOST=${CHROMA_HOST:-chromadb}
@@ -75,7 +75,7 @@ services:
         "--port",
         "${CHROMA_MCP_PORT:-9010}",
         "--",
-        "chroma-mcp",
+        "chromadb-mcp",
         "--client-type",
         "${CHROMA_CLIENT_TYPE:-http}",
         "--host",
@@ -94,7 +94,7 @@ services:
     image: llmctl-mcp:latest
     build:
       context: ..
-      dockerfile: docker/llmctl-mcp.Dockerfile
+      dockerfile: app/llmctl-mcp/docker/llmctl-mcp.Dockerfile
     container_name: llmctl-mcp
     environment:
       - LLMCTL_MCP_HOST=0.0.0.0
@@ -135,7 +135,7 @@ services:
   llmctl-rag:
     build:
       context: ..
-      dockerfile: docker/llmctl-rag.Dockerfile
+      dockerfile: app/llmctl-rag/docker/llmctl-rag.Dockerfile
     container_name: llmctl-rag
     environment:
       - CHROMA_HOST=${CHROMA_HOST:-chromadb}
@@ -155,7 +155,7 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     volumes:
-      - ..:/app
+      - ../app/llmctl-rag:/app/app/llmctl-rag
       - llmctl_rag_data:/data/llmctl-rag
     depends_on:
       - chromadb

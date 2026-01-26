@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_model') }}">
+      <i class="fa-solid fa-plus"></i>
+      create model
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Models</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Create model profiles that bind provider selection and runtime policies.
+  </p>
+  {% if models %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Provider</th>
+            <th>Model</th>
+            <th>Default</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for model in models %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_model', model_id=model.id) }}"
+            >
+              <td>
+                <p>{{ model.name }}</p>
+                {% if model.description %}
+                  <p class="muted" style="margin-top: 6px; font-size: 12px;">
+                    {{ model.description | truncate(120, True, "...") }}
+                  </p>
+                {% endif %}
+              </td>
+              <td>
+                <p>{{ model.provider_label }}</p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">{{ model.model_name }}</p>
+              </td>
+              <td>
+                <form
+                  method="post"
+                  action="{{ url_for('agents.update_default_model') }}"
+                >
+                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <input type="hidden" name="model_id" value="{{ model.id }}" />
+                  <label class="switch" aria-label="Set default model">
+                    <input
+                      type="checkbox"
+                      name="is_default"
+                      value="true"
+                      {% if model.is_default %}checked{% endif %}
+                      onchange="this.form.submit()"
+                    />
+                    <span class="switch-slider"></span>
+                  </label>
+                </form>
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.delete_model', model_id=model.id) }}"
+                    onsubmit="return confirm('Delete this model?');"
+                  >
+                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <button type="submit" class="btn btn-danger" aria-label="Delete model">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No models created yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const modelRows = document.querySelectorAll(".table-row-link");
+  modelRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

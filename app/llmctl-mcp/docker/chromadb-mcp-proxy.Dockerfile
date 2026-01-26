@@ -7,9 +7,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && python -m venv /opt/mcp-proxy-venv \
   && /opt/mcp-proxy-venv/bin/python -m pip install --no-cache-dir mcp-proxy \
-  && mv /usr/local/bin/chroma-mcp /usr/local/bin/chroma-mcp-real \
-  && cat <<'PY' > /usr/local/bin/chroma-mcp \
-  && chmod +x /usr/local/bin/chroma-mcp
+  && if command -v chromadb-mcp >/dev/null 2>&1; then \
+       mv "$(command -v chromadb-mcp)" /usr/local/bin/chromadb-mcp-real; \
+     fi \
+  && cat <<'PY' > /usr/local/bin/chromadb-mcp \
+  && chmod +x /usr/local/bin/chromadb-mcp
 #!/usr/local/bin/python
 import builtins
 import sys

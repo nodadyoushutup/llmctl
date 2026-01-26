@@ -94,6 +94,7 @@ def _ensure_schema() -> None:
             "description": "TEXT",
             "autonomous_prompt": "TEXT",
             "role_id": "INTEGER",
+            "model_id": "INTEGER",
             "is_system": "BOOLEAN NOT NULL DEFAULT 0",
             "last_run_task_id": "TEXT",
             "run_max_loops": "INTEGER",

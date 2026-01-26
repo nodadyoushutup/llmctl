@@ -18,18 +18,56 @@ def normalize_provider(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
-def resolve_llm_provider(default: str | None = None) -> str:
-    settings = load_integration_settings("llm")
+def _as_bool(value: str | None) -> bool:
+    return (value or "").strip().lower() == "true"
+
+
+def resolve_enabled_llm_providers(
+    settings: dict[str, str] | None = None,
+) -> set[str]:
+    settings = settings or load_integration_settings("llm")
+    enabled_keys = [
+        key for key in settings if key.startswith("provider_enabled_")
+    ]
+    if not enabled_keys:
+        return set(LLM_PROVIDERS)
+    enabled: set[str] = set()
+    for provider in LLM_PROVIDERS:
+        key = f"provider_enabled_{provider}"
+        if _as_bool(settings.get(key)):
+            enabled.add(provider)
+    return enabled
+
+
+def resolve_default_model_id(settings: dict[str, str] | None = None) -> int | None:
+    settings = settings or load_integration_settings("llm")
+    raw = (settings.get("default_model_id") or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def resolve_llm_provider(
+    default: str | None = None,
+    *,
+    settings: dict[str, str] | None = None,
+    enabled_providers: set[str] | None = None,
+) -> str | None:
+    settings = settings or load_integration_settings("llm")
+    enabled = enabled_providers or resolve_enabled_llm_providers(settings)
     provider = normalize_provider(settings.get("provider"))
-    if provider in LLM_PROVIDERS:
+    if provider in enabled:
         return provider
     env_provider = normalize_provider(Config.LLM_PROVIDER)
-    if env_provider in LLM_PROVIDERS:
+    if env_provider in enabled:
         return env_provider
     fallback = normalize_provider(default)
-    if fallback in LLM_PROVIDERS:
+    if fallback in enabled:
         return fallback
-    return "codex"
+    return None
 
 
 def load_integration_settings(provider: str) -> dict[str, str]:

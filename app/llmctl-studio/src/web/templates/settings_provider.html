@@ -3,10 +3,10 @@
 {% block settings_content %}
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">Provider</h2>
+    <h2 class="section-title">Providers</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Select which CLI powers agent autorun prompts.
+    Enable providers and choose an optional default for agents without a model.
   </p>
   <form
     method="post"
@@ -14,50 +14,71 @@
     class="form-grid"
     style="margin-top: 20px;"
   >
-    <label class="label" style="grid-column: 1 / -1;">
-      Active provider
-      <select class="input" name="provider">
-        {% for option in provider_options %}
-          <option
-            value="{{ option.value }}"
-            {% if option.value == provider_summary.provider %}selected{% endif %}
-          >
-            {{ option.label }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
+    <div class="stack" style="grid-column: 1 / -1;">
+      {% for provider in provider_details %}
+        <div class="subcard" data-provider="{{ provider.id }}">
+          <div class="row-between">
+            <div>
+              <p class="eyebrow">{{ provider.label }}</p>
+              <p class="muted" style="margin-top: 6px; font-size: 12px;">
+                Command {{ provider.command }}. Default model {{ provider.model }}.
+              </p>
+            </div>
+            <div class="row" style="gap: 20px;">
+              <div class="row" style="gap: 8px;">
+                <span class="muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em;">
+                  enabled
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    name="provider_enabled_{{ provider.id }}"
+                    value="true"
+                    class="provider-enabled-toggle"
+                    data-provider="{{ provider.id }}"
+                    {% if provider.enabled %}checked{% endif %}
+                  />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+              <div class="row" style="gap: 8px;">
+                <span class="muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em;">
+                  default
+                </span>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    name="default_provider"
+                    value="{{ provider.id }}"
+                    class="default-provider-toggle"
+                    data-provider="{{ provider.id }}"
+                    {% if provider.is_default %}checked{% endif %}
+                  />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
     <div class="form-actions">
       <button class="btn btn-primary" type="submit">
         <i class="fa-solid fa-floppy-disk"></i>
-        save provider
+        save providers
       </button>
     </div>
   </form>
-  <div class="stack" style="margin-top: 24px;">
-    {% for provider in provider_details %}
-      <div class="subcard">
-        <div class="row-between">
-          <div>
-            <p class="eyebrow">{{ provider.label }}</p>
-            <p class="muted" style="margin-top: 6px; font-size: 12px;">
-              Command {{ provider.command }} with model {{ provider.model }}.
-            </p>
-          </div>
-          <span class="status {% if provider.active %}status-success{% else %}status-idle{% endif %}">
-            {% if provider.active %}active{% else %}available{% endif %}
-          </span>
-        </div>
-      </div>
-    {% endfor %}
-  </div>
+  <p class="muted" style="margin-top: 16px; font-size: 12px;">
+    Default model selection overrides provider defaults when assigned to an agent.
+  </p>
 </section>
-<section class="card" style="margin-top: 24px;" data-codex-settings>
+<section class="card" style="margin-top: 24px;">
   <div class="card-header">
-    <h2 class="section-title">Codex Settings</h2>
+    <h2 class="section-title">Codex Auth</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Auth and runtime configuration for Codex CLI autoruns.
+    Configure API credentials for Codex.
   </p>
   <form
     method="post"
@@ -75,142 +96,114 @@
         placeholder="sk-..."
       />
     </label>
-    <label class="label" style="grid-column: 1 / -1;">
-      Model
-      <input
-        class="input"
-        type="text"
-        name="codex_model"
-        value="{{ codex_settings.model }}"
-        placeholder="gpt-5.2-codex"
-      />
-    </label>
-    <label class="label">
-      Approval policy
-      <select class="input" name="codex_approval_policy">
-        {% set approval_selected = codex_settings.approval_policy %}
-        {% for option in ["never", "on-failure", "on-request", "untrusted"] %}
-          <option value="{{ option }}" {% if option == approval_selected %}selected{% endif %}>
-            {{ option }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="label">
-      Sandbox mode
-      <select class="input" name="codex_sandbox_mode">
-        {% set sandbox_selected = codex_settings.sandbox_mode %}
-        {% for option in ["danger-full-access", "workspace-write", "read-only"] %}
-          <option value="{{ option }}" {% if option == sandbox_selected %}selected{% endif %}>
-            {{ option }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="label">
-      Network access
-      <select class="input" name="codex_network_access">
-        {% set network_selected = codex_settings.network_access %}
-        {% for option in ["enabled", "disabled"] %}
-          <option value="{{ option }}" {% if option == network_selected %}selected{% endif %}>
-            {{ option }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="label">
-      Reasoning effort
-      <select class="input" name="codex_model_reasoning_effort">
-        {% set effort_selected = codex_settings.model_reasoning_effort %}
-        {% for option in ["high", "medium", "low", "none"] %}
-          <option value="{{ option }}" {% if option == effort_selected %}selected{% endif %}>
-            {{ option }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="label">
-      Shell env inherit
-      <select class="input" name="codex_shell_env_inherit">
-        {% set inherit_selected = codex_settings.shell_env_inherit %}
-        {% for option in ["all", "safe", "none"] %}
-          <option value="{{ option }}" {% if option == inherit_selected %}selected{% endif %}>
-            {{ option }}
-          </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="label" style="grid-column: 1 / -1;">
-      <input
-        type="checkbox"
-        name="codex_shell_env_ignore_default_excludes"
-        value="true"
-        {% if codex_settings.shell_env_ignore_default_excludes %}checked{% endif %}
-      />
-      ignore default excludes
-    </label>
-    <div style="grid-column: 1 / -1; margin-top: 8px;">
-      <p class="eyebrow">Notice overrides</p>
-      <p class="muted" style="margin-top: 6px; font-size: 12px;">
-        Optional suppression and migration prompts for specific models.
-      </p>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save codex auth
+      </button>
     </div>
+  </form>
+</section>
+<section class="card" style="margin-top: 24px;">
+  <div class="card-header">
+    <h2 class="section-title">Gemini Auth</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Configure API credentials for Gemini.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_gemini_settings') }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
     <label class="label" style="grid-column: 1 / -1;">
-      Hide migration prompt key
+      Gemini API key
       <input
         class="input"
-        type="text"
-        name="codex_notice_hide_key"
-        value="{{ codex_settings.notice_hide_key }}"
-        placeholder="hide_gpt-5.1-codex-max_migration_prompt"
-      />
-    </label>
-    <label class="label" style="grid-column: 1 / -1;">
-      <input
-        type="checkbox"
-        name="codex_notice_hide_enabled"
-        value="true"
-        {% if codex_settings.notice_hide_enabled %}checked{% endif %}
-      />
-      enable hide migration prompt
-    </label>
-    <label class="label">
-      Migration from
-      <input
-        class="input"
-        type="text"
-        name="codex_notice_migration_from"
-        value="{{ codex_settings.notice_migration_from }}"
-        placeholder="gpt-5.1-codex-max"
-      />
-    </label>
-    <label class="label">
-      Migration to
-      <input
-        class="input"
-        type="text"
-        name="codex_notice_migration_to"
-        value="{{ codex_settings.notice_migration_to }}"
-        placeholder="gpt-5.2-codex"
+        type="password"
+        name="gemini_api_key"
+        value="{{ gemini_settings.api_key }}"
+        placeholder="AIza..."
       />
     </label>
     <div class="form-actions">
       <button class="btn btn-primary" type="submit">
         <i class="fa-solid fa-floppy-disk"></i>
-        save codex settings
+        save gemini auth
       </button>
     </div>
   </form>
 </section>
+<section class="card" style="margin-top: 24px;">
+  <div class="card-header">
+    <h2 class="section-title">Claude Auth</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Configure API credentials for Claude (Anthropic).
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_claude_settings') }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
+    <label class="label" style="grid-column: 1 / -1;">
+      Anthropic API key
+      <input
+        class="input"
+        type="password"
+        name="claude_api_key"
+        value="{{ claude_settings.api_key }}"
+        placeholder="sk-ant-..."
+      />
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save claude auth
+      </button>
+    </div>
+  </form>
+</section>
+
 <script>
-  const providerSelect = document.querySelector('select[name="provider"]');
-  const codexSection = document.querySelector("[data-codex-settings]");
-  if (providerSelect && codexSection) {
-    const toggleCodexSettings = () => {
-      codexSection.style.display = providerSelect.value === "codex" ? "block" : "none";
-    };
-    providerSelect.addEventListener("change", toggleCodexSettings);
-    toggleCodexSettings();
-  }
+  const defaultProviderToggles = document.querySelectorAll(".default-provider-toggle");
+  const enabledProviderToggles = document.querySelectorAll(".provider-enabled-toggle");
+
+  defaultProviderToggles.forEach((toggle) => {
+    toggle.addEventListener("change", () => {
+      if (!toggle.checked) {
+        return;
+      }
+      defaultProviderToggles.forEach((other) => {
+        if (other !== toggle) {
+          other.checked = false;
+        }
+      });
+      const provider = toggle.dataset.provider;
+      const enabledToggle = document.querySelector(
+        `.provider-enabled-toggle[data-provider="${provider}"]`
+      );
+      if (enabledToggle) {
+        enabledToggle.checked = true;
+      }
+    });
+  });
+
+  enabledProviderToggles.forEach((toggle) => {
+    toggle.addEventListener("change", () => {
+      if (toggle.checked) {
+        return;
+      }
+      const provider = toggle.dataset.provider;
+      const defaultToggle = document.querySelector(
+        `.default-provider-toggle[data-provider="${provider}"]`
+      );
+      if (defaultToggle) {
+        defaultToggle.checked = false;
+      }
+    });
+  });
 </script>
 {% endblock %}

@@ -13,7 +13,7 @@ RUN apt-get update \
         python3 \
         python3-pip \
         python3-venv \
-    && npm install -g @openai/codex \
+    && npm install -g @openai/codex @google/gemini-cli \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

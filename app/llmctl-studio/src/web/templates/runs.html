@@ -1,5 +1,69 @@
 {% extends "base.html" %}
 
+{% macro pagination_controls() %}
+  <nav class="pagination" aria-label="Autoruns pages">
+    {% if page > 1 %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('agents.runs', page=page - 1, per_page=per_page) }}"
+      >
+        Prev
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+    {% endif %}
+    <div class="pagination-pages">
+      {% for item in pagination_items %}
+        {% if item.type == "gap" %}
+          <span class="pagination-ellipsis">&hellip;</span>
+        {% else %}
+          {% if item.page == page %}
+            <span class="pagination-link is-active" aria-current="page">
+              {{ item.page }}
+            </span>
+          {% else %}
+            <a
+              class="pagination-link"
+              href="{{ url_for('agents.runs', page=item.page, per_page=per_page) }}"
+            >
+              {{ item.page }}
+            </a>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if page < total_pages %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('agents.runs', page=page + 1, per_page=per_page) }}"
+      >
+        Next
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+{% endmacro %}
+
+{% block action_header %}
+  <div class="pagination-bar pagination-bar-header">
+    {{ pagination_controls() }}
+    <div class="pagination-bar-actions">
+      <form class="pagination-size" method="get" action="{{ url_for('agents.runs') }}">
+        <input type="hidden" name="page" value="1" />
+        <label for="per-page">Rows per page</label>
+        <select name="per_page" id="per-page" onchange="this.form.submit()">
+          {% for option in per_page_options %}
+            <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>
+              {{ option }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+
 {% block content %}
 <section class="card">
   <p class="muted" style="margin-top: 12px;">
@@ -58,7 +122,7 @@
                     method="post"
                     action="{{ url_for('agents.stop_agent', agent_id=run.agent_id) }}"
                   >
-                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <input type="hidden" name="next" value="{{ current_url }}" />
                     <button type="submit" class="btn btn-secondary" aria-label="Disable autorun">
                       <i class="fa-solid fa-stop"></i>
                     </button>
@@ -73,7 +137,7 @@
                   action="{{ url_for('agents.delete_run', run_id=run.id) }}"
                   onsubmit="return confirm('Delete this autorun?');"
                 >
-                  <input type="hidden" name="next" value="{{ request.path }}" />
+                  <input type="hidden" name="next" value="{{ current_url }}" />
                   <button type="submit" class="btn btn-danger" aria-label="Delete autorun">
                     <i class="fa-solid fa-trash"></i>
                   </button>

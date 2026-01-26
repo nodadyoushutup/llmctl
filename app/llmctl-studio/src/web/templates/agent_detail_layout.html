@@ -101,6 +101,18 @@
       </dd>
     </div>
     <div class="meta-span">
+      <dt>Model</dt>
+      <dd>
+        {% if agent.model_id and agent.model %}
+          <a href="{{ url_for('agents.view_model', model_id=agent.model_id) }}">
+            {{ agent.model.name }}
+          </a>
+        {% else %}
+          -
+        {% endif %}
+      </dd>
+    </div>
+    <div class="meta-span">
       <dt>Scripts</dt>
       <dd>{{ agent.scripts|length }}</dd>
     </div>

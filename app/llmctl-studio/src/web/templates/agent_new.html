@@ -47,6 +47,24 @@
         </span>
       {% endif %}
     </label>
+    <label class="label">
+      model (optional)
+      <select name="model_id" class="input">
+        <option value="">No model (use default model/provider)</option>
+        {% for model in models %}
+          <option value="{{ model.id }}">{{ model.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not models %}
+        <span class="muted" style="font-size: 12px; margin-top: 6px;">
+          Create a model in
+          <a href="{{ url_for('agents.list_models') }}" style="text-decoration: underline;">
+            models
+          </a>
+          to attach provider configuration.
+        </span>
+      {% endif %}
+    </label>
     <div class="label" style="grid-column: 1 / -1;">
       scripts (optional)
       {% include "partials/script_picker.html" %}
