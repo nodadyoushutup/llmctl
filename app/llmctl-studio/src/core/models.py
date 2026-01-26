@@ -423,6 +423,11 @@ class Pipeline(BaseModel):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+    steps: Mapped[list["PipelineStep"]] = relationship(
+        "PipelineStep",
+        back_populates="pipeline",
+        order_by="PipelineStep.step_order.asc()",
+    )
 
 
 class PipelineStep(BaseModel):
@@ -443,6 +448,10 @@ class PipelineStep(BaseModel):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+    pipeline: Mapped["Pipeline"] = relationship(
+        "Pipeline",
+        back_populates="steps",
     )
     attachments: Mapped[list["Attachment"]] = relationship(
         "Attachment",

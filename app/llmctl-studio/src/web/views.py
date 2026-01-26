@@ -150,6 +150,27 @@ def _parse_agent_payload(raw_json: str) -> tuple[str, str | None, str | None]:
     return formatted, None, None
 
 
+def _parse_task_prompt(raw_prompt: str | None) -> tuple[str | None, str | None]:
+    if not raw_prompt:
+        return None, None
+    stripped = raw_prompt.strip()
+    if not stripped:
+        return raw_prompt, None
+    try:
+        payload = json.loads(raw_prompt)
+    except (json.JSONDecodeError, TypeError):
+        return raw_prompt, None
+    formatted = json.dumps(payload, indent=2, sort_keys=True)
+    prompt_text = None
+    if isinstance(payload, dict):
+        prompt_value = payload.get("prompt")
+        if isinstance(prompt_value, str):
+            prompt_text = prompt_value
+    elif isinstance(payload, str):
+        prompt_text = payload
+    return prompt_text, formatted
+
+
 def _parse_role_details(raw_json: str) -> str:
     if not raw_json:
         return "{}"
@@ -4037,6 +4058,7 @@ def view_task(task_id: int):
             else None
         )
         stage_entries = _build_stage_entries(task)
+        prompt_text, prompt_json = _parse_task_prompt(task.prompt)
     return render_template(
         "task_detail.html",
         task=task,
@@ -4045,6 +4067,8 @@ def view_task(task_id: int):
         pipeline=pipeline,
         template=template,
         stage_entries=stage_entries,
+        prompt_text=prompt_text,
+        prompt_json=prompt_json,
         summary=summary,
         page_title=f"Task {task_id}",
         active_page="tasks",

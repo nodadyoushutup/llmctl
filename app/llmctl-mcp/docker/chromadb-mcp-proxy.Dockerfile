@@ -2,12 +2,7 @@ FROM mcp/chroma:latest
 
 ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends catatonit \
-  && rm -rf /var/lib/apt/lists/* \
-  && python -m venv /opt/mcp-proxy-venv \
-  && /opt/mcp-proxy-venv/bin/python -m pip install --no-cache-dir mcp-proxy \
-  && if command -v chromadb-mcp >/dev/null 2>&1; then \
+RUN if command -v chromadb-mcp >/dev/null 2>&1; then \
        mv "$(command -v chromadb-mcp)" /usr/local/bin/chromadb-mcp-real; \
      fi \
   && cat <<'PY' > /usr/local/bin/chromadb-mcp \
@@ -28,5 +23,3 @@ import chroma_mcp.server as server
 
 server.main()
 PY
-
-ENTRYPOINT ["catatonit", "--", "/opt/mcp-proxy-venv/bin/mcp-proxy"]

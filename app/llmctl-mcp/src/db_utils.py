@@ -68,6 +68,13 @@ def _serialize_value(value: Any) -> Any:
     return value
 
 
+def _serialize_model_columns(obj) -> dict[str, Any]:
+    data = {}
+    for column in sa_inspect(obj.__class__).columns:
+        data[column.key] = _serialize_value(getattr(obj, column.key))
+    return data
+
+
 def _serialize_relationships(obj, include: bool) -> dict[str, Any]:
     if not include:
         return {}
@@ -78,16 +85,16 @@ def _serialize_relationships(obj, include: bool) -> dict[str, Any]:
         if rel.uselist:
             items = getattr(obj, key) or []
             data[f"{key}_ids"] = [getattr(item, "id", None) for item in items]
+            data[key] = [_serialize_model_columns(item) for item in items]
         else:
             item = getattr(obj, key)
             data[f"{key}_id"] = getattr(item, "id", None) if item else None
+            data[key] = _serialize_model_columns(item) if item else None
     return data
 
 
 def _serialize_model(obj, include_relationships: bool = False) -> dict[str, Any]:
-    data = {}
-    for column in sa_inspect(obj.__class__).columns:
-        data[column.key] = _serialize_value(getattr(obj, column.key))
+    data = _serialize_model_columns(obj)
     data.update(_serialize_relationships(obj, include_relationships))
     return data
 

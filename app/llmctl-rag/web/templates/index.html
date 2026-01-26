@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>llmctl-rag chat</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="page page-fixed">
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="brand-icon">
+              <i class="fa-solid fa-robot"></i>
+            </div>
+            <div>
+              <div class="eyebrow">LLMCTL</div>
+              <div class="brand-title">RAG</div>
+              <div class="brand-meta">Context workspace</div>
+            </div>
+          </div>
+          <nav class="nav">
+            <div class="nav-section">
+              <div class="nav-section-title">Core</div>
+              <a
+                class="nav-item {% if active_nav == 'chat' %}is-active{% endif %}"
+                href="{{ url_for('index', view='chat') }}"
+              >
+                <span class="nav-icon"><i class="fa-solid fa-comment-dots"></i></span>
+                Chat
+              </a>
+              <a
+                class="nav-item {% if active_nav == 'sources' %}is-active{% endif %}"
+                href="{{ url_for('sources_index') }}"
+              >
+                <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
+                Sources
+              </a>
+              <a
+                class="nav-item {% if active_nav == 'tasks' %}is-active{% endif %}"
+                href="{{ url_for('tasks_index') }}"
+              >
+                <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
+                Tasks
+              </a>
+              <a
+                class="nav-item {% if active_nav == 'settings' %}is-active{% endif %}"
+                href="{{ url_for('index', view='settings') }}"
+              >
+                <span class="nav-icon"><i class="fa-solid fa-sliders"></i></span>
+                Settings
+              </a>
+            </div>
+          </nav>
+        </aside>
+
+        <main class="main">
+          <header class="topbar">
+            <div class="topbar-row">
+              <div>
+                {% if active_view == 'chat' %}
+                  <div class="title">Chat</div>
+                  <p class="subtitle">Ask about your repo, files, or indexed docs.</p>
+                {% else %}
+                  <div class="title">Settings</div>
+                  <p class="subtitle">Integrations, runtime, and model controls.</p>
+                {% endif %}
+              </div>
+            </div>
+          </header>
+
+          {% if active_view == 'chat' %}
+          <header class="action-header">
+            <div class="action-header-row">
+              <span class="muted">Conversation</span>
+              <div class="action-header-actions">
+                <div
+                  id="context-meter"
+                  class="context-meter"
+                  data-budget-tokens="{{ chat_context_budget_tokens }}"
+                  data-max-history="{{ chat_max_history }}"
+                  title="Approximate conversation context size"
+                >
+                  <span class="context-meter-label">Context</span>
+                  <span class="context-meter-value">0%</span>
+                  <span class="context-meter-bar">
+                    <span class="context-meter-fill"></span>
+                  </span>
+                </div>
+                <button type="button" id="clear-btn" class="btn btn-secondary">Clear</button>
+              </div>
+            </div>
+          </header>
+          {% else %}
+          <header class="action-header is-hidden"></header>
+          {% endif %}
+
+          <div class="content">
+            {% if not has_api_key %}
+            <div class="banner">OPENAI_API_KEY is not set. Replies will fail until it is provided.</div>
+            {% endif %}
+
+            <section
+              id="chat-view"
+              class="view {% if active_view == 'chat' %}is-active{% endif %}"
+            >
+              <div class="chat-shell">
+                <div id="chat" class="chat"></div>
+              </div>
+
+              <section class="composer">
+                <form id="composer-form" autocomplete="off">
+                  <label class="sr-only" for="message-input">Message</label>
+                  <div class="composer-row">
+                    <textarea
+                      id="message-input"
+                      name="message"
+                      placeholder="Ask about your repo, files, or indexed docs..."
+                      rows="1"
+                    ></textarea>
+                    <button type="submit" id="send-btn">Send</button>
+                  </div>
+                  <div class="composer-footer">
+                    <div id="status" class="status status-panel">Ready.</div>
+                  </div>
+                </form>
+              </section>
+            </section>
+
+            <section
+              id="settings-view"
+              class="view view-scroll {% if active_view == 'settings' %}is-active{% endif %}"
+            >
+              {% if settings_notice %}
+              <div class="notice {% if settings_notice.type %}{{ settings_notice.type }}{% endif %}">
+                {{ settings_notice.message }}
+              </div>
+              {% endif %}
+
+              <div class="settings-grid">
+                <div class="card">
+                  <div class="card-header">
+                    <div>
+                      <h2 class="section-title">GitHub integration</h2>
+                      <p class="muted">Use a PAT for API access, or an SSH key for cloning.</p>
+                    </div>
+                    <span class="status-pill {% if github_connected %}status-success{% else %}status-warning{% endif %}">
+                      {% if github_connected %}connected{% else %}needs token{% endif %}
+                    </span>
+                  </div>
+                  <form
+                    method="post"
+                    action="{{ url_for('update_github_settings') }}"
+                    class="form-grid"
+                    enctype="multipart/form-data"
+                  >
+                    <label class="label">
+                      GitHub PAT
+                      <input
+                        class="input"
+                        type="text"
+                        name="github_pat"
+                        value="{{ github_settings.get('pat', '') }}"
+                        placeholder="enter PAT"
+                      />
+                    </label>
+                    <label class="label">
+                      SSH private key (.pem)
+                      <input class="input" type="file" name="github_ssh_key" />
+                      <span class="help">
+                        {% if github_settings.get('ssh_key_path') %}
+                          SSH key uploaded.
+                        {% else %}
+                          No SSH key uploaded. HTTPS cloning will be used.
+                        {% endif %}
+                      </span>
+                    </label>
+                    <label class="checkbox">
+                      <input type="checkbox" name="github_ssh_key_clear" value="true" />
+                      remove SSH key
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Save GitHub</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div class="card">
+                  <div class="card-header">
+                    <div>
+                      <h2 class="section-title">Runtime + models</h2>
+                      <p class="muted">Configure Chroma connection and OpenAI model behavior.</p>
+                    </div>
+                  </div>
+                  <form method="post" action="{{ url_for('update_rag_settings') }}" class="form-grid">
+                    <label class="label">
+                      Chroma host
+                      <input
+                        class="input"
+                        type="text"
+                        name="chroma_host"
+                        value="{{ chroma_host }}"
+                        placeholder="chromadb"
+                      />
+                    </label>
+                    <label class="label">
+                      Chroma port
+                      <input
+                        class="input"
+                        type="number"
+                        name="chroma_port"
+                        min="1"
+                        step="1"
+                        value="{{ chroma_port }}"
+                      />
+                    </label>
+                    <label class="label">
+                      OpenAI API key
+                      <input
+                        class="input"
+                        type="password"
+                        name="openai_api_key"
+                        value="{{ openai_api_key }}"
+                        placeholder="sk-..."
+                      />
+                    </label>
+                    <label class="label">
+                      Embedding model
+                      <input
+                        class="input"
+                        type="text"
+                        name="openai_embed_model"
+                        value="{{ openai_embed_model }}"
+                        placeholder="text-embedding-3-small"
+                      />
+                    </label>
+                    <label class="label">
+                      Chat model
+                      <input
+                        class="input"
+                        type="text"
+                        name="openai_chat_model"
+                        value="{{ openai_chat_model }}"
+                        placeholder="gpt-4o-mini"
+                      />
+                    </label>
+                    <label class="label">
+                      Chat temperature
+                      <input
+                        class="input"
+                        type="number"
+                        name="openai_chat_temperature"
+                        step="0.1"
+                        value="{{ openai_chat_temperature }}"
+                      />
+                    </label>
+                    <label class="label">
+                      Chat top K
+                      <input
+                        class="input"
+                        type="number"
+                        name="chat_top_k"
+                        min="1"
+                        step="1"
+                        value="{{ chat_top_k }}"
+                      />
+                    </label>
+                    <label class="label">
+                      Chat max history
+                      <input
+                        class="input"
+                        type="number"
+                        name="chat_max_history"
+                        min="1"
+                        step="1"
+                        value="{{ chat_max_history }}"
+                      />
+                    </label>
+                    <label class="label">
+                      Chat max context chars
+                      <input
+                        class="input"
+                        type="number"
+                        name="chat_max_context_chars"
+                        min="1"
+                        step="1"
+                        value="{{ chat_max_context_chars }}"
+                      />
+                    </label>
+                    <label class="label">
+                      Chat snippet chars
+                      <input
+                        class="input"
+                        type="number"
+                        name="chat_snippet_chars"
+                        min="1"
+                        step="1"
+                        value="{{ chat_snippet_chars }}"
+                      />
+                    </label>
+                    <label class="label">
+                      Chat context budget tokens
+                      <input
+                        class="input"
+                        type="number"
+                        name="chat_context_budget_tokens"
+                        min="1"
+                        step="1"
+                        value="{{ chat_context_budget_tokens }}"
+                      />
+                    </label>
+                    <label class="label">
+                      Web port
+                      <input
+                        class="input"
+                        type="number"
+                        name="web_port"
+                        min="1"
+                        step="1"
+                        value="{{ web_port }}"
+                      />
+                    </label>
+                    <div class="form-actions">
+                      <button type="button" class="ghost" id="chroma-test-btn">Test Chroma</button>
+                      <button type="submit">Save runtime</button>
+                    </div>
+                    <div id="chroma-test-status" class="notice inline" hidden></div>
+                  </form>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

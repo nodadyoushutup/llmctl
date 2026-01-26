@@ -20,19 +20,7 @@ services:
       - 192.168.1.1
       - 1.1.1.1
       - 8.8.8.8
-    command:
-      [
-        "--pass-environment",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "9001",
-        "--",
-        "github-mcp-server",
-        "stdio"
-      ]
-    ports:
-      - "9001:9001"
+    entrypoint: ["/bin/busybox", "sleep", "infinity"]
     restart: unless-stopped
   jira-mcp:
     image: ghcr.io/sooperset/mcp-atlassian:latest
@@ -48,9 +36,7 @@ services:
       - 192.168.1.1
       - 1.1.1.1
       - 8.8.8.8
-    command: ["--transport", "streamable-http", "--port", "9000"]
-    ports:
-      - "9000:9000"
+    entrypoint: ["sleep", "infinity"]
     restart: unless-stopped
   chromadb-mcp:
     image: llmctl-chromadb-mcp:latest
@@ -67,26 +53,7 @@ services:
       - 192.168.1.1
       - 1.1.1.1
       - 8.8.8.8
-    command:
-      [
-        "--pass-environment",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "${CHROMA_MCP_PORT:-9010}",
-        "--",
-        "chromadb-mcp",
-        "--client-type",
-        "${CHROMA_CLIENT_TYPE:-http}",
-        "--host",
-        "${CHROMA_HOST:-chromadb}",
-        "--port",
-        "${CHROMA_PORT:-8000}",
-        "--ssl",
-        "${CHROMA_SSL:-false}"
-      ]
-    ports:
-      - "${CHROMA_MCP_PORT:-9010}:${CHROMA_MCP_PORT:-9010}"
+    entrypoint: ["sleep", "infinity"]
     depends_on:
       - chromadb
     restart: unless-stopped
@@ -100,7 +67,7 @@ services:
       - LLMCTL_MCP_HOST=0.0.0.0
       - LLMCTL_MCP_PORT=${LLMCTL_MCP_PORT:-9020}
       - LLMCTL_MCP_PATH=${LLMCTL_MCP_PATH:-/mcp}
-      - LLMCTL_MCP_TRANSPORT=${LLMCTL_MCP_TRANSPORT:-http}
+      - LLMCTL_MCP_TRANSPORT=${LLMCTL_MCP_TRANSPORT:-stdio}
       - LLMCTL_STUDIO_DATA_DIR=/app/data
       - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-192.168.1.36}
       - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
@@ -110,8 +77,7 @@ services:
       - 192.168.1.1
       - 1.1.1.1
       - 8.8.8.8
-    ports:
-      - "${LLMCTL_MCP_PORT:-9020}:${LLMCTL_MCP_PORT:-9020}"
+    entrypoint: ["sleep", "infinity"]
     volumes:
       - ../data:/app/data
       - ../app/llmctl-mcp:/app/app/llmctl-mcp
@@ -138,32 +104,28 @@ services:
       dockerfile: app/llmctl-rag/docker/llmctl-rag.Dockerfile
     container_name: llmctl-rag
     environment:
-      - CHROMA_HOST=${CHROMA_HOST:-chromadb}
-      - CHROMA_PORT=${CHROMA_PORT:-8000}
-      - CHROMA_COLLECTION=${CHROMA_COLLECTION:-example}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_EMBED_MODEL=${OPENAI_EMBED_MODEL:-text-embedding-3-small}
-      - RAG_MODE=${RAG_MODE:-git}
-      - RAG_GIT_URL=${RAG_GIT_URL:-}
-      - RAG_GIT_BRANCH=${RAG_GIT_BRANCH:-main}
-      - RAG_GIT_POLL_S=${RAG_GIT_POLL_S:-30}
-      - RAG_GIT_DIR=${RAG_GIT_DIR:-/data/llmctl-rag/repo}
-      - RAG_ROOT=/app
-      - RAG_WATCH_DEBOUNCE_S=${RAG_WATCH_DEBOUNCE_S:-1.0}
+      - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-192.168.1.36}
+      - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
+      - CELERY_REDIS_BROKER_DB=${CELERY_REDIS_BROKER_DB:-0}
+      - CELERY_REDIS_BACKEND_DB=${CELERY_REDIS_BACKEND_DB:-1}
+      - LLMCTL_RAG_CELERY_BROKER_URL=redis://${CELERY_REDIS_HOST:-192.168.1.36}:${CELERY_REDIS_PORT:-6380}/${CELERY_REDIS_BROKER_DB:-0}
+      - LLMCTL_RAG_CELERY_RESULT_BACKEND=redis://${CELERY_REDIS_HOST:-192.168.1.36}:${CELERY_REDIS_PORT:-6380}/${CELERY_REDIS_BACKEND_DB:-1}
     dns:
       - 192.168.1.1
       - 1.1.1.1
       - 8.8.8.8
+    ports:
+      - "5050:5050"
     volumes:
       - ../app/llmctl-rag:/app/app/llmctl-rag
       - llmctl_rag_data:/data/llmctl-rag
+      - ../example:/example:ro
     depends_on:
       - chromadb
     restart: unless-stopped
   llmctl-studio:
     image: llmctl-studio:latest
     container_name: llmctl-studio
-    user: "1000:1000"
     environment:
       - CELERY_REDIS_HOST=192.168.1.36
       - CELERY_REDIS_PORT=6380
@@ -179,7 +141,8 @@ services:
       - ../app/llmctl-studio/run.py:/app/app/llmctl-studio/run.py
       - ../app/llmctl-studio/src:/app/app/llmctl-studio/src
       - ../data:/app/data
-      - ${HOME}/.gitconfig:/home/app/.gitconfig:ro
+      - ${HOME}/.gitconfig:/home/llmctl-studio/.gitconfig:ro
+      - /var/run/docker.sock:/var/run/docker.sock
   dozzle:
     image: amir20/dozzle:latest
     container_name: dozzle

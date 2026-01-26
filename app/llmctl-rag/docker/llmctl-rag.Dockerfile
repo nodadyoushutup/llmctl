@@ -10,6 +10,8 @@ RUN apt-get update \
     git \
     python3 \
     python3-pip \
+    tesseract-ocr \
+    tesseract-ocr-eng \
   && rm -rf /var/lib/apt/lists/*
 
 COPY app/llmctl-rag/requirements.txt /app/app/llmctl-rag/requirements.txt
@@ -17,4 +19,4 @@ RUN pip3 install --no-cache-dir -r /app/app/llmctl-rag/requirements.txt
 
 COPY app/llmctl-rag /app/app/llmctl-rag
 
-CMD ["python3", "app/llmctl-rag/watch.py"]
+CMD ["python3", "app/llmctl-rag/run.py"]

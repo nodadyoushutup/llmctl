@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sources | llmctl-rag</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="brand-icon">
+              <i class="fa-solid fa-robot"></i>
+            </div>
+            <div>
+              <div class="eyebrow">LLMCTL</div>
+              <div class="brand-title">RAG</div>
+              <div class="brand-meta">Context workspace</div>
+            </div>
+          </div>
+          <nav class="nav">
+            <div class="nav-section">
+              <div class="nav-section-title">Core</div>
+              <a class="nav-item" href="{{ url_for('index', view='chat') }}">
+                <span class="nav-icon"><i class="fa-solid fa-comment-dots"></i></span>
+                Chat
+              </a>
+              <a class="nav-item is-active" href="{{ url_for('sources_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
+                Sources
+              </a>
+              <a class="nav-item" href="{{ url_for('tasks_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
+                Tasks
+              </a>
+              <a class="nav-item" href="{{ url_for('index', view='settings') }}">
+                <span class="nav-icon"><i class="fa-solid fa-sliders"></i></span>
+                Settings
+              </a>
+            </div>
+          </nav>
+        </aside>
+
+        <main class="main">
+          <header class="topbar">
+            <div class="topbar-row">
+              <div>
+                <div class="title">Sources</div>
+                <p class="subtitle">Source registry and indexing status.</p>
+              </div>
+            </div>
+          </header>
+
+          <header class="action-header">
+            <div class="action-header-row">
+              <span class="muted">Manage your collections</span>
+              <div class="action-header-actions">
+                <a class="btn btn-primary" href="{{ url_for('sources_new') }}">New source</a>
+              </div>
+            </div>
+          </header>
+
+          <div class="content">
+            {% if sources_notice %}
+            <div class="notice {% if sources_notice.type %}{{ sources_notice.type }}{% endif %}">
+              {{ sources_notice.message }}
+            </div>
+            {% endif %}
+
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2 class="section-title">All sources</h2>
+                  <p class="muted">Click a source to view details and index history.</p>
+                </div>
+              </div>
+              {% if sources %}
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Location</th>
+                      <th>Collection</th>
+                      <th>Status</th>
+                      <th class="table-actions-cell">Index</th>
+                      <th class="table-actions-cell">Delete</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for source in sources %}
+                    <tr
+                      class="table-row-link"
+                      data-href="{{ url_for('sources_detail', source_id=source.id) }}"
+                    >
+                      <td>
+                        <a href="{{ url_for('sources_detail', source_id=source.id) }}">{{ source.name }}</a>
+                      </td>
+                      <td><span class="pill">{{ source.kind }}</span></td>
+                      <td class="truncate">
+                        {% if source.kind == 'local' %}
+                          {{ source.local_path }}
+                        {% else %}
+                          {{ source.git_repo }}
+                        {% endif %}
+                      </td>
+                      <td class="mono">{{ source.collection }}</td>
+                      <td>
+                        <span class="source-status" data-source-id="{{ source.id }}">
+                          {% if source.last_error %}
+                            Error
+                          {% elif source.last_indexed_at %}
+                            Indexed {{ source.last_indexed_at }}
+                          {% else %}
+                            Not indexed
+                          {% endif %}
+                        </span>
+                      </td>
+                      <td class="table-actions-cell">
+                        <button
+                          type="button"
+                          class="btn btn-icon btn-primary source-index-btn"
+                          title="Index source"
+                          aria-label="Index source"
+                          data-source-id="{{ source.id }}"
+                        >
+                          <i class="fa-solid fa-rotate-right"></i>
+                        </button>
+                      </td>
+                      <td class="table-actions-cell">
+                        <form
+                          method="post"
+                          action="{{ url_for('remove_source', source_id=source.id) }}"
+                          data-confirm="Delete this source?"
+                        >
+                          <button type="submit" class="btn btn-icon btn-danger" aria-label="Delete source">
+                            <i class="fa-solid fa-trash"></i>
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <p class="muted" style="margin-top: 16px;">No sources created yet.</p>
+              {% endif %}
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

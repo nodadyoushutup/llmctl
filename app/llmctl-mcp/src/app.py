@@ -21,5 +21,8 @@ def run() -> None:
     host = os.getenv("LLMCTL_MCP_HOST", "0.0.0.0")
     port = int(os.getenv("LLMCTL_MCP_PORT", "9020"))
     path = os.getenv("LLMCTL_MCP_PATH", "/mcp")
-    transport = os.getenv("LLMCTL_MCP_TRANSPORT", "http")
+    transport = os.getenv("LLMCTL_MCP_TRANSPORT", "stdio")
+    if transport == "stdio":
+        mcp.run(transport=transport, show_banner=False)
+        return
     mcp.run(transport=transport, host=host, port=port, path=path)

@@ -1682,6 +1682,21 @@ def _run_llm_process(
     return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
 
 
+def _is_upstream_500(stdout: str, stderr: str) -> bool:
+    haystack = f"{stdout}\n{stderr}".lower()
+    markers = (
+        "status: internal",
+        "\"status\":\"internal\"",
+        "internal error encountered",
+        "status: 500",
+        "code\":500",
+        "error code: 500",
+        "http 500",
+        "internal server error",
+    )
+    return any(marker in haystack for marker in markers)
+
+
 def _run_llm(
     provider: str,
     prompt: str | None,
@@ -1738,7 +1753,66 @@ def _run_llm(
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
     logger.info("Running %s: %s", provider_label, " ".join(cmd))
-    return _run_llm_process(cmd, prompt, on_update=on_update, cwd=cwd, env=env)
+    result = _run_llm_process(cmd, prompt, on_update=on_update, cwd=cwd, env=env)
+    if result.returncode != 0 and _is_upstream_500(result.stdout, result.stderr):
+        if on_log:
+            on_log(f"{provider_label} returned upstream 500; retrying once.")
+        time.sleep(1.0)
+        result = _run_llm_process(cmd, prompt, on_update=on_update, cwd=cwd, env=env)
+    return result
+
+
+def _run_llmctl_mcp_stdio_preflight(
+    mcp_configs: dict[str, dict[str, Any]],
+    on_log: Callable[[str], None] | None = None,
+    cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
+    config = mcp_configs.get("llmctl-mcp")
+    if not config:
+        return
+    command = config.get("command")
+    if not command:
+        if on_log:
+            on_log("MCP preflight skipped: llmctl-mcp has no command configured.")
+        return
+    args = _extract_list_config(config.get("args"), "args")
+    repo_root = Path(__file__).resolve().parents[4]
+    smoke_test = repo_root / "app" / "llmctl-mcp" / "scripts" / "stdio_smoke_test.py"
+    if not smoke_test.exists():
+        raise RuntimeError(f"MCP preflight missing: {smoke_test}")
+    tool_args = json.dumps({"limit": 1, "order_by": "id"})
+    cmd = [
+        "python3",
+        str(smoke_test),
+        "--timeout",
+        "8",
+        "--tool-name",
+        "llmctl_get_pipeline",
+        "--tool-args",
+        tool_args,
+        "--",
+        str(command),
+        *args,
+    ]
+    if on_log:
+        on_log(f"MCP preflight (llmctl-mcp): {_format_cmd_for_log(cmd)}")
+    result = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        env=env or os.environ.copy(),
+        cwd=str(cwd) if cwd is not None else None,
+    )
+    if result.stdout.strip() and on_log:
+        on_log(result.stdout.rstrip())
+    if result.stderr.strip() and on_log:
+        on_log(result.stderr.rstrip())
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(
+            message or f"MCP preflight failed with code {result.returncode}."
+        )
 
 
 def _update_task_logs(
@@ -2477,7 +2551,6 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         _set_stage("llm_query")
         result = None
         try:
-            _append_task_log(f"Launching {provider_label}...")
             llm_env = os.environ.copy()
             if workspace is not None:
                 llm_env["WORKSPACE_PATH"] = str(workspace)
@@ -2496,6 +2569,15 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 claude_api_key = _load_claude_auth_key()
                 if claude_api_key:
                     llm_env["ANTHROPIC_API_KEY"] = claude_api_key
+            if provider == "gemini" and "llmctl-mcp" in mcp_configs:
+                _append_task_log("Running MCP stdio preflight for llmctl-mcp...")
+                _run_llmctl_mcp_stdio_preflight(
+                    mcp_configs,
+                    on_log=_append_task_log,
+                    cwd=workspace,
+                    env=llm_env,
+                )
+            _append_task_log(f"Launching {provider_label}...")
             result = _run_llm(
                 provider,
                 payload,

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 import sys
 import threading
 import time
@@ -13,116 +11,21 @@ from watchdog.events import FileSystemEventHandler, FileMovedEvent
 from watchdog.observers import Observer
 
 from config import load_config
+from git_sync import (
+    ensure_git_repo,
+    git_diff_paths,
+    git_env,
+    git_fetch_and_reset,
+    git_rev_parse,
+    safe_git_url,
+)
 from ingest import delete_paths, get_collection, index_paths, ingest, _is_excluded
-
-
-def _run_git(args: list[str], cwd: Path | None = None) -> str:
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=str(cwd) if cwd else None,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError("git is required for RAG_MODE=git") from exc
-    if result.returncode != 0:
-        error = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"git {' '.join(args)} failed: {error}")
-    return result.stdout.strip()
-
-
-def _ensure_git_repo(config) -> None:
-    if not config.git_url:
-        raise RuntimeError("RAG_GIT_URL is required when RAG_MODE=git")
-
-    repo_root = config.repo_root
-    if repo_root.exists():
-        if not (repo_root / ".git").exists():
-            raise RuntimeError(
-                f"RAG_GIT_DIR exists but is not a git repo: {repo_root}"
-            )
-        return
-
-    repo_root.parent.mkdir(parents=True, exist_ok=True)
-    _run_git(
-        [
-            "clone",
-            "--branch",
-            config.git_branch,
-            "--single-branch",
-            config.git_url,
-            str(repo_root),
-        ]
-    )
-
-
-def _git_rev_parse(repo_root: Path, ref: str = "HEAD") -> str:
-    return _run_git(["rev-parse", ref], cwd=repo_root)
-
-
-def _git_fetch_and_reset(config) -> None:
-    repo_root = config.repo_root
-    _run_git(["fetch", "origin", config.git_branch], cwd=repo_root)
-    _run_git(
-        ["checkout", "-B", config.git_branch, f"origin/{config.git_branch}"],
-        cwd=repo_root,
-    )
-    _run_git(["reset", "--hard", f"origin/{config.git_branch}"], cwd=repo_root)
-
-
-def _git_diff_paths(repo_root: Path, old: str, new: str) -> tuple[list[Path], list[Path]]:
-    raw = subprocess.run(
-        ["git", "diff", "--name-status", "-z", old, new],
-        cwd=str(repo_root),
-        check=False,
-        capture_output=True,
-    )
-    if raw.returncode != 0:
-        error = (raw.stderr or raw.stdout).decode("utf-8", errors="ignore").strip()
-        raise RuntimeError(f"git diff failed: {error}")
-
-    parts = raw.stdout.decode("utf-8", errors="ignore").split("\0")
-    changed: list[Path] = []
-    deleted: list[Path] = []
-
-    idx = 0
-    while idx < len(parts):
-        status = parts[idx]
-        idx += 1
-        if not status:
-            continue
-        code = status[0]
-        if code in {"R", "C"}:
-            if idx + 1 >= len(parts):
-                break
-            old_path = parts[idx]
-            new_path = parts[idx + 1]
-            idx += 2
-            if old_path:
-                deleted.append(repo_root / old_path)
-            if new_path:
-                changed.append(repo_root / new_path)
-        else:
-            if idx >= len(parts):
-                break
-            path = parts[idx]
-            idx += 1
-            if not path:
-                continue
-            if code == "D":
-                deleted.append(repo_root / path)
-            else:
-                changed.append(repo_root / path)
-
-    return changed, deleted
 
 
 def _git_poll_loop(config, reset: bool, skip_initial: bool) -> int:
     try:
-        _ensure_git_repo(config)
-        _git_fetch_and_reset(config)
+        ensure_git_repo(config)
+        git_fetch_and_reset(config)
     except Exception as exc:
         print(f"Git repo setup failed: {exc}", file=sys.stderr)
         return 1
@@ -141,10 +44,11 @@ def _git_poll_loop(config, reset: bool, skip_initial: bool) -> int:
         print(f"Failed to connect to Chroma: {exc}", file=sys.stderr)
         return 1
 
-    last_commit = _git_rev_parse(config.repo_root)
+    env = git_env(config)
+    last_commit = git_rev_parse(config.repo_root, env=env)
     poll_s = max(1.0, float(config.git_poll_s))
     print(
-        f"Polling {config.git_url}@{config.git_branch} every {poll_s:.1f}s into {config.repo_root}."
+        f"Polling {safe_git_url(config.git_url)}@{config.git_branch} every {poll_s:.1f}s into {config.repo_root}."
     )
 
     try:
@@ -152,12 +56,12 @@ def _git_poll_loop(config, reset: bool, skip_initial: bool) -> int:
             time.sleep(poll_s)
             try:
                 prev_commit = last_commit
-                _git_fetch_and_reset(config)
-                last_commit = _git_rev_parse(config.repo_root)
+                git_fetch_and_reset(config)
+                last_commit = git_rev_parse(config.repo_root, env=env)
                 if last_commit == prev_commit:
                     continue
 
-                changed, deleted = _git_diff_paths(
+                changed, deleted = git_diff_paths(
                     config.repo_root, prev_commit, last_commit
                 )
                 if deleted:
@@ -166,7 +70,7 @@ def _git_poll_loop(config, reset: bool, skip_initial: bool) -> int:
                         print(f"Removed {delete_count} files from RAG index.")
 
                 if changed:
-                    file_count, chunk_count = index_paths(
+                    file_count, chunk_count, _, _ = index_paths(
                         collection, config, changed, delete_first=True
                     )
                     if file_count:
@@ -247,7 +151,7 @@ class _ChangeBatcher:
                     print(f"Removed {delete_count} files from RAG index.")
 
             if changed:
-                file_count, chunk_count = index_paths(
+                file_count, chunk_count, _, _ = index_paths(
                     self._collection,
                     self._config,
                     list(changed),
@@ -317,7 +221,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--debounce",
         type=float,
-        default=float(os.getenv("RAG_WATCH_DEBOUNCE_S", "1.0")),
+        default=None,
         help="Seconds to wait for quiet period before indexing changes",
     )
     return parser
@@ -337,6 +241,10 @@ def main() -> int:
             print(f"Initial ingest failed: {exc}", file=sys.stderr)
             return 1
 
+    if not config.watch_enabled:
+        print("Filesystem watchdog is disabled; exiting after initial ingest.")
+        return 0
+
     client = chromadb.HttpClient(host=config.chroma_host, port=config.chroma_port)
     try:
         collection = get_collection(client, config, reset=False)
@@ -344,7 +252,8 @@ def main() -> int:
         print(f"Failed to connect to Chroma: {exc}", file=sys.stderr)
         return 1
 
-    batcher = _ChangeBatcher(collection, config, args.debounce)
+    debounce_s = args.debounce if args.debounce is not None else config.watch_debounce_s
+    batcher = _ChangeBatcher(collection, config, debounce_s)
     batcher.start()
 
     observer = Observer()

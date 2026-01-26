@@ -171,30 +171,62 @@
 
   <section class="card">
     <details id="task-prompt-details" data-task-id="{{ task.id }}">
-      <summary class="card-header collapse-summary">
-        <div class="row" style="gap: 10px; align-items: center;">
-          <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
-          <h2 class="section-title">Prompt</h2>
+      <summary
+        class="collapse-summary"
+        style="display: flex; flex-direction: column; align-items: stretch; gap: 12px;"
+      >
+        <div class="card-header">
+          <div class="row" style="gap: 10px; align-items: center;">
+            <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+            <h2 class="section-title">Prompt</h2>
+          </div>
+          <div class="row" style="gap: 8px; align-items: center;">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              id="task-prompt-copy"
+              data-copy-target="task-prompt-text"
+              data-copy-label="Copy Prompt"
+              data-copy-success="Copied"
+              aria-label="Copy prompt"
+              title="Copy prompt"
+              {% if not prompt_text %}disabled{% endif %}
+              style="padding: 6px 12px; font-size: 10px; letter-spacing: 0.2em;"
+            >
+              Copy Prompt
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              id="task-prompt-json-copy"
+              data-copy-target="task-prompt-json"
+              data-copy-label="Copy JSON"
+              data-copy-success="Copied"
+              aria-label="Copy JSON"
+              title="Copy JSON"
+              {% if not prompt_json %}disabled{% endif %}
+              style="padding: 6px 12px; font-size: 10px; letter-spacing: 0.2em;"
+            >
+              Copy JSON
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          id="task-prompt-copy"
-          data-copy-target="task-prompt"
-          data-copy-label="copy"
-          data-copy-success="copied"
-          aria-label="Copy prompt"
-          title="Copy prompt"
-          {% if not task.prompt %}disabled{% endif %}
-          style="padding: 6px 12px; font-size: 10px; letter-spacing: 0.2em;"
-        >
-          copy
-        </button>
+        {% if prompt_text %}
+          <pre
+            id="task-prompt-text"
+            style="margin: 0; white-space: pre-wrap;"
+          >{{ prompt_text }}</pre>
+        {% else %}
+          <p class="muted" style="margin: 0;">No prompt recorded.</p>
+        {% endif %}
       </summary>
-      {% if task.prompt %}
-        <pre id="task-prompt" style="margin-top: 12px; white-space: pre-wrap;">{{ task.prompt }}</pre>
+      {% if prompt_json %}
+        <div style="margin-top: 12px;">
+          <p class="eyebrow" style="margin-bottom: 8px;">full json</p>
+          <pre id="task-prompt-json" style="white-space: pre-wrap;">{{ prompt_json }}</pre>
+        </div>
       {% else %}
-        <p class="muted" style="margin-top: 12px;">No prompt recorded.</p>
+        <p class="muted" style="margin-top: 12px;">No JSON payload recorded.</p>
       {% endif %}
     </details>
   </section>

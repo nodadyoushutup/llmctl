@@ -3,6 +3,13 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
+ARG DOCKER_GID=999
+ENV APP_UID=1000 \
+    APP_GID=1000 \
+    DOCKER_GID=$DOCKER_GID \
+    APP_USER=llmctl-studio \
+    APP_GROUP=llmctl-studio
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -26,6 +33,11 @@ RUN apt-get update \
 
 WORKDIR /app
 
+COPY app/llmctl-studio/docker/scripts /app/app/llmctl-studio/docker/scripts
+RUN /app/app/llmctl-studio/docker/scripts/install-docker-cli.sh \
+    && /app/app/llmctl-studio/docker/scripts/install-kubectl.sh \
+    && /app/app/llmctl-studio/docker/scripts/setup-user-groups.sh
+
 COPY app/llmctl-studio/requirements.txt /app/app/llmctl-studio/requirements.txt
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -36,5 +48,7 @@ COPY . /app
 RUN mkdir -p /app/data
 
 EXPOSE 5055
+
+USER llmctl-studio
 
 CMD ["python3", "app/llmctl-studio/run.py"]

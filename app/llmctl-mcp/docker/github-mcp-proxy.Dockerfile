@@ -1,7 +1,5 @@
-FROM ghcr.io/github/github-mcp-server:latest AS github_mcp
+FROM busybox:1.36.1 AS busybox
 
-FROM ghcr.io/sparfenyuk/mcp-proxy:latest
+FROM ghcr.io/github/github-mcp-server:latest
 
-COPY --from=github_mcp /server/github-mcp-server /usr/local/bin/github-mcp-server
-
-ENTRYPOINT ["catatonit", "--", "mcp-proxy"]
+COPY --from=busybox /bin/busybox /bin/busybox

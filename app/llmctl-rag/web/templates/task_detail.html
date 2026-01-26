@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Task {{ task.id }} | llmctl-rag</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="brand-icon">
+              <i class="fa-solid fa-robot"></i>
+            </div>
+            <div>
+              <div class="eyebrow">LLMCTL</div>
+              <div class="brand-title">RAG</div>
+              <div class="brand-meta">Context workspace</div>
+            </div>
+          </div>
+          <nav class="nav">
+            <div class="nav-section">
+              <div class="nav-section-title">Core</div>
+              <a class="nav-item" href="{{ url_for('index', view='chat') }}">
+                <span class="nav-icon"><i class="fa-solid fa-comment-dots"></i></span>
+                Chat
+              </a>
+              <a class="nav-item" href="{{ url_for('sources_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
+                Sources
+              </a>
+              <a class="nav-item is-active" href="{{ url_for('tasks_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
+                Tasks
+              </a>
+              <a class="nav-item" href="{{ url_for('index', view='settings') }}">
+                <span class="nav-icon"><i class="fa-solid fa-sliders"></i></span>
+                Settings
+              </a>
+            </div>
+          </nav>
+        </aside>
+
+        <main class="main">
+          <header class="topbar">
+            <div class="topbar-row">
+              <div>
+                <div class="title">Task {{ task.id }}</div>
+                <p class="subtitle">{{ task_kind_label(task.kind) }} run</p>
+              </div>
+            </div>
+          </header>
+
+          <header class="action-header">
+            <div class="action-header-row">
+              <span class="muted">Task actions</span>
+              <div class="action-header-actions">
+                <a class="btn btn-secondary" href="{{ url_for('tasks_index') }}">Back</a>
+                <form
+                  method="post"
+                  action="{{ url_for('remove_task', task_id=task.id) }}"
+                  data-confirm="Delete this task?"
+                >
+                  <button type="submit" class="btn btn-icon btn-danger" aria-label="Delete task">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </div>
+            </div>
+          </header>
+
+          <div class="content">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2 class="section-title">Task details</h2>
+                  <p class="muted">Indexing status, timing, and output.</p>
+                </div>
+              </div>
+              <div class="detail-grid">
+                <div>
+                  <span class="detail-label">Status</span>
+                  <strong>
+                    {% if task.status == "running" %}
+                      <span class="status-pill status-running" id="task-status">running</span>
+                    {% elif task.status == "queued" %}
+                      <span class="status-pill status-queued" id="task-status">queued</span>
+                    {% elif task.status == "succeeded" %}
+                      <span class="status-pill status-success" id="task-status">succeeded</span>
+                    {% elif task.status == "failed" %}
+                      <span class="status-pill status-failed" id="task-status">failed</span>
+                    {% else %}
+                      <span class="status-pill" id="task-status">{{ task.status }}</span>
+                    {% endif %}
+                  </strong>
+                </div>
+                <div>
+                  <span class="detail-label">Source</span>
+                  <strong>
+                    {% if source %}
+                      <a href="{{ url_for('sources_detail', source_id=source.id) }}">{{ source.name }}</a>
+                    {% elif task.source_id %}
+                      Source {{ task.source_id }}
+                    {% else %}
+                      All sources
+                    {% endif %}
+                  </strong>
+                </div>
+                <div>
+                  <span class="detail-label">Reset</span>
+                  <strong>{{ "yes" if meta.get("reset") else "no" }}</strong>
+                </div>
+                <div>
+                  <span class="detail-label">Created</span>
+                  <strong id="task-created-at">{{ task.created_at or "-" }}</strong>
+                </div>
+                <div>
+                  <span class="detail-label">Started</span>
+                  <strong id="task-started-at">{{ task.started_at or "-" }}</strong>
+                </div>
+                <div>
+                  <span class="detail-label">Finished</span>
+                  <strong id="task-finished-at">{{ task.finished_at or "-" }}</strong>
+                </div>
+                <div>
+                  <span class="detail-label">Celery task</span>
+                  <strong class="mono" id="task-celery-id">{{ task.celery_task_id or "-" }}</strong>
+                </div>
+              </div>
+              <div class="detail-section">
+                <span class="detail-label">Output</span>
+                {% if task.output %}
+                  <pre class="code-block" id="task-output">{{ task.output }}</pre>
+                {% else %}
+                  <p class="muted" id="task-output-empty" style="margin-top: 8px;">No output yet.</p>
+                  <pre class="code-block" id="task-output" style="display: none;"></pre>
+                {% endif %}
+              </div>
+              <div class="detail-section">
+                <span class="detail-label">Error</span>
+                {% if task.error %}
+                  <p id="task-error">{{ task.error }}</p>
+                {% else %}
+                  <p class="muted" id="task-error">none</p>
+                {% endif %}
+              </div>
+              {% if task.status in ["queued", "running"] %}
+              <p class="muted" id="task-auto-refresh" style="margin-top: 16px;">
+                Auto-updating every 2 seconds while the task runs.
+              </p>
+              {% endif %}
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    {% if task.status in ["queued", "running"] %}
+    <script>
+      (() => {
+        const statusEl = document.getElementById("task-status");
+        const createdEl = document.getElementById("task-created-at");
+        const startedEl = document.getElementById("task-started-at");
+        const finishedEl = document.getElementById("task-finished-at");
+        const celeryEl = document.getElementById("task-celery-id");
+        const outputEl = document.getElementById("task-output");
+        const outputEmptyEl = document.getElementById("task-output-empty");
+        const errorEl = document.getElementById("task-error");
+        const autoRefreshEl = document.getElementById("task-auto-refresh");
+        const taskId = {{ task.id }};
+
+        const statusClasses = {
+          running: "status-running",
+          queued: "status-queued",
+          succeeded: "status-success",
+          failed: "status-failed",
+        };
+
+        const updateText = (el, value, fallback = "-") => {
+          if (!el) {
+            return;
+          }
+          if (value === null || value === undefined || value === "") {
+            el.textContent = fallback;
+          } else {
+            el.textContent = value;
+          }
+        };
+
+        const updateStatus = (status) => {
+          if (!statusEl) {
+            return;
+          }
+          const className = statusClasses[status] || "";
+          statusEl.className = `status-pill ${className}`.trim();
+          statusEl.textContent = status || "-";
+        };
+
+        const updateOutput = (output) => {
+          const value = output || "";
+          const hasOutput = value.length > 0;
+          if (outputEl) {
+            outputEl.textContent = value;
+            outputEl.style.display = hasOutput ? "" : "none";
+          }
+          if (outputEmptyEl) {
+            outputEmptyEl.style.display = hasOutput ? "none" : "";
+          }
+        };
+
+        const stopPolling = () => {
+          if (autoRefreshEl) {
+            autoRefreshEl.style.display = "none";
+          }
+          if (pollTimer) {
+            window.clearTimeout(pollTimer);
+            pollTimer = null;
+          }
+        };
+
+        let pollTimer = null;
+
+        const poll = async () => {
+          try {
+            const response = await window.fetch(`/tasks/${taskId}/status`, {
+              cache: "no-store",
+              headers: { Accept: "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error("Request failed");
+            }
+            const data = await response.json();
+            updateStatus(data.status);
+            updateText(createdEl, data.created_at);
+            updateText(startedEl, data.started_at);
+            updateText(finishedEl, data.finished_at);
+            updateText(celeryEl, data.celery_task_id);
+            updateOutput(data.output);
+            updateText(errorEl, data.error, "none");
+            if (!data.running) {
+              stopPolling();
+              return;
+            }
+          } catch (err) {
+            console.error(err);
+          }
+          pollTimer = window.setTimeout(poll, 2000);
+        };
+
+        poll();
+      })();
+    </script>
+    {% endif %}
+  </body>
+</html>

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import hashlib
+import json
+import re
 from pathlib import Path
 import os
+import shutil
 
+from settings_store import load_integration_settings
 
 _DEFAULT_EXCLUDE_DIRS = {
     ".git",
@@ -29,7 +34,6 @@ _DEFAULT_EXCLUDE_GLOBS = [
     "*.jpeg",
     "*.gif",
     "*.svg",
-    "*.pdf",
     "*.zip",
     "*.tar",
     "*.gz",
@@ -42,11 +46,55 @@ _DEFAULT_EXCLUDE_GLOBS = [
     "*.bin",
 ]
 
+_DEFAULT_MAX_FILE_BYTES_BY_TYPE = {
+    "pdf": 1_000_000_000,
+}
+
 
 def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _split_map_list(value: str | None) -> dict[str, list[str]]:
+    if not value:
+        return {}
+    result: dict[str, list[str]] = {}
+    for pair in value.split(";"):
+        if not pair.strip():
+            continue
+        if "=" not in pair:
+            continue
+        key, raw = pair.split("=", 1)
+        key = key.strip().lower()
+        if not key:
+            continue
+        parts = [item.strip() for item in re.split(r"[|,]", raw) if item.strip()]
+        if parts:
+            result[key] = parts
+    return result
+
+
+def _split_map_int(value: str | None) -> dict[str, int]:
+    if not value:
+        return {}
+    result: dict[str, int] = {}
+    for pair in value.split(";"):
+        if not pair.strip():
+            continue
+        if "=" not in pair:
+            continue
+        key, raw = pair.split("=", 1)
+        key = key.strip().lower()
+        raw = raw.strip()
+        if not key or not raw:
+            continue
+        try:
+            result[key] = int(raw)
+        except ValueError:
+            continue
+    return result
 
 
 def _find_repo_root() -> Path:
@@ -67,51 +115,391 @@ class RagConfig:
     collection: str
     openai_api_key: str | None
     openai_embedding_model: str
+    embed_max_tokens_per_request: int
+    embed_max_tokens_per_input: int
     git_url: str | None
+    git_repo: str | None
+    git_pat: str | None
+    git_ssh_key_path: str | None
     git_branch: str
     git_poll_s: float
     git_dir: Path
+    watch_enabled: bool
+    watch_debounce_s: float
     chunk_lines: int
     chunk_overlap_lines: int
     max_file_bytes: int
     exclude_dirs: set[str]
     exclude_globs: list[str]
     include_globs: list[str]
+    max_file_bytes_by_type: dict[str, int]
+    exclude_globs_by_type: dict[str, list[str]]
+    chunk_lines_by_type: dict[str, int]
+    chunk_overlap_lines_by_type: dict[str, int]
+    enabled_doc_types: set[str]
+    ocr_enabled: bool
+    ocr_lang: str
+    chat_model: str
+    chat_temperature: float
+    chat_top_k: int
+    chat_max_history: int
+    chat_max_context_chars: int
+    chat_snippet_chars: int
+    chat_context_budget_tokens: int
+    web_port: int
+
+
+def _as_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _as_float(value: str | None, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _setting(
+    env_key: str,
+    rag_settings: dict[str, str],
+    rag_key: str,
+    default: str | None = None,
+) -> str | None:
+    env_value = (os.getenv(env_key) or "").strip()
+    if env_value:
+        return env_value
+    rag_value = (rag_settings.get(rag_key) or "").strip()
+    if rag_value:
+        return rag_value
+    return default
+
+
+def build_git_url(
+    repo: str | None, pat: str | None, ssh_key_path: str | None
+) -> str | None:
+    repo_value = (repo or "").strip()
+    if not repo_value:
+        return None
+    ssh_key_value = (ssh_key_path or "").strip()
+    if ssh_key_value and shutil.which("ssh"):
+        return f"git@github.com:{repo_value}.git"
+    pat_value = (pat or "").strip()
+    if pat_value:
+        return f"https://x-access-token:{pat_value}@github.com/{repo_value}.git"
+    return f"https://github.com/{repo_value}.git"
+
+
+def max_file_bytes_for(config: RagConfig, doc_type: str | None) -> int:
+    if not doc_type:
+        return config.max_file_bytes
+    return config.max_file_bytes_by_type.get(doc_type, config.max_file_bytes)
+
+
+def chunk_lines_for(config: RagConfig, doc_type: str | None) -> int:
+    if not doc_type:
+        return config.chunk_lines
+    return config.chunk_lines_by_type.get(doc_type, config.chunk_lines)
+
+
+def chunk_overlap_lines_for(config: RagConfig, doc_type: str | None) -> int:
+    if not doc_type:
+        return config.chunk_overlap_lines
+    return config.chunk_overlap_lines_by_type.get(doc_type, config.chunk_overlap_lines)
+
+
+def _signature_payload(payload: dict) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def parser_signature(config: RagConfig, version: str) -> str:
+    payload = {
+        "version": version,
+        "max_file_bytes_by_type": config.max_file_bytes_by_type,
+        "exclude_globs_by_type": config.exclude_globs_by_type,
+        "enabled_doc_types": sorted(config.enabled_doc_types),
+        "ocr_enabled": config.ocr_enabled,
+        "ocr_lang": config.ocr_lang,
+    }
+    return _signature_payload(payload)
+
+
+def chunker_signature(config: RagConfig, version: str) -> str:
+    payload = {
+        "version": version,
+        "chunk_lines": config.chunk_lines,
+        "chunk_overlap_lines": config.chunk_overlap_lines,
+        "chunk_lines_by_type": config.chunk_lines_by_type,
+        "chunk_overlap_lines_by_type": config.chunk_overlap_lines_by_type,
+    }
+    return _signature_payload(payload)
 
 
 def load_config() -> RagConfig:
-    root_env = os.getenv("RAG_ROOT")
-    repo_root = Path(root_env).expanduser().resolve() if root_env else _find_repo_root()
+    rag_settings = {}
+    github_settings = {}
+    try:
+        rag_settings = load_integration_settings("rag")
+        github_settings = load_integration_settings("github")
+    except Exception:
+        rag_settings = {}
+        github_settings = {}
 
-    rag_mode = os.getenv("RAG_MODE", "local").strip().lower()
-    git_dir = Path(os.getenv("RAG_GIT_DIR", "/tmp/llmctl-rag-repo")).expanduser().resolve()
+    local_root = _setting("RAG_ROOT", rag_settings, "local_path", None)
+    repo_root = (
+        Path(local_root).expanduser().resolve()
+        if local_root
+        else _find_repo_root()
+    )
+
+    rag_mode = (
+        _setting("RAG_MODE", rag_settings, "mode", "local") or "local"
+    ).strip().lower()
+    git_dir_raw = _setting(
+        "RAG_GIT_DIR", rag_settings, "git_dir", "/tmp/llmctl-rag-repo"
+    ) or "/tmp/llmctl-rag-repo"
+    git_dir = Path(git_dir_raw).expanduser().resolve()
     if rag_mode == "git":
         repo_root = git_dir
 
+    git_repo = (github_settings.get("repo") or "").strip() or None
+    git_pat = (github_settings.get("pat") or "").strip() or None
+    git_ssh_key_path = (github_settings.get("ssh_key_path") or "").strip() or None
+    git_url = _setting("RAG_GIT_URL", rag_settings, "git_url", None)
+    if not git_url:
+        git_url = build_git_url(git_repo, git_pat, git_ssh_key_path)
+
     exclude_dirs = set(_DEFAULT_EXCLUDE_DIRS)
-    exclude_dirs.update(_split_csv(os.getenv("RAG_EXCLUDE_DIRS")))
+    exclude_dirs.update(
+        _split_csv(_setting("RAG_EXCLUDE_DIRS", rag_settings, "exclude_dirs", None))
+    )
 
     exclude_globs = list(_DEFAULT_EXCLUDE_GLOBS)
-    exclude_globs.extend(_split_csv(os.getenv("RAG_EXCLUDE_GLOBS")))
+    exclude_globs.extend(
+        _split_csv(_setting("RAG_EXCLUDE_GLOBS", rag_settings, "exclude_globs", None))
+    )
 
-    include_globs = _split_csv(os.getenv("RAG_INCLUDE_GLOBS"))
+    include_globs = _split_csv(
+        _setting("RAG_INCLUDE_GLOBS", rag_settings, "include_globs", None)
+    )
+    max_file_bytes_by_type = _split_map_int(
+        _setting(
+            "RAG_MAX_FILE_BYTES_BY_TYPE",
+            rag_settings,
+            "max_file_bytes_by_type",
+            None,
+        )
+    )
+    exclude_globs_by_type = _split_map_list(
+        _setting(
+            "RAG_EXCLUDE_GLOBS_BY_TYPE",
+            rag_settings,
+            "exclude_globs_by_type",
+            None,
+        )
+    )
+    chunk_lines_by_type = _split_map_int(
+        _setting("RAG_CHUNK_LINES_BY_TYPE", rag_settings, "chunk_lines_by_type", None)
+    )
+    chunk_overlap_lines_by_type = _split_map_int(
+        _setting(
+            "RAG_CHUNK_OVERLAP_LINES_BY_TYPE",
+            rag_settings,
+            "chunk_overlap_lines_by_type",
+            None,
+        )
+    )
+    enabled_doc_types = {
+        item.lower()
+        for item in _split_csv(
+            _setting("RAG_ENABLED_DOC_TYPES", rag_settings, "enabled_doc_types", None)
+        )
+    }
+    ocr_enabled_raw = _setting("RAG_OCR_ENABLED", rag_settings, "ocr_enabled", "true")
+    ocr_enabled = (ocr_enabled_raw or "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+    ocr_lang = _setting("RAG_OCR_LANG", rag_settings, "ocr_lang", "eng") or "eng"
 
     return RagConfig(
         repo_root=repo_root,
         rag_mode=rag_mode,
-        chroma_host=os.getenv("CHROMA_HOST", "localhost"),
-        chroma_port=int(os.getenv("CHROMA_PORT", "8000")),
-        collection=os.getenv("CHROMA_COLLECTION", "llmctl_repo"),
-        openai_api_key=os.getenv("OPENAI_API_KEY"),
-        openai_embedding_model=os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small"),
-        git_url=os.getenv("RAG_GIT_URL"),
-        git_branch=os.getenv("RAG_GIT_BRANCH", "main"),
-        git_poll_s=float(os.getenv("RAG_GIT_POLL_S", "300")),
+        chroma_host=_setting("CHROMA_HOST", rag_settings, "chroma_host", "localhost")
+        or "localhost",
+        chroma_port=int(
+            _setting("CHROMA_PORT", rag_settings, "chroma_port", "8000") or "8000"
+        ),
+        collection=_setting(
+            "CHROMA_COLLECTION", rag_settings, "chroma_collection", "llmctl_repo"
+        )
+        or "llmctl_repo",
+        openai_api_key=_setting(
+            "OPENAI_API_KEY", rag_settings, "openai_api_key", None
+        ),
+    openai_embedding_model=_setting(
+            "OPENAI_EMBED_MODEL",
+            rag_settings,
+            "openai_embed_model",
+            "text-embedding-3-small",
+        )
+        or "text-embedding-3-small",
+        embed_max_tokens_per_request=int(
+            _setting(
+                "RAG_EMBED_MAX_TOKENS_PER_REQUEST",
+                rag_settings,
+                "embed_max_tokens_per_request",
+                "300000",
+            )
+            or "300000"
+        ),
+        embed_max_tokens_per_input=int(
+            _setting(
+                "RAG_EMBED_MAX_TOKENS_PER_INPUT",
+                rag_settings,
+                "embed_max_tokens_per_input",
+                "8192",
+            )
+            or "8192"
+        ),
+        git_url=git_url,
+        git_repo=git_repo,
+        git_pat=git_pat,
+        git_ssh_key_path=git_ssh_key_path,
+        git_branch=_setting("RAG_GIT_BRANCH", rag_settings, "git_branch", "main")
+        or "main",
+        git_poll_s=_as_float(
+            _setting("RAG_GIT_POLL_S", rag_settings, "git_poll_s", None), 300.0
+        ),
         git_dir=git_dir,
-        chunk_lines=int(os.getenv("RAG_CHUNK_LINES", "120")),
-        chunk_overlap_lines=int(os.getenv("RAG_CHUNK_OVERLAP_LINES", "20")),
-        max_file_bytes=int(os.getenv("RAG_MAX_FILE_BYTES", str(1_000_000))),
+        watch_enabled=_as_bool(
+            _setting("RAG_WATCH_ENABLED", rag_settings, "watch_enabled", None),
+            _as_bool(rag_settings.get("watch_enabled"), True),
+        ),
+        watch_debounce_s=_as_float(
+            _setting("RAG_WATCH_DEBOUNCE_S", rag_settings, "watch_debounce_s", None),
+            1.0,
+        ),
+        chunk_lines=int(
+            _setting("RAG_CHUNK_LINES", rag_settings, "chunk_lines", "120") or "120"
+        ),
+        chunk_overlap_lines=int(
+            _setting("RAG_CHUNK_OVERLAP_LINES", rag_settings, "chunk_overlap_lines", "20")
+            or "20"
+        ),
+        max_file_bytes=int(
+            _setting(
+                "RAG_MAX_FILE_BYTES", rag_settings, "max_file_bytes", str(1_000_000)
+            )
+            or str(1_000_000)
+        ),
         exclude_dirs=exclude_dirs,
         exclude_globs=exclude_globs,
         include_globs=include_globs,
+        max_file_bytes_by_type={
+            **_DEFAULT_MAX_FILE_BYTES_BY_TYPE,
+            **max_file_bytes_by_type,
+        },
+        exclude_globs_by_type=exclude_globs_by_type,
+        chunk_lines_by_type=chunk_lines_by_type,
+        chunk_overlap_lines_by_type=chunk_overlap_lines_by_type,
+        enabled_doc_types=enabled_doc_types,
+        ocr_enabled=ocr_enabled,
+        ocr_lang=ocr_lang,
+        chat_model=_setting(
+            "OPENAI_CHAT_MODEL", rag_settings, "openai_chat_model", "gpt-4o-mini"
+        )
+        or "gpt-4o-mini",
+        chat_temperature=_as_float(
+            _setting(
+                "OPENAI_CHAT_TEMPERATURE", rag_settings, "openai_chat_temperature", None
+            ),
+            0.2,
+        ),
+        chat_top_k=int(
+            _setting("RAG_CHAT_TOP_K", rag_settings, "chat_top_k", "5") or "5"
+        ),
+        chat_max_history=int(
+            _setting("RAG_CHAT_MAX_HISTORY", rag_settings, "chat_max_history", "8")
+            or "8"
+        ),
+        chat_max_context_chars=int(
+            _setting(
+                "RAG_CHAT_MAX_CONTEXT_CHARS",
+                rag_settings,
+                "chat_max_context_chars",
+                "12000",
+            )
+            or "12000"
+        ),
+        chat_snippet_chars=int(
+            _setting(
+                "RAG_CHAT_SNIPPET_CHARS",
+                rag_settings,
+                "chat_snippet_chars",
+                "600",
+            )
+            or "600"
+        ),
+        chat_context_budget_tokens=int(
+            _setting(
+                "RAG_CHAT_CONTEXT_BUDGET_TOKENS",
+                rag_settings,
+                "chat_context_budget_tokens",
+                "8000",
+            )
+            or "8000"
+        ),
+        web_port=int(
+            _setting("RAG_WEB_PORT", rag_settings, "web_port", "5050") or "5050"
+        ),
+    )
+
+
+def build_source_config(base: RagConfig, source, github_settings: dict[str, str]) -> RagConfig:
+    kind = (getattr(source, "kind", "") or "").strip().lower()
+    rag_mode = base.rag_mode
+    repo_root = base.repo_root
+    git_url = base.git_url
+    git_dir = base.git_dir
+    git_branch = base.git_branch
+    git_repo = None
+    git_pat = (github_settings.get("pat") or "").strip() or None
+    git_ssh_key_path = (github_settings.get("ssh_key_path") or "").strip() or None
+
+    if kind == "local":
+        rag_mode = "local"
+        local_path = (getattr(source, "local_path", "") or "").strip()
+        if local_path:
+            repo_root = Path(local_path).expanduser().resolve()
+    elif kind == "github":
+        rag_mode = "git"
+        git_repo = (getattr(source, "git_repo", "") or "").strip() or None
+        source_branch = (getattr(source, "git_branch", "") or "").strip() or None
+        source_git_dir = (getattr(source, "git_dir", "") or "").strip() or None
+        if source_git_dir:
+            git_dir = Path(source_git_dir).expanduser().resolve()
+            repo_root = git_dir
+        if source_branch:
+            git_branch = source_branch
+        git_url = build_git_url(git_repo, git_pat, git_ssh_key_path)
+        repo_root = git_dir
+
+    return replace(
+        base,
+        rag_mode=rag_mode,
+        repo_root=repo_root,
+        collection=getattr(source, "collection", base.collection),
+        git_url=git_url,
+        git_repo=git_repo,
+        git_pat=git_pat,
+        git_ssh_key_path=git_ssh_key_path,
+        git_branch=git_branch,
+        git_dir=git_dir,
     )

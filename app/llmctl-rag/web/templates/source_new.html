@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>New Source | llmctl-rag</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="brand-icon">
+              <i class="fa-solid fa-robot"></i>
+            </div>
+            <div>
+              <div class="eyebrow">LLMCTL</div>
+              <div class="brand-title">RAG</div>
+              <div class="brand-meta">Context workspace</div>
+            </div>
+          </div>
+          <nav class="nav">
+            <div class="nav-section">
+              <div class="nav-section-title">Core</div>
+              <a class="nav-item" href="{{ url_for('index', view='chat') }}">
+                <span class="nav-icon"><i class="fa-solid fa-comment-dots"></i></span>
+                Chat
+              </a>
+              <a class="nav-item is-active" href="{{ url_for('sources_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
+                Sources
+              </a>
+              <a class="nav-item" href="{{ url_for('tasks_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
+                Tasks
+              </a>
+              <a class="nav-item" href="{{ url_for('index', view='settings') }}">
+                <span class="nav-icon"><i class="fa-solid fa-sliders"></i></span>
+                Settings
+              </a>
+            </div>
+          </nav>
+        </aside>
+
+        <main class="main">
+          <header class="topbar">
+            <div class="topbar-row">
+              <div>
+                <div class="title">New source</div>
+                <p class="subtitle">Connect a local folder or GitHub repo.</p>
+              </div>
+            </div>
+          </header>
+
+          <header class="action-header">
+            <div class="action-header-row">
+              <span class="muted">Add a new collection</span>
+              <div class="action-header-actions">
+                <a class="btn btn-secondary" href="{{ url_for('sources_index') }}">Back</a>
+              </div>
+            </div>
+          </header>
+
+          <div class="content">
+            {% if not github_connected %}
+            <div class="banner">GitHub PAT not set. GitHub source selection will fail.</div>
+            {% endif %}
+
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2 class="section-title">Source settings</h2>
+                  <p class="muted">Each source will get its own Chroma collection.</p>
+                </div>
+              </div>
+              <form method="post" action="{{ url_for('add_source') }}" class="form-grid">
+                <label class="label">
+                  Name
+                  <input class="input" type="text" name="source_name" placeholder="Docs, Repo, Handbook" required />
+                </label>
+                <label class="label">
+                  Type
+                  <select class="input" name="source_kind" id="source-kind">
+                    <option value="local">Local folder</option>
+                    <option value="github">GitHub repo</option>
+                  </select>
+                </label>
+                <label class="label source-field source-field-local">
+                  Local path
+                  <input class="input" type="text" name="source_local_path" placeholder="/path/to/project" />
+                </label>
+                <label class="label source-field source-field-github">
+                  GitHub repo
+                  <select class="input" name="source_git_repo" id="github-repo-select">
+                    <option value="">Select a repo</option>
+                  </select>
+                  <span class="help" id="github-repo-status">Load repositories from your PAT.</span>
+                </label>
+                <label class="label source-field source-field-github">
+                  Branch
+                  <input class="input" type="text" name="source_git_branch" placeholder="main" />
+                </label>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Create source</button>
+                </div>
+              </form>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

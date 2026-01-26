@@ -1126,8 +1126,8 @@ MCP_SERVER_SEEDS = [
         "description": "Jira MCP server from docker compose.",
         "config_toml": (
             "[mcp_servers.jira]\n"
-            "transport = \"streamable-http\"\n"
-            "url = \"http://localhost:9000/mcp\"\n"
+            "command = \"docker\"\n"
+            "args = [\"exec\", \"-i\", \"jira-mcp\", \"mcp-atlassian\", \"--transport\", \"stdio\"]\n"
         ),
     },
     {
@@ -1136,8 +1136,8 @@ MCP_SERVER_SEEDS = [
         "description": "Chroma MCP server from docker compose.",
         "config_toml": (
             "[mcp_servers.chroma]\n"
-            "transport = \"streamable-http\"\n"
-            "url = \"http://localhost:9010/mcp\"\n"
+            "command = \"docker\"\n"
+            "args = [\"exec\", \"-i\", \"chromadb-mcp\", \"chromadb-mcp\", \"--client-type\", \"http\", \"--host\", \"chromadb\", \"--port\", \"8000\", \"--ssl\", \"false\"]\n"
         ),
     },
     {
@@ -1146,8 +1146,8 @@ MCP_SERVER_SEEDS = [
         "description": "LLMCTL MCP server.",
         "config_toml": (
             "[mcp_servers.llmctl-mcp]\n"
-            "transport = \"streamable-http\"\n"
-            "url = \"http://192.168.1.36:9020/mcp\"\n"
+            "command = \"docker\"\n"
+            "args = [\"exec\", \"-i\", \"llmctl-mcp\", \"env\", \"LLMCTL_MCP_TRANSPORT=stdio\", \"python3\", \"app/llmctl-mcp/run.py\"]\n"
         ),
     },
 ]
