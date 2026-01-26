@@ -277,6 +277,10 @@ def _gemini_settings_from_model_config(config: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _gemini_sandbox_available() -> bool:
+    return bool(shutil.which("docker") or shutil.which("podman"))
+
+
 def _build_codex_overrides(settings: dict[str, Any]) -> list[str]:
     overrides: list[str] = []
     if settings.get("approval_policy"):
@@ -406,6 +410,38 @@ def _extract_mapping_config(value: Any, label: str) -> dict[str, str]:
     return {str(key): str(val) for key, val in value.items()}
 
 
+def _redact_value(label: str, value: Any) -> Any:
+    lowered = str(label).lower()
+    if any(token in lowered for token in ("token", "secret", "password", "key", "authorization")):
+        return "***"
+    return value
+
+
+def _redact_object(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        return {key: _redact_object(_redact_value(key, val)) for key, val in payload.items()}
+    if isinstance(payload, list):
+        return [_redact_object(item) for item in payload]
+    return payload
+
+
+def _format_cmd_for_log(cmd: list[str]) -> str:
+    # Redact values following -e/--env and -H/--header to avoid leaking secrets.
+    redacted: list[str] = []
+    skip_next = False
+    for idx, part in enumerate(cmd):
+        if skip_next:
+            redacted.append("***")
+            skip_next = False
+            continue
+        if part in {"-e", "--env", "-H", "--header"}:
+            redacted.append(part)
+            skip_next = True
+            continue
+        redacted.append(part)
+    return " ".join(redacted)
+
+
 def _build_gemini_mcp_add_cmd(
     server_key: str,
     config: dict[str, Any],
@@ -414,11 +450,19 @@ def _build_gemini_mcp_add_cmd(
     cmd = [Config.GEMINI_CMD, "mcp", "add", "--scope", scope]
     url = config.get("url")
     command = config.get("command")
+    gemini_transport = config.get("gemini_transport")
     transport = config.get("transport")
-    if transport:
-        cmd.extend(["--transport", str(transport)])
+    transport_value = str(transport).lower() if transport is not None else ""
+    if gemini_transport is not None:
+        transport_value = str(gemini_transport).lower()
+    if transport_value in {"streamable-http", "streamable_http", "streamablehttp"}:
+        transport_value = "http"
+    if transport_value:
+        cmd.extend(["--transport", transport_value])
     elif url:
         cmd.extend(["--transport", "http"])
+    if _as_optional_bool(config.get("debug")):
+        cmd.append("--debug")
     timeout = config.get("timeout")
     if timeout is not None:
         cmd.extend(["--timeout", str(timeout)])
@@ -431,8 +475,7 @@ def _build_gemini_mcp_add_cmd(
     for key, value in env.items():
         cmd.extend(["-e", f"{key}={value}"])
     headers = _extract_mapping_config(config.get("headers"), "headers")
-    transport_value = str(transport).lower() if transport is not None else ""
-    if url and (transport_value == "http" or not transport_value):
+    if url and transport_value in {"", "http", "sse"}:
         if not any(key.lower() == "accept" for key in headers):
             headers["Accept"] = "application/json, text/event-stream"
     for key, value in headers.items():
@@ -486,6 +529,44 @@ def _run_config_cmd(
         raise RuntimeError(message or f"Command failed: {' '.join(cmd)}")
 
 
+def _log_gemini_settings(
+    server_key: str,
+    scope: str,
+    cwd: str | Path | None,
+    on_log: Callable[[str], None],
+) -> None:
+    settings_path = (
+        Path(cwd) / ".gemini" / "settings.json"
+        if scope == "project" and cwd is not None
+        else Path.home() / ".gemini" / "settings.json"
+    )
+    if not settings_path.exists():
+        on_log(f"Gemini settings not found at {settings_path}.")
+        return
+    try:
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        on_log(f"Failed to read Gemini settings: {exc}")
+        return
+    servers = (
+        payload.get("mcpServers")
+        or payload.get("mcp_servers")
+        or payload.get("mcpServers".lower())
+        or {}
+    )
+    if not isinstance(servers, dict):
+        on_log("Gemini settings mcpServers is not a dict.")
+        return
+    entry = servers.get(server_key)
+    if entry is None:
+        on_log(f"Gemini settings missing MCP server '{server_key}'.")
+        return
+    on_log(
+        "Gemini settings entry:\n"
+        + json.dumps(_redact_object(entry), indent=2, sort_keys=True)
+    )
+
+
 def _ensure_gemini_mcp_servers(
     configs: dict[str, dict[str, Any]],
     on_log: Callable[[str], None] | None = None,
@@ -510,7 +591,12 @@ def _ensure_gemini_mcp_servers(
             ignore_failure=True,
         )
         add_cmd = _build_gemini_mcp_add_cmd(server_key, configs[server_key], scope)
+        debug_enabled = _as_optional_bool(configs[server_key].get("debug"))
+        if on_log and debug_enabled:
+            on_log(f"Gemini MCP add: {_format_cmd_for_log(add_cmd)}")
         _run_config_cmd(add_cmd, on_log=on_log, cwd=cwd)
+        if on_log and debug_enabled:
+            _log_gemini_settings(server_key, scope, cwd, on_log)
 
 
 def _build_task_workspace(task_id: int) -> Path:
@@ -1623,9 +1709,22 @@ def _run_llm(
         _ensure_gemini_mcp_servers(mcp_configs, on_log=on_log, cwd=cwd)
         if gemini_settings.get("sandbox") is not None:
             env = dict(env or os.environ)
-            env["GEMINI_SANDBOX"] = (
-                "true" if gemini_settings.get("sandbox") else "false"
-            )
+            sandbox_enabled = bool(gemini_settings.get("sandbox"))
+            sandbox_value = str(env.get("GEMINI_SANDBOX", "")).strip()
+            if sandbox_enabled:
+                if sandbox_value and sandbox_value.lower() not in {"true", "false"}:
+                    pass
+                elif _gemini_sandbox_available():
+                    env["GEMINI_SANDBOX"] = "true"
+                else:
+                    if on_log:
+                        on_log(
+                            "Gemini sandbox requested but docker/podman not found; "
+                            "running without sandbox."
+                        )
+                    env["GEMINI_SANDBOX"] = "false"
+            else:
+                env["GEMINI_SANDBOX"] = "false"
         cmd = _build_gemini_cmd(
             sorted(mcp_configs),
             model=gemini_settings.get("model"),

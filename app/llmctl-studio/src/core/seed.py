@@ -1026,6 +1026,7 @@ AGENT_SEEDS = [
             """,
         ),
         "mcp_servers": ["github", "jira"],
+        "sync_mcp_servers": False,
     },
     {
         "name": "Coder",
@@ -1534,6 +1535,7 @@ def _seed_agents(session) -> None:
                 server = mcp_by_key.get(key)
                 if server is not None:
                     mcp_servers.append(server)
+        sync_mcp_servers = payload.get("sync_mcp_servers", True)
         agent = existing.get(name)
         if agent is None:
             Agent.create(
@@ -1556,7 +1558,7 @@ def _seed_agents(session) -> None:
             agent.prompt_json = prompt_json
         if agent.role_id is None and role_id is not None:
             agent.role_id = role_id
-        if mcp_servers:
+        if sync_mcp_servers and mcp_servers:
             for server in mcp_servers:
                 if server not in agent.mcp_servers:
                     agent.mcp_servers.append(server)
