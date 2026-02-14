@@ -1,3 +1,35 @@
+{% macro pagination_controls() %}
+  {% set current_page = page | default(1) | int %}
+  {% set current_per_page = per_page | default(10) | int %}
+  {% set current_total_pages = total_pages | default(1) | int %}
+  {% set current_pagination_items = pagination_items | default([]) %}
+  <nav class="pagination" aria-label="Tasks pages">
+    {% if current_page > 1 %}
+      <a class="pagination-btn" href="{{ url_for('tasks_index', page=current_page - 1, per_page=current_per_page) }}">Prev</a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+    {% endif %}
+    <div class="pagination-pages">
+      {% for item in current_pagination_items %}
+        {% if item.type == "gap" %}
+          <span class="pagination-ellipsis">&hellip;</span>
+        {% elif item.page == current_page %}
+          <span class="pagination-link is-active" aria-current="page">{{ item.page }}</span>
+        {% else %}
+          <a class="pagination-link" href="{{ url_for('tasks_index', page=item.page, per_page=current_per_page) }}">
+            {{ item.page }}
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if current_page < current_total_pages %}
+      <a class="pagination-btn" href="{{ url_for('tasks_index', page=current_page + 1, per_page=current_per_page) }}">Next</a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+{% endmacro %}
+
 <!doctype html>
 <html lang="en">
   <head>
@@ -22,7 +54,6 @@
             <div>
               <div class="eyebrow">LLMCTL</div>
               <div class="brand-title">RAG</div>
-              <div class="brand-meta">Context workspace</div>
             </div>
           </div>
           <nav class="nav">
@@ -35,6 +66,10 @@
               <a class="nav-item" href="{{ url_for('sources_index') }}">
                 <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
                 Sources
+              </a>
+              <a class="nav-item" href="{{ url_for('collections_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-layer-group"></i></span>
+                Collections
               </a>
               <a class="nav-item is-active" href="{{ url_for('tasks_index') }}">
                 <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
@@ -53,12 +88,28 @@
             <div class="topbar-row">
               <div>
                 <div class="title">Tasks</div>
-                <p class="subtitle">Track indexing work across sources.</p>
               </div>
             </div>
           </header>
 
-          <header class="action-header is-hidden"></header>
+          <header class="action-header">
+            <div class="action-header-row pagination-bar">
+              {{ pagination_controls() }}
+              <div class="action-header-actions pagination-bar-actions">
+                <form class="pagination-size" method="get" action="{{ url_for('tasks_index') }}">
+                  <input type="hidden" name="page" value="1" />
+                  <label for="tasks-per-page">Rows per page</label>
+                  <select name="per_page" id="tasks-per-page" onchange="this.form.submit()">
+                    {% for option in per_page_options %}
+                      <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>
+                        {{ option }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </form>
+              </div>
+            </div>
+          </header>
 
           <div class="content">
             {% if tasks_notice %}
@@ -84,6 +135,9 @@
                       <th>Status</th>
                       <th>Started</th>
                       <th>Finished</th>
+                      <th class="table-actions-cell">Pause</th>
+                      <th class="table-actions-cell">Resume</th>
+                      <th class="table-actions-cell">Cancel</th>
                       <th class="table-actions-cell">Delete</th>
                     </tr>
                   </thead>
@@ -117,16 +171,60 @@
                           <span class="status-pill status-running">running</span>
                         {% elif task.status == "queued" %}
                           <span class="status-pill status-queued">queued</span>
+                        {% elif task.status == "pausing" %}
+                          <span class="status-pill status-warning">pausing</span>
+                        {% elif task.status == "paused" %}
+                          <span class="status-pill status-warning">paused</span>
                         {% elif task.status == "succeeded" %}
                           <span class="status-pill status-success">succeeded</span>
                         {% elif task.status == "failed" %}
                           <span class="status-pill status-failed">failed</span>
+                        {% elif task.status == "cancelled" %}
+                          <span class="status-pill status-warning">cancelled</span>
                         {% else %}
                           <span class="status-pill">{{ task.status }}</span>
                         {% endif %}
                       </td>
                       <td data-task-started>{{ task.started_at or "-" }}</td>
                       <td data-task-finished>{{ task.finished_at or "-" }}</td>
+                      <td class="table-actions-cell">
+                        <form
+                          method="post"
+                          action="{{ url_for('pause_index_task', task_id=task.id) }}"
+                          data-confirm="Pause this task?"
+                          data-task-pause-form
+                          {% if task.status not in ["queued", "running"] %}style="display: none;"{% endif %}
+                        >
+                          <button type="submit" class="btn btn-icon btn-secondary" aria-label="Pause task">
+                            <i class="fa-solid fa-pause"></i>
+                          </button>
+                        </form>
+                      </td>
+                      <td class="table-actions-cell">
+                        <form
+                          method="post"
+                          action="{{ url_for('resume_index_task', task_id=task.id) }}"
+                          data-task-resume-form
+                          {% if task.status != "paused" %}style="display: none;"{% endif %}
+                        >
+                          <button type="submit" class="btn btn-icon btn-secondary" aria-label="Resume task">
+                            <i class="fa-solid fa-play"></i>
+                          </button>
+                        </form>
+                      </td>
+                      <td class="table-actions-cell">
+                        <form
+                          method="post"
+                          action="{{ url_for('stop_task', task_id=task.id) }}"
+                          data-confirm="Cancel this task?"
+                          data-task-cancel-form
+                          {% if task.status not in ["queued", "running", "pausing"] %}style="display: none;"{% endif %}
+                        >
+                          <button type="submit" class="btn btn-icon btn-secondary" aria-label="Cancel task">
+                            <i class="fa-solid fa-stop"></i>
+                          </button>
+                        </form>
+                      </td>
                       <td class="table-actions-cell">
                         <form
                           method="post"

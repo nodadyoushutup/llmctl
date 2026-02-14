@@ -1,5 +1,5 @@
 services:
-  redis:
+  llmctl-redis:
     image: redis:7.2-alpine
     command: ["redis-server", "--appendonly", "yes", "--port", "6380"]
     dns:
@@ -69,7 +69,7 @@ services:
       - LLMCTL_MCP_PATH=${LLMCTL_MCP_PATH:-/mcp}
       - LLMCTL_MCP_TRANSPORT=${LLMCTL_MCP_TRANSPORT:-stdio}
       - LLMCTL_STUDIO_DATA_DIR=/app/data
-      - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-192.168.1.36}
+      - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-llmctl-redis}
       - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
       - CELERY_REDIS_BROKER_DB=${CELERY_REDIS_BROKER_DB:-0}
       - CELERY_REDIS_BACKEND_DB=${CELERY_REDIS_BACKEND_DB:-1}
@@ -94,7 +94,7 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     ports:
-      - "8000:8000"
+      - "${CHROMA_HOST_PORT:-8000}:8000"
     volumes:
       - chroma_data:/chroma/chroma
     restart: unless-stopped
@@ -104,12 +104,37 @@ services:
       dockerfile: app/llmctl-rag/docker/llmctl-rag.Dockerfile
     container_name: llmctl-rag
     environment:
-      - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-192.168.1.36}
+      - CHROMA_HOST=${CHROMA_HOST:-}
+      - CHROMA_PORT=${CHROMA_PORT:-}
+      - CHROMA_COLLECTION=${CHROMA_COLLECTION:-}
+      - RAG_EMBED_PROVIDER=${RAG_EMBED_PROVIDER:-}
+      - RAG_CHAT_PROVIDER=${RAG_CHAT_PROVIDER:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_EMBED_MODEL=${OPENAI_EMBED_MODEL:-}
+      - RAG_EMBED_MAX_TOKENS_PER_REQUEST=${RAG_EMBED_MAX_TOKENS_PER_REQUEST:-120000}
+      - RAG_EMBED_TARGET_TOKENS_PER_MINUTE=${RAG_EMBED_TARGET_TOKENS_PER_MINUTE:-250000}
+      - RAG_EMBED_MIN_REQUEST_INTERVAL_S=${RAG_EMBED_MIN_REQUEST_INTERVAL_S:-0.75}
+      - RAG_EMBED_RATE_LIMIT_MAX_RETRIES=${RAG_EMBED_RATE_LIMIT_MAX_RETRIES:-8}
+      - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-}
+      - OPENAI_CHAT_TEMPERATURE=${OPENAI_CHAT_TEMPERATURE:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_EMBED_MODEL=${GEMINI_EMBED_MODEL:-}
+      - GEMINI_CHAT_MODEL=${GEMINI_CHAT_MODEL:-}
+      - RAG_CHAT_TEMPERATURE=${RAG_CHAT_TEMPERATURE:-}
+      - RAG_CHAT_RESPONSE_STYLE=${RAG_CHAT_RESPONSE_STYLE:-}
+      - RAG_DRIVE_SYNC_WORKERS=${RAG_DRIVE_SYNC_WORKERS:-4}
+      - RAG_INDEX_PARALLEL_WORKERS=${RAG_INDEX_PARALLEL_WORKERS:-1}
+      - RAG_PDF_PAGE_WORKERS=${RAG_PDF_PAGE_WORKERS:-1}
+      - RAG_EMBED_PARALLEL_REQUESTS=${RAG_EMBED_PARALLEL_REQUESTS:-6}
+      - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-llmctl-redis}
       - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
       - CELERY_REDIS_BROKER_DB=${CELERY_REDIS_BROKER_DB:-0}
       - CELERY_REDIS_BACKEND_DB=${CELERY_REDIS_BACKEND_DB:-1}
-      - LLMCTL_RAG_CELERY_BROKER_URL=redis://${CELERY_REDIS_HOST:-192.168.1.36}:${CELERY_REDIS_PORT:-6380}/${CELERY_REDIS_BROKER_DB:-0}
-      - LLMCTL_RAG_CELERY_RESULT_BACKEND=redis://${CELERY_REDIS_HOST:-192.168.1.36}:${CELERY_REDIS_PORT:-6380}/${CELERY_REDIS_BACKEND_DB:-1}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-6}
+      - CELERY_WORKER_QUEUES=${CELERY_WORKER_QUEUES:-llmctl_rag,llmctl_rag_index,llmctl_rag_drive,llmctl_rag_git}
+      - LLMCTL_RAG_CELERY_BROKER_URL=redis://${CELERY_REDIS_HOST:-llmctl-redis}:${CELERY_REDIS_PORT:-6380}/${CELERY_REDIS_BROKER_DB:-0}
+      - LLMCTL_RAG_CELERY_RESULT_BACKEND=redis://${CELERY_REDIS_HOST:-llmctl-redis}:${CELERY_REDIS_PORT:-6380}/${CELERY_REDIS_BACKEND_DB:-1}
     dns:
       - 192.168.1.1
       - 1.1.1.1
@@ -118,19 +143,26 @@ services:
       - "5050:5050"
     volumes:
       - ../app/llmctl-rag:/app/app/llmctl-rag
-      - llmctl_rag_data:/data/llmctl-rag
+      - ../data/llmctl-rag:/data/llmctl-rag
       - ../example:/example:ro
     depends_on:
       - chromadb
     restart: unless-stopped
   llmctl-studio:
     image: llmctl-studio:latest
+    build:
+      context: ..
+      dockerfile: app/llmctl-studio/docker/Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+        DOCKER_GID: ${DOCKER_GID:-999}
     container_name: llmctl-studio
     environment:
-      - CELERY_REDIS_HOST=192.168.1.36
-      - CELERY_REDIS_PORT=6380
-      - CELERY_REDIS_BROKER_DB=0
-      - CELERY_REDIS_BACKEND_DB=1
+      - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-llmctl-redis}
+      - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
+      - CELERY_REDIS_BROKER_DB=${CELERY_REDIS_BROKER_DB:-0}
+      - CELERY_REDIS_BACKEND_DB=${CELERY_REDIS_BACKEND_DB:-1}
     dns:
       - 192.168.1.1
       - 1.1.1.1
@@ -155,4 +187,3 @@ services:
     restart: unless-stopped
 volumes:
   chroma_data:
-  llmctl_rag_data:

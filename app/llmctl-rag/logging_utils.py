@@ -52,3 +52,9 @@ def log_event(event: str, **fields: Any) -> None:
             sink(_format_event(event, fields))
         except Exception:
             pass
+
+
+def submit_with_log_context(executor, fn: Callable[..., Any], *args: Any, **kwargs: Any):
+    """Submit work to a thread pool while preserving the active log sink context."""
+    ctx = contextvars.copy_context()
+    return executor.submit(ctx.run, fn, *args, **kwargs)

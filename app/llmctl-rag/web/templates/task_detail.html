@@ -22,7 +22,6 @@
             <div>
               <div class="eyebrow">LLMCTL</div>
               <div class="brand-title">RAG</div>
-              <div class="brand-meta">Context workspace</div>
             </div>
           </div>
           <nav class="nav">
@@ -35,6 +34,10 @@
               <a class="nav-item" href="{{ url_for('sources_index') }}">
                 <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
                 Sources
+              </a>
+              <a class="nav-item" href="{{ url_for('collections_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-layer-group"></i></span>
+                Collections
               </a>
               <a class="nav-item is-active" href="{{ url_for('tasks_index') }}">
                 <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
@@ -53,16 +56,52 @@
             <div class="topbar-row">
               <div>
                 <div class="title">Task {{ task.id }}</div>
-                <p class="subtitle">{{ task_kind_label(task.kind) }} run</p>
               </div>
             </div>
           </header>
 
           <header class="action-header">
             <div class="action-header-row">
-              <span class="muted">Task actions</span>
               <div class="action-header-actions">
                 <a class="btn btn-secondary" href="{{ url_for('tasks_index') }}">Back</a>
+                <form
+                  id="task-pause-form"
+                  method="post"
+                  action="{{ url_for('pause_index_task', task_id=task.id) }}"
+                  data-confirm="Pause this task?"
+                  {% if task.status not in ["queued", "running"] %}style="display: none;"{% endif %}
+                >
+                  <input type="hidden" name="next" value="detail" />
+                  <button type="submit" class="btn btn-secondary" aria-label="Pause task">
+                    <i class="fa-solid fa-pause"></i>
+                    Pause
+                  </button>
+                </form>
+                <form
+                  id="task-resume-form"
+                  method="post"
+                  action="{{ url_for('resume_index_task', task_id=task.id) }}"
+                  {% if task.status != "paused" %}style="display: none;"{% endif %}
+                >
+                  <input type="hidden" name="next" value="detail" />
+                  <button type="submit" class="btn btn-secondary" aria-label="Resume task">
+                    <i class="fa-solid fa-play"></i>
+                    Resume
+                  </button>
+                </form>
+                <form
+                  id="task-cancel-form"
+                  method="post"
+                  action="{{ url_for('stop_task', task_id=task.id) }}"
+                  data-confirm="Cancel this task?"
+                  {% if task.status not in ["queued", "running", "pausing"] %}style="display: none;"{% endif %}
+                >
+                  <input type="hidden" name="next" value="detail" />
+                  <button type="submit" class="btn btn-secondary" aria-label="Cancel task">
+                    <i class="fa-solid fa-stop"></i>
+                    Cancel
+                  </button>
+                </form>
                 <form
                   method="post"
                   action="{{ url_for('remove_task', task_id=task.id) }}"
@@ -77,6 +116,11 @@
           </header>
 
           <div class="content">
+            {% if task_notice %}
+            <div class="notice {% if task_notice.type %}{{ task_notice.type }}{% endif %}">
+              {{ task_notice.message }}
+            </div>
+            {% endif %}
             <section class="card">
               <div class="card-header">
                 <div>
@@ -92,10 +136,16 @@
                       <span class="status-pill status-running" id="task-status">running</span>
                     {% elif task.status == "queued" %}
                       <span class="status-pill status-queued" id="task-status">queued</span>
+                    {% elif task.status == "pausing" %}
+                      <span class="status-pill status-warning" id="task-status">pausing</span>
+                    {% elif task.status == "paused" %}
+                      <span class="status-pill status-warning" id="task-status">paused</span>
                     {% elif task.status == "succeeded" %}
                       <span class="status-pill status-success" id="task-status">succeeded</span>
                     {% elif task.status == "failed" %}
                       <span class="status-pill status-failed" id="task-status">failed</span>
+                    {% elif task.status == "cancelled" %}
+                      <span class="status-pill status-warning" id="task-status">cancelled</span>
                     {% else %}
                       <span class="status-pill" id="task-status">{{ task.status }}</span>
                     {% endif %}
@@ -112,6 +162,10 @@
                       All sources
                     {% endif %}
                   </strong>
+                </div>
+                <div>
+                  <span class="detail-label">Mode</span>
+                  <strong>{{ index_mode }}</strong>
                 </div>
                 <div>
                   <span class="detail-label">Reset</span>
@@ -135,6 +189,14 @@
                 </div>
               </div>
               <div class="detail-section">
+                <span class="detail-label">Progress</span>
+                {% if task_progress and task_progress.summary %}
+                  <p class="mono" id="task-progress-summary">{{ task_progress.summary }}</p>
+                {% else %}
+                  <p class="muted" id="task-progress-summary">No progress details yet.</p>
+                {% endif %}
+              </div>
+              <div class="detail-section">
                 <span class="detail-label">Output</span>
                 {% if task.output %}
                   <pre class="code-block" id="task-output">{{ task.output }}</pre>
@@ -151,7 +213,7 @@
                   <p class="muted" id="task-error">none</p>
                 {% endif %}
               </div>
-              {% if task.status in ["queued", "running"] %}
+              {% if task.status in ["queued", "running", "pausing"] %}
               <p class="muted" id="task-auto-refresh" style="margin-top: 16px;">
                 Auto-updating every 2 seconds while the task runs.
               </p>
@@ -163,7 +225,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
-    {% if task.status in ["queued", "running"] %}
+    {% if task.status in ["queued", "running", "pausing"] %}
     <script>
       (() => {
         const statusEl = document.getElementById("task-status");
@@ -174,14 +236,23 @@
         const outputEl = document.getElementById("task-output");
         const outputEmptyEl = document.getElementById("task-output-empty");
         const errorEl = document.getElementById("task-error");
+        const progressSummaryEl = document.getElementById("task-progress-summary");
         const autoRefreshEl = document.getElementById("task-auto-refresh");
+        const pauseFormEl = document.getElementById("task-pause-form");
+        const resumeFormEl = document.getElementById("task-resume-form");
+        const cancelFormEl = document.getElementById("task-cancel-form");
         const taskId = {{ task.id }};
+        const outputStickThresholdPx = 16;
+        let outputPinnedToBottom = true;
 
         const statusClasses = {
           running: "status-running",
           queued: "status-queued",
+          pausing: "status-warning",
+          paused: "status-warning",
           succeeded: "status-success",
           failed: "status-failed",
+          cancelled: "status-warning",
         };
 
         const updateText = (el, value, fallback = "-") => {
@@ -204,9 +275,43 @@
           statusEl.textContent = status || "-";
         };
 
+        const updateForms = (status) => {
+          const canPause = status === "queued" || status === "running";
+          const canResume = status === "paused";
+          const canCancel =
+            status === "queued" || status === "running" || status === "pausing";
+          if (pauseFormEl) {
+            pauseFormEl.style.display = canPause ? "" : "none";
+          }
+          if (resumeFormEl) {
+            resumeFormEl.style.display = canResume ? "" : "none";
+          }
+          if (cancelFormEl) {
+            cancelFormEl.style.display = canCancel ? "" : "none";
+          }
+        };
+
+        const isOutputNearBottom = () => {
+          if (!outputEl) {
+            return true;
+          }
+          return (
+            outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight <=
+            outputStickThresholdPx
+          );
+        };
+
+        const scrollOutputToBottom = () => {
+          if (!outputEl) {
+            return;
+          }
+          outputEl.scrollTop = outputEl.scrollHeight;
+        };
+
         const updateOutput = (output) => {
           const value = output || "";
           const hasOutput = value.length > 0;
+          const shouldStickToBottom = outputPinnedToBottom || isOutputNearBottom();
           if (outputEl) {
             outputEl.textContent = value;
             outputEl.style.display = hasOutput ? "" : "none";
@@ -214,6 +319,31 @@
           if (outputEmptyEl) {
             outputEmptyEl.style.display = hasOutput ? "none" : "";
           }
+          if (hasOutput && shouldStickToBottom) {
+            window.requestAnimationFrame(() => {
+              scrollOutputToBottom();
+              outputPinnedToBottom = true;
+            });
+          }
+        };
+
+        const updateProgress = (progress) => {
+          if (!progressSummaryEl) {
+            return;
+          }
+          const summary =
+            progress && typeof progress.summary === "string"
+              ? progress.summary.trim()
+              : "";
+          if (!summary) {
+            progressSummaryEl.textContent = "No progress details yet.";
+            progressSummaryEl.classList.add("muted");
+            progressSummaryEl.classList.remove("mono");
+            return;
+          }
+          progressSummaryEl.textContent = summary;
+          progressSummaryEl.classList.remove("muted");
+          progressSummaryEl.classList.add("mono");
         };
 
         const stopPolling = () => {
@@ -227,6 +357,14 @@
         };
 
         let pollTimer = null;
+
+        if (outputEl) {
+          scrollOutputToBottom();
+          outputPinnedToBottom = true;
+          outputEl.addEventListener("scroll", () => {
+            outputPinnedToBottom = isOutputNearBottom();
+          });
+        }
 
         const poll = async () => {
           try {
@@ -245,6 +383,8 @@
             updateText(celeryEl, data.celery_task_id);
             updateOutput(data.output);
             updateText(errorEl, data.error, "none");
+            updateProgress(data.progress);
+            updateForms(data.status);
             if (!data.running) {
               stopPolling();
               return;

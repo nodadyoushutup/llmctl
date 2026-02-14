@@ -104,6 +104,10 @@ def _ensure_source_columns() -> None:
             "indexed_file_count": "INTEGER",
             "indexed_chunk_count": "INTEGER",
             "indexed_file_types": "TEXT",
+            "drive_folder_id": "TEXT",
+            "index_schedule_value": "INTEGER",
+            "index_schedule_unit": "TEXT",
+            "next_index_at": "DATETIME",
         }
         for name, col_type in additions.items():
             if name in existing:

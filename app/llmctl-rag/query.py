@@ -4,9 +4,14 @@ import argparse
 import sys
 
 import chromadb
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
 from config import load_config
+from provider_adapters import (
+    build_embedding_function,
+    get_embedding_provider,
+    has_embedding_api_key,
+    missing_api_key_message,
+)
 from sources_store import list_sources
 
 
@@ -24,15 +29,13 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     config = load_config()
-    if not config.openai_api_key:
-        print("OPENAI_API_KEY is required to run a query.", file=sys.stderr)
+    embed_provider = get_embedding_provider(config)
+    if not has_embedding_api_key(config):
+        print(missing_api_key_message(embed_provider, "Query"), file=sys.stderr)
         return 1
 
     client = chromadb.HttpClient(host=config.chroma_host, port=config.chroma_port)
-    embedding_fn = OpenAIEmbeddingFunction(
-        api_key=config.openai_api_key,
-        model_name=config.openai_embedding_model,
-    )
+    embedding_fn = build_embedding_function(config)
     sources = list_sources()
     collections = []
     if sources:

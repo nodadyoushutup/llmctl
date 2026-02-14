@@ -4,4 +4,4 @@ Flask-Seeder>=1.2.0
 SQLAlchemy>=2.0.0
 celery>=5.3.6
 redis>=5.0.1
-setuptools>=69.0.0
+setuptools>=69.0.0,<81

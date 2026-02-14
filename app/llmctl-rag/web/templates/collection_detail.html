@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ collection_name }} | Collections | llmctl-rag</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      referrerpolicy="no-referrer"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="brand-icon">
+              <i class="fa-solid fa-robot"></i>
+            </div>
+            <div>
+              <div class="eyebrow">LLMCTL</div>
+              <div class="brand-title">RAG</div>
+            </div>
+          </div>
+          <nav class="nav">
+            <div class="nav-section">
+              <div class="nav-section-title">Core</div>
+              <a class="nav-item" href="{{ url_for('index', view='chat') }}">
+                <span class="nav-icon"><i class="fa-solid fa-comment-dots"></i></span>
+                Chat
+              </a>
+              <a class="nav-item" href="{{ url_for('sources_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
+                Sources
+              </a>
+              <a class="nav-item is-active" href="{{ url_for('collections_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-layer-group"></i></span>
+                Collections
+              </a>
+              <a class="nav-item" href="{{ url_for('tasks_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
+                Tasks
+              </a>
+              <a class="nav-item" href="{{ url_for('index', view='settings') }}">
+                <span class="nav-icon"><i class="fa-solid fa-sliders"></i></span>
+                Settings
+              </a>
+            </div>
+          </nav>
+        </aside>
+
+        <main class="main">
+          <header class="topbar">
+            <div class="topbar-row">
+              <div>
+                <div class="title">Collection</div>
+              </div>
+            </div>
+          </header>
+
+          <header class="action-header">
+            <div class="action-header-row">
+              <div class="action-header-actions">
+                <form
+                  method="post"
+                  action="{{ url_for('remove_collection') }}"
+                  data-confirm="Delete this collection from Chroma?"
+                >
+                  <input type="hidden" name="collection_name" value="{{ collection_name }}" />
+                  <input type="hidden" name="next" value="detail" />
+                  <button type="submit" class="btn btn-icon btn-danger" aria-label="Delete collection">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+                <a class="btn btn-secondary" href="{{ url_for('collections_index') }}">Back</a>
+              </div>
+            </div>
+          </header>
+
+          <div class="content">
+            {% if collection_notice %}
+            <div class="notice {% if collection_notice.type %}{{ collection_notice.type }}{% endif %}">
+              {{ collection_notice.message }}
+            </div>
+            {% endif %}
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2 class="section-title">Collection details</h2>
+                  <p class="muted">Chroma metadata and mapped source.</p>
+                </div>
+              </div>
+              <div class="detail-grid">
+                <div>
+                  <span class="detail-label">Name</span>
+                  <strong class="mono">{{ collection_name }}</strong>
+                </div>
+                <div>
+                  <span class="detail-label">Documents</span>
+                  <strong>{{ collection_count }}</strong>
+                </div>
+                <div>
+                  <span class="detail-label">Mapped source</span>
+                  <strong>
+                    {% if source %}
+                      <a href="{{ url_for('sources_detail', source_id=source.id) }}">{{ source.name }}</a>
+                    {% else %}
+                      none
+                    {% endif %}
+                  </strong>
+                </div>
+              </div>
+              <div class="detail-section">
+                <span class="detail-label">Metadata</span>
+                <pre class="code-block">{{ collection_metadata_json }}</pre>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

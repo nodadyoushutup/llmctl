@@ -12,7 +12,7 @@ def _env(key: str, default: str) -> str:
 
 BROKER_URL = _env(
     "LLMCTL_RAG_CELERY_BROKER_URL",
-    _env("CELERY_BROKER_URL", "redis://192.168.1.36:6379/0"),
+    _env("CELERY_BROKER_URL", "redis://llmctl-redis:6380/0"),
 )
 RESULT_BACKEND = _env(
     "LLMCTL_RAG_CELERY_RESULT_BACKEND",
@@ -22,6 +22,7 @@ RESULT_BACKEND = _env(
 celery_app = Celery("llmctl_rag")
 celery_config = {
     "broker_url": BROKER_URL,
+    "task_default_queue": "llmctl_rag",
     "task_track_started": True,
     "task_serializer": "json",
     "accept_content": ["json"],

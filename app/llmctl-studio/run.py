@@ -27,6 +27,7 @@ def _start_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | 
     if not _should_start_worker(debug):
         return None
 
+    queue_name = "llmctl_studio"
     concurrency = os.getenv("CELERY_WORKER_CONCURRENCY", "6")
     loglevel = os.getenv("CELERY_WORKER_LOGLEVEL", "info")
     env = os.environ.copy()
@@ -44,6 +45,8 @@ def _start_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | 
         loglevel,
         "--concurrency",
         concurrency,
+        "--queues",
+        queue_name,
     ]
     return subprocess.Popen(command, cwd=repo_root, env=env)
 

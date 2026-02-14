@@ -22,7 +22,6 @@
             <div>
               <div class="eyebrow">LLMCTL</div>
               <div class="brand-title">RAG</div>
-              <div class="brand-meta">Context workspace</div>
             </div>
           </div>
           <nav class="nav">
@@ -41,6 +40,13 @@
               >
                 <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
                 Sources
+              </a>
+              <a
+                class="nav-item {% if active_nav == 'collections' %}is-active{% endif %}"
+                href="{{ url_for('collections_index') }}"
+              >
+                <span class="nav-icon"><i class="fa-solid fa-layer-group"></i></span>
+                Collections
               </a>
               <a
                 class="nav-item {% if active_nav == 'tasks' %}is-active{% endif %}"
@@ -66,10 +72,8 @@
               <div>
                 {% if active_view == 'chat' %}
                   <div class="title">Chat</div>
-                  <p class="subtitle">Ask about your repo, files, or indexed docs.</p>
                 {% else %}
                   <div class="title">Settings</div>
-                  <p class="subtitle">Integrations, runtime, and model controls.</p>
                 {% endif %}
               </div>
             </div>
@@ -78,7 +82,6 @@
           {% if active_view == 'chat' %}
           <header class="action-header">
             <div class="action-header-row">
-              <span class="muted">Conversation</span>
               <div class="action-header-actions">
                 <div
                   id="context-meter"
@@ -102,8 +105,8 @@
           {% endif %}
 
           <div class="content">
-            {% if not has_api_key %}
-            <div class="banner">OPENAI_API_KEY is not set. Replies will fail until it is provided.</div>
+            {% if missing_api_key %}
+            <div class="banner">{{ missing_api_key }}</div>
             {% endif %}
 
             <section
@@ -121,10 +124,18 @@
                     <textarea
                       id="message-input"
                       name="message"
-                      placeholder="Ask about your repo, files, or indexed docs..."
+                      placeholder=""
                       rows="1"
                     ></textarea>
                     <button type="submit" id="send-btn">Send</button>
+                    <label class="composer-verbosity" for="verbosity-select">
+                      <span class="sr-only">Verbosity</span>
+                      <select id="verbosity-select" name="verbosity" class="composer-select" title="Verbosity">
+                        <option value="low" {% if chat_response_style == 'low' %}selected{% endif %}>Low</option>
+                        <option value="medium" {% if chat_response_style == 'medium' %}selected{% endif %}>Medium</option>
+                        <option value="high" {% if chat_response_style == 'high' %}selected{% endif %}>High</option>
+                      </select>
+                    </label>
                   </div>
                   <div class="composer-footer">
                     <div id="status" class="status status-panel">Ready.</div>
@@ -194,8 +205,41 @@
                 <div class="card">
                   <div class="card-header">
                     <div>
+                      <h2 class="section-title">Google Drive integration</h2>
+                      <p class="muted">Paste a Google service account JSON key for Drive folder indexing.</p>
+                    </div>
+                    <span class="status-pill {% if google_drive_connected %}status-success{% else %}status-warning{% endif %}">
+                      {% if google_drive_connected %}connected{% else %}needs key{% endif %}
+                    </span>
+                  </div>
+                  <form method="post" action="{{ url_for('update_google_drive_settings') }}" class="form-grid">
+                    <label class="label">
+                      Service account JSON
+                      <textarea
+                        class="input"
+                        name="google_drive_service_account_json"
+                        rows="10"
+                        placeholder='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'
+                      >{{ google_drive_settings.get('service_account_json', '') }}</textarea>
+                      <span class="help">
+                        {% if google_drive_service_email %}
+                          Service account: {{ google_drive_service_email }}
+                        {% else %}
+                          Share Drive folders with the service account email before verifying.
+                        {% endif %}
+                      </span>
+                    </label>
+                    <div class="form-actions">
+                      <button type="submit">Save Google Drive</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div class="card">
+                  <div class="card-header">
+                    <div>
                       <h2 class="section-title">Runtime + models</h2>
-                      <p class="muted">Configure Chroma connection and OpenAI model behavior.</p>
+                      <p class="muted">Configure Chroma and choose OpenAI or Gemini for embeddings and chat.</p>
                     </div>
                   </div>
                   <form method="post" action="{{ url_for('update_rag_settings') }}" class="form-grid">
@@ -221,6 +265,21 @@
                       />
                     </label>
                     <label class="label">
+                      Embedding provider
+                      <select class="input" name="embed_provider">
+                        <option value="openai" {% if embed_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                        <option value="gemini" {% if embed_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                      </select>
+                      <span class="help">Switching embedding provider/model requires a re-index.</span>
+                    </label>
+                    <label class="label">
+                      Chat provider
+                      <select class="input" name="chat_provider">
+                        <option value="openai" {% if chat_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                        <option value="gemini" {% if chat_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                      </select>
+                    </label>
+                    <label class="label">
                       OpenAI API key
                       <input
                         class="input"
@@ -231,7 +290,17 @@
                       />
                     </label>
                     <label class="label">
-                      Embedding model
+                      Gemini API key
+                      <input
+                        class="input"
+                        type="password"
+                        name="gemini_api_key"
+                        value="{{ gemini_api_key }}"
+                        placeholder="AIza..."
+                      />
+                    </label>
+                    <label class="label">
+                      OpenAI embedding model
                       <input
                         class="input"
                         type="text"
@@ -241,7 +310,17 @@
                       />
                     </label>
                     <label class="label">
-                      Chat model
+                      Gemini embedding model
+                      <input
+                        class="input"
+                        type="text"
+                        name="gemini_embed_model"
+                        value="{{ gemini_embed_model }}"
+                        placeholder="models/gemini-embedding-001"
+                      />
+                    </label>
+                    <label class="label">
+                      OpenAI chat model
                       <input
                         class="input"
                         type="text"
@@ -251,13 +330,31 @@
                       />
                     </label>
                     <label class="label">
+                      Gemini chat model
+                      <input
+                        class="input"
+                        type="text"
+                        name="gemini_chat_model"
+                        value="{{ gemini_chat_model }}"
+                        placeholder="gemini-2.5-flash"
+                      />
+                    </label>
+                    <label class="label">
+                      Default chat verbosity
+                      <select class="input" name="chat_response_style">
+                        <option value="low" {% if chat_response_style == 'low' %}selected{% endif %}>Low</option>
+                        <option value="medium" {% if chat_response_style == 'medium' %}selected{% endif %}>Medium</option>
+                        <option value="high" {% if chat_response_style == 'high' %}selected{% endif %}>High</option>
+                      </select>
+                    </label>
+                    <label class="label">
                       Chat temperature
                       <input
                         class="input"
                         type="number"
-                        name="openai_chat_temperature"
+                        name="chat_temperature"
                         step="0.1"
-                        value="{{ openai_chat_temperature }}"
+                        value="{{ chat_temperature }}"
                       />
                     </label>
                     <label class="label">
@@ -340,6 +437,7 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

@@ -19,12 +19,16 @@ class Source(BaseModel):
     git_repo: Mapped[str | None] = mapped_column(String(255))
     git_branch: Mapped[str | None] = mapped_column(String(128))
     git_dir: Mapped[str | None] = mapped_column(Text)
+    drive_folder_id: Mapped[str | None] = mapped_column(String(255))
     collection: Mapped[str] = mapped_column(String(128), nullable=False)
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     indexed_file_count: Mapped[int | None] = mapped_column(Integer)
     indexed_chunk_count: Mapped[int | None] = mapped_column(Integer)
     indexed_file_types: Mapped[str | None] = mapped_column(Text)
+    index_schedule_value: Mapped[int | None] = mapped_column(Integer)
+    index_schedule_unit: Mapped[str | None] = mapped_column(String(16))
+    next_index_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -47,6 +51,28 @@ class Task(BaseModel):
     meta_json: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class SourceFileState(BaseModel):
+    __tablename__ = "source_file_states"
+    __table_args__ = (
+        UniqueConstraint("source_id", "path", name="uq_source_file_states_source_path"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(80), nullable=False)
+    indexed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    doc_type: Mapped[str | None] = mapped_column(String(32))
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False

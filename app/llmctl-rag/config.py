@@ -49,6 +49,15 @@ _DEFAULT_EXCLUDE_GLOBS = [
 _DEFAULT_MAX_FILE_BYTES_BY_TYPE = {
     "pdf": 1_000_000_000,
 }
+_SUPPORTED_MODEL_PROVIDERS = {"openai", "gemini"}
+_SUPPORTED_CHAT_RESPONSE_STYLES = {"low", "medium", "high"}
+_CHAT_RESPONSE_STYLE_ALIASES = {
+    "concise": "low",
+    "brief": "low",
+    "balanced": "medium",
+    "detailed": "high",
+    "verbose": "high",
+}
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -113,10 +122,19 @@ class RagConfig:
     chroma_host: str
     chroma_port: int
     collection: str
+    embed_provider: str
+    chat_provider: str
     openai_api_key: str | None
+    gemini_api_key: str | None
     openai_embedding_model: str
+    gemini_embedding_model: str
+    embed_model: str
     embed_max_tokens_per_request: int
     embed_max_tokens_per_input: int
+    embed_max_batch_items: int
+    embed_min_request_interval_s: float
+    embed_target_tokens_per_minute: int
+    embed_rate_limit_max_retries: int
     git_url: str | None
     git_repo: str | None
     git_pat: str | None
@@ -139,7 +157,17 @@ class RagConfig:
     enabled_doc_types: set[str]
     ocr_enabled: bool
     ocr_lang: str
+    ocr_dpi: int
+    ocr_timeout_s: int
+    ocr_include_char_boxes: bool
+    drive_sync_workers: int
+    index_parallel_workers: int
+    pdf_page_workers: int
+    embed_parallel_requests: int
+    openai_chat_model: str
+    gemini_chat_model: str
     chat_model: str
+    chat_response_style: str
     chat_temperature: float
     chat_top_k: int
     chat_max_history: int
@@ -164,6 +192,15 @@ def _as_float(value: str | None, default: float) -> float:
         return default
 
 
+def _as_int(value: str | None, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _setting(
     env_key: str,
     rag_settings: dict[str, str],
@@ -176,6 +213,36 @@ def _setting(
     rag_value = (rag_settings.get(rag_key) or "").strip()
     if rag_value:
         return rag_value
+    return default
+
+
+def _setting_rag_first(
+    env_key: str,
+    rag_settings: dict[str, str],
+    rag_key: str,
+    default: str | None = None,
+) -> str | None:
+    rag_value = (rag_settings.get(rag_key) or "").strip()
+    if rag_value:
+        return rag_value
+    env_value = (os.getenv(env_key) or "").strip()
+    if env_value:
+        return env_value
+    return default
+
+
+def _normalize_provider(value: str | None, default: str = "openai") -> str:
+    candidate = (value or "").strip().lower()
+    if candidate in _SUPPORTED_MODEL_PROVIDERS:
+        return candidate
+    return default
+
+
+def _normalize_chat_response_style(value: str | None, default: str = "high") -> str:
+    candidate = (value or "").strip().lower()
+    candidate = _CHAT_RESPONSE_STYLE_ALIASES.get(candidate, candidate)
+    if candidate in _SUPPORTED_CHAT_RESPONSE_STYLES:
+        return candidate
     return default
 
 
@@ -225,6 +292,9 @@ def parser_signature(config: RagConfig, version: str) -> str:
         "enabled_doc_types": sorted(config.enabled_doc_types),
         "ocr_enabled": config.ocr_enabled,
         "ocr_lang": config.ocr_lang,
+        "ocr_dpi": config.ocr_dpi,
+        "ocr_timeout_s": config.ocr_timeout_s,
+        "ocr_include_char_boxes": config.ocr_include_char_boxes,
     }
     return _signature_payload(payload)
 
@@ -327,6 +397,115 @@ def load_config() -> RagConfig:
         "no",
     }
     ocr_lang = _setting("RAG_OCR_LANG", rag_settings, "ocr_lang", "eng") or "eng"
+    ocr_dpi = max(
+        72,
+        _as_int(
+            _setting("RAG_OCR_DPI", rag_settings, "ocr_dpi", "150"),
+            150,
+        ),
+    )
+    ocr_timeout_s = max(
+        0,
+        _as_int(
+            _setting("RAG_OCR_TIMEOUT_S", rag_settings, "ocr_timeout_s", "45"),
+            45,
+        ),
+    )
+    ocr_include_char_boxes = _as_bool(
+        _setting(
+            "RAG_OCR_INCLUDE_CHAR_BOXES",
+            rag_settings,
+            "ocr_include_char_boxes",
+            "false",
+        ),
+        False,
+    )
+
+    embed_provider = _normalize_provider(
+        _setting_rag_first(
+            "RAG_EMBED_PROVIDER", rag_settings, "embed_provider", "openai"
+        ),
+        "openai",
+    )
+    chat_provider = _normalize_provider(
+        _setting_rag_first(
+            "RAG_CHAT_PROVIDER", rag_settings, "chat_provider", "openai"
+        ),
+        "openai",
+    )
+
+    openai_api_key = _setting_rag_first(
+        "OPENAI_API_KEY", rag_settings, "openai_api_key", None
+    )
+    gemini_api_key = _setting_rag_first(
+        "GEMINI_API_KEY", rag_settings, "gemini_api_key", None
+    )
+    if not gemini_api_key:
+        gemini_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or None
+
+    openai_embedding_model = (
+        _setting_rag_first(
+            "OPENAI_EMBED_MODEL",
+            rag_settings,
+            "openai_embed_model",
+            "text-embedding-3-small",
+        )
+        or "text-embedding-3-small"
+    )
+    gemini_embedding_model = (
+        _setting_rag_first(
+            "GEMINI_EMBED_MODEL",
+            rag_settings,
+            "gemini_embed_model",
+            "models/gemini-embedding-001",
+        )
+        or "models/gemini-embedding-001"
+    )
+    embed_model = (
+        gemini_embedding_model
+        if embed_provider == "gemini"
+        else openai_embedding_model
+    )
+
+    openai_chat_model = (
+        _setting_rag_first(
+            "OPENAI_CHAT_MODEL", rag_settings, "openai_chat_model", "gpt-4o-mini"
+        )
+        or "gpt-4o-mini"
+    )
+    gemini_chat_model = (
+        _setting_rag_first(
+            "GEMINI_CHAT_MODEL",
+            rag_settings,
+            "gemini_chat_model",
+            "gemini-2.5-flash",
+        )
+        or "gemini-2.5-flash"
+    )
+    chat_model = gemini_chat_model if chat_provider == "gemini" else openai_chat_model
+    chat_response_style = _normalize_chat_response_style(
+        _setting_rag_first(
+            "RAG_CHAT_RESPONSE_STYLE",
+            rag_settings,
+            "chat_response_style",
+            "high",
+        ),
+        "high",
+    )
+
+    chat_temperature_raw = _setting_rag_first(
+        "RAG_CHAT_TEMPERATURE",
+        rag_settings,
+        "chat_temperature",
+        None,
+    )
+    if chat_temperature_raw is None:
+        chat_temperature_raw = _setting_rag_first(
+            "OPENAI_CHAT_TEMPERATURE",
+            rag_settings,
+            "openai_chat_temperature",
+            None,
+        )
 
     return RagConfig(
         repo_root=repo_root,
@@ -340,16 +519,13 @@ def load_config() -> RagConfig:
             "CHROMA_COLLECTION", rag_settings, "chroma_collection", "llmctl_repo"
         )
         or "llmctl_repo",
-        openai_api_key=_setting(
-            "OPENAI_API_KEY", rag_settings, "openai_api_key", None
-        ),
-    openai_embedding_model=_setting(
-            "OPENAI_EMBED_MODEL",
-            rag_settings,
-            "openai_embed_model",
-            "text-embedding-3-small",
-        )
-        or "text-embedding-3-small",
+        embed_provider=embed_provider,
+        chat_provider=chat_provider,
+        openai_api_key=openai_api_key,
+        gemini_api_key=gemini_api_key,
+        openai_embedding_model=openai_embedding_model,
+        gemini_embedding_model=gemini_embedding_model,
+        embed_model=embed_model,
         embed_max_tokens_per_request=int(
             _setting(
                 "RAG_EMBED_MAX_TOKENS_PER_REQUEST",
@@ -367,6 +543,42 @@ def load_config() -> RagConfig:
                 "8192",
             )
             or "8192"
+        ),
+        embed_max_batch_items=_as_int(
+            _setting(
+                "RAG_EMBED_MAX_BATCH_ITEMS",
+                rag_settings,
+                "embed_max_batch_items",
+                "100",
+            ),
+            100,
+        ),
+        embed_min_request_interval_s=_as_float(
+            _setting(
+                "RAG_EMBED_MIN_REQUEST_INTERVAL_S",
+                rag_settings,
+                "embed_min_request_interval_s",
+                "0",
+            ),
+            0.0,
+        ),
+        embed_target_tokens_per_minute=_as_int(
+            _setting(
+                "RAG_EMBED_TARGET_TOKENS_PER_MINUTE",
+                rag_settings,
+                "embed_target_tokens_per_minute",
+                "0",
+            ),
+            0,
+        ),
+        embed_rate_limit_max_retries=_as_int(
+            _setting(
+                "RAG_EMBED_RATE_LIMIT_MAX_RETRIES",
+                rag_settings,
+                "embed_rate_limit_max_retries",
+                "6",
+            ),
+            6,
         ),
         git_url=git_url,
         git_repo=git_repo,
@@ -412,16 +624,68 @@ def load_config() -> RagConfig:
         enabled_doc_types=enabled_doc_types,
         ocr_enabled=ocr_enabled,
         ocr_lang=ocr_lang,
-        chat_model=_setting(
-            "OPENAI_CHAT_MODEL", rag_settings, "openai_chat_model", "gpt-4o-mini"
-        )
-        or "gpt-4o-mini",
-        chat_temperature=_as_float(
-            _setting(
-                "OPENAI_CHAT_TEMPERATURE", rag_settings, "openai_chat_temperature", None
+        ocr_dpi=ocr_dpi,
+        ocr_timeout_s=ocr_timeout_s,
+        ocr_include_char_boxes=ocr_include_char_boxes,
+        drive_sync_workers=max(
+            1,
+            _as_int(
+                _setting(
+                    "RAG_DRIVE_SYNC_WORKERS",
+                    rag_settings,
+                    "drive_sync_workers",
+                    "4",
+                ),
+                4,
             ),
-            0.2,
         ),
+        index_parallel_workers=max(
+            1,
+            _as_int(
+                _setting(
+                    "RAG_INDEX_PARALLEL_WORKERS",
+                    rag_settings,
+                    "index_parallel_workers",
+                    "1",
+                ),
+                1,
+            ),
+        ),
+        pdf_page_workers=max(
+            1,
+            _as_int(
+                _setting(
+                    "RAG_PDF_PAGE_WORKERS",
+                    rag_settings,
+                    "pdf_page_workers",
+                    "1",
+                ),
+                1,
+            ),
+        ),
+        embed_parallel_requests=max(
+            1,
+            _as_int(
+                _setting(
+                    "RAG_EMBED_PARALLEL_REQUESTS",
+                    rag_settings,
+                    "embed_parallel_requests",
+                    _setting(
+                        "CELERY_WORKER_CONCURRENCY",
+                        rag_settings,
+                        "celery_worker_concurrency",
+                        "6",
+                    )
+                    or "6",
+                ),
+                6,
+            ),
+        ),
+        openai_chat_model=openai_chat_model,
+        gemini_chat_model=gemini_chat_model,
+        chat_model=chat_model,
+        chat_response_style=chat_response_style,
+        chat_temperature=_as_float(chat_temperature_raw, 0.2),
         chat_top_k=int(
             _setting("RAG_CHAT_TOP_K", rag_settings, "chat_top_k", "5") or "5"
         ),
@@ -473,7 +737,7 @@ def build_source_config(base: RagConfig, source, github_settings: dict[str, str]
     git_pat = (github_settings.get("pat") or "").strip() or None
     git_ssh_key_path = (github_settings.get("ssh_key_path") or "").strip() or None
 
-    if kind == "local":
+    if kind in {"local", "google_drive"}:
         rag_mode = "local"
         local_path = (getattr(source, "local_path", "") or "").strip()
         if local_path:

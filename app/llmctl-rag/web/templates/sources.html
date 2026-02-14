@@ -1,3 +1,35 @@
+{% macro pagination_controls() %}
+  {% set current_page = page | default(1) | int %}
+  {% set current_per_page = per_page | default(10) | int %}
+  {% set current_total_pages = total_pages | default(1) | int %}
+  {% set current_pagination_items = pagination_items | default([]) %}
+  <nav class="pagination" aria-label="Sources pages">
+    {% if current_page > 1 %}
+      <a class="pagination-btn" href="{{ url_for('sources_index', page=current_page - 1, per_page=current_per_page) }}">Prev</a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+    {% endif %}
+    <div class="pagination-pages">
+      {% for item in current_pagination_items %}
+        {% if item.type == "gap" %}
+          <span class="pagination-ellipsis">&hellip;</span>
+        {% elif item.page == current_page %}
+          <span class="pagination-link is-active" aria-current="page">{{ item.page }}</span>
+        {% else %}
+          <a class="pagination-link" href="{{ url_for('sources_index', page=item.page, per_page=current_per_page) }}">
+            {{ item.page }}
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if current_page < current_total_pages %}
+      <a class="pagination-btn" href="{{ url_for('sources_index', page=current_page + 1, per_page=current_per_page) }}">Next</a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+{% endmacro %}
+
 <!doctype html>
 <html lang="en">
   <head>
@@ -22,7 +54,6 @@
             <div>
               <div class="eyebrow">LLMCTL</div>
               <div class="brand-title">RAG</div>
-              <div class="brand-meta">Context workspace</div>
             </div>
           </div>
           <nav class="nav">
@@ -35,6 +66,10 @@
               <a class="nav-item is-active" href="{{ url_for('sources_index') }}">
                 <span class="nav-icon"><i class="fa-solid fa-database"></i></span>
                 Sources
+              </a>
+              <a class="nav-item" href="{{ url_for('collections_index') }}">
+                <span class="nav-icon"><i class="fa-solid fa-layer-group"></i></span>
+                Collections
               </a>
               <a class="nav-item" href="{{ url_for('tasks_index') }}">
                 <span class="nav-icon"><i class="fa-solid fa-list-check"></i></span>
@@ -53,15 +88,25 @@
             <div class="topbar-row">
               <div>
                 <div class="title">Sources</div>
-                <p class="subtitle">Source registry and indexing status.</p>
               </div>
             </div>
           </header>
 
           <header class="action-header">
-            <div class="action-header-row">
-              <span class="muted">Manage your collections</span>
-              <div class="action-header-actions">
+            <div class="action-header-row pagination-bar">
+              {{ pagination_controls() }}
+              <div class="action-header-actions pagination-bar-actions">
+                <form class="pagination-size" method="get" action="{{ url_for('sources_index') }}">
+                  <input type="hidden" name="page" value="1" />
+                  <label for="sources-per-page">Rows per page</label>
+                  <select name="per_page" id="sources-per-page" onchange="this.form.submit()">
+                    {% for option in per_page_options %}
+                      <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>
+                        {{ option }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </form>
                 <a class="btn btn-primary" href="{{ url_for('sources_new') }}">New source</a>
               </div>
             </div>
@@ -90,13 +135,22 @@
                       <th>Type</th>
                       <th>Location</th>
                       <th>Collection</th>
+                      <th>Schedule</th>
+                      <th>Last indexed</th>
+                      <th>Next index</th>
                       <th>Status</th>
-                      <th class="table-actions-cell">Index</th>
+                      <th class="table-actions-cell">Fresh</th>
+                      <th class="table-actions-cell">Delta</th>
+                      <th class="table-actions-cell">Resume</th>
+                      <th class="table-actions-cell">Pause</th>
+                      <th class="table-actions-cell">Edit</th>
                       <th class="table-actions-cell">Delete</th>
                     </tr>
                   </thead>
                   <tbody>
                     {% for source in sources %}
+                    {% set is_active = source.id in source_active_ids %}
+                    {% set can_resume = source.id in source_resumable_ids %}
                     <tr
                       class="table-row-link"
                       data-href="{{ url_for('sources_detail', source_id=source.id) }}"
@@ -108,17 +162,38 @@
                       <td class="truncate">
                         {% if source.kind == 'local' %}
                           {{ source.local_path }}
+                        {% elif source.kind == 'google_drive' %}
+                          folder {{ source.drive_folder_id }}
                         {% else %}
                           {{ source.git_repo }}
                         {% endif %}
                       </td>
                       <td class="mono">{{ source.collection }}</td>
+                      <td>{{ source_schedule_text(source) }}</td>
+                      <td>
+                        <span class="source-last-indexed" data-source-id="{{ source.id }}">
+                          {{ format_source_time(source.last_indexed_at) }}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="source-next-index" data-source-id="{{ source.id }}">
+                          {% if source.index_schedule_value and source.index_schedule_unit %}
+                            {{ format_source_time(source.next_index_at) }}
+                          {% else %}
+                            Not scheduled
+                          {% endif %}
+                        </span>
+                      </td>
                       <td>
                         <span class="source-status" data-source-id="{{ source.id }}">
-                          {% if source.last_error %}
+                          {% if is_active %}
+                            Indexing...
+                          {% elif can_resume %}
+                            Paused
+                          {% elif source.last_error %}
                             Error
                           {% elif source.last_indexed_at %}
-                            Indexed {{ source.last_indexed_at }}
+                            Indexed {{ format_source_time(source.last_indexed_at) }}
                           {% else %}
                             Not indexed
                           {% endif %}
@@ -127,13 +202,60 @@
                       <td class="table-actions-cell">
                         <button
                           type="button"
-                          class="btn btn-icon btn-primary source-index-btn"
-                          title="Index source"
-                          aria-label="Index source"
+                          class="btn btn-icon btn-primary source-index-btn source-action-btn"
+                          title="Fresh index"
+                          aria-label="Fresh index"
                           data-source-id="{{ source.id }}"
+                          {% if is_active or can_resume %}disabled{% endif %}
                         >
                           <i class="fa-solid fa-rotate-right"></i>
                         </button>
+                      </td>
+                      <td class="table-actions-cell">
+                        <button
+                          type="button"
+                          class="btn btn-icon btn-secondary source-delta-btn source-action-btn"
+                          title="Delta index"
+                          aria-label="Delta index"
+                          data-source-id="{{ source.id }}"
+                          {% if is_active or can_resume %}disabled{% endif %}
+                        >
+                          <i class="fa-solid fa-code-branch"></i>
+                        </button>
+                      </td>
+                      <td class="table-actions-cell">
+                        <button
+                          type="button"
+                          class="btn btn-icon btn-secondary source-resume-btn source-action-btn"
+                          title="Resume paused index"
+                          aria-label="Resume paused index"
+                          data-source-id="{{ source.id }}"
+                          {% if not can_resume or is_active %}disabled{% endif %}
+                        >
+                          <i class="fa-solid fa-play"></i>
+                        </button>
+                      </td>
+                      <td class="table-actions-cell">
+                        <button
+                          type="button"
+                          class="btn btn-icon btn-secondary source-pause-btn source-action-btn"
+                          title="Pause active index"
+                          aria-label="Pause active index"
+                          data-source-id="{{ source.id }}"
+                          {% if not is_active %}disabled{% endif %}
+                        >
+                          <i class="fa-solid fa-pause"></i>
+                        </button>
+                      </td>
+                      <td class="table-actions-cell">
+                        <a
+                          class="btn btn-icon btn-secondary"
+                          href="{{ url_for('sources_edit', source_id=source.id) }}"
+                          title="Edit source"
+                          aria-label="Edit source"
+                        >
+                          <i class="fa-solid fa-pen"></i>
+                        </a>
                       </td>
                       <td class="table-actions-cell">
                         <form

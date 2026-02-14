@@ -6,12 +6,16 @@ import sys
 from pathlib import Path
 
 from config import load_config
-from web_app import create_app
+from web_app import create_app, start_source_scheduler, stop_source_scheduler
 
 
 def _should_start_worker(debug: bool) -> bool:
     if os.getenv("CELERY_AUTOSTART", "true").lower() != "true":
         return False
+    return _should_start_background(debug)
+
+
+def _should_start_background(debug: bool) -> bool:
     if debug and os.getenv("WERKZEUG_RUN_MAIN") != "true":
         return False
     return True
@@ -22,6 +26,10 @@ def _start_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | 
     if not _should_start_worker(debug):
         return None
     concurrency = os.getenv("CELERY_WORKER_CONCURRENCY", "6")
+    queues = os.getenv(
+        "CELERY_WORKER_QUEUES",
+        "llmctl_rag,llmctl_rag_index,llmctl_rag_drive,llmctl_rag_git",
+    )
     loglevel = os.getenv("CELERY_WORKER_LOGLEVEL", "info")
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{src_path}{os.pathsep}{env.get('PYTHONPATH', '')}".strip(
@@ -38,6 +46,8 @@ def _start_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | 
         loglevel,
         "--concurrency",
         concurrency,
+        "--queues",
+        queues,
     ]
     return subprocess.Popen(command, cwd=repo_root, env=env)
 
@@ -53,9 +63,12 @@ def main() -> int:
     port = config.web_port
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
     worker = _start_celery_worker(src_path, repo_root)
+    if _should_start_background(debug):
+        start_source_scheduler()
     try:
         app.run(host="0.0.0.0", port=port, debug=debug)
     finally:
+        stop_source_scheduler()
         if worker is not None:
             worker.terminate()
             try:

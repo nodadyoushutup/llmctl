@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>New Source | llmctl-rag</title>
+    <title>Edit Source | llmctl-rag</title>
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
@@ -22,6 +22,7 @@
             <div>
               <div class="eyebrow">LLMCTL</div>
               <div class="brand-title">RAG</div>
+              <div class="brand-meta">Context workspace</div>
             </div>
           </div>
           <nav class="nav">
@@ -55,7 +56,7 @@
           <header class="topbar">
             <div class="topbar-row">
               <div>
-                <div class="title">New source</div>
+                <div class="title">Edit source</div>
               </div>
             </div>
           </header>
@@ -63,12 +64,17 @@
           <header class="action-header">
             <div class="action-header-row">
               <div class="action-header-actions">
-                <a class="btn btn-secondary" href="{{ url_for('sources_index') }}">Back</a>
+                <a class="btn btn-secondary" href="{{ url_for('sources_detail', source_id=source.id) }}">Back</a>
               </div>
             </div>
           </header>
 
           <div class="content">
+            {% if source_notice %}
+            <div class="notice {% if source_notice.type %}{{ source_notice.type }}{% endif %}">
+              {{ source_notice.message }}
+            </div>
+            {% endif %}
             {% if not github_connected %}
             <div class="banner">GitHub PAT not set. GitHub source selection will fail.</div>
             {% endif %}
@@ -80,20 +86,27 @@
               <div class="card-header">
                 <div>
                   <h2 class="section-title">Source settings</h2>
-                  <p class="muted">Each source will get its own Chroma collection.</p>
+                  <p class="muted">Update this source configuration.</p>
                 </div>
               </div>
-              <form method="post" action="{{ url_for('add_source') }}" class="form-grid">
+              <form method="post" action="{{ url_for('save_source', source_id=source.id) }}" class="form-grid">
                 <label class="label">
                   Name
-                  <input class="input" type="text" name="source_name" placeholder="Docs, Repo, Handbook" required />
+                  <input
+                    class="input"
+                    type="text"
+                    name="source_name"
+                    value="{{ source.name }}"
+                    placeholder="Docs, Repo, Handbook"
+                    required
+                  />
                 </label>
                 <label class="label">
                   Type
                   <select class="input" name="source_kind" id="source-kind">
-                    <option value="local">Local folder</option>
-                    <option value="github">GitHub repo</option>
-                    <option value="google_drive">Google Drive folder</option>
+                    <option value="local" {% if source.kind == 'local' %}selected{% endif %}>Local folder</option>
+                    <option value="github" {% if source.kind == 'github' %}selected{% endif %}>GitHub repo</option>
+                    <option value="google_drive" {% if source.kind == 'google_drive' %}selected{% endif %}>Google Drive folder</option>
                   </select>
                 </label>
                 <label class="label">
@@ -105,32 +118,55 @@
                       min="1"
                       step="1"
                       name="source_index_schedule_value"
+                      value="{{ source.index_schedule_value or '' }}"
                       placeholder="2"
                     />
+                    {% set schedule_unit = source.index_schedule_unit or '' %}
                     <select class="input" name="source_index_schedule_unit">
-                      <option value="">Not scheduled</option>
-                      <option value="minutes">Minutes</option>
-                      <option value="hours">Hours</option>
-                      <option value="days">Days</option>
-                      <option value="weeks">Weeks</option>
+                      <option value="" {% if not schedule_unit %}selected{% endif %}>Not scheduled</option>
+                      <option value="minutes" {% if schedule_unit == 'minutes' %}selected{% endif %}>Minutes</option>
+                      <option value="hours" {% if schedule_unit == 'hours' %}selected{% endif %}>Hours</option>
+                      <option value="days" {% if schedule_unit == 'days' %}selected{% endif %}>Days</option>
+                      <option value="weeks" {% if schedule_unit == 'weeks' %}selected{% endif %}>Weeks</option>
                     </select>
                   </div>
                   <span class="help">Example: 2 + days runs every 2 days.</span>
                 </label>
                 <label class="label source-field source-field-local">
                   Local path
-                  <input class="input" type="text" name="source_local_path" placeholder="/path/to/project" />
+                  <input
+                    class="input"
+                    type="text"
+                    name="source_local_path"
+                    value="{{ source.local_path or '' }}"
+                    placeholder="/path/to/project"
+                  />
                 </label>
                 <label class="label source-field source-field-github">
                   GitHub repo
-                  <select class="input" name="source_git_repo" id="github-repo-select">
+                  <select
+                    class="input"
+                    name="source_git_repo"
+                    id="github-repo-select"
+                    data-selected-value="{{ source.git_repo or '' }}"
+                  >
+                    {% if source.git_repo %}
+                    <option value="{{ source.git_repo }}" selected>{{ source.git_repo }}</option>
+                    {% else %}
                     <option value="">Select a repo</option>
+                    {% endif %}
                   </select>
                   <span class="help" id="github-repo-status">Load repositories from your PAT.</span>
                 </label>
                 <label class="label source-field source-field-github">
                   Branch
-                  <input class="input" type="text" name="source_git_branch" placeholder="main" />
+                  <input
+                    class="input"
+                    type="text"
+                    name="source_git_branch"
+                    value="{{ source.git_branch or '' }}"
+                    placeholder="main"
+                  />
                 </label>
                 <label class="label source-field source-field-google-drive">
                   Google Drive folder ID
@@ -139,6 +175,7 @@
                     type="text"
                     name="source_drive_folder_id"
                     id="drive-folder-id"
+                    value="{{ source.drive_folder_id or '' }}"
                     placeholder="1AbCdEfGhIjKlMn..."
                   />
                   <div class="form-actions form-actions-inline">
@@ -153,7 +190,7 @@
                   <span class="help" id="drive-folder-status">Verify that the service account can access this folder.</span>
                 </label>
                 <div class="form-actions">
-                  <button type="submit" class="btn btn-primary">Create source</button>
+                  <button type="submit" class="btn btn-primary">Save changes</button>
                 </div>
               </form>
             </section>
