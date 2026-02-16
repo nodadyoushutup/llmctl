@@ -46,7 +46,9 @@ def query_collections(
                 meta.setdefault("source_id", getattr(source, "id", None))
                 meta.setdefault("source_name", getattr(source, "name", None))
                 meta.setdefault("source_kind", getattr(source, "kind", None))
+                meta.setdefault("collection", getattr(source, "collection", None))
             score = float(distance) if distance is not None else float("inf")
+            meta.setdefault("score", score)
             merged.append((score, doc, meta))
 
     merged.sort(key=lambda item: item[0])

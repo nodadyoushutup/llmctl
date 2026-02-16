@@ -47,6 +47,7 @@ _DEFAULT_EXCLUDE_GLOBS = [
 _DEFAULT_MAX_FILE_BYTES_BY_TYPE = {
     "pdf": 1_000_000_000,
 }
+_DOCKER_CHROMA_HOST_ALIASES = {"llmctl-chromadb", "chromadb"}
 _SUPPORTED_MODEL_PROVIDERS = {"openai", "gemini"}
 _SUPPORTED_CHAT_RESPONSE_STYLES = {"low", "medium", "high"}
 _CHAT_RESPONSE_STYLE_ALIASES = {
@@ -199,6 +200,37 @@ def _as_int(value: str | None, default: int) -> int:
         return default
 
 
+def _as_int_range(
+    value: str | None,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    parsed = _as_int(value, default)
+    if minimum is not None and parsed < minimum:
+        return minimum
+    if maximum is not None and parsed > maximum:
+        return maximum
+    return parsed
+
+
+def _normalize_chroma_target(host: str, port: int) -> tuple[str, int]:
+    host_value = (host or "").strip()
+    if host_value.lower() in _DOCKER_CHROMA_HOST_ALIASES and port != 8000:
+        return "llmctl-chromadb", 8000
+    if host_value.lower() in _DOCKER_CHROMA_HOST_ALIASES:
+        return "llmctl-chromadb", port
+    return host_value, port
+
+
+def _parse_chroma_port(raw: str | None, default: int) -> int:
+    value = _as_int(raw, default)
+    if 1 <= value <= 65535:
+        return value
+    return default
+
+
 def _setting(
     env_key: str,
     rag_settings: dict[str, str],
@@ -311,6 +343,7 @@ def chunker_signature(config: RagConfig, version: str) -> str:
 def load_config() -> RagConfig:
     rag_settings = {}
     github_settings = {}
+    chroma_settings = {}
     try:
         from rag.repositories.settings import load_rag_settings
 
@@ -321,8 +354,10 @@ def load_config() -> RagConfig:
         from services.integrations import load_integration_settings
 
         github_settings = load_integration_settings("github")
+        chroma_settings = load_integration_settings("chroma")
     except Exception:
         github_settings = {}
+        chroma_settings = {}
 
     local_root = _setting("RAG_ROOT", rag_settings, "local_path", None)
     repo_root = (
@@ -511,14 +546,25 @@ def load_config() -> RagConfig:
             None,
         )
 
+    chroma_host = (
+        (chroma_settings.get("host") or "").strip()
+        or (os.getenv("CHROMA_HOST") or "").strip()
+        or (rag_settings.get("chroma_host") or "").strip()
+        or "llmctl-chromadb"
+    )
+    chroma_port = _parse_chroma_port(
+        (chroma_settings.get("port") or "").strip()
+        or (os.getenv("CHROMA_PORT") or "").strip()
+        or (rag_settings.get("chroma_port") or "").strip(),
+        8000,
+    )
+    chroma_host, chroma_port = _normalize_chroma_target(chroma_host, chroma_port)
+
     return RagConfig(
         repo_root=repo_root,
         rag_mode=rag_mode,
-        chroma_host=_setting("CHROMA_HOST", rag_settings, "chroma_host", "localhost")
-        or "localhost",
-        chroma_port=int(
-            _setting("CHROMA_PORT", rag_settings, "chroma_port", "8000") or "8000"
-        ),
+        chroma_host=chroma_host,
+        chroma_port=chroma_port,
         collection=_setting(
             "CHROMA_COLLECTION", rag_settings, "chroma_collection", "llmctl_repo"
         )
@@ -530,23 +576,25 @@ def load_config() -> RagConfig:
         openai_embedding_model=openai_embedding_model,
         gemini_embedding_model=gemini_embedding_model,
         embed_model=embed_model,
-        embed_max_tokens_per_request=int(
+        embed_max_tokens_per_request=_as_int_range(
             _setting(
                 "RAG_EMBED_MAX_TOKENS_PER_REQUEST",
                 rag_settings,
                 "embed_max_tokens_per_request",
                 "300000",
-            )
-            or "300000"
+            ),
+            300000,
+            minimum=1,
         ),
-        embed_max_tokens_per_input=int(
+        embed_max_tokens_per_input=_as_int_range(
             _setting(
                 "RAG_EMBED_MAX_TOKENS_PER_INPUT",
                 rag_settings,
                 "embed_max_tokens_per_input",
                 "8192",
-            )
-            or "8192"
+            ),
+            8192,
+            minimum=1,
         ),
         embed_max_batch_items=_as_int(
             _setting(
@@ -602,18 +650,22 @@ def load_config() -> RagConfig:
             _setting("RAG_WATCH_DEBOUNCE_S", rag_settings, "watch_debounce_s", None),
             1.0,
         ),
-        chunk_lines=int(
-            _setting("RAG_CHUNK_LINES", rag_settings, "chunk_lines", "120") or "120"
+        chunk_lines=_as_int_range(
+            _setting("RAG_CHUNK_LINES", rag_settings, "chunk_lines", "120"),
+            120,
+            minimum=1,
         ),
-        chunk_overlap_lines=int(
-            _setting("RAG_CHUNK_OVERLAP_LINES", rag_settings, "chunk_overlap_lines", "20")
-            or "20"
+        chunk_overlap_lines=_as_int_range(
+            _setting("RAG_CHUNK_OVERLAP_LINES", rag_settings, "chunk_overlap_lines", "20"),
+            20,
+            minimum=0,
         ),
-        max_file_bytes=int(
+        max_file_bytes=_as_int_range(
             _setting(
                 "RAG_MAX_FILE_BYTES", rag_settings, "max_file_bytes", str(1_000_000)
-            )
-            or str(1_000_000)
+            ),
+            1_000_000,
+            minimum=1,
         ),
         exclude_dirs=exclude_dirs,
         exclude_globs=exclude_globs,
@@ -690,42 +742,53 @@ def load_config() -> RagConfig:
         chat_model=chat_model,
         chat_response_style=chat_response_style,
         chat_temperature=_as_float(chat_temperature_raw, 0.2),
-        chat_top_k=int(
-            _setting("RAG_CHAT_TOP_K", rag_settings, "chat_top_k", "5") or "5"
+        chat_top_k=_as_int_range(
+            _setting("RAG_CHAT_TOP_K", rag_settings, "chat_top_k", "5"),
+            5,
+            minimum=1,
+            maximum=20,
         ),
-        chat_max_history=int(
-            _setting("RAG_CHAT_MAX_HISTORY", rag_settings, "chat_max_history", "8")
-            or "8"
+        chat_max_history=_as_int_range(
+            _setting("RAG_CHAT_MAX_HISTORY", rag_settings, "chat_max_history", "8"),
+            8,
+            minimum=1,
+            maximum=50,
         ),
-        chat_max_context_chars=int(
+        chat_max_context_chars=_as_int_range(
             _setting(
                 "RAG_CHAT_MAX_CONTEXT_CHARS",
                 rag_settings,
                 "chat_max_context_chars",
                 "12000",
-            )
-            or "12000"
+            ),
+            12000,
+            minimum=1000,
         ),
-        chat_snippet_chars=int(
+        chat_snippet_chars=_as_int_range(
             _setting(
                 "RAG_CHAT_SNIPPET_CHARS",
                 rag_settings,
                 "chat_snippet_chars",
                 "600",
-            )
-            or "600"
+            ),
+            600,
+            minimum=100,
         ),
-        chat_context_budget_tokens=int(
+        chat_context_budget_tokens=_as_int_range(
             _setting(
                 "RAG_CHAT_CONTEXT_BUDGET_TOKENS",
                 rag_settings,
                 "chat_context_budget_tokens",
                 "8000",
-            )
-            or "8000"
+            ),
+            8000,
+            minimum=256,
         ),
-        web_port=int(
-            _setting("RAG_WEB_PORT", rag_settings, "web_port", "5050") or "5050"
+        web_port=_as_int_range(
+            _setting("RAG_WEB_PORT", rag_settings, "web_port", "5050"),
+            5050,
+            minimum=1,
+            maximum=65535,
         ),
     )
 

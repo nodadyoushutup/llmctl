@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_skills') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    all skills
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Create Skill</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Create a new skill package and initial immutable version.
+  </p>
+  <form method="post" action="{{ url_for('agents.create_skill') }}" class="form-grid" style="margin-top: 20px;">
+    <label class="label">
+      slug (name)
+      <input type="text" name="name" class="input" placeholder="customer-support" required />
+    </label>
+    <label class="label">
+      display name
+      <input type="text" name="display_name" class="input" placeholder="Customer Support" required />
+    </label>
+    <label class="label">
+      version
+      <input type="text" name="version" class="input" value="1.0.0" required />
+    </label>
+    <label class="label">
+      status
+      <select name="status" class="input">
+        {% for value, label in skill_status_options %}
+          <option value="{{ value }}" {% if value == 'active' %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      source ref (optional)
+      <input type="text" name="source_ref" class="input" placeholder="web:create" />
+    </label>
+    <label class="label">
+      description
+      <textarea name="description" class="textarea" rows="3" required></textarea>
+    </label>
+    <label class="label">
+      SKILL.md content (optional)
+      <textarea name="skill_md" class="textarea" rows="14" placeholder="Leave blank to auto-generate from metadata."></textarea>
+    </label>
+    <label class="label">
+      extra files JSON (optional)
+      <textarea
+        name="extra_files_json"
+        class="textarea"
+        rows="6"
+        placeholder='[{"path":"scripts/run.sh","content":"echo hello\\n"}]'
+      ></textarea>
+      <span class="muted" style="font-size: 12px; margin-top: 6px;">
+        JSON array of objects with <code>path</code> and <code>content</code>.
+      </span>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-plus"></i>
+        create
+      </button>
+      <button type="reset" class="btn btn-secondary">
+        <i class="fa-solid fa-rotate-right"></i>
+        reset
+      </button>
+    </div>
+  </form>
+</section>
+{% endblock %}

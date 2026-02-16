@@ -4,7 +4,11 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
-from core.models import Script
+from core.models import (
+    Script,
+    ensure_legacy_skill_script_writable,
+    is_legacy_skill_script_type,
+)
 from storage.script_storage import ensure_script_file, remove_script_file, write_script_file
 
 from constants import SCRIPT_TYPE_KEYS
@@ -35,8 +39,11 @@ def _normalize_script_type_key(raw: str) -> str:
         raise ValueError("Script type is required.")
     key = raw.strip().lower().replace("-", "_").replace(" ", "_")
     if key in SCRIPT_TYPE_KEYS:
-        return SCRIPT_TYPE_KEYS[key]
+        script_type = SCRIPT_TYPE_KEYS[key]
+        ensure_legacy_skill_script_writable(script_type)
+        return script_type
     if key in SCRIPT_TYPE_KEYS.values():
+        ensure_legacy_skill_script_writable(key)
         return key
     valid = ", ".join(sorted(SCRIPT_TYPE_KEYS))
     raise ValueError(f"Unknown script type '{raw}'. Use: {valid}.")
@@ -91,8 +98,13 @@ def _resolve_script_ids_by_type(
     if len(scripts_by_id) != len(set(all_ids)):
         raise ValueError("One or more scripts were not found.")
     for script_type, ids in script_ids_by_type.items():
+        ensure_legacy_skill_script_writable(script_type)
         for script_id in ids:
             script = scripts_by_id[script_id]
+            if is_legacy_skill_script_type(script.script_type):
+                raise ValueError(
+                    "Legacy script_type=skill records are disabled. Use Skills attachments."
+                )
             if script.script_type != script_type:
                 raise ValueError("Script selection is invalid.")
     return script_ids_by_type

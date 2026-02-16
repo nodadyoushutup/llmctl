@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Launch Chat</h2>
+    <a class="btn btn-secondary" href="{{ url_for('agents.chat_activity') }}">
+      <i class="fa-solid fa-timeline"></i>
+      activity
+    </a>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Session-scoped chat threads with model, MCP, and optional RAG selection.
+  </p>
+</section>
+
+<section class="grid" style="grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 16px; margin-top: 16px;">
+  <article class="card">
+    <div class="card-header">
+      <h3 class="section-title">Threads</h3>
+    </div>
+    <form method="post" action="{{ url_for('agents.create_chat_thread_route') }}" style="margin-top: 12px;">
+      <div class="grid" style="grid-template-columns: 1fr; gap: 8px;">
+        <input type="text" name="title" placeholder="New chat title" />
+        <select name="model_id">
+          <option value="">Use default model</option>
+          {% for model in models %}
+            <option value="{{ model.id }}">{{ model.name }} ({{ model.provider }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary" style="margin-top: 8px;">
+        <i class="fa-solid fa-plus"></i>
+        create thread
+      </button>
+    </form>
+
+    {% if threads %}
+      <div style="overflow-x: auto; margin-top: 14px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Thread</th>
+              <th>Status</th>
+              <th class="table-actions-cell"><i class="fa-solid fa-gear"></i></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for thread in threads %}
+              <tr
+                class="table-row-link"
+                data-href="{{ url_for('agents.chat_page', thread_id=thread.id) }}"
+              >
+                <td>
+                  <p>{{ thread.title }}</p>
+                  {% if thread.model_name %}
+                    <p class="muted" style="font-size: 12px; margin-top: 4px;">{{ thread.model_name }}</p>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="status-badge {% if thread.status == 'archived' %}status-warning{% else %}status-success{% endif %}">
+                    {{ thread.status }}
+                  </span>
+                </td>
+                <td class="table-actions-cell">
+                  <div class="table-actions">
+                    {% if thread.status == 'archived' %}
+                      <form method="post" action="{{ url_for('agents.restore_chat_thread_route', thread_id=thread.id) }}">
+                        <button type="submit" class="btn" aria-label="Restore thread">
+                          <i class="fa-solid fa-box-open"></i>
+                        </button>
+                      </form>
+                    {% else %}
+                      <form method="post" action="{{ url_for('agents.archive_chat_thread_route', thread_id=thread.id) }}">
+                        <button type="submit" class="btn" aria-label="Archive thread">
+                          <i class="fa-solid fa-box-archive"></i>
+                        </button>
+                      </form>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('agents.delete_chat_thread_route', thread_id=thread.id) }}" onsubmit="return confirm('Delete this thread permanently?');">
+                      <button type="submit" class="btn btn-danger" aria-label="Delete thread">
+                        <i class="fa-solid fa-trash"></i>
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted" style="margin-top: 14px;">No chat threads yet.</p>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    {% if selected_thread %}
+      {% set selected_mcp_ids = selected_thread.mcp_servers | map(attribute='id') | list %}
+      {% set selected_collections = selected_thread.rag_collections or [] %}
+      <div class="card-header">
+        <h3 class="section-title">{{ selected_thread.title }}</h3>
+        <form method="post" action="{{ url_for('agents.clear_chat_thread_route', thread_id=selected_thread.id) }}" onsubmit="return confirm('Clear this thread context and messages?');">
+          <button type="submit" class="btn btn-secondary">
+            <i class="fa-solid fa-eraser"></i>
+            clear
+          </button>
+        </form>
+      </div>
+
+      {% if selected_thread.latest_turn and selected_thread.latest_turn.context_limit_tokens %}
+        {% set usage_pct = (selected_thread.latest_turn.context_usage_after or 0) * 100 / selected_thread.latest_turn.context_limit_tokens %}
+        <div style="margin-top: 10px;">
+          <p class="muted" style="font-size: 12px;">Context usage: {{ usage_pct|round(1) }}%</p>
+          <div style="height: 8px; background: rgba(255,255,255,0.08); border-radius: 999px; margin-top: 6px;">
+            <div style="height: 8px; width: {{ [usage_pct, 100]|min }}%; background: {% if usage_pct >= 100 %}#f97316{% else %}#22c55e{% endif %}; border-radius: 999px;"></div>
+          </div>
+        </div>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('agents.update_chat_thread_route', thread_id=selected_thread.id) }}" style="margin-top: 14px;">
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+          <div class="subcard">
+            <p class="eyebrow">model</p>
+            <select name="model_id" style="margin-top: 8px;">
+              <option value="">Use default model</option>
+              {% for model in models %}
+                <option value="{{ model.id }}" {% if selected_thread.model_id == model.id %}selected{% endif %}>
+                  {{ model.name }} ({{ model.provider }})
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="subcard">
+            <p class="eyebrow">rag collections</p>
+            {% if rag_health.state == 'configured_healthy' and rag_collections %}
+              <div style="margin-top: 8px; max-height: 170px; overflow-y: auto;">
+                {% for collection in rag_collections %}
+                  <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                    <input
+                      type="checkbox"
+                      name="rag_collections"
+                      value="{{ collection.id }}"
+                      {% if collection.id in selected_collections %}checked{% endif %}
+                    />
+                    <span>{{ collection.name }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="muted" style="margin-top: 8px;">
+                RAG state: {{ rag_health.state }}{% if rag_health.error %} ({{ rag_health.error }}){% endif %}
+              </p>
+            {% endif %}
+            {% if selected_collections %}
+              <p class="muted" style="margin-top: 8px; font-size: 12px;">
+                selected: {{ selected_collections | join(", ") }}
+              </p>
+            {% endif %}
+          </div>
+
+          <div class="subcard">
+            <p class="eyebrow">mcp servers</p>
+            <div style="margin-top: 8px; max-height: 170px; overflow-y: auto;">
+              {% for mcp in mcp_servers %}
+                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                  <input
+                    type="checkbox"
+                    name="mcp_server_ids"
+                    value="{{ mcp.id }}"
+                    {% if mcp.id in selected_mcp_ids %}checked{% endif %}
+                  />
+                  <span>{{ mcp.name }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-secondary" style="margin-top: 10px;">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save session settings
+        </button>
+      </form>
+
+      {% if selected_thread.compaction_summary_text %}
+        <div class="subcard" style="margin-top: 14px;">
+          <p class="eyebrow">compaction summary</p>
+          <pre style="white-space: pre-wrap; margin-top: 8px; font-size: 12px;">{{ selected_thread.compaction_summary_text }}</pre>
+        </div>
+      {% endif %}
+
+      <div id="chat-error" class="alert alert-error" style="display: none; margin-top: 14px;"></div>
+
+      <div style="margin-top: 14px; max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+        {% for item in selected_thread.messages %}
+          <div class="subcard" style="border-color: {% if item.role == 'user' %}rgba(251,191,36,0.35){% else %}rgba(56,189,248,0.35){% endif %};">
+            <p class="eyebrow">{{ item.role }}</p>
+            <div style="margin-top: 8px; white-space: pre-wrap;">{{ item.content }}</div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <form id="chat-turn-form" data-thread-id="{{ selected_thread.id }}" style="margin-top: 12px;">
+        <textarea
+          id="chat-message"
+          name="message"
+          rows="4"
+          placeholder="Send a message..."
+          style="width: 100%;"
+        ></textarea>
+        <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+          <button id="chat-send-btn" type="submit" class="btn btn-primary">
+            <i class="fa-solid fa-paper-plane"></i>
+            send
+          </button>
+        </div>
+      </form>
+    {% else %}
+      <p class="muted">Create or select a thread to start chatting.</p>
+    {% endif %}
+  </article>
+</section>
+
+<script>
+  const rowLinks = document.querySelectorAll(".table-row-link");
+  rowLinks.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+
+  const form = document.getElementById("chat-turn-form");
+  const sendButton = document.getElementById("chat-send-btn");
+  const messageInput = document.getElementById("chat-message");
+  const errorBox = document.getElementById("chat-error");
+  if (form && sendButton && messageInput && errorBox) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorBox.style.display = "none";
+      const message = messageInput.value.trim();
+      if (!message) {
+        errorBox.textContent = "Message is required.";
+        errorBox.style.display = "";
+        return;
+      }
+      const threadId = form.dataset.threadId;
+      if (!threadId) {
+        return;
+      }
+      sendButton.disabled = true;
+      try {
+        const response = await fetch(`/api/chat/threads/${threadId}/turn`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          errorBox.textContent = payload.error || "Chat request failed.";
+          if (payload.reason_code) {
+            errorBox.textContent += ` (${payload.reason_code})`;
+          }
+          errorBox.style.display = "";
+          return;
+        }
+        window.location.href = `{{ url_for('agents.chat_page') }}?thread_id=${threadId}`;
+      } catch (error) {
+        errorBox.textContent = "Chat request failed.";
+        errorBox.style.display = "";
+      } finally {
+        sendButton.disabled = false;
+      }
+    });
+  }
+</script>
+{% endblock %}

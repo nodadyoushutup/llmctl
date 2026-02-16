@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.view_skill', skill_id=skill.id) }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to skill
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_skills') }}">
+    <i class="fa-solid fa-list"></i>
+    all skills
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">skill {{ skill.id }}</p>
+      <h2 class="section-title">Edit Skill</h2>
+    </div>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Update metadata and optionally publish a new immutable version.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_skill', skill_id=skill.id) }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
+    <label class="label">
+      slug
+      <input type="text" class="input" value="{{ skill.name }}" disabled />
+    </label>
+    <label class="label">
+      display name
+      <input type="text" name="display_name" class="input" value="{{ skill.display_name }}" required />
+    </label>
+    <label class="label">
+      status
+      <select name="status" class="input">
+        {% for value, label in skill_status_options %}
+          <option value="{{ value }}" {% if skill.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      description
+      <textarea name="description" class="textarea" rows="3" required>{{ skill.description or '' }}</textarea>
+    </label>
+
+    <div class="subcard" style="margin-top: 4px;">
+      <p class="eyebrow">optional new version</p>
+      <div class="stack" style="margin-top: 10px; gap: 10px;">
+        <label class="label" style="margin-top: 0;">
+          new version
+          <input
+            type="text"
+            name="new_version"
+            class="input"
+            placeholder="{{ latest_version.version if latest_version else '1.0.0' }}"
+          />
+        </label>
+        <label class="label" style="margin-top: 0;">
+          source ref (optional)
+          <input type="text" name="source_ref" class="input" placeholder="web:skill:{{ skill.id }}" />
+        </label>
+        <label class="label" style="margin-top: 0;">
+          new SKILL.md content (optional)
+          <textarea
+            name="new_skill_md"
+            class="textarea"
+            rows="12"
+            placeholder="Leave blank to auto-generate from updated metadata."
+          >{{ latest_skill_md }}</textarea>
+        </label>
+        <label class="label" style="margin-top: 0;">
+          extra files JSON (optional)
+          <textarea
+            name="extra_files_json"
+            class="textarea"
+            rows="5"
+            placeholder='[{"path":"scripts/run.sh","content":"echo update\\n"}]'
+          ></textarea>
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.view_skill', skill_id=skill.id) }}">
+        <i class="fa-solid fa-arrow-left"></i>
+        cancel
+      </a>
+    </div>
+  </form>
+</section>
+{% endblock %}

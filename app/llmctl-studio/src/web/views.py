@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 import logging
 import re
@@ -35,6 +36,28 @@ from services.code_review import (
 )
 from core.config import Config
 from core.db import session_scope, utcnow
+from chat.contracts import (
+    CHAT_REASON_SELECTOR_SCOPE,
+    RAGContractError,
+    RAG_HEALTH_CONFIGURED_UNHEALTHY as CHAT_RAG_HEALTH_CONFIGURED_UNHEALTHY,
+)
+from chat.rag_client import get_rag_contract_client
+from chat.runtime import (
+    archive_thread as archive_chat_thread,
+    clear_thread as clear_chat_thread,
+    create_thread as create_chat_thread,
+    delete_thread as delete_chat_thread,
+    execute_turn as execute_chat_turn,
+    get_thread as get_chat_thread,
+    list_activity as list_chat_activity,
+    list_threads as list_chat_threads,
+    restore_thread as restore_chat_thread,
+    update_thread_config as update_chat_thread_config,
+)
+from chat.settings import (
+    load_chat_runtime_settings_payload,
+    save_chat_runtime_settings,
+)
 from services.integrations import (
     LLM_PROVIDER_LABELS,
     LLM_PROVIDERS,
@@ -45,8 +68,14 @@ from services.integrations import (
     resolve_llm_provider,
     save_integration_settings as _save_integration_settings,
 )
+from services.instruction_adapters import (
+    NON_FRONTIER_DEFAULT_INSTRUCTION_FILENAME,
+    is_frontier_instruction_provider,
+    validate_agent_markdown_filename,
+)
 from core.models import (
     Agent,
+    AgentPriority,
     AgentTask,
     Attachment,
     FLOWCHART_EDGE_MODE_CHOICES,
@@ -57,6 +86,7 @@ from core.models import (
     FLOWCHART_NODE_TYPE_MEMORY,
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_RAG,
     FLOWCHART_NODE_TYPE_START,
     FLOWCHART_NODE_TYPE_TASK,
     Flowchart,
@@ -80,14 +110,24 @@ from core.models import (
     Plan,
     PlanStage,
     PlanTask,
-    Run,
     Role,
+    Run,
     RUN_ACTIVE_STATUSES,
+    SKILL_STATUS_ACTIVE,
+    SKILL_STATUS_ARCHIVED,
+    SKILL_STATUS_CHOICES,
+    Skill,
+    SkillFile,
+    SkillVersion,
     Script,
+    agent_skill_bindings,
     agent_task_attachments,
     agent_task_scripts,
+    ensure_legacy_skill_script_writable,
     flowchart_node_mcp_servers,
+    flowchart_node_skills,
     flowchart_node_scripts,
+    is_legacy_skill_script_type,
     task_template_attachments,
     SCRIPT_TYPE_CHOICES,
     SCRIPT_TYPE_LABELS,
@@ -95,7 +135,6 @@ from core.models import (
     SCRIPT_TYPE_POST_INIT,
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
-    SCRIPT_TYPE_SKILL,
     SYSTEM_MANAGED_MCP_SERVER_KEYS,
     TaskTemplate,
 )
@@ -119,10 +158,41 @@ from core.quick_node import (
     build_quick_node_system_contract,
 )
 from core.vllm_models import discover_vllm_local_models
+from rag.engine.config import load_config as load_rag_config
+from rag.domain import (
+    RAG_FLOWCHART_MODE_CHOICES as RAG_NODE_MODE_CHOICES,
+    RAG_FLOWCHART_MODE_DELTA_INDEX as RAG_NODE_MODE_DELTA_INDEX,
+    RAG_FLOWCHART_MODE_FRESH_INDEX as RAG_NODE_MODE_FRESH_INDEX,
+    RAG_FLOWCHART_MODE_QUERY as RAG_NODE_MODE_QUERY,
+    RAG_HEALTH_CONFIGURED_UNHEALTHY as RAG_DOMAIN_HEALTH_CONFIGURED_UNHEALTHY,
+    RAG_HEALTH_UNCONFIGURED as RAG_DOMAIN_HEALTH_UNCONFIGURED,
+    list_collection_contract as rag_list_collection_contract,
+    normalize_collection_selection as rag_normalize_collection_selection,
+    rag_health_snapshot as rag_domain_health_snapshot,
+)
+from rag.integrations.google_drive_sync import (
+    service_account_email as _google_drive_service_account_email,
+)
+from rag.repositories.settings import (
+    ensure_rag_setting_defaults as _ensure_rag_setting_defaults,
+    load_rag_settings as _load_rag_settings,
+    save_rag_settings as _save_rag_settings,
+)
 from storage.script_storage import read_script_file, remove_script_file, write_script_file
 from storage.attachment_storage import remove_attachment_file, write_attachment_file
 from core.task_stages import TASK_STAGE_ORDER
 from core.task_kinds import QUICK_TASK_KIND, is_quick_task_kind, task_kind_label
+from services.skills import (
+    SkillPackage,
+    SkillPackageValidationError,
+    build_skill_package,
+    build_skill_package_from_directory,
+    export_skill_package_from_db,
+    format_validation_errors,
+    import_skill_package_to_db,
+    load_skill_bundle,
+    serialize_skill_bundle,
+)
 from services.tasks import (
     build_one_off_output_contract,
     run_agent,
@@ -172,8 +242,25 @@ SCRIPT_TYPE_FIELDS = {
     SCRIPT_TYPE_INIT: "init_script_ids",
     SCRIPT_TYPE_POST_INIT: "post_init_script_ids",
     SCRIPT_TYPE_POST_RUN: "post_run_script_ids",
-    SCRIPT_TYPE_SKILL: "skill_script_ids",
 }
+SCRIPT_TYPE_WRITE_CHOICES = tuple(
+    (value, label)
+    for value, label in SCRIPT_TYPE_CHOICES
+    if not is_legacy_skill_script_type(value)
+)
+RAG_DB_PROVIDER_CHOICES = ("chroma",)
+RAG_MODEL_PROVIDER_CHOICES = ("openai", "gemini")
+RAG_CHAT_RESPONSE_STYLE_CHOICES = ("low", "medium", "high")
+RAG_CHAT_RESPONSE_STYLE_ALIASES = {
+    "concise": "low",
+    "brief": "low",
+    "balanced": "medium",
+    "detailed": "high",
+    "verbose": "high",
+}
+NODE_SKILL_BINDING_WRITE_ERROR = (
+    "Node-level skill binding is disabled. Assign skills on the Agent instead."
+)
 
 MILESTONE_STATUS_LABELS = {
     "planned": "planned",
@@ -214,6 +301,14 @@ MILESTONE_PRIORITY_OPTIONS = tuple(
 MILESTONE_HEALTH_OPTIONS = tuple(
     (value, MILESTONE_HEALTH_LABELS.get(value, value)) for value in MILESTONE_HEALTH_CHOICES
 )
+SKILL_STATUS_LABELS = {
+    "draft": "draft",
+    "active": "active",
+    "archived": "archived",
+}
+SKILL_STATUS_OPTIONS = tuple(
+    (value, SKILL_STATUS_LABELS.get(value, value)) for value in SKILL_STATUS_CHOICES
+)
 
 FLOWCHART_NODE_TYPE_WITH_REF = {
     FLOWCHART_NODE_TYPE_FLOWCHART,
@@ -228,14 +323,15 @@ FLOWCHART_NODE_TYPE_REQUIRES_REF = {
     FLOWCHART_NODE_TYPE_MILESTONE,
 }
 FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
-    FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False},
-    FLOWCHART_NODE_TYPE_END: {"model": False, "mcp": False, "scripts": False},
-    FLOWCHART_NODE_TYPE_FLOWCHART: {"model": False, "mcp": False, "scripts": False},
-    FLOWCHART_NODE_TYPE_TASK: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False, "skills": False},
+    FLOWCHART_NODE_TYPE_END: {"model": False, "mcp": False, "scripts": False, "skills": False},
+    FLOWCHART_NODE_TYPE_FLOWCHART: {"model": False, "mcp": False, "scripts": False, "skills": False},
+    FLOWCHART_NODE_TYPE_TASK: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_RAG: {"model": True, "mcp": False, "scripts": False, "skills": False},
 }
 FLOWCHART_END_MAX_OUTGOING_EDGES = 0
 FLOWCHART_DEFAULT_START_X = 280.0
@@ -284,6 +380,22 @@ def _parse_role_details(raw_json: str) -> str:
     if not isinstance(payload, dict):
         raise ValueError("Role details must be a JSON object.")
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _ordered_agent_priorities(agent: Agent) -> list[AgentPriority]:
+    priorities = list(agent.priorities or [])
+    priorities.sort(
+        key=lambda entry: (
+            int(entry.position) if entry.position is not None else 2**31 - 1,
+            int(entry.id),
+        )
+    )
+    return priorities
+
+
+def _reindex_agent_priorities(priorities: list[AgentPriority]) -> None:
+    for index, priority in enumerate(priorities, start=1):
+        priority.position = index
 
 
 def _save_uploaded_attachments(
@@ -529,6 +641,9 @@ def _resolve_script_selection(
     scripts_by_id = {script.id: script for script in scripts}
     if len(scripts_by_id) != len(set(all_ids)):
         return {}, "One or more scripts were not found."
+    for script in scripts_by_id.values():
+        if is_legacy_skill_script_type(script.script_type):
+            return {}, "Legacy script_type=skill records are disabled. Use Skills attachments instead."
 
     if not has_typed_selection:
         grouped = {script_type: [] for script_type in SCRIPT_TYPE_FIELDS}
@@ -591,11 +706,164 @@ def _set_flowchart_node_scripts(
     session.execute(flowchart_node_scripts.insert(), rows)
 
 
+def _set_flowchart_node_skills(
+    session,
+    node_id: int,
+    skill_ids: list[int],
+) -> None:
+    session.execute(
+        delete(flowchart_node_skills).where(flowchart_node_skills.c.flowchart_node_id == node_id)
+    )
+    if not skill_ids:
+        return
+    rows = [
+        {
+            "flowchart_node_id": node_id,
+            "skill_id": skill_id,
+            "position": position,
+        }
+        for position, skill_id in enumerate(skill_ids, start=1)
+    ]
+    session.execute(flowchart_node_skills.insert(), rows)
+
+
+def _set_agent_skills(
+    session,
+    agent_id: int,
+    skill_ids: list[int],
+) -> None:
+    session.execute(delete(agent_skill_bindings).where(agent_skill_bindings.c.agent_id == agent_id))
+    if not skill_ids:
+        return
+    rows = [
+        {
+            "agent_id": agent_id,
+            "skill_id": skill_id,
+            "position": position,
+        }
+        for position, skill_id in enumerate(skill_ids, start=1)
+    ]
+    session.execute(agent_skill_bindings.insert(), rows)
+
+
+def _ordered_agent_skills(agent: Agent) -> list[Skill]:
+    return list(agent.skills or [])
+
+
+def _node_skill_binding_write_rejected() -> tuple[dict[str, object], int]:
+    return {
+        "error": NODE_SKILL_BINDING_WRITE_ERROR,
+        "deprecated": True,
+    }, 400
+
+
+def _assert_flowchart_node_owner(session, *, flowchart_id: int, node_id: int) -> None:
+    flowchart_node = session.get(FlowchartNode, node_id)
+    if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+        abort(404)
+
+
 def _read_script_content(script: Script) -> str:
     file_contents = read_script_file(script.file_path)
     if file_contents:
         return file_contents
     return script.content or ""
+
+
+def _latest_skill_version(skill: Skill) -> SkillVersion | None:
+    versions = sorted(list(skill.versions or []), key=lambda item: item.id or 0, reverse=True)
+    return versions[0] if versions else None
+
+
+def _skill_file_content(version: SkillVersion | None, path: str) -> str:
+    if version is None:
+        return ""
+    for entry in version.files or []:
+        if entry.path == path:
+            return entry.content or ""
+    return ""
+
+
+def _default_skill_markdown(
+    *,
+    name: str,
+    display_name: str,
+    description: str,
+    version: str,
+    status: str,
+) -> str:
+    title = display_name or name or "Skill"
+    return (
+        "---\n"
+        f"name: {name}\n"
+        f"display_name: {display_name}\n"
+        f"description: {description}\n"
+        f"version: {version}\n"
+        f"status: {status}\n"
+        "---\n\n"
+        f"# {title}\n"
+    )
+
+
+def _parse_skill_extra_files(raw_payload: str) -> tuple[list[tuple[str, str]], str | None]:
+    cleaned = (raw_payload or "").strip()
+    if not cleaned:
+        return [], None
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return [], "Extra files JSON must be valid JSON."
+    if not isinstance(payload, list):
+        return [], "Extra files JSON must be an array."
+    files: list[tuple[str, str]] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            return [], f"extra_files_json[{index}] must be an object."
+        path = item.get("path")
+        content = item.get("content")
+        if not isinstance(path, str) or not path.strip():
+            return [], f"extra_files_json[{index}].path is required."
+        if not isinstance(content, str):
+            return [], f"extra_files_json[{index}].content must be a string."
+        files.append((path.strip(), content))
+    return files, None
+
+
+def _build_skill_preview(package: SkillPackage) -> dict[str, object]:
+    paths = [entry.path for entry in package.files]
+    warnings: list[str] = []
+    if not any(path.startswith("scripts/") for path in paths):
+        warnings.append("No scripts/ files found; this package is guidance-only.")
+    if any(path.startswith("references/") for path in paths):
+        warnings.append("references/ files are lazy-loaded and not injected into fallback prompts.")
+    if any(path.startswith("assets/") for path in paths):
+        warnings.append("assets/ files are stored in package materialization paths only.")
+
+    compatibility_hints = [
+        "Native adapter targets: Codex, Claude Code, Gemini CLI.",
+        "Fallback mode injects SKILL.md excerpts only (deterministic caps apply).",
+    ]
+    return {
+        "metadata": {
+            "name": package.metadata.name,
+            "display_name": package.metadata.display_name,
+            "description": package.metadata.description,
+            "version": package.metadata.version,
+            "status": package.metadata.status,
+        },
+        "manifest_hash": package.manifest_hash,
+        "manifest": package.manifest,
+        "files": [
+            {
+                "path": entry.path,
+                "size_bytes": entry.size_bytes,
+                "checksum": entry.checksum,
+            }
+            for entry in package.files
+        ],
+        "warnings": warnings,
+        "compatibility_hints": compatibility_hints,
+    }
 
 
 def _human_time(value: datetime | None) -> str:
@@ -839,6 +1107,8 @@ def _build_stage_entries(task: AgentTask) -> list[dict[str, str]]:
 def _script_type_label(value: str | None) -> str:
     if not value:
         return "-"
+    if is_legacy_skill_script_type(value):
+        return "Legacy Skill (read-only)"
     return SCRIPT_TYPE_LABELS.get(value, value)
 
 
@@ -978,11 +1248,38 @@ def _list_collection_names(collections: object) -> list[str]:
     return sorted(names, key=str.lower)
 
 
+def _google_drive_service_email(settings: dict[str, str]) -> str | None:
+    raw = (settings.get("service_account_json") or "").strip()
+    if not raw:
+        return None
+    try:
+        return _google_drive_service_account_email(raw)
+    except ValueError:
+        return None
+
+
+def _rag_nav_health_payload() -> dict[str, str | None]:
+    try:
+        health = rag_domain_health_snapshot()
+    except Exception as exc:
+        return {
+            "state": RAG_DOMAIN_HEALTH_CONFIGURED_UNHEALTHY,
+            "provider": "chroma",
+            "error": str(exc),
+        }
+    return {
+        "state": str(health.get("state") or RAG_DOMAIN_HEALTH_UNCONFIGURED),
+        "provider": str(health.get("provider") or "chroma"),
+        "error": str(health.get("error") or "").strip() or None,
+    }
+
+
 @bp.app_context_processor
 def _inject_template_helpers() -> dict[str, object]:
     return {
         "human_time": _human_time,
         "integration_overview": _integration_overview(),
+        "rag_nav_health": _rag_nav_health_payload(),
         "task_kind_label": task_kind_label,
         "script_type_label": _script_type_label,
     }
@@ -999,6 +1296,15 @@ def _load_agents() -> list[Agent]:
             .all()
         )
     return agents
+
+
+def _load_roles() -> list[Role]:
+    with session_scope() as session:
+        return (
+            session.execute(select(Role).order_by(Role.created_at.desc()))
+            .scalars()
+            .all()
+        )
 
 
 def _quick_node_default_model_id(models: list[LLMModel]) -> int | None:
@@ -1194,6 +1500,47 @@ def _as_bool(value: str | None) -> bool:
     return (value or "").strip().lower() == "true"
 
 
+def _instruction_flag_default_native(provider: str) -> bool:
+    normalized = str(provider or "").strip().lower()
+    return normalized in {"codex", "gemini", "claude"}
+
+
+def _instruction_flag_default_fallback(provider: str) -> bool:
+    del provider
+    return True
+
+
+def _instruction_runtime_flags(settings: dict[str, str]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for provider in LLM_PROVIDERS:
+        native_key = f"instruction_native_enabled_{provider}"
+        fallback_key = f"instruction_fallback_enabled_{provider}"
+        native_raw = settings.get(native_key)
+        fallback_raw = settings.get(fallback_key)
+        native_enabled = (
+            _as_bool(native_raw)
+            if native_raw is not None
+            else _instruction_flag_default_native(provider)
+        )
+        fallback_enabled = (
+            _as_bool(fallback_raw)
+            if fallback_raw is not None
+            else _instruction_flag_default_fallback(provider)
+        )
+        rows.append(
+            {
+                "provider": provider,
+                "label": LLM_PROVIDER_LABELS.get(provider, provider),
+                "native_key": native_key,
+                "fallback_key": fallback_key,
+                "native_enabled": native_enabled,
+                "fallback_enabled": fallback_enabled,
+                "supports_native": _instruction_flag_default_native(provider),
+            }
+        )
+    return rows
+
+
 def _default_model_overview(
     settings: dict[str, str] | None = None,
 ) -> dict[str, object]:
@@ -1237,6 +1584,30 @@ def _decode_model_config(raw: str | None) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _configured_agent_markdown_filename(config: dict[str, object]) -> str:
+    candidate = str(config.get("agent_markdown_filename") or "").strip()
+    return candidate or NON_FRONTIER_DEFAULT_INSTRUCTION_FILENAME
+
+
+def _apply_model_markdown_filename_validation(
+    provider: str,
+    config_payload: dict[str, object],
+) -> str | None:
+    if is_frontier_instruction_provider(provider):
+        config_payload.pop("agent_markdown_filename", None)
+        return None
+    raw_value = str(config_payload.get("agent_markdown_filename") or "").strip()
+    if not raw_value:
+        raw_value = NON_FRONTIER_DEFAULT_INSTRUCTION_FILENAME
+    try:
+        config_payload["agent_markdown_filename"] = validate_agent_markdown_filename(
+            raw_value
+        )
+    except ValueError as exc:
+        return str(exc)
+    return None
 
 
 def _codex_model_config_defaults(
@@ -1349,6 +1720,7 @@ def _vllm_local_model_config_defaults(
         "temperature": numbers["temperature"],
         "max_tokens": numbers["max_tokens"],
         "request_timeout_seconds": numbers["request_timeout_seconds"],
+        "agent_markdown_filename": _configured_agent_markdown_filename(config),
     }
 
 
@@ -1371,6 +1743,7 @@ def _vllm_remote_model_config_defaults(
         "temperature": numbers["temperature"],
         "max_tokens": numbers["max_tokens"],
         "request_timeout_seconds": numbers["request_timeout_seconds"],
+        "agent_markdown_filename": _configured_agent_markdown_filename(config),
     }
 
 
@@ -1538,6 +1911,7 @@ def _model_config_payload(provider: str, form: dict[str, str]) -> dict[str, obje
             "request_timeout_seconds": form.get(
                 "vllm_local_request_timeout_seconds", ""
             ).strip(),
+            "agent_markdown_filename": form.get("agent_markdown_filename", "").strip(),
         }
     if provider == "vllm_remote":
         return {
@@ -1548,6 +1922,7 @@ def _model_config_payload(provider: str, form: dict[str, str]) -> dict[str, obje
             "request_timeout_seconds": form.get(
                 "vllm_remote_request_timeout_seconds", ""
             ).strip(),
+            "agent_markdown_filename": form.get("agent_markdown_filename", "").strip(),
         }
     return {}
 
@@ -1932,6 +2307,245 @@ def _confluence_space_options(settings: dict[str, str]) -> list[dict[str, str]]:
         _parse_option_entries(settings.get("space_options")),
         settings.get("space"),
     )
+
+
+def _normalize_rag_db_provider(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate in RAG_DB_PROVIDER_CHOICES:
+        return candidate
+    return RAG_DB_PROVIDER_CHOICES[0]
+
+
+def _normalize_rag_model_provider(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    if candidate in RAG_MODEL_PROVIDER_CHOICES:
+        return candidate
+    return "openai"
+
+
+def _normalize_rag_chat_response_style(value: str | None) -> str:
+    candidate = (value or "").strip().lower()
+    candidate = RAG_CHAT_RESPONSE_STYLE_ALIASES.get(candidate, candidate)
+    if candidate in RAG_CHAT_RESPONSE_STYLE_CHOICES:
+        return candidate
+    return "high"
+
+
+def _coerce_rag_int_str(
+    value: str | None,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> str:
+    raw = (value or "").strip()
+    try:
+        parsed = int(raw)
+    except ValueError:
+        parsed = default
+    if minimum is not None and parsed < minimum:
+        parsed = minimum
+    if maximum is not None and parsed > maximum:
+        parsed = maximum
+    return str(parsed)
+
+
+def _coerce_rag_float_str(
+    value: str | None,
+    default: float,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> str:
+    raw = (value or "").strip()
+    try:
+        parsed = float(raw)
+    except ValueError:
+        parsed = default
+    if minimum is not None and parsed < minimum:
+        parsed = minimum
+    if maximum is not None and parsed > maximum:
+        parsed = maximum
+    text = f"{parsed:.4f}".rstrip("0").rstrip(".")
+    return text or str(default)
+
+
+def _rag_default_settings() -> dict[str, str]:
+    config = load_rag_config()
+    return {
+        "db_provider": "chroma",
+        "embed_provider": _normalize_rag_model_provider(config.embed_provider),
+        "chat_provider": _normalize_rag_model_provider(config.chat_provider),
+        "openai_api_key": config.openai_api_key or "",
+        "gemini_api_key": config.gemini_api_key or "",
+        "openai_embed_model": config.openai_embedding_model or "text-embedding-3-small",
+        "gemini_embed_model": config.gemini_embedding_model or "models/gemini-embedding-001",
+        "openai_chat_model": config.openai_chat_model or "gpt-4o-mini",
+        "gemini_chat_model": config.gemini_chat_model or "gemini-2.5-flash",
+        "chat_temperature": _coerce_rag_float_str(str(config.chat_temperature), 0.2),
+        "chat_response_style": _normalize_rag_chat_response_style(
+            config.chat_response_style
+        ),
+        "chat_top_k": str(config.chat_top_k),
+        "chat_max_history": str(config.chat_max_history),
+        "chat_max_context_chars": str(config.chat_max_context_chars),
+        "chat_snippet_chars": str(config.chat_snippet_chars),
+        "chat_context_budget_tokens": str(config.chat_context_budget_tokens),
+        "index_parallel_workers": str(config.index_parallel_workers),
+        "embed_parallel_requests": str(config.embed_parallel_requests),
+    }
+
+
+def _effective_rag_settings() -> dict[str, str]:
+    defaults = _rag_default_settings()
+    try:
+        _ensure_rag_setting_defaults("rag", defaults)
+    except Exception:
+        pass
+    stored = _load_rag_settings("rag")
+    settings = {**defaults, **stored}
+    settings["db_provider"] = _normalize_rag_db_provider(settings.get("db_provider"))
+    settings["embed_provider"] = _normalize_rag_model_provider(
+        settings.get("embed_provider")
+    )
+    settings["chat_provider"] = _normalize_rag_model_provider(
+        settings.get("chat_provider")
+    )
+    settings["chat_response_style"] = _normalize_rag_chat_response_style(
+        settings.get("chat_response_style")
+    )
+    settings["chat_temperature"] = _coerce_rag_float_str(
+        settings.get("chat_temperature"),
+        float(defaults["chat_temperature"] or 0.2),
+        minimum=0.0,
+        maximum=2.0,
+    )
+    settings["chat_top_k"] = _coerce_rag_int_str(
+        settings.get("chat_top_k"),
+        int(defaults["chat_top_k"] or 5),
+        minimum=1,
+        maximum=20,
+    )
+    settings["chat_max_history"] = _coerce_rag_int_str(
+        settings.get("chat_max_history"),
+        int(defaults["chat_max_history"] or 8),
+        minimum=1,
+        maximum=50,
+    )
+    settings["chat_max_context_chars"] = _coerce_rag_int_str(
+        settings.get("chat_max_context_chars"),
+        int(defaults["chat_max_context_chars"] or 12000),
+        minimum=1000,
+        maximum=1000000,
+    )
+    settings["chat_snippet_chars"] = _coerce_rag_int_str(
+        settings.get("chat_snippet_chars"),
+        int(defaults["chat_snippet_chars"] or 600),
+        minimum=100,
+        maximum=10000,
+    )
+    settings["chat_context_budget_tokens"] = _coerce_rag_int_str(
+        settings.get("chat_context_budget_tokens"),
+        int(defaults["chat_context_budget_tokens"] or 8000),
+        minimum=256,
+        maximum=100000,
+    )
+    settings["index_parallel_workers"] = _coerce_rag_int_str(
+        settings.get("index_parallel_workers"),
+        int(defaults["index_parallel_workers"] or 1),
+        minimum=1,
+        maximum=64,
+    )
+    settings["embed_parallel_requests"] = _coerce_rag_int_str(
+        settings.get("embed_parallel_requests"),
+        int(defaults["embed_parallel_requests"] or 1),
+        minimum=1,
+        maximum=64,
+    )
+    settings["openai_embed_model"] = (settings.get("openai_embed_model") or "").strip() or defaults["openai_embed_model"]
+    settings["gemini_embed_model"] = (settings.get("gemini_embed_model") or "").strip() or defaults["gemini_embed_model"]
+    settings["openai_chat_model"] = (settings.get("openai_chat_model") or "").strip() or defaults["openai_chat_model"]
+    settings["gemini_chat_model"] = (settings.get("gemini_chat_model") or "").strip() or defaults["gemini_chat_model"]
+    settings["openai_api_key"] = (settings.get("openai_api_key") or "").strip()
+    settings["gemini_api_key"] = (settings.get("gemini_api_key") or "").strip()
+    return settings
+
+
+def _settings_integrations_context(
+    *,
+    github_repo_options: list[str] | None = None,
+    jira_project_options: list[dict[str, str]] | None = None,
+    jira_board_options: list[dict[str, str]] | None = None,
+    confluence_space_options: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    summary = _settings_summary()
+    github_settings = _load_integration_settings("github")
+    jira_settings = _load_integration_settings("jira")
+    confluence_settings = _load_integration_settings("confluence")
+    google_drive_settings = _load_integration_settings("google_drive")
+    google_drive_service_email = _google_drive_service_email(google_drive_settings)
+    chroma_settings = _resolved_chroma_settings()
+    rag_settings = _effective_rag_settings()
+
+    if github_repo_options is None:
+        github_repo_options = []
+        selected_repo = github_settings.get("repo")
+        if selected_repo:
+            github_repo_options = [selected_repo]
+
+    if jira_project_options is None:
+        jira_project_options = []
+        selected_project = jira_settings.get("project_key")
+        if selected_project:
+            jira_project_options = [
+                {"value": selected_project, "label": selected_project}
+            ]
+
+    if jira_board_options is None:
+        jira_board_options = []
+        selected_board = jira_settings.get("board")
+        if selected_board:
+            jira_board_options = [{"value": selected_board, "label": selected_board}]
+
+    if confluence_space_options is None:
+        confluence_space_options = _confluence_space_options(confluence_settings)
+
+    chroma_connected = _chroma_connected(chroma_settings)
+    rag_chroma_ready = rag_settings.get("db_provider") != "chroma" or chroma_connected
+
+    return {
+        "github_settings": github_settings,
+        "jira_settings": jira_settings,
+        "confluence_settings": confluence_settings,
+        "google_drive_settings": google_drive_settings,
+        "google_drive_connected": bool(
+            (google_drive_settings.get("service_account_json") or "").strip()
+        ),
+        "google_drive_service_email": google_drive_service_email,
+        "chroma_settings": chroma_settings,
+        "rag_settings": rag_settings,
+        "github_repo_options": github_repo_options,
+        "jira_project_options": jira_project_options,
+        "jira_board_options": jira_board_options,
+        "confluence_space_options": confluence_space_options,
+        "github_connected": bool(
+            (github_settings.get("pat") or "").strip()
+            or (github_settings.get("ssh_key_path") or "").strip()
+        ),
+        "jira_connected": bool((jira_settings.get("api_key") or "").strip()),
+        "confluence_connected": bool((confluence_settings.get("api_key") or "").strip()),
+        "chroma_connected": chroma_connected,
+        "rag_chroma_ready": rag_chroma_ready,
+        "rag_db_provider_choices": RAG_DB_PROVIDER_CHOICES,
+        "rag_model_provider_choices": RAG_MODEL_PROVIDER_CHOICES,
+        "rag_chat_response_style_choices": RAG_CHAT_RESPONSE_STYLE_CHOICES,
+        "summary": summary,
+        "page_title": "Settings - Integrations",
+        "active_page": "settings_integrations",
+        "settings_title": "Settings",
+        "settings_subtitle": "Integrations",
+        "settings_section": "integrations",
+    }
 
 
 def _strip_confluence_html(value: str | None) -> str:
@@ -3639,15 +4253,6 @@ def _load_task_templates() -> list[TaskTemplate]:
             .all()
         )
 
-def _load_roles() -> list[Role]:
-    with session_scope() as session:
-        return (
-            session.execute(select(Role).order_by(Role.created_at.desc()))
-            .scalars()
-            .all()
-        )
-
-
 PAGINATION_PAGE_SIZES = (10, 25, 50, 100)
 PAGINATION_DEFAULT_SIZE = 10
 PAGINATION_WINDOW = 2
@@ -3757,6 +4362,61 @@ def _load_mcp_servers() -> list[MCPServer]:
         )
 
 
+def _coerce_chat_id_list(raw_values: list[object], *, field_name: str) -> list[int]:
+    ordered: list[int] = []
+    for raw in raw_values:
+        parsed = _coerce_optional_int(raw, field_name=field_name, minimum=1)
+        if parsed is None:
+            continue
+        if parsed not in ordered:
+            ordered.append(parsed)
+    return ordered
+
+
+def _coerce_chat_collection_list(raw_values: list[object]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        cleaned = str(raw or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        ordered.append(cleaned)
+    return ordered
+
+
+def _chat_rag_health_payload() -> tuple[dict[str, object], list[dict[str, str]]]:
+    client = get_rag_contract_client()
+    try:
+        health = client.health()
+        collections = client.list_collections()
+    except RAGContractError as exc:
+        return (
+            {
+                "state": CHAT_RAG_HEALTH_CONFIGURED_UNHEALTHY,
+                "provider": "chroma",
+                "error": str(exc),
+            },
+            [],
+        )
+    health_payload = {
+        "state": health.state,
+        "provider": health.provider,
+        "error": health.error,
+    }
+    collection_payload = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "provider": item.provider,
+            "status": item.status or "",
+        }
+        for item in collections
+    ]
+    collection_payload.sort(key=lambda item: item["name"].lower())
+    return health_payload, collection_payload
+
+
 def _split_mcp_servers_by_type(
     mcp_servers: list[MCPServer],
 ) -> tuple[list[MCPServer], list[MCPServer]]:
@@ -3777,6 +4437,22 @@ def _load_scripts() -> list[Script]:
     with session_scope() as session:
         return (
             session.execute(select(Script).order_by(Script.created_at.desc()))
+            .scalars()
+            .all()
+        )
+
+
+def _load_skills() -> list[Skill]:
+    with session_scope() as session:
+        return (
+            session.execute(
+                select(Skill)
+                .options(
+                    selectinload(Skill.versions).selectinload(SkillVersion.files),
+                    selectinload(Skill.agents),
+                )
+                .order_by(Skill.created_at.desc())
+            )
             .scalars()
             .all()
         )
@@ -3923,7 +4599,7 @@ def _coerce_flowchart_edge_mode(value: object, *, field_name: str) -> str:
 def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
     return FLOWCHART_NODE_UTILITY_COMPATIBILITY.get(
         node_type,
-        {"model": False, "mcp": False, "scripts": False},
+        {"model": False, "mcp": False, "scripts": False, "skills": False},
     )
 
 
@@ -3933,6 +4609,7 @@ def _validate_flowchart_utility_compatibility(
     model_id: int | None,
     mcp_server_ids: list[int] | None = None,
     script_ids: list[int] | None = None,
+    skill_ids: list[int] | None = None,
 ) -> list[str]:
     compatibility = _flowchart_node_compatibility(node_type)
     errors: list[str] = []
@@ -3942,6 +4619,8 @@ def _validate_flowchart_utility_compatibility(
         errors.append(f"Node type '{node_type}' does not support MCP servers.")
     if script_ids and not compatibility["scripts"]:
         errors.append(f"Node type '{node_type}' does not support scripts.")
+    if skill_ids and not compatibility["skills"]:
+        errors.append(f"Node type '{node_type}' does not support skills.")
     return errors
 
 
@@ -4240,8 +4919,13 @@ def _flowchart_status_class(status: str | None) -> str:
     return "status-idle"
 
 
-def _flowchart_catalog(session) -> dict[str, list[dict[str, object]]]:
+def _flowchart_catalog(session) -> dict[str, object]:
     integration_overview = _integration_overview()
+    rag_health = rag_domain_health_snapshot()
+    rag_collections_contract = rag_list_collection_contract()
+    rag_collection_rows = rag_collections_contract.get("collections")
+    if not isinstance(rag_collection_rows, list):
+        rag_collection_rows = []
     agents = (
         session.execute(select(Agent).order_by(Agent.created_at.desc())).scalars().all()
     )
@@ -4256,8 +4940,15 @@ def _flowchart_catalog(session) -> dict[str, list[dict[str, object]]]:
         .all()
     )
     scripts = (
-        session.execute(select(Script).order_by(Script.created_at.desc())).scalars().all()
+        session.execute(
+            select(Script).order_by(Script.created_at.desc())
+        )
+        .scalars()
+        .all()
     )
+    scripts = [
+        script for script in scripts if not is_legacy_skill_script_type(script.script_type)
+    ]
     task_templates = (
         session.execute(
             select(TaskTemplate)
@@ -4347,6 +5038,22 @@ def _flowchart_catalog(session) -> dict[str, list[dict[str, object]]]:
             {"id": milestone.id, "name": milestone.name} for milestone in milestones
         ],
         "memories": [{"id": memory.id, "title": memory.title} for memory in memories],
+        "rag_health": {
+            "state": str(rag_health.get("state") or RAG_DOMAIN_HEALTH_UNCONFIGURED),
+            "provider": str(rag_health.get("provider") or "chroma"),
+            "error": str(rag_health.get("error") or "").strip() or None,
+        },
+        "rag_collections": [
+            {
+                "id": str(item.get("id") or "").strip(),
+                "name": str(item.get("name") or "").strip(),
+                "status": str(item.get("status") or "").strip() or "",
+            }
+            for item in rag_collection_rows
+            if isinstance(item, dict)
+            and str(item.get("id") or "").strip()
+            and str(item.get("name") or "").strip()
+        ],
     }
 
 
@@ -4376,6 +5083,59 @@ def _task_node_has_prompt(config: object) -> bool:
         return False
     prompt = config.get("task_prompt")
     return isinstance(prompt, str) and bool(prompt.strip())
+
+
+def _is_rag_embedding_model_provider(provider: str | None) -> bool:
+    return str(provider or "").strip().lower() in {"codex", "gemini"}
+
+
+def _sanitize_rag_node_config(
+    config_payload: dict[str, object],
+    *,
+    model_provider: str | None = None,
+) -> dict[str, object]:
+    mode = str(config_payload.get("mode") or "").strip().lower()
+    if mode not in RAG_NODE_MODE_CHOICES:
+        raise ValueError(
+            "config.mode is required and must be one of: "
+            + ", ".join(RAG_NODE_MODE_CHOICES)
+            + "."
+        )
+
+    collections = rag_normalize_collection_selection(
+        config_payload.get("collections")
+    )
+    if not collections:
+        collections = rag_normalize_collection_selection(
+            config_payload.get("selected_collections")
+        )
+    if not collections:
+        raise ValueError("config.collections requires at least one selected collection.")
+
+    sanitized: dict[str, object] = {
+        "mode": mode,
+        "collections": collections,
+    }
+    if mode == RAG_NODE_MODE_QUERY:
+        question_prompt = str(config_payload.get("question_prompt") or "").strip()
+        if not question_prompt:
+            raise ValueError("config.question_prompt is required for query mode.")
+        sanitized["question_prompt"] = question_prompt
+        top_k = _coerce_optional_int(
+            config_payload.get("top_k"),
+            field_name="config.top_k",
+            minimum=1,
+        )
+        if top_k is not None:
+            sanitized["top_k"] = min(top_k, 20)
+    elif model_provider is not None and not _is_rag_embedding_model_provider(
+        model_provider
+    ):
+        raise ValueError(
+            "Index modes require an embedding-capable model provider (codex or gemini)."
+        )
+
+    return sanitized
 
 
 def _validate_flowchart_graph_snapshot(
@@ -4412,6 +5172,11 @@ def _validate_flowchart_graph_snapshot(
             errors.append(
                 f"Node {node_id} ({node_type}) requires ref_id or config.task_prompt."
             )
+        if node_type == FLOWCHART_NODE_TYPE_RAG:
+            try:
+                _sanitize_rag_node_config(config_payload)
+            except ValueError as exc:
+                errors.append(f"Node {node_id} ({node_type}) {exc}")
         if node_type == FLOWCHART_NODE_TYPE_TASK and "integration_keys" in config_payload:
             raw_integration_keys = config_payload.get("integration_keys")
             if raw_integration_keys is not None and not isinstance(
@@ -4440,6 +5205,9 @@ def _validate_flowchart_graph_snapshot(
         script_ids = node.get("script_ids") or []
         if script_ids and not compatibility["scripts"]:
             errors.append(f"Node {node_id} ({node_type}) does not support scripts.")
+        skill_ids = node.get("skill_ids") or []
+        if skill_ids and not compatibility["skills"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support skills.")
 
     start_nodes = [node for node in nodes if node.get("node_type") == FLOWCHART_NODE_TYPE_START]
     if len(start_nodes) != 1:
@@ -4716,6 +5484,10 @@ def view_agent(agent_id: int):
         agent = (
             session.execute(
                 select(Agent)
+                .options(
+                    selectinload(Agent.priorities),
+                    selectinload(Agent.skills).selectinload(Skill.versions),
+                )
                 .where(Agent.id == agent_id)
             )
             .scalars()
@@ -4723,11 +5495,15 @@ def view_agent(agent_id: int):
         )
         if agent is None:
             abort(404)
+        priorities = _ordered_agent_priorities(agent)
+        assigned_skills = _ordered_agent_skills(agent)
     agent_status_by_id = _agent_status_by_id([agent.id])
     agent_status = agent_status_by_id.get(agent.id, "stopped")
     return render_template(
         "agent_detail.html",
         agent=agent,
+        priorities=priorities,
+        assigned_skills=assigned_skills,
         agent_status=agent_status,
         roles_by_id=roles_by_id,
         human_time=_human_time,
@@ -4741,13 +5517,43 @@ def view_agent(agent_id: int):
 def edit_agent(agent_id: int):
     roles = _load_roles()
     with session_scope() as session:
-        agent = session.get(Agent, agent_id)
+        agent = (
+            session.execute(
+                select(Agent)
+                .options(
+                    selectinload(Agent.priorities),
+                    selectinload(Agent.skills).selectinload(Skill.versions),
+                )
+                .where(Agent.id == agent_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         if agent is None:
             abort(404)
+        priorities = _ordered_agent_priorities(agent)
+        assigned_skills = _ordered_agent_skills(agent)
+        assigned_skill_ids = {skill.id for skill in assigned_skills}
+        available_skills = (
+            session.execute(
+                select(Skill)
+                .options(selectinload(Skill.versions))
+                .where(Skill.status != SKILL_STATUS_ARCHIVED)
+                .order_by(Skill.display_name.asc(), Skill.name.asc(), Skill.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        available_skills = [
+            skill for skill in available_skills if skill.id not in assigned_skill_ids
+        ]
     return render_template(
         "agent_edit.html",
         agent=agent,
         roles=roles,
+        priorities=priorities,
+        assigned_skills=assigned_skills,
+        available_skills=available_skills,
         page_title=f"Edit Agent - {agent.name}",
         active_page="agents",
     )
@@ -4796,6 +5602,219 @@ def update_agent(agent_id: int):
 
     flash("Agent updated.", "success")
     return redirect(url_for("agents.view_agent", agent_id=agent_id))
+
+
+@bp.post("/agents/<int:agent_id>/skills")
+def attach_agent_skill(agent_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
+    )
+    payload = _flowchart_request_payload()
+    raw_skill_id = payload.get("skill_id") if payload else request.form.get("skill_id")
+    try:
+        skill_id = _coerce_optional_int(raw_skill_id, field_name="skill_id", minimum=1)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(redirect_target)
+    if skill_id is None:
+        flash("skill_id is required.", "error")
+        return redirect(redirect_target)
+
+    with session_scope() as session:
+        agent = (
+            session.execute(
+                select(Agent).options(selectinload(Agent.skills)).where(Agent.id == agent_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
+        if agent is None:
+            abort(404)
+        skill = session.get(Skill, skill_id)
+        if skill is None:
+            flash(f"Skill {skill_id} was not found.", "error")
+            return redirect(redirect_target)
+        if (skill.status or SKILL_STATUS_ACTIVE) == SKILL_STATUS_ARCHIVED:
+            flash(f"Skill {skill_id} is archived and cannot be assigned.", "error")
+            return redirect(redirect_target)
+
+        ordered_ids = [item.id for item in _ordered_agent_skills(agent)]
+        if skill_id not in ordered_ids:
+            ordered_ids.append(skill_id)
+            _set_agent_skills(session, agent_id, ordered_ids)
+            flash("Skill assigned.", "success")
+        else:
+            flash("Skill already assigned.", "info")
+
+    return redirect(redirect_target)
+
+
+@bp.post("/agents/<int:agent_id>/skills/<int:skill_id>/delete")
+def detach_agent_skill(agent_id: int, skill_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
+    )
+    with session_scope() as session:
+        agent = (
+            session.execute(
+                select(Agent).options(selectinload(Agent.skills)).where(Agent.id == agent_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
+        if agent is None:
+            abort(404)
+        ordered_ids = [item.id for item in _ordered_agent_skills(agent) if item.id != skill_id]
+        _set_agent_skills(session, agent_id, ordered_ids)
+    flash("Skill removed.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/agents/<int:agent_id>/skills/<int:skill_id>/move")
+def move_agent_skill(agent_id: int, skill_id: int):
+    direction = (request.form.get("direction") or "").strip().lower()
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
+    )
+    if direction not in {"up", "down"}:
+        flash("Invalid skill reorder direction.", "error")
+        return redirect(redirect_target)
+
+    with session_scope() as session:
+        agent = (
+            session.execute(
+                select(Agent).options(selectinload(Agent.skills)).where(Agent.id == agent_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
+        if agent is None:
+            abort(404)
+        ordered_ids = [item.id for item in _ordered_agent_skills(agent)]
+        index = next((idx for idx, item_id in enumerate(ordered_ids) if item_id == skill_id), None)
+        if index is None:
+            abort(404)
+        if direction == "up" and index > 0:
+            ordered_ids[index - 1], ordered_ids[index] = ordered_ids[index], ordered_ids[index - 1]
+        elif direction == "down" and index < len(ordered_ids) - 1:
+            ordered_ids[index + 1], ordered_ids[index] = ordered_ids[index], ordered_ids[index + 1]
+        _set_agent_skills(session, agent_id, ordered_ids)
+
+    return redirect(redirect_target)
+
+
+@bp.post("/agents/<int:agent_id>/priorities")
+def create_agent_priority(agent_id: int):
+    content = request.form.get("content", "").strip()
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
+    )
+    if not content:
+        flash("Priority content is required.", "error")
+        return redirect(redirect_target)
+    with session_scope() as session:
+        agent = (
+            session.execute(
+                select(Agent)
+                .options(selectinload(Agent.priorities))
+                .where(Agent.id == agent_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
+        if agent is None:
+            abort(404)
+        position = len(_ordered_agent_priorities(agent)) + 1
+        AgentPriority.create(
+            session,
+            agent_id=agent_id,
+            position=position,
+            content=content,
+        )
+    flash("Priority added.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/agents/<int:agent_id>/priorities/<int:priority_id>")
+def update_agent_priority(agent_id: int, priority_id: int):
+    content = request.form.get("content", "").strip()
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
+    )
+    if not content:
+        flash("Priority content is required.", "error")
+        return redirect(redirect_target)
+    with session_scope() as session:
+        priority = session.get(AgentPriority, priority_id)
+        if priority is None or priority.agent_id != agent_id:
+            abort(404)
+        priority.content = content
+    flash("Priority updated.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/agents/<int:agent_id>/priorities/<int:priority_id>/move")
+def move_agent_priority(agent_id: int, priority_id: int):
+    direction = (request.form.get("direction") or "").strip().lower()
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
+    )
+    if direction not in {"up", "down"}:
+        flash("Invalid priority reorder direction.", "error")
+        return redirect(redirect_target)
+    with session_scope() as session:
+        agent = (
+            session.execute(
+                select(Agent)
+                .options(selectinload(Agent.priorities))
+                .where(Agent.id == agent_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
+        if agent is None:
+            abort(404)
+        priorities = _ordered_agent_priorities(agent)
+        index = next(
+            (entry_index for entry_index, item in enumerate(priorities) if item.id == priority_id),
+            None,
+        )
+        if index is None:
+            abort(404)
+        if direction == "up" and index > 0:
+            priorities[index - 1], priorities[index] = priorities[index], priorities[index - 1]
+        elif direction == "down" and index < len(priorities) - 1:
+            priorities[index + 1], priorities[index] = priorities[index], priorities[index + 1]
+        _reindex_agent_priorities(priorities)
+    return redirect(redirect_target)
+
+
+@bp.post("/agents/<int:agent_id>/priorities/<int:priority_id>/delete")
+def delete_agent_priority(agent_id: int, priority_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
+    )
+    with session_scope() as session:
+        agent = (
+            session.execute(
+                select(Agent)
+                .options(selectinload(Agent.priorities))
+                .where(Agent.id == agent_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
+        if agent is None:
+            abort(404)
+        priorities = _ordered_agent_priorities(agent)
+        priority = next((item for item in priorities if item.id == priority_id), None)
+        if priority is None:
+            abort(404)
+        session.delete(priority)
+        priorities = [item for item in priorities if item.id != priority_id]
+        _reindex_agent_priorities(priorities)
+    flash("Priority deleted.", "success")
+    return redirect(redirect_target)
 
 
 @bp.post("/roles")
@@ -5225,8 +6244,165 @@ def quick_task():
 
 
 @bp.get("/chat")
-def legacy_chat_redirect():
-    return redirect(url_for("agents.quick_task"), code=301)
+def chat_page():
+    sync_integrated_mcp_servers()
+    agents = _load_agents()
+    _, summary = _agent_rollup(agents)
+    models = _load_llm_models()
+    mcp_servers = _load_mcp_servers()
+    threads = list_chat_threads(include_archived=True)
+    try:
+        selected_thread_id = _coerce_optional_int(
+            request.args.get("thread_id"),
+            field_name="thread_id",
+            minimum=1,
+        )
+    except ValueError:
+        selected_thread_id = None
+    selected_thread = None
+    if selected_thread_id is not None:
+        selected_thread = get_chat_thread(selected_thread_id)
+    if selected_thread is None and threads:
+        selected_thread = get_chat_thread(int(threads[0]["id"]))
+    rag_health, rag_collections = _chat_rag_health_payload()
+    return render_template(
+        "chat_runtime.html",
+        summary=summary,
+        page_title="Launch Chat",
+        active_page="chat",
+        models=models,
+        mcp_servers=mcp_servers,
+        threads=threads,
+        selected_thread=selected_thread,
+        rag_health=rag_health,
+        rag_collections=rag_collections,
+        chat_settings=load_chat_runtime_settings_payload(),
+    )
+
+
+@bp.get("/chat/activity")
+def chat_activity():
+    agents = _load_agents()
+    _, summary = _agent_rollup(agents)
+    event_class = (request.args.get("event_class") or "").strip() or None
+    event_type = (request.args.get("event_type") or "").strip() or None
+    reason_code = (request.args.get("reason_code") or "").strip() or None
+    try:
+        thread_id = _coerce_optional_int(
+            request.args.get("thread_id"),
+            field_name="thread_id",
+            minimum=1,
+        )
+    except ValueError:
+        thread_id = None
+    events = list_chat_activity(
+        event_class=event_class,
+        event_type=event_type,
+        reason_code=reason_code,
+        thread_id=thread_id,
+    )
+    threads = list_chat_threads(include_archived=True)
+    return render_template(
+        "chat_activity.html",
+        summary=summary,
+        page_title="Chat Activity",
+        active_page="chat_activity",
+        events=events,
+        threads=threads,
+        selected_event_class=event_class or "",
+        selected_event_type=event_type or "",
+        selected_reason_code=reason_code or "",
+        selected_thread_id=thread_id,
+    )
+
+
+@bp.post("/chat/threads")
+def create_chat_thread_route():
+    try:
+        title = (request.form.get("title") or "").strip() or "New chat"
+        model_id = _coerce_optional_int(
+            request.form.get("model_id"),
+            field_name="model_id",
+            minimum=1,
+        )
+        mcp_server_ids = _coerce_chat_id_list(
+            request.form.getlist("mcp_server_ids"),
+            field_name="mcp_server_id",
+        )
+        rag_collections = _coerce_chat_collection_list(
+            request.form.getlist("rag_collections")
+        )
+        thread = create_chat_thread(
+            title=title,
+            model_id=model_id,
+            mcp_server_ids=mcp_server_ids,
+            rag_collections=rag_collections,
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("agents.chat_page"))
+    flash("Chat thread created.", "success")
+    return redirect(url_for("agents.chat_page", thread_id=thread["id"]))
+
+
+@bp.post("/chat/threads/<int:thread_id>/config")
+def update_chat_thread_route(thread_id: int):
+    try:
+        model_id = _coerce_optional_int(
+            request.form.get("model_id"),
+            field_name="model_id",
+            minimum=1,
+        )
+        mcp_server_ids = _coerce_chat_id_list(
+            request.form.getlist("mcp_server_ids"),
+            field_name="mcp_server_id",
+        )
+        rag_collections = _coerce_chat_collection_list(
+            request.form.getlist("rag_collections")
+        )
+        update_chat_thread_config(
+            thread_id,
+            model_id=model_id,
+            mcp_server_ids=mcp_server_ids,
+            rag_collections=rag_collections,
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("agents.chat_page", thread_id=thread_id))
+    flash("Chat thread settings updated.", "success")
+    return redirect(url_for("agents.chat_page", thread_id=thread_id))
+
+
+@bp.post("/chat/threads/<int:thread_id>/archive")
+def archive_chat_thread_route(thread_id: int):
+    if not archive_chat_thread(thread_id):
+        abort(404)
+    flash("Chat thread archived.", "success")
+    return redirect(url_for("agents.chat_page"))
+
+
+@bp.post("/chat/threads/<int:thread_id>/restore")
+def restore_chat_thread_route(thread_id: int):
+    if not restore_chat_thread(thread_id):
+        abort(404)
+    flash("Chat thread restored.", "success")
+    return redirect(url_for("agents.chat_page", thread_id=thread_id))
+
+
+@bp.post("/chat/threads/<int:thread_id>/clear")
+def clear_chat_thread_route(thread_id: int):
+    if not clear_chat_thread(thread_id):
+        abort(404)
+    flash("Chat thread cleared.", "success")
+    return redirect(url_for("agents.chat_page", thread_id=thread_id))
+
+
+@bp.post("/chat/threads/<int:thread_id>/delete")
+def delete_chat_thread_route(thread_id: int):
+    if not delete_chat_thread(thread_id):
+        abort(404)
+    flash("Chat thread deleted.", "success")
+    return redirect(url_for("agents.chat_page"))
 
 
 @bp.post("/quick")
@@ -5368,9 +6544,79 @@ def create_quick_task():
     return redirect(url_for("agents.view_node", task_id=task_id))
 
 
-@bp.post("/chat")
-def legacy_chat_create():
-    return create_quick_task()
+@bp.get("/api/chat/threads/<int:thread_id>")
+def api_chat_thread(thread_id: int):
+    payload = get_chat_thread(thread_id)
+    if payload is None:
+        return {"error": "Thread not found."}, 404
+    return payload
+
+
+@bp.get("/api/chat/activity")
+def api_chat_activity():
+    event_class = (request.args.get("event_class") or "").strip() or None
+    event_type = (request.args.get("event_type") or "").strip() or None
+    reason_code = (request.args.get("reason_code") or "").strip() or None
+    try:
+        thread_id = _coerce_optional_int(
+            request.args.get("thread_id"),
+            field_name="thread_id",
+            minimum=1,
+        )
+    except ValueError:
+        return {"error": "thread_id must be an integer."}, 400
+    return {
+        "events": list_chat_activity(
+            event_class=event_class,
+            event_type=event_type,
+            reason_code=reason_code,
+            thread_id=thread_id,
+        )
+    }
+
+
+@bp.post("/api/chat/threads/<int:thread_id>/turn")
+def api_chat_turn(thread_id: int):
+    payload = request.get_json(silent=True) or {}
+    for key in ("model_id", "mcp_server_ids", "rag_collections"):
+        if key in payload:
+            return {
+                "error": "Model, MCP, and RAG selectors are session-scoped only.",
+                "reason_code": CHAT_REASON_SELECTOR_SCOPE,
+            }, 400
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        return {"error": "Message is required."}, 400
+    try:
+        result = execute_chat_turn(thread_id=thread_id, message=message)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    thread_payload = get_chat_thread(thread_id)
+    if result.ok:
+        return {
+            "ok": True,
+            "thread_id": result.thread_id,
+            "turn_id": result.turn_id,
+            "request_id": result.request_id,
+            "reply": result.reply,
+            "thread": thread_payload,
+        }
+    status_code = 500
+    if result.reason_code == "RAG_UNAVAILABLE_FOR_SELECTED_COLLECTIONS":
+        status_code = 503
+    elif result.reason_code == "RAG_RETRIEVAL_EXECUTION_FAILED":
+        status_code = 502
+    return {
+        "ok": False,
+        "thread_id": result.thread_id,
+        "turn_id": result.turn_id,
+        "request_id": result.request_id,
+        "reason_code": result.reason_code,
+        "error": result.error,
+        "rag_health_state": result.rag_health_state,
+        "selected_collections": result.selected_collections,
+        "thread": thread_payload,
+    }, status_code
 
 
 @bp.get("/nodes", endpoint="list_nodes")
@@ -5768,7 +7014,7 @@ def new_node():
         scripts_by_type=scripts_by_type,
         selected_scripts_by_type=selected_scripts_by_type,
         script_type_fields=SCRIPT_TYPE_FIELDS,
-        script_type_choices=SCRIPT_TYPE_CHOICES,
+        script_type_choices=SCRIPT_TYPE_WRITE_CHOICES,
         integration_options=integration_options,
         selected_integration_keys=default_selected_integration_keys,
         summary=summary,
@@ -6333,7 +7579,9 @@ def list_task_templates():
     with session_scope() as session:
         total_count = session.execute(
             select(func.count(FlowchartNode.id)).where(
-                FlowchartNode.node_type == FLOWCHART_NODE_TYPE_TASK
+                FlowchartNode.node_type.in_(
+                    [FLOWCHART_NODE_TYPE_TASK, FLOWCHART_NODE_TYPE_RAG]
+                )
             )
         ).scalar_one()
         pagination = _build_pagination(request.path, page, per_page, total_count)
@@ -6342,7 +7590,11 @@ def list_task_templates():
             session.execute(
                 select(FlowchartNode, Flowchart)
                 .join(Flowchart, Flowchart.id == FlowchartNode.flowchart_id)
-                .where(FlowchartNode.node_type == FLOWCHART_NODE_TYPE_TASK)
+                .where(
+                    FlowchartNode.node_type.in_(
+                        [FLOWCHART_NODE_TYPE_TASK, FLOWCHART_NODE_TYPE_RAG]
+                    )
+                )
                 .order_by(FlowchartNode.updated_at.desc(), FlowchartNode.id.desc())
                 .limit(per_page)
                 .offset(offset)
@@ -6368,23 +7620,42 @@ def list_task_templates():
     task_nodes: list[dict[str, object]] = []
     for node, flowchart in task_rows:
         config = _parse_json_dict(node.config_json)
-        inline_name = config.get("task_name")
-        inline_prompt = config.get("task_prompt")
-        task_name = str(inline_name).strip() if isinstance(inline_name, str) else ""
-        if not task_name:
-            task_name = str(node.title or "").strip()
-        if not task_name and node.ref_id is not None:
-            task_name = template_name_by_id.get(int(node.ref_id), "")
-        if not task_name:
-            task_name = f"Task node {node.id}"
+        task_name = str(node.title or "").strip()
+        prompt_text = ""
+        if node.node_type == FLOWCHART_NODE_TYPE_RAG:
+            if not task_name:
+                task_name = f"RAG node {node.id}"
+            rag_mode = str(config.get("mode") or "query").strip().lower() or "query"
+            if rag_mode == RAG_NODE_MODE_QUERY:
+                prompt_text = str(config.get("question_prompt") or "").strip()
+            if not prompt_text:
+                selected_collections = rag_normalize_collection_selection(
+                    config.get("collections")
+                )
+                if selected_collections:
+                    prompt_text = (
+                        f"mode={rag_mode} | collections="
+                        + ", ".join(selected_collections)
+                    )
+                else:
+                    prompt_text = f"mode={rag_mode}"
+        else:
+            inline_name = config.get("task_name")
+            inline_prompt = config.get("task_prompt")
+            if not task_name:
+                task_name = str(inline_name).strip() if isinstance(inline_name, str) else ""
+            if not task_name and node.ref_id is not None:
+                task_name = template_name_by_id.get(int(node.ref_id), "")
+            if not task_name:
+                task_name = f"Task node {node.id}"
 
-        prompt_text = str(inline_prompt).strip() if isinstance(inline_prompt, str) else ""
-        if not prompt_text and node.ref_id is not None:
-            legacy_name = template_name_by_id.get(int(node.ref_id), "")
-            if legacy_name:
-                prompt_text = f"Legacy template reference: {legacy_name}"
-            else:
-                prompt_text = "Legacy template reference."
+            prompt_text = str(inline_prompt).strip() if isinstance(inline_prompt, str) else ""
+            if not prompt_text and node.ref_id is not None:
+                legacy_name = template_name_by_id.get(int(node.ref_id), "")
+                if legacy_name:
+                    prompt_text = f"Legacy template reference: {legacy_name}"
+                else:
+                    prompt_text = "Legacy template reference."
         prompt_preview = " ".join(prompt_text.split())
         if len(prompt_preview) > 180:
             prompt_preview = f"{prompt_preview[:177]}..."
@@ -6393,6 +7664,7 @@ def list_task_templates():
                 "node_id": node.id,
                 "task_name": task_name,
                 "prompt_preview": prompt_preview or "-",
+                "node_type": str(node.node_type or "").strip().lower(),
                 "flowchart_id": flowchart.id,
                 "flowchart_name": flowchart.name,
             }
@@ -6405,7 +7677,7 @@ def list_task_templates():
         summary=summary,
         human_time=_human_time,
         fixed_list_page=True,
-        page_title="Tasks",
+        page_title="Workflow Nodes",
         active_page="templates",
     )
 
@@ -6625,6 +7897,7 @@ def view_flowchart(flowchart_id: int):
                 .options(
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -6700,6 +7973,10 @@ def view_flowchart(flowchart_id: int):
         validation=validation_payload,
         catalog=catalog,
         node_types=list(FLOWCHART_NODE_TYPE_CHOICES),
+        rag_palette_state=str(
+            ((catalog.get("rag_health") or {}).get("state"))
+            or RAG_DOMAIN_HEALTH_UNCONFIGURED
+        ),
         selected_node_id=selected_node_id,
         active_run_id=active_run_id,
         page_title=f"Flowchart - {flowchart_payload['name']}",
@@ -7018,6 +8295,11 @@ def delete_flowchart(flowchart_id: int):
                     flowchart_node_scripts.c.flowchart_node_id.in_(node_ids)
                 )
             )
+            session.execute(
+                delete(flowchart_node_skills).where(
+                    flowchart_node_skills.c.flowchart_node_id.in_(node_ids)
+                )
+            )
 
         session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
         if node_ids:
@@ -7053,6 +8335,7 @@ def get_flowchart_graph(flowchart_id: int):
                 .options(
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -7113,6 +8396,7 @@ def upsert_flowchart_graph(flowchart_id: int):
                     .options(
                         selectinload(FlowchartNode.mcp_servers),
                         selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
                     )
                     .where(FlowchartNode.flowchart_id == flowchart_id)
                 )
@@ -7171,6 +8455,17 @@ def upsert_flowchart_graph(flowchart_id: int):
                     config_payload.pop("route_key_path", None)
                 else:
                     config_payload.pop("integration_keys", None)
+                if node_type == FLOWCHART_NODE_TYPE_RAG:
+                    selected_model_provider: str | None = None
+                    if model_id is not None:
+                        selected_model = session.get(LLMModel, model_id)
+                        if selected_model is None:
+                            raise ValueError(f"nodes[{index}].model_id {model_id} was not found.")
+                        selected_model_provider = selected_model.provider
+                    config_payload = _sanitize_rag_node_config(
+                        config_payload,
+                        model_provider=selected_model_provider,
+                    )
 
                 if node_type in FLOWCHART_NODE_TYPE_REQUIRES_REF and ref_id is None:
                     raise ValueError(f"nodes[{index}] requires ref_id for node_type '{node_type}'.")
@@ -7288,13 +8583,23 @@ def upsert_flowchart_graph(flowchart_id: int):
                     if compatibility_errors:
                         raise ValueError(compatibility_errors[0])
                     selected_scripts = (
-                        session.execute(select(Script.id).where(Script.id.in_(script_ids)))
+                        session.execute(select(Script).where(Script.id.in_(script_ids)))
                         .scalars()
                         .all()
                     )
                     if len(selected_scripts) != len(set(script_ids)):
                         raise ValueError(f"nodes[{index}] contains unknown script IDs.")
+                    if any(is_legacy_skill_script_type(item.script_type) for item in selected_scripts):
+                        raise ValueError(
+                            "Legacy script_type=skill records cannot be attached. "
+                            "Assign first-class Skills to an Agent instead."
+                        )
                     _set_flowchart_node_scripts(session, flowchart_node.id, script_ids)
+
+                if "skill_ids" in raw_node:
+                    raise ValueError(
+                        f"nodes[{index}].skill_ids is no longer writable; assign skills on the Agent."
+                    )
 
                 keep_node_ids.add(flowchart_node.id)
                 if node_id_raw is not None:
@@ -7361,6 +8666,11 @@ def upsert_flowchart_graph(flowchart_id: int):
                     )
                 )
                 session.execute(
+                    delete(flowchart_node_skills).where(
+                        flowchart_node_skills.c.flowchart_node_id.in_(removed_node_ids)
+                    )
+                )
+                session.execute(
                     delete(FlowchartNode).where(FlowchartNode.id.in_(removed_node_ids))
                 )
 
@@ -7370,6 +8680,7 @@ def upsert_flowchart_graph(flowchart_id: int):
                     .options(
                         selectinload(FlowchartNode.mcp_servers),
                         selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
                     )
                     .where(FlowchartNode.flowchart_id == flowchart_id)
                     .order_by(FlowchartNode.id.asc())
@@ -7422,6 +8733,7 @@ def validate_flowchart(flowchart_id: int):
                 .options(
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -7462,6 +8774,7 @@ def run_flowchart_route(flowchart_id: int):
                 .options(
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -7783,6 +9096,23 @@ def set_flowchart_node_model(flowchart_id: int, node_id: int):
             return {"error": errors[0]}, 400
         if model_id is not None and session.get(LLMModel, model_id) is None:
             return {"error": f"Model {model_id} was not found."}, 404
+        if (
+            flowchart_node.node_type == FLOWCHART_NODE_TYPE_RAG
+            and model_id is not None
+        ):
+            selected_model = session.get(LLMModel, model_id)
+            rag_config = _parse_json_dict(flowchart_node.config_json)
+            rag_mode = str(rag_config.get("mode") or "").strip().lower()
+            if rag_mode in {RAG_NODE_MODE_FRESH_INDEX, RAG_NODE_MODE_DELTA_INDEX}:
+                if selected_model is None or not _is_rag_embedding_model_provider(
+                    selected_model.provider
+                ):
+                    return {
+                        "error": (
+                            "Index modes require an embedding-capable model provider "
+                            "(codex or gemini)."
+                        )
+                    }, 400
         flowchart_node.model_id = model_id
         return {"node": _serialize_flowchart_node(flowchart_node)}
 
@@ -7861,7 +9191,10 @@ def attach_flowchart_node_script(flowchart_id: int, node_id: int):
         flowchart_node = (
             session.execute(
                 select(FlowchartNode)
-                .options(selectinload(FlowchartNode.scripts))
+                .options(
+                    selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.skills),
+                )
                 .where(FlowchartNode.id == node_id)
             )
             .scalars()
@@ -7879,6 +9212,13 @@ def attach_flowchart_node_script(flowchart_id: int, node_id: int):
         script = session.get(Script, script_id)
         if script is None:
             return {"error": f"Script {script_id} was not found."}, 404
+        if is_legacy_skill_script_type(script.script_type):
+            return {
+                "error": (
+                    "Legacy script_type=skill records cannot be attached. "
+                    "Assign first-class Skills on an Agent."
+                )
+            }, 400
         ordered_ids = [item.id for item in flowchart_node.scripts]
         if script_id not in ordered_ids:
             ordered_ids.append(script_id)
@@ -7886,7 +9226,10 @@ def attach_flowchart_node_script(flowchart_id: int, node_id: int):
         refreshed = (
             session.execute(
                 select(FlowchartNode)
-                .options(selectinload(FlowchartNode.scripts))
+                .options(
+                    selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.skills),
+                )
                 .where(FlowchartNode.id == node_id)
             )
             .scalars()
@@ -7901,7 +9244,10 @@ def detach_flowchart_node_script(flowchart_id: int, node_id: int, script_id: int
         flowchart_node = (
             session.execute(
                 select(FlowchartNode)
-                .options(selectinload(FlowchartNode.scripts))
+                .options(
+                    selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.skills),
+                )
                 .where(FlowchartNode.id == node_id)
             )
             .scalars()
@@ -7914,7 +9260,10 @@ def detach_flowchart_node_script(flowchart_id: int, node_id: int, script_id: int
         refreshed = (
             session.execute(
                 select(FlowchartNode)
-                .options(selectinload(FlowchartNode.scripts))
+                .options(
+                    selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.skills),
+                )
                 .where(FlowchartNode.id == node_id)
             )
             .scalars()
@@ -7954,7 +9303,10 @@ def reorder_flowchart_node_scripts(flowchart_id: int, node_id: int):
         flowchart_node = (
             session.execute(
                 select(FlowchartNode)
-                .options(selectinload(FlowchartNode.scripts))
+                .options(
+                    selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.skills),
+                )
                 .where(FlowchartNode.id == node_id)
             )
             .scalars()
@@ -7969,6 +9321,13 @@ def reorder_flowchart_node_scripts(flowchart_id: int, node_id: int):
         )
         if errors:
             return {"error": errors[0]}, 400
+        if any(is_legacy_skill_script_type(script.script_type) for script in flowchart_node.scripts):
+            return {
+                "error": (
+                    "Legacy script_type=skill records cannot be reordered; "
+                    "migrate to first-class Skills."
+                )
+            }, 400
         existing_ids = {script.id for script in flowchart_node.scripts}
         if set(script_ids) != existing_ids:
             return {
@@ -7978,13 +9337,38 @@ def reorder_flowchart_node_scripts(flowchart_id: int, node_id: int):
         refreshed = (
             session.execute(
                 select(FlowchartNode)
-                .options(selectinload(FlowchartNode.scripts))
+                .options(
+                    selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.skills),
+                )
                 .where(FlowchartNode.id == node_id)
             )
             .scalars()
             .first()
         )
         return {"node": _serialize_flowchart_node(refreshed)}
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills")
+def attach_flowchart_node_skill(flowchart_id: int, node_id: int):
+    with session_scope() as session:
+        _assert_flowchart_node_owner(session, flowchart_id=flowchart_id, node_id=node_id)
+    return _node_skill_binding_write_rejected()
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills/<int:skill_id>/delete")
+def detach_flowchart_node_skill(flowchart_id: int, node_id: int, skill_id: int):
+    del skill_id
+    with session_scope() as session:
+        _assert_flowchart_node_owner(session, flowchart_id=flowchart_id, node_id=node_id)
+    return _node_skill_binding_write_rejected()
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills/reorder")
+def reorder_flowchart_node_skills(flowchart_id: int, node_id: int):
+    with session_scope() as session:
+        _assert_flowchart_node_owner(session, flowchart_id=flowchart_id, node_id=node_id)
+    return _node_skill_binding_write_rejected()
 
 
 @bp.get("/mcps")
@@ -8078,6 +9462,13 @@ def create_model():
         return redirect(url_for("agents.new_model"))
 
     config_payload = _model_config_payload(provider, request.form)
+    markdown_filename_error = _apply_model_markdown_filename_validation(
+        provider,
+        config_payload,
+    )
+    if markdown_filename_error:
+        flash(markdown_filename_error, "error")
+        return redirect(url_for("agents.new_model"))
     model_options = _provider_model_options()
     model_name = str(config_payload.get("model") or "").strip()
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
@@ -8228,6 +9619,13 @@ def update_model(model_id: int):
         return redirect(url_for("agents.edit_model", model_id=model_id))
 
     config_payload = _model_config_payload(provider, request.form)
+    markdown_filename_error = _apply_model_markdown_filename_validation(
+        provider,
+        config_payload,
+    )
+    if markdown_filename_error:
+        flash(markdown_filename_error, "error")
+        return redirect(url_for("agents.edit_model", model_id=model_id))
     model_options = _provider_model_options()
     model_name = str(config_payload.get("model") or "").strip()
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
@@ -8555,6 +9953,440 @@ def list_scripts():
     )
 
 
+@bp.get("/skills")
+def list_skills():
+    skills = _load_skills()
+    skill_rows: list[dict[str, object]] = []
+    for skill in skills:
+        latest_version = _latest_skill_version(skill)
+        skill_rows.append(
+            {
+                "id": skill.id,
+                "name": skill.name,
+                "display_name": skill.display_name,
+                "description": skill.description or "",
+                "status": skill.status,
+                "version_count": len(skill.versions or []),
+                "latest_version": latest_version.version if latest_version is not None else None,
+                "binding_count": len(skill.agents or []),
+                "created_at": skill.created_at,
+                "updated_at": skill.updated_at,
+            }
+        )
+    return render_template(
+        "skills.html",
+        skills=skill_rows,
+        human_time=_human_time,
+        page_title="Skills",
+        active_page="skills",
+    )
+
+
+@bp.get("/skills/new")
+def new_skill():
+    return render_template(
+        "skill_new.html",
+        skill_status_options=SKILL_STATUS_OPTIONS,
+        page_title="Create Skill",
+        active_page="skills",
+    )
+
+
+@bp.post("/skills")
+def create_skill():
+    name = request.form.get("name", "").strip()
+    display_name = request.form.get("display_name", "").strip()
+    description = request.form.get("description", "").strip()
+    version = request.form.get("version", "").strip()
+    status = request.form.get("status", "").strip().lower() or SKILL_STATUS_ACTIVE
+    skill_md = request.form.get("skill_md", "")
+    source_ref = request.form.get("source_ref", "").strip()
+    extra_files_json = request.form.get("extra_files_json", "")
+
+    extra_files, parse_error = _parse_skill_extra_files(extra_files_json)
+    if parse_error:
+        flash(parse_error, "error")
+        return redirect(url_for("agents.new_skill"))
+
+    if not skill_md.strip():
+        skill_md = _default_skill_markdown(
+            name=name or "skill",
+            display_name=display_name or "Skill",
+            description=description or "Describe how and when this skill should be used.",
+            version=version or "1.0.0",
+            status=status or SKILL_STATUS_ACTIVE,
+        )
+
+    files = [("SKILL.md", skill_md), *extra_files]
+    metadata_overrides = {
+        "name": name,
+        "display_name": display_name,
+        "description": description,
+        "version": version,
+        "status": status,
+    }
+
+    try:
+        package = build_skill_package(files, metadata_overrides=metadata_overrides)
+    except SkillPackageValidationError as exc:
+        errors = format_validation_errors(exc.errors)
+        message = str(errors[0].get("message") or "Skill package validation failed.")
+        flash(message, "error")
+        return redirect(url_for("agents.new_skill"))
+
+    try:
+        with session_scope() as session:
+            result = import_skill_package_to_db(
+                session,
+                package,
+                source_type="ui",
+                source_ref=source_ref or "web:create",
+                actor=None,
+            )
+            skill_id = result.skill_id
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("agents.new_skill"))
+
+    flash("Skill created.", "success")
+    return redirect(url_for("agents.view_skill", skill_id=skill_id))
+
+
+@bp.get("/skills/import")
+def import_skill():
+    return render_template(
+        "skill_import.html",
+        preview=None,
+        validation_errors=[],
+        form_values={},
+        page_title="Import Skill",
+        active_page="skills",
+    )
+
+
+@bp.post("/skills/import")
+def import_skill_submit():
+    action = (request.form.get("action") or "preview").strip().lower()
+    source_kind = (request.form.get("source_kind") or "upload").strip().lower()
+    local_path = request.form.get("local_path", "").strip()
+    source_ref = request.form.get("source_ref", "").strip()
+    actor = request.form.get("actor", "").strip()
+    git_url = request.form.get("git_url", "").strip()
+
+    form_values = {
+        "source_kind": source_kind,
+        "local_path": local_path,
+        "source_ref": source_ref,
+        "actor": actor,
+        "git_url": git_url,
+    }
+
+    package: SkillPackage
+    try:
+        if source_kind == "upload":
+            uploaded = request.files.get("bundle_file")
+            if uploaded is None or not uploaded.filename:
+                flash("Bundle upload is required.", "error")
+                return redirect(url_for("agents.import_skill"))
+            payload = uploaded.read().decode("utf-8", errors="replace")
+            package = load_skill_bundle(payload)
+        elif source_kind == "path":
+            if not local_path:
+                flash("Local path is required.", "error")
+                return redirect(url_for("agents.import_skill"))
+            package = build_skill_package_from_directory(local_path)
+        elif source_kind == "git":
+            flash("Git-based skill import is deferred to v1.1.", "error")
+            return redirect(url_for("agents.import_skill"))
+        else:
+            flash("Unknown import source.", "error")
+            return redirect(url_for("agents.import_skill"))
+    except SkillPackageValidationError as exc:
+        return render_template(
+            "skill_import.html",
+            preview=None,
+            validation_errors=format_validation_errors(exc.errors),
+            form_values=form_values,
+            page_title="Import Skill",
+            active_page="skills",
+        )
+
+    preview = _build_skill_preview(package)
+
+    if action == "import":
+        try:
+            with session_scope() as session:
+                result = import_skill_package_to_db(
+                    session,
+                    package,
+                    source_type="import",
+                    source_ref=source_ref or source_kind,
+                    actor=actor or None,
+                )
+                skill_id = result.skill_id
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return render_template(
+                "skill_import.html",
+                preview=preview,
+                validation_errors=[],
+                form_values=form_values,
+                page_title="Import Skill",
+                active_page="skills",
+            )
+        flash("Skill imported.", "success")
+        return redirect(url_for("agents.view_skill", skill_id=skill_id))
+
+    return render_template(
+        "skill_import.html",
+        preview=preview,
+        validation_errors=[],
+        form_values=form_values,
+        page_title="Import Skill",
+        active_page="skills",
+    )
+
+
+@bp.get("/skills/<int:skill_id>")
+def view_skill(skill_id: int):
+    requested_version = request.args.get("version", "").strip()
+    with session_scope() as session:
+        skill = (
+            session.execute(
+                select(Skill)
+                .options(
+                    selectinload(Skill.versions).selectinload(SkillVersion.files),
+                    selectinload(Skill.agents),
+                )
+                .where(Skill.id == skill_id)
+            )
+            .scalars()
+            .first()
+        )
+        if skill is None:
+            abort(404)
+
+        versions = sorted(list(skill.versions or []), key=lambda item: item.id or 0, reverse=True)
+        selected_version = None
+        if requested_version:
+            for entry in versions:
+                if entry.version == requested_version:
+                    selected_version = entry
+                    break
+        if selected_version is None and versions:
+            selected_version = versions[0]
+
+        attached_agents = sorted(
+            list(skill.agents or []),
+            key=lambda item: (item.name or "").lower(),
+        )
+
+    preview = None
+    if selected_version is not None:
+        preview = {
+            "version_id": selected_version.id,
+            "version": selected_version.version,
+            "manifest_hash": selected_version.manifest_hash or "",
+            "manifest": _parse_json_dict(selected_version.manifest_json),
+            "files": [
+                {
+                    "id": entry.id,
+                    "path": entry.path,
+                    "size_bytes": entry.size_bytes,
+                    "checksum": entry.checksum,
+                    "content_preview": (
+                        entry.content[:5000] + "\n... (truncated)"
+                        if len(entry.content or "") > 5000
+                        else (entry.content or "")
+                    ),
+                }
+                for entry in sorted(list(selected_version.files or []), key=lambda item: item.path)
+            ],
+            "skill_md": _skill_file_content(selected_version, "SKILL.md"),
+        }
+
+    return render_template(
+        "skill_detail.html",
+        skill=skill,
+        versions=versions,
+        selected_version=selected_version,
+        preview=preview,
+        attached_agents=attached_agents,
+        human_time=_human_time,
+        page_title=f"Skill - {skill.display_name}",
+        active_page="skills",
+    )
+
+
+@bp.get("/skills/<int:skill_id>/edit")
+def edit_skill(skill_id: int):
+    with session_scope() as session:
+        skill = (
+            session.execute(
+                select(Skill)
+                .options(selectinload(Skill.versions).selectinload(SkillVersion.files))
+                .where(Skill.id == skill_id)
+            )
+            .scalars()
+            .first()
+        )
+        if skill is None:
+            abort(404)
+        latest_version = _latest_skill_version(skill)
+    return render_template(
+        "skill_edit.html",
+        skill=skill,
+        latest_version=latest_version,
+        latest_skill_md=_skill_file_content(latest_version, "SKILL.md"),
+        skill_status_options=SKILL_STATUS_OPTIONS,
+        page_title=f"Edit Skill - {skill.display_name}",
+        active_page="skills",
+    )
+
+
+@bp.post("/skills/<int:skill_id>")
+def update_skill(skill_id: int):
+    display_name = request.form.get("display_name", "").strip()
+    description = request.form.get("description", "").strip()
+    status = request.form.get("status", "").strip().lower()
+    new_version = request.form.get("new_version", "").strip()
+    new_skill_md = request.form.get("new_skill_md", "")
+    extra_files_json = request.form.get("extra_files_json", "")
+    source_ref = request.form.get("source_ref", "").strip()
+
+    if status not in SKILL_STATUS_CHOICES:
+        flash("Select a valid skill status.", "error")
+        return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+
+    extra_files, parse_error = _parse_skill_extra_files(extra_files_json)
+    if parse_error:
+        flash(parse_error, "error")
+        return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+
+    try:
+        with session_scope() as session:
+            skill = (
+                session.execute(
+                    select(Skill)
+                    .options(selectinload(Skill.versions).selectinload(SkillVersion.files))
+                    .where(Skill.id == skill_id)
+                )
+                .scalars()
+                .first()
+            )
+            if skill is None:
+                abort(404)
+
+            if not display_name:
+                flash("Display name is required.", "error")
+                return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+            if not description:
+                flash("Description is required.", "error")
+                return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+
+            skill.display_name = display_name
+            skill.description = description
+            skill.status = status
+            skill.updated_by = None
+
+            if new_version:
+                if not new_skill_md.strip():
+                    new_skill_md = _default_skill_markdown(
+                        name=skill.name,
+                        display_name=display_name,
+                        description=description,
+                        version=new_version,
+                        status=status,
+                    )
+                files = [("SKILL.md", new_skill_md), *extra_files]
+                package = build_skill_package(
+                    files,
+                    metadata_overrides={
+                        "name": skill.name,
+                        "display_name": display_name,
+                        "description": description,
+                        "version": new_version,
+                        "status": status,
+                    },
+                )
+                import_skill_package_to_db(
+                    session,
+                    package,
+                    source_type="ui",
+                    source_ref=source_ref or f"web:skill:{skill_id}",
+                    actor=None,
+                )
+    except SkillPackageValidationError as exc:
+        errors = format_validation_errors(exc.errors)
+        message = str(errors[0].get("message") or "Skill package validation failed.")
+        flash(message, "error")
+        return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+
+    flash("Skill updated.", "success")
+    return redirect(url_for("agents.view_skill", skill_id=skill_id))
+
+
+@bp.get("/skills/<int:skill_id>/export")
+def export_skill(skill_id: int):
+    requested_version = request.args.get("version", "").strip() or None
+    with session_scope() as session:
+        try:
+            package = export_skill_package_from_db(
+                session,
+                skill_id=skill_id,
+                version=requested_version,
+            )
+        except ValueError:
+            abort(404)
+    payload = serialize_skill_bundle(package, pretty=True).encode("utf-8")
+    file_name = f"{package.metadata.name}-{package.metadata.version}.skill.json"
+    return send_file(
+        BytesIO(payload),
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=file_name,
+    )
+
+
+@bp.post("/skills/<int:skill_id>/delete")
+def delete_skill(skill_id: int):
+    next_url = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.list_skills")
+    )
+    with session_scope() as session:
+        skill = (
+            session.execute(
+                select(Skill)
+                .options(
+                    selectinload(Skill.flowchart_nodes),
+                    selectinload(Skill.agents),
+                )
+                .where(Skill.id == skill_id)
+            )
+            .scalars()
+            .first()
+        )
+        if skill is None:
+            abort(404)
+        attached_nodes = list(skill.flowchart_nodes or [])
+        attached_agents = list(skill.agents or [])
+        if attached_nodes:
+            skill.flowchart_nodes = []
+        if attached_agents:
+            skill.agents = []
+        session.delete(skill)
+
+    flash("Skill deleted.", "success")
+    if attached_nodes:
+        flash(f"Detached from {len(attached_nodes)} flowchart node binding(s).", "info")
+    if attached_agents:
+        flash(f"Detached from {len(attached_agents)} agent binding(s).", "info")
+    return redirect(next_url)
+
+
 @bp.get("/attachments")
 def list_attachments():
     attachments = _load_attachments()
@@ -8787,7 +10619,7 @@ def delete_memory(memory_id: int):
 def new_script():
     return render_template(
         "script_new.html",
-        script_types=SCRIPT_TYPE_CHOICES,
+        script_types=SCRIPT_TYPE_WRITE_CHOICES,
         page_title="Create Script",
         active_page="scripts",
     )
@@ -8812,6 +10644,11 @@ def create_script():
         return redirect(url_for("agents.new_script"))
     if script_type not in SCRIPT_TYPE_LABELS:
         flash("Select a valid script type.", "error")
+        return redirect(url_for("agents.new_script"))
+    try:
+        ensure_legacy_skill_script_writable(script_type)
+    except ValueError as exc:
+        flash(str(exc), "error")
         return redirect(url_for("agents.new_script"))
     if not content or not content.strip():
         flash("Script content is required.", "error")
@@ -8893,7 +10730,7 @@ def edit_script(script_id: int):
         "script_edit.html",
         script=script,
         script_content=script_content,
-        script_types=SCRIPT_TYPE_CHOICES,
+        script_types=SCRIPT_TYPE_WRITE_CHOICES,
         page_title=f"Edit Script - {script.file_name}",
         active_page="scripts",
     )
@@ -8925,6 +10762,11 @@ def update_script(script_id: int):
                 return redirect(url_for("agents.edit_script", script_id=script_id))
             if script_type not in SCRIPT_TYPE_LABELS:
                 flash("Select a valid script type.", "error")
+                return redirect(url_for("agents.edit_script", script_id=script_id))
+            try:
+                ensure_legacy_skill_script_writable(script_type)
+            except ValueError as exc:
+                flash(str(exc), "error")
                 return redirect(url_for("agents.edit_script", script_id=script_id))
             if not content or not content.strip():
                 flash("Script content is required.", "error")
@@ -9720,7 +11562,7 @@ def settings():
         gitconfig_overview=gitconfig_overview,
         summary=summary,
         page_title="Settings",
-        active_page="settings",
+        active_page="settings_overview",
         settings_title="Settings",
         settings_subtitle="Choose a section to configure.",
         settings_section="overview",
@@ -9885,7 +11727,7 @@ def settings_core():
         core_config=core_config,
         summary=summary,
         page_title="Settings - Core",
-        active_page="settings",
+        active_page="settings_core",
         settings_title="Settings",
         settings_subtitle="Core Configuration",
         settings_section="core",
@@ -9930,7 +11772,7 @@ def settings_provider():
         vllm_remote_settings=vllm_remote_settings,
         summary=summary,
         page_title="Settings - Provider",
-        active_page="settings",
+        active_page="settings_provider",
         settings_title="Settings",
         settings_subtitle="Provider Defaults & Auth",
         settings_section="provider",
@@ -10045,7 +11887,7 @@ def settings_celery():
         broker_options=broker_options,
         summary=summary,
         page_title="Settings - Celery",
-        active_page="settings",
+        active_page="settings_celery",
         settings_title="Settings",
         settings_subtitle="Celery Configuration",
         settings_section="celery",
@@ -10064,17 +11906,73 @@ def settings_runtime():
     llm_config = _provider_summary(
         settings=llm_settings, enabled_providers=enabled_providers
     )
+    instruction_runtime_flags = _instruction_runtime_flags(llm_settings)
     return render_template(
         "settings_runtime.html",
         config=config,
         llm_config=llm_config,
+        instruction_runtime_flags=instruction_runtime_flags,
         summary=summary,
         page_title="Settings - Runtime",
-        active_page="settings",
+        active_page="settings_runtime",
         settings_title="Settings",
         settings_subtitle="Runtime Hints",
         settings_section="runtime",
     )
+
+
+@bp.get("/settings/chat")
+def settings_chat():
+    summary = _settings_summary()
+    return render_template(
+        "settings_chat.html",
+        chat_runtime_settings=load_chat_runtime_settings_payload(),
+        summary=summary,
+        page_title="Settings - Chat",
+        active_page="settings_chat",
+        settings_title="Settings",
+        settings_subtitle="Chat Runtime",
+        settings_section="chat",
+    )
+
+
+@bp.post("/settings/runtime/chat")
+def update_chat_runtime_settings_route():
+    payload = {
+        "history_budget_percent": request.form.get("history_budget_percent", ""),
+        "rag_budget_percent": request.form.get("rag_budget_percent", ""),
+        "mcp_budget_percent": request.form.get("mcp_budget_percent", ""),
+        "compaction_trigger_percent": request.form.get("compaction_trigger_percent", ""),
+        "compaction_target_percent": request.form.get("compaction_target_percent", ""),
+        "preserve_recent_turns": request.form.get("preserve_recent_turns", ""),
+        "rag_top_k": request.form.get("rag_top_k", ""),
+        "default_context_window_tokens": request.form.get(
+            "default_context_window_tokens",
+            "",
+        ),
+        "max_compaction_summary_chars": request.form.get(
+            "max_compaction_summary_chars",
+            "",
+        ),
+    }
+    save_chat_runtime_settings(payload)
+    flash("Chat runtime settings updated.", "success")
+    return redirect(url_for("agents.settings_chat"))
+
+
+@bp.post("/settings/runtime/instructions")
+def update_instruction_runtime_settings_route():
+    payload: dict[str, str] = {}
+    for provider in LLM_PROVIDERS:
+        native_key = f"instruction_native_enabled_{provider}"
+        fallback_key = f"instruction_fallback_enabled_{provider}"
+        payload[native_key] = "true" if _as_bool(request.form.get(native_key)) else ""
+        payload[fallback_key] = (
+            "true" if _as_bool(request.form.get(fallback_key)) else ""
+        )
+    _save_integration_settings("llm", payload)
+    flash("Instruction runtime adapter flags updated.", "success")
+    return redirect(url_for("agents.settings_runtime"))
 
 
 @bp.get("/settings/gitconfig")
@@ -10097,7 +11995,7 @@ def settings_gitconfig():
         gitconfig_path=str(gitconfig_path),
         summary=summary,
         page_title="Settings - GitConfig",
-        active_page="settings",
+        active_page="settings_gitconfig",
         settings_title="Settings",
         settings_subtitle="Git Config",
         settings_section="gitconfig",
@@ -10120,7 +12018,7 @@ def update_gitconfig():
             gitconfig_path=str(gitconfig_path),
             summary=summary,
             page_title="Settings - GitConfig",
-            active_page="settings",
+            active_page="settings_gitconfig",
             settings_title="Settings",
             settings_subtitle="Git Config",
             settings_section="gitconfig",
@@ -10132,49 +12030,9 @@ def update_gitconfig():
 @bp.get("/settings/integrations")
 def settings_integrations():
     sync_integrated_mcp_servers()
-    summary = _settings_summary()
-    github_settings = _load_integration_settings("github")
-    jira_settings = _load_integration_settings("jira")
-    confluence_settings = _load_integration_settings("confluence")
-    chroma_settings = _resolved_chroma_settings()
-    github_repo_options: list[str] = []
-    selected_repo = github_settings.get("repo")
-    if selected_repo:
-        github_repo_options = [selected_repo]
-    jira_project_options: list[dict[str, str]] = []
-    selected_project = jira_settings.get("project_key")
-    if selected_project:
-        jira_project_options = [
-            {"value": selected_project, "label": selected_project}
-        ]
-    jira_board_options: list[dict[str, str]] = []
-    selected_board = jira_settings.get("board")
-    if selected_board:
-        jira_board_options = [{"value": selected_board, "label": selected_board}]
-    confluence_space_options = _confluence_space_options(confluence_settings)
     return render_template(
         "settings_integrations.html",
-        github_settings=github_settings,
-        jira_settings=jira_settings,
-        confluence_settings=confluence_settings,
-        chroma_settings=chroma_settings,
-        github_repo_options=github_repo_options,
-        jira_project_options=jira_project_options,
-        jira_board_options=jira_board_options,
-        confluence_space_options=confluence_space_options,
-        github_connected=bool(
-            (github_settings.get("pat") or "").strip()
-            or (github_settings.get("ssh_key_path") or "").strip()
-        ),
-        jira_connected=bool(jira_settings.get("api_key")),
-        confluence_connected=bool(confluence_settings.get("api_key")),
-        chroma_connected=_chroma_connected(chroma_settings),
-        summary=summary,
-        page_title="Settings - Integrations",
-        active_page="settings",
-        settings_title="Settings",
-        settings_subtitle="Integrations",
-        settings_section="integrations",
+        **_settings_integrations_context(),
     )
 
 
@@ -10240,47 +12098,33 @@ def update_github_settings():
         else:
             logger.info("GitHub refresh: missing PAT")
             flash("GitHub PAT is required to refresh repositories.", "error")
-        summary = _settings_summary()
-        jira_settings = _load_integration_settings("jira")
-        confluence_settings = _load_integration_settings("confluence")
-        chroma_settings = _resolved_chroma_settings()
-        github_settings = _load_integration_settings("github")
-        jira_project_options: list[dict[str, str]] = []
-        selected_project = jira_settings.get("project_key")
-        if selected_project:
-            jira_project_options = [
-                {"value": selected_project, "label": selected_project}
-            ]
-        jira_board_options: list[dict[str, str]] = []
-        selected_board = jira_settings.get("board")
-        if selected_board:
-            jira_board_options = [{"value": selected_board, "label": selected_board}]
-        confluence_space_options = _confluence_space_options(confluence_settings)
         return render_template(
             "settings_integrations.html",
-            github_settings=github_settings,
-            jira_settings=jira_settings,
-            confluence_settings=confluence_settings,
-            chroma_settings=chroma_settings,
-            github_repo_options=repo_options,
-            jira_project_options=jira_project_options,
-            jira_board_options=jira_board_options,
-            confluence_space_options=confluence_space_options,
-            github_connected=bool(
-                (github_settings.get("pat") or "").strip()
-                or (github_settings.get("ssh_key_path") or "").strip()
-            ),
-            jira_connected=bool(jira_settings.get("api_key")),
-            confluence_connected=bool(confluence_settings.get("api_key")),
-            chroma_connected=_chroma_connected(chroma_settings),
-            summary=summary,
-            page_title="Settings - Integrations",
-            active_page="settings",
-            settings_title="Settings",
-            settings_subtitle="Integrations",
-            settings_section="integrations",
+            **_settings_integrations_context(github_repo_options=repo_options),
         )
     flash("GitHub settings updated.", "success")
+    return redirect(url_for("agents.settings_integrations"))
+
+
+@bp.post("/settings/integrations/google-drive")
+def update_google_drive_settings():
+    service_account_json = request.form.get(
+        "google_drive_service_account_json", ""
+    ).strip()
+
+    if service_account_json:
+        try:
+            _google_drive_service_account_email(service_account_json)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("agents.settings_integrations"))
+
+    _save_integration_settings(
+        "google_drive",
+        {"service_account_json": service_account_json},
+    )
+    sync_integrated_mcp_servers()
+    flash("Google Drive settings updated.", "success")
     return redirect(url_for("agents.settings_integrations"))
 
 
@@ -10314,6 +12158,102 @@ def update_chroma_settings():
     if normalized_hint:
         flash(normalized_hint, "info")
     flash("ChromaDB settings updated.", "success")
+    return redirect(url_for("agents.settings_integrations"))
+
+
+@bp.post("/settings/integrations/rag")
+def update_rag_settings():
+    defaults = _rag_default_settings()
+    db_provider = _normalize_rag_db_provider(request.form.get("rag_db_provider"))
+    embed_provider = _normalize_rag_model_provider(request.form.get("rag_embed_provider"))
+    chat_provider = _normalize_rag_model_provider(request.form.get("rag_chat_provider"))
+    chat_response_style = _normalize_rag_chat_response_style(
+        request.form.get("rag_chat_response_style")
+    )
+    chat_temperature = _coerce_rag_float_str(
+        request.form.get("rag_chat_temperature"),
+        float(defaults.get("chat_temperature") or 0.2),
+        minimum=0.0,
+        maximum=2.0,
+    )
+    payload = {
+        "db_provider": db_provider,
+        "embed_provider": embed_provider,
+        "chat_provider": chat_provider,
+        "openai_api_key": (request.form.get("rag_openai_api_key") or "").strip(),
+        "gemini_api_key": (request.form.get("rag_gemini_api_key") or "").strip(),
+        "openai_embed_model": (
+            (request.form.get("rag_openai_embed_model") or "").strip()
+            or defaults["openai_embed_model"]
+        ),
+        "gemini_embed_model": (
+            (request.form.get("rag_gemini_embed_model") or "").strip()
+            or defaults["gemini_embed_model"]
+        ),
+        "openai_chat_model": (
+            (request.form.get("rag_openai_chat_model") or "").strip()
+            or defaults["openai_chat_model"]
+        ),
+        "gemini_chat_model": (
+            (request.form.get("rag_gemini_chat_model") or "").strip()
+            or defaults["gemini_chat_model"]
+        ),
+        "chat_temperature": chat_temperature,
+        "openai_chat_temperature": chat_temperature,
+        "chat_response_style": chat_response_style,
+        "chat_top_k": _coerce_rag_int_str(
+            request.form.get("rag_chat_top_k"),
+            int(defaults.get("chat_top_k") or 5),
+            minimum=1,
+            maximum=20,
+        ),
+        "chat_max_history": _coerce_rag_int_str(
+            request.form.get("rag_chat_max_history"),
+            int(defaults.get("chat_max_history") or 8),
+            minimum=1,
+            maximum=50,
+        ),
+        "chat_max_context_chars": _coerce_rag_int_str(
+            request.form.get("rag_chat_max_context_chars"),
+            int(defaults.get("chat_max_context_chars") or 12000),
+            minimum=1000,
+            maximum=1000000,
+        ),
+        "chat_snippet_chars": _coerce_rag_int_str(
+            request.form.get("rag_chat_snippet_chars"),
+            int(defaults.get("chat_snippet_chars") or 600),
+            minimum=100,
+            maximum=10000,
+        ),
+        "chat_context_budget_tokens": _coerce_rag_int_str(
+            request.form.get("rag_chat_context_budget_tokens"),
+            int(defaults.get("chat_context_budget_tokens") or 8000),
+            minimum=256,
+            maximum=100000,
+        ),
+        "index_parallel_workers": _coerce_rag_int_str(
+            request.form.get("rag_index_parallel_workers"),
+            int(defaults.get("index_parallel_workers") or 1),
+            minimum=1,
+            maximum=64,
+        ),
+        "embed_parallel_requests": _coerce_rag_int_str(
+            request.form.get("rag_embed_parallel_requests"),
+            int(defaults.get("embed_parallel_requests") or 1),
+            minimum=1,
+            maximum=64,
+        ),
+    }
+    _save_rag_settings("rag", payload)
+
+    chroma_ready = _chroma_connected(_resolved_chroma_settings())
+    if db_provider == "chroma" and not chroma_ready:
+        flash(
+            "RAG settings saved. Configure ChromaDB host and port before indexing or chat.",
+            "warning",
+        )
+    else:
+        flash("RAG settings updated.", "success")
     return redirect(url_for("agents.settings_integrations"))
 
 
@@ -10410,45 +12350,18 @@ def update_jira_settings():
                 "Jira API key and site URL are required to refresh projects and boards.",
                 "error",
             )
-        summary = _settings_summary()
-        github_settings = _load_integration_settings("github")
-        jira_settings = _load_integration_settings("jira")
-        confluence_settings = _load_integration_settings("confluence")
-        chroma_settings = _resolved_chroma_settings()
-        github_repo_options: list[str] = []
-        selected_repo = github_settings.get("repo")
-        if selected_repo:
-            github_repo_options = [selected_repo]
         if project_key and all(
             option.get("value") != project_key for option in project_options
         ):
             project_options.insert(
                 0, {"value": project_key, "label": project_key}
             )
-        confluence_space_options = _confluence_space_options(confluence_settings)
         return render_template(
             "settings_integrations.html",
-            github_settings=github_settings,
-            jira_settings=jira_settings,
-            confluence_settings=confluence_settings,
-            chroma_settings=chroma_settings,
-            github_repo_options=github_repo_options,
-            jira_project_options=project_options,
-            jira_board_options=board_options,
-            confluence_space_options=confluence_space_options,
-            github_connected=bool(
-                (github_settings.get("pat") or "").strip()
-                or (github_settings.get("ssh_key_path") or "").strip()
+            **_settings_integrations_context(
+                jira_project_options=project_options,
+                jira_board_options=board_options,
             ),
-            jira_connected=bool(api_key),
-            confluence_connected=bool(confluence_settings.get("api_key")),
-            chroma_connected=_chroma_connected(chroma_settings),
-            summary=summary,
-            page_title="Settings - Integrations",
-            active_page="settings",
-            settings_title="Settings",
-            settings_subtitle="Integrations",
-            settings_section="integrations",
         )
     flash("Jira settings updated.", "success")
     return redirect(url_for("agents.settings_integrations"))
@@ -10545,25 +12458,7 @@ def update_confluence_settings():
             )
         if cache_payload is not None:
             _save_integration_settings("confluence", {"space_options": cache_payload})
-        summary = _settings_summary()
-        github_settings = _load_integration_settings("github")
-        jira_settings = _load_integration_settings("jira")
         confluence_settings = _load_integration_settings("confluence")
-        chroma_settings = _resolved_chroma_settings()
-        github_repo_options: list[str] = []
-        selected_repo = github_settings.get("repo")
-        if selected_repo:
-            github_repo_options = [selected_repo]
-        jira_project_options: list[dict[str, str]] = []
-        selected_project = jira_settings.get("project_key")
-        if selected_project:
-            jira_project_options = [
-                {"value": selected_project, "label": selected_project}
-            ]
-        jira_board_options: list[dict[str, str]] = []
-        selected_board = jira_settings.get("board")
-        if selected_board:
-            jira_board_options = [{"value": selected_board, "label": selected_board}]
         if not space_options:
             space_options = _confluence_space_options(confluence_settings)
         else:
@@ -10572,27 +12467,9 @@ def update_confluence_settings():
             )
         return render_template(
             "settings_integrations.html",
-            github_settings=github_settings,
-            jira_settings=jira_settings,
-            confluence_settings=confluence_settings,
-            chroma_settings=chroma_settings,
-            github_repo_options=github_repo_options,
-            jira_project_options=jira_project_options,
-            jira_board_options=jira_board_options,
-            confluence_space_options=space_options,
-            github_connected=bool(
-                (github_settings.get("pat") or "").strip()
-                or (github_settings.get("ssh_key_path") or "").strip()
+            **_settings_integrations_context(
+                confluence_space_options=space_options,
             ),
-            jira_connected=bool(jira_settings.get("api_key")),
-            confluence_connected=bool(api_key),
-            chroma_connected=_chroma_connected(chroma_settings),
-            summary=summary,
-            page_title="Settings - Integrations",
-            active_page="settings",
-            settings_title="Settings",
-            settings_subtitle="Integrations",
-            settings_section="integrations",
         )
     flash("Confluence settings updated.", "success")
     return redirect(url_for("agents.settings_integrations"))

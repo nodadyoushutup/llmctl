@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% macro pagination_controls() %}
+  <nav class="pagination" aria-label="Index job pages">
+    {% if page > 1 %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('rag.index_jobs_page', page=page - 1, per_page=per_page, source_id=source_filter) }}"
+      >
+        Prev
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+    {% endif %}
+    <div class="pagination-pages">
+      {% for item in pagination_items %}
+        {% if item.type == "gap" %}
+          <span class="pagination-ellipsis">&hellip;</span>
+        {% elif item.page == page %}
+          <span class="pagination-link is-active" aria-current="page">{{ item.page }}</span>
+        {% else %}
+          <a
+            class="pagination-link"
+            href="{{ url_for('rag.index_jobs_page', page=item.page, per_page=per_page, source_id=source_filter) }}"
+          >
+            {{ item.page }}
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if page < total_pages %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('rag.index_jobs_page', page=page + 1, per_page=per_page, source_id=source_filter) }}"
+      >
+        Next
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+{% endmacro %}
+
+{% block action_header %}
+  <div class="pagination-bar pagination-bar-header">
+    {{ pagination_controls() }}
+    <div class="pagination-bar-actions">
+      <form class="pagination-size" method="get" action="{{ url_for('rag.index_jobs_page') }}">
+        <input type="hidden" name="page" value="1" />
+        <label for="rag-jobs-per-page">Rows per page</label>
+        <select name="per_page" id="rag-jobs-per-page" onchange="this.form.submit()">
+          {% for option in per_page_options %}
+            <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="rag-jobs-source-filter">Source</label>
+        <select name="source_id" id="rag-jobs-source-filter" onchange="this.form.submit()">
+          <option value="" {% if not source_filter %}selected{% endif %}>All</option>
+          {% for source in sources %}
+            <option value="{{ source.id }}" {% if source_filter == source.id %}selected{% endif %}>{{ source.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card" data-rag-jobs-table>
+  <div class="card-header">
+    <div>
+      <h2 class="section-title">Index Jobs</h2>
+      <p class="muted" style="margin-top: 6px;">
+        Polling updates run automatically while jobs are queued/running/pausing.
+      </p>
+    </div>
+    <span class="status status-idle">{{ total_count }} total</span>
+  </div>
+
+  {% if jobs %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Mode</th>
+            <th>Trigger</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>Finished</th>
+            <th>Progress</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+            {% set source = source_by_id.get(job.source_id) %}
+            {% set badge_class = status_badge_class.get(job.status, 'status-idle') %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('rag.index_job_detail_page', job_id=job.id) }}"
+              data-rag-job-id="{{ job.id }}"
+              data-rag-job-status="{{ job.status }}"
+            >
+              <td>
+                {% if source %}
+                  <a href="{{ url_for('rag.source_detail_page', source_id=source.id) }}">{{ source.name }}</a>
+                {% else %}
+                  Source {{ job.source_id }}
+                {% endif %}
+              </td>
+              <td class="mono">{{ job.mode }}</td>
+              <td>{{ job.trigger_mode }}</td>
+              <td>
+                <span class="status {{ badge_class }}" data-rag-job-status-label>{{ job.status }}</span>
+              </td>
+              <td class="muted" data-rag-job-started>{{ format_source_time(job.started_at) }}</td>
+              <td class="muted" data-rag-job-finished>{{ format_source_time(job.finished_at) }}</td>
+              <td class="muted" data-rag-job-progress>-</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No index jobs recorded yet.</p>
+  {% endif %}
+</section>
+
+<script src="{{ url_for('static', filename='rag/app.js') }}"></script>
+{% endblock %}

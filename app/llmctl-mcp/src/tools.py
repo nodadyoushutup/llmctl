@@ -30,6 +30,7 @@ from core.models import (
     FLOWCHART_NODE_TYPE_START,
     FLOWCHART_NODE_TYPE_TASK,
     flowchart_node_mcp_servers,
+    flowchart_node_skills,
     flowchart_node_scripts,
     LLMModel,
     MCPServer,
@@ -47,10 +48,15 @@ from core.models import (
     PlanTask,
     Run,
     RUN_ACTIVE_STATUSES,
+    SKILL_STATUS_ARCHIVED,
+    SKILL_STATUS_CHOICES,
+    Skill,
+    SkillVersion,
     Role,
     Script,
     TaskTemplate,
     agent_task_scripts,
+    is_legacy_skill_script_type,
 )
 from core.task_kinds import QUICK_TASK_KIND, is_quick_task_kind
 from services.celery_app import celery_app
@@ -60,6 +66,12 @@ from services.code_review import (
     ensure_code_reviewer_role,
 )
 from services.integrations import load_integration_settings
+from services.skills import (
+    SkillPackageValidationError,
+    build_skill_package,
+    format_validation_errors,
+    import_skill_package_to_db,
+)
 from services.tasks import run_agent, run_agent_task, run_flowchart
 from storage.attachment_storage import remove_attachment_file
 
@@ -155,12 +167,12 @@ FLOWCHART_NODE_TYPE_REQUIRES_REF = {
 }
 
 FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
-    FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False},
-    FLOWCHART_NODE_TYPE_TASK: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True},
-    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False, "skills": False},
+    FLOWCHART_NODE_TYPE_TASK: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True, "skills": True},
 }
 FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES = 1
 FLOWCHART_DECISION_MAX_OUTGOING_EDGES = 3
@@ -226,7 +238,7 @@ def _parse_json_dict(raw: str | None) -> dict[str, Any]:
 def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
     return FLOWCHART_NODE_UTILITY_COMPATIBILITY.get(
         node_type,
-        {"model": False, "mcp": False, "scripts": False},
+        {"model": False, "mcp": False, "scripts": False, "skills": False},
     )
 
 
@@ -236,6 +248,7 @@ def _validate_flowchart_utility_compatibility(
     model_id: int | None = None,
     mcp_server_ids: list[int] | None = None,
     script_ids: list[int] | None = None,
+    skill_ids: list[int] | None = None,
 ) -> list[str]:
     compatibility = _flowchart_node_compatibility(node_type)
     errors: list[str] = []
@@ -245,6 +258,8 @@ def _validate_flowchart_utility_compatibility(
         errors.append(f"Node type '{node_type}' does not support MCP servers.")
     if script_ids and not compatibility["scripts"]:
         errors.append(f"Node type '{node_type}' does not support scripts.")
+    if skill_ids and not compatibility["skills"]:
+        errors.append(f"Node type '{node_type}' does not support skills.")
     return errors
 
 
@@ -297,6 +312,29 @@ def _set_flowchart_node_scripts(
     session.execute(flowchart_node_scripts.insert(), rows)
 
 
+def _set_flowchart_node_skills(
+    session,
+    node_id: int,
+    skill_ids: list[int],
+) -> None:
+    session.execute(
+        delete(flowchart_node_skills).where(
+            flowchart_node_skills.c.flowchart_node_id == node_id
+        )
+    )
+    if not skill_ids:
+        return
+    rows = [
+        {
+            "flowchart_node_id": node_id,
+            "skill_id": skill_id,
+            "position": position,
+        }
+        for position, skill_id in enumerate(skill_ids, start=1)
+    ]
+    session.execute(flowchart_node_skills.insert(), rows)
+
+
 def _serialize_flowchart_item(flowchart: Flowchart) -> dict[str, Any]:
     return _serialize_model(flowchart, include_relationships=False)
 
@@ -306,6 +344,7 @@ def _serialize_flowchart_node_item(node: FlowchartNode) -> dict[str, Any]:
     payload["config"] = _parse_json_dict(node.config_json)
     payload["mcp_server_ids"] = [server.id for server in node.mcp_servers]
     payload["script_ids"] = [script.id for script in node.scripts]
+    payload["skill_ids"] = [skill.id for skill in node.skills]
     payload["compatibility"] = _flowchart_node_compatibility(node.node_type)
     return payload
 
@@ -326,6 +365,32 @@ def _serialize_flowchart_run_node_item(node_run: FlowchartRunNode) -> dict[str, 
     return payload
 
 
+def _latest_skill_version(skill: Skill) -> SkillVersion | None:
+    versions = sorted(list(skill.versions or []), key=lambda item: item.id or 0, reverse=True)
+    return versions[0] if versions else None
+
+
+def _default_skill_markdown(
+    *,
+    name: str,
+    display_name: str,
+    description: str,
+    version: str,
+    status: str,
+) -> str:
+    title = display_name or name or "Skill"
+    return (
+        "---\n"
+        f"name: {name}\n"
+        f"display_name: {display_name}\n"
+        f"description: {description}\n"
+        f"version: {version}\n"
+        f"status: {status}\n"
+        "---\n\n"
+        f"# {title}\n"
+    )
+
+
 def _flowchart_graph_state(
     flowchart_nodes: list[FlowchartNode],
     flowchart_edges: list[FlowchartEdge],
@@ -339,6 +404,7 @@ def _flowchart_graph_state(
             "model_id": node.model_id,
             "mcp_server_ids": [server.id for server in node.mcp_servers],
             "script_ids": [script.id for script in node.scripts],
+            "skill_ids": [skill.id for skill in node.skills],
         }
         for node in flowchart_nodes
     ]
@@ -400,6 +466,9 @@ def _validate_flowchart_graph_snapshot(
         script_ids = node.get("script_ids") or []
         if script_ids and not compatibility["scripts"]:
             errors.append(f"Node {node_id} ({node_type}) does not support scripts.")
+        skill_ids = node.get("skill_ids") or []
+        if skill_ids and not compatibility["skills"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support skills.")
 
     start_nodes = [node for node in nodes if node.get("node_type") == FLOWCHART_NODE_TYPE_START]
     if len(start_nodes) != 1:
@@ -693,6 +762,7 @@ def register(mcp: FastMCP) -> None:
                     stmt = stmt.options(
                         selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                         selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
                         selectinload(Flowchart.edges),
                     )
                 flowchart = session.execute(stmt).scalars().first()
@@ -918,6 +988,11 @@ def register(mcp: FastMCP) -> None:
                         flowchart_node_scripts.c.flowchart_node_id.in_(node_ids)
                     )
                 )
+                session.execute(
+                    delete(flowchart_node_skills).where(
+                        flowchart_node_skills.c.flowchart_node_id.in_(node_ids)
+                    )
+                )
 
             if task_ids:
                 tasks = (
@@ -954,6 +1029,7 @@ def register(mcp: FastMCP) -> None:
                     .options(
                         selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                         selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
                         selectinload(Flowchart.edges),
                     )
                     .where(Flowchart.id == flowchart_id)
@@ -1008,6 +1084,7 @@ def register(mcp: FastMCP) -> None:
                         .options(
                             selectinload(FlowchartNode.mcp_servers),
                             selectinload(FlowchartNode.scripts),
+                            selectinload(FlowchartNode.skills),
                         )
                         .where(FlowchartNode.flowchart_id == flowchart_id)
                     )
@@ -1171,13 +1248,53 @@ def register(mcp: FastMCP) -> None:
                         if compatibility_errors:
                             raise ValueError(compatibility_errors[0])
                         selected_scripts = (
-                            session.execute(select(Script.id).where(Script.id.in_(script_ids)))
+                            session.execute(select(Script).where(Script.id.in_(script_ids)))
                             .scalars()
                             .all()
                         )
                         if len(selected_scripts) != len(set(script_ids)):
                             raise ValueError(f"nodes[{index}] contains unknown script IDs.")
+                        if any(
+                            is_legacy_skill_script_type(item.script_type)
+                            for item in selected_scripts
+                        ):
+                            raise ValueError(
+                                f"nodes[{index}] cannot attach legacy script_type=skill records; use skill_ids."
+                            )
                         _set_flowchart_node_scripts(session, flowchart_node.id, script_ids)
+
+                    if "skill_ids" in raw_node:
+                        skill_ids_raw = raw_node.get("skill_ids")
+                        if not isinstance(skill_ids_raw, list):
+                            raise ValueError(f"nodes[{index}].skill_ids must be an array.")
+                        skill_ids: list[int] = []
+                        for skill_index, skill_id_raw in enumerate(skill_ids_raw):
+                            skill_id = _coerce_optional_int(
+                                skill_id_raw,
+                                field_name=f"nodes[{index}].skill_ids[{skill_index}]",
+                                minimum=1,
+                            )
+                            if skill_id is None:
+                                raise ValueError(
+                                    f"nodes[{index}].skill_ids[{skill_index}] is invalid."
+                                )
+                            skill_ids.append(skill_id)
+                        if len(skill_ids) != len(set(skill_ids)):
+                            raise ValueError(f"nodes[{index}] has duplicate skill_ids.")
+                        compatibility_errors = _validate_flowchart_utility_compatibility(
+                            node_type,
+                            skill_ids=skill_ids,
+                        )
+                        if compatibility_errors:
+                            raise ValueError(compatibility_errors[0])
+                        selected_skills = (
+                            session.execute(select(Skill.id).where(Skill.id.in_(skill_ids)))
+                            .scalars()
+                            .all()
+                        )
+                        if len(selected_skills) != len(set(skill_ids)):
+                            raise ValueError(f"nodes[{index}] contains unknown skill IDs.")
+                        _set_flowchart_node_skills(session, flowchart_node.id, skill_ids)
 
                     keep_node_ids.add(flowchart_node.id)
                     if node_id_raw is not None:
@@ -1236,6 +1353,11 @@ def register(mcp: FastMCP) -> None:
                             flowchart_node_scripts.c.flowchart_node_id.in_(removed_node_ids)
                         )
                     )
+                    session.execute(
+                        delete(flowchart_node_skills).where(
+                            flowchart_node_skills.c.flowchart_node_id.in_(removed_node_ids)
+                        )
+                    )
                     session.execute(delete(FlowchartNode).where(FlowchartNode.id.in_(removed_node_ids)))
 
                 updated_nodes = (
@@ -1244,6 +1366,7 @@ def register(mcp: FastMCP) -> None:
                         .options(
                             selectinload(FlowchartNode.mcp_servers),
                             selectinload(FlowchartNode.scripts),
+                            selectinload(FlowchartNode.skills),
                         )
                         .where(FlowchartNode.flowchart_id == flowchart_id)
                         .order_by(FlowchartNode.id.asc())
@@ -1297,6 +1420,7 @@ def register(mcp: FastMCP) -> None:
                     .options(
                         selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                         selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
                         selectinload(Flowchart.edges),
                     )
                     .where(Flowchart.id == flowchart_id)
@@ -1610,7 +1734,10 @@ def register(mcp: FastMCP) -> None:
             node = (
                 session.execute(
                     select(FlowchartNode)
-                    .options(selectinload(FlowchartNode.scripts))
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
                     .where(FlowchartNode.id == node_id)
                 )
                 .scalars()
@@ -1630,6 +1757,11 @@ def register(mcp: FastMCP) -> None:
             script = session.get(Script, script_id)
             if script is None:
                 return {"ok": False, "error": f"Script {script_id} was not found."}
+            if is_legacy_skill_script_type(script.script_type):
+                return {
+                    "ok": False,
+                    "error": "Legacy script_type=skill records cannot be attached. Use node skills instead.",
+                }
             ordered_ids = [item.id for item in node.scripts]
             if script_id not in ordered_ids:
                 ordered_ids.append(script_id)
@@ -1637,7 +1769,10 @@ def register(mcp: FastMCP) -> None:
             refreshed = (
                 session.execute(
                     select(FlowchartNode)
-                    .options(selectinload(FlowchartNode.scripts))
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
                     .where(FlowchartNode.id == node_id)
                 )
                 .scalars()
@@ -1658,7 +1793,10 @@ def register(mcp: FastMCP) -> None:
             node = (
                 session.execute(
                     select(FlowchartNode)
-                    .options(selectinload(FlowchartNode.scripts))
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
                     .where(FlowchartNode.id == node_id)
                 )
                 .scalars()
@@ -1674,7 +1812,10 @@ def register(mcp: FastMCP) -> None:
             refreshed = (
                 session.execute(
                     select(FlowchartNode)
-                    .options(selectinload(FlowchartNode.scripts))
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
                     .where(FlowchartNode.id == node_id)
                 )
                 .scalars()
@@ -1713,7 +1854,10 @@ def register(mcp: FastMCP) -> None:
             node = (
                 session.execute(
                     select(FlowchartNode)
-                    .options(selectinload(FlowchartNode.scripts))
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
                     .where(FlowchartNode.id == node_id)
                 )
                 .scalars()
@@ -1730,6 +1874,14 @@ def register(mcp: FastMCP) -> None:
             )
             if errors:
                 return {"ok": False, "error": errors[0]}
+            if any(is_legacy_skill_script_type(script.script_type) for script in node.scripts):
+                return {
+                    "ok": False,
+                    "error": (
+                        "Legacy script_type=skill records cannot be reordered; "
+                        "migrate to node skills."
+                    ),
+                }
             existing_ids = {script.id for script in node.scripts}
             if set(parsed_script_ids) != existing_ids:
                 return {
@@ -1740,7 +1892,385 @@ def register(mcp: FastMCP) -> None:
             refreshed = (
                 session.execute(
                     select(FlowchartNode)
-                    .options(selectinload(FlowchartNode.scripts))
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
+            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
+
+    @mcp.tool()
+    def llmctl_get_skill(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        skill_id: int | None = None,
+        name: str | None = None,
+        include_versions: bool = False,
+    ) -> dict[str, Any]:
+        """Read/list skills and optional immutable versions."""
+        if skill_id is not None and name:
+            return {"ok": False, "error": "Provide only one selector: skill_id or name."}
+        if skill_id is not None or name:
+            with session_scope() as session:
+                stmt = select(Skill).options(selectinload(Skill.versions))
+                if skill_id is not None:
+                    stmt = stmt.where(Skill.id == skill_id)
+                else:
+                    stmt = stmt.where(Skill.name == str(name or "").strip())
+                skill = session.execute(stmt).scalars().first()
+                if skill is None:
+                    selector = f"id {skill_id}" if skill_id is not None else f"name '{name}'"
+                    return {"ok": False, "error": f"Skill {selector} not found."}
+                payload: dict[str, Any] = {
+                    "ok": True,
+                    "item": _serialize_model(skill, include_relationships=False),
+                }
+                latest = _latest_skill_version(skill)
+                if latest is not None:
+                    payload["latest_version"] = _serialize_model(
+                        latest,
+                        include_relationships=False,
+                    )
+                if include_versions:
+                    payload["versions"] = [
+                        _serialize_model(version, include_relationships=False)
+                        for version in sorted(
+                            list(skill.versions or []),
+                            key=lambda item: item.id or 0,
+                            reverse=True,
+                        )
+                    ]
+                return payload
+
+        columns = _column_map(Skill)
+        stmt = select(Skill).options(selectinload(Skill.versions))
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            skills = session.execute(stmt).scalars().all()
+            items: list[dict[str, Any]] = []
+            for skill in skills:
+                latest = _latest_skill_version(skill)
+                payload = _serialize_model(skill, include_relationships=False)
+                payload["latest_version"] = latest.version if latest is not None else None
+                payload["version_count"] = len(skill.versions or [])
+                items.append(payload)
+            return {"ok": True, "count": len(items), "items": items}
+
+    @mcp.tool()
+    def llmctl_create_skill(
+        name: str,
+        display_name: str,
+        description: str,
+        version: str,
+        status: str = "active",
+        skill_md: str | None = None,
+        extra_files: list[dict[str, Any]] | None = None,
+        source_ref: str | None = None,
+        actor: str | None = None,
+    ) -> dict[str, Any]:
+        """Create/import a skill package and its first immutable version."""
+        cleaned_name = str(name or "").strip()
+        cleaned_display_name = str(display_name or "").strip()
+        cleaned_description = str(description or "").strip()
+        cleaned_version = str(version or "").strip()
+        cleaned_status = str(status or "").strip().lower() or "active"
+
+        if not cleaned_name:
+            return {"ok": False, "error": "name is required."}
+        if not cleaned_display_name:
+            return {"ok": False, "error": "display_name is required."}
+        if not cleaned_description:
+            return {"ok": False, "error": "description is required."}
+        if not cleaned_version:
+            return {"ok": False, "error": "version is required."}
+        if cleaned_status not in SKILL_STATUS_CHOICES:
+            return {"ok": False, "error": "status is invalid."}
+
+        files: list[tuple[str, str]] = []
+        skill_md_content = str(skill_md or "")
+        if not skill_md_content.strip():
+            skill_md_content = _default_skill_markdown(
+                name=cleaned_name,
+                display_name=cleaned_display_name,
+                description=cleaned_description,
+                version=cleaned_version,
+                status=cleaned_status,
+            )
+        files.append(("SKILL.md", skill_md_content))
+        for index, entry in enumerate(extra_files or []):
+            if not isinstance(entry, dict):
+                return {"ok": False, "error": f"extra_files[{index}] must be an object."}
+            path = entry.get("path")
+            content = entry.get("content")
+            if not isinstance(path, str) or not path.strip():
+                return {"ok": False, "error": f"extra_files[{index}].path is required."}
+            if not isinstance(content, str):
+                return {"ok": False, "error": f"extra_files[{index}].content must be a string."}
+            files.append((path.strip(), content))
+
+        try:
+            package = build_skill_package(
+                files,
+                metadata_overrides={
+                    "name": cleaned_name,
+                    "display_name": cleaned_display_name,
+                    "description": cleaned_description,
+                    "version": cleaned_version,
+                    "status": cleaned_status,
+                },
+            )
+        except SkillPackageValidationError as exc:
+            return {"ok": False, "errors": format_validation_errors(exc.errors)}
+
+        with session_scope() as session:
+            try:
+                result = import_skill_package_to_db(
+                    session,
+                    package,
+                    source_type="ui",
+                    source_ref=(source_ref or "").strip() or "mcp:create",
+                    actor=(actor or "").strip() or None,
+                )
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            return {
+                "ok": True,
+                "skill_id": result.skill_id,
+                "skill_name": result.skill_name,
+                "version_id": result.version_id,
+                "version": result.version,
+                "file_count": result.file_count,
+            }
+
+    @mcp.tool()
+    def llmctl_update_skill(
+        skill_id: int,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update mutable skill metadata fields by id."""
+        if not isinstance(patch, dict) or not patch:
+            return {"ok": False, "error": "patch must be a non-empty object."}
+        allowed = {"display_name", "description", "status", "source_ref", "actor"}
+        unknown = sorted(set(patch).difference(allowed))
+        if unknown:
+            return {"ok": False, "error": f"Unknown fields: {', '.join(unknown)}"}
+
+        with session_scope() as session:
+            skill = session.get(Skill, skill_id)
+            if skill is None:
+                return {"ok": False, "error": f"Skill {skill_id} not found."}
+            if "display_name" in patch:
+                cleaned = str(patch.get("display_name") or "").strip()
+                if not cleaned:
+                    return {"ok": False, "error": "display_name cannot be empty."}
+                skill.display_name = cleaned
+            if "description" in patch:
+                cleaned = str(patch.get("description") or "").strip()
+                if not cleaned:
+                    return {"ok": False, "error": "description cannot be empty."}
+                skill.description = cleaned
+            if "status" in patch:
+                cleaned = str(patch.get("status") or "").strip().lower()
+                if cleaned not in SKILL_STATUS_CHOICES:
+                    return {"ok": False, "error": "status is invalid."}
+                skill.status = cleaned
+            if "source_ref" in patch:
+                skill.source_ref = str(patch.get("source_ref") or "").strip() or None
+            if "actor" in patch:
+                skill.updated_by = str(patch.get("actor") or "").strip() or None
+            return {"ok": True, "item": _serialize_model(skill, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_archive_skill(
+        skill_id: int,
+    ) -> dict[str, Any]:
+        """Archive a skill (metadata-only state change)."""
+        with session_scope() as session:
+            skill = session.get(Skill, skill_id)
+            if skill is None:
+                return {"ok": False, "error": f"Skill {skill_id} not found."}
+            skill.status = SKILL_STATUS_ARCHIVED
+            return {"ok": True, "item": _serialize_model(skill, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_bind_flowchart_node_skill(
+        flowchart_id: int,
+        node_id: int,
+        skill_id: int,
+    ) -> dict[str, Any]:
+        """Bind a skill to a flowchart node."""
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            errors = _validate_flowchart_utility_compatibility(
+                node.node_type,
+                skill_ids=[skill_id],
+            )
+            if errors:
+                return {"ok": False, "error": errors[0]}
+            skill = session.get(Skill, skill_id)
+            if skill is None:
+                return {"ok": False, "error": f"Skill {skill_id} was not found."}
+            if (skill.status or "active") == SKILL_STATUS_ARCHIVED:
+                return {"ok": False, "error": f"Skill {skill_id} is archived and cannot be attached."}
+            ordered_ids = [item.id for item in node.skills]
+            if skill_id not in ordered_ids:
+                ordered_ids.append(skill_id)
+                _set_flowchart_node_skills(session, node.id, ordered_ids)
+            refreshed = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
+            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
+
+    @mcp.tool()
+    def llmctl_unbind_flowchart_node_skill(
+        flowchart_id: int,
+        node_id: int,
+        skill_id: int,
+    ) -> dict[str, Any]:
+        """Unbind a skill from a flowchart node."""
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            ordered_ids = [item.id for item in node.skills if item.id != skill_id]
+            _set_flowchart_node_skills(session, node.id, ordered_ids)
+            refreshed = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
+            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
+
+    @mcp.tool()
+    def llmctl_reorder_flowchart_node_skills(
+        flowchart_id: int,
+        node_id: int,
+        skill_ids: list[int],
+    ) -> dict[str, Any]:
+        """Reorder all skills attached to a flowchart node."""
+        if not isinstance(skill_ids, list):
+            return {"ok": False, "error": "skill_ids must be an array."}
+        parsed_skill_ids: list[int] = []
+        for index, skill_id in enumerate(skill_ids):
+            try:
+                parsed = _coerce_optional_int(
+                    skill_id,
+                    field_name=f"skill_ids[{index}]",
+                    minimum=1,
+                )
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            if parsed is None:
+                return {"ok": False, "error": f"skill_ids[{index}] is invalid."}
+            parsed_skill_ids.append(parsed)
+        if len(parsed_skill_ids) != len(set(parsed_skill_ids)):
+            return {"ok": False, "error": "skill_ids cannot contain duplicates."}
+
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            errors = _validate_flowchart_utility_compatibility(
+                node.node_type,
+                skill_ids=parsed_skill_ids,
+            )
+            if errors:
+                return {"ok": False, "error": errors[0]}
+            existing_ids = {skill.id for skill in node.skills}
+            if set(parsed_skill_ids) != existing_ids:
+                return {
+                    "ok": False,
+                    "error": "skill_ids must include each attached skill exactly once.",
+                }
+            _set_flowchart_node_skills(session, node.id, parsed_skill_ids)
+            refreshed = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.scripts),
+                        selectinload(FlowchartNode.skills),
+                    )
                     .where(FlowchartNode.id == node_id)
                 )
                 .scalars()

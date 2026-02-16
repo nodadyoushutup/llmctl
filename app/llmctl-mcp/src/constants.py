@@ -25,7 +25,6 @@ from core.models import (
     SCRIPT_TYPE_POST_INIT,
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
-    SCRIPT_TYPE_SKILL,
     TaskTemplate,
 )
 
@@ -98,5 +97,4 @@ SCRIPT_TYPE_KEYS = {
     "init": SCRIPT_TYPE_INIT,
     "post_init": SCRIPT_TYPE_POST_INIT,
     "post_run": SCRIPT_TYPE_POST_RUN,
-    "skill": SCRIPT_TYPE_SKILL,
 }

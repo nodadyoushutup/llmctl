@@ -1,6 +1,14 @@
 {% extends "settings_layout.html" %}
 
 {% block settings_content %}
+{% set google_drive_settings = google_drive_settings if google_drive_settings is defined else {} %}
+{% set google_drive_connected = google_drive_connected if google_drive_connected is defined else false %}
+{% set google_drive_service_email = google_drive_service_email if google_drive_service_email is defined else none %}
+{% set rag_settings = rag_settings if rag_settings is defined else {} %}
+{% set rag_chroma_ready = rag_chroma_ready if rag_chroma_ready is defined else false %}
+{% set rag_db_provider_choices = rag_db_provider_choices if rag_db_provider_choices is defined else ('chroma',) %}
+{% set rag_model_provider_choices = rag_model_provider_choices if rag_model_provider_choices is defined else ('openai', 'gemini') %}
+{% set rag_chat_response_style_choices = rag_chat_response_style_choices if rag_chat_response_style_choices is defined else ('low', 'medium', 'high') %}
 <section class="grid grid-2">
   <div class="card">
     <div class="card-header">
@@ -238,6 +246,42 @@
   <div class="card">
     <div class="card-header">
       <div>
+        <h2 class="section-title">Google Drive</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Service account JSON used for Drive source verification and indexing.
+        </p>
+      </div>
+      <span class="status {% if google_drive_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if google_drive_connected %}connected{% else %}needs key{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_google_drive_settings') }}" class="form-grid">
+      <label class="label" style="grid-column: 1 / -1;">
+        Service account JSON
+        <textarea
+          class="input mono"
+          name="google_drive_service_account_json"
+          rows="10"
+          placeholder='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'
+        >{{ google_drive_settings.get('service_account_json', '') }}</textarea>
+      </label>
+      {% if google_drive_service_email %}
+        <span class="muted" style="grid-column: 1 / -1; font-size: 12px;">
+          Service account email: {{ google_drive_service_email }}
+        </span>
+      {% endif %}
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save google drive
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
         <h2 class="section-title">ChromaDB</h2>
         <p class="muted" style="margin-top: 6px;">
           Host, port, and TLS settings for integrated MCP and Chroma collections views.
@@ -294,6 +338,231 @@
             open collections
           </a>
         {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">RAG Runtime</h2>
+        <p class="muted" style="margin-top: 6px;">
+          RAG-specific providers, model defaults, indexing workers, and chat controls.
+        </p>
+      </div>
+      <span class="status {% if rag_chroma_ready %}status-success{% else %}status-warning{% endif %}">
+        {% if rag_chroma_ready %}ready{% else %}needs chroma config{% endif %}
+      </span>
+    </div>
+    {% if not rag_chroma_ready %}
+      <div class="alert alert-warning" style="margin-top: 16px;">
+        RAG is set to use ChromaDB, but Chroma integration host/port is missing.
+      </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('agents.update_rag_settings') }}" class="form-grid">
+      <label class="label">
+        RAG DB Provider
+        <select class="input" name="rag_db_provider">
+          {% for provider in rag_db_provider_choices %}
+            <option
+              value="{{ provider }}"
+              {% if provider == rag_settings.get('db_provider', 'chroma') %}selected{% endif %}
+            >
+              {% if provider == 'chroma' %}ChromaDB (v1){% else %}{{ provider }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="label">
+        Embedding Provider
+        <select class="input" name="rag_embed_provider">
+          {% for provider in rag_model_provider_choices %}
+            <option
+              value="{{ provider }}"
+              {% if provider == rag_settings.get('embed_provider', 'openai') %}selected{% endif %}
+            >
+              {{ provider|upper }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="label">
+        Chat Provider
+        <select class="input" name="rag_chat_provider">
+          {% for provider in rag_model_provider_choices %}
+            <option
+              value="{{ provider }}"
+              {% if provider == rag_settings.get('chat_provider', 'openai') %}selected{% endif %}
+            >
+              {{ provider|upper }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="label">
+        OpenAI API Key
+        <input
+          class="input"
+          type="password"
+          name="rag_openai_api_key"
+          value="{{ rag_settings.get('openai_api_key', '') }}"
+          placeholder="sk-..."
+        />
+      </label>
+      <label class="label">
+        Gemini API Key
+        <input
+          class="input"
+          type="password"
+          name="rag_gemini_api_key"
+          value="{{ rag_settings.get('gemini_api_key', '') }}"
+          placeholder="AIza..."
+        />
+      </label>
+      <label class="label">
+        OpenAI Embed Model
+        <input
+          class="input"
+          type="text"
+          name="rag_openai_embed_model"
+          value="{{ rag_settings.get('openai_embed_model', 'text-embedding-3-small') }}"
+          placeholder="text-embedding-3-small"
+        />
+      </label>
+      <label class="label">
+        Gemini Embed Model
+        <input
+          class="input"
+          type="text"
+          name="rag_gemini_embed_model"
+          value="{{ rag_settings.get('gemini_embed_model', 'models/gemini-embedding-001') }}"
+          placeholder="models/gemini-embedding-001"
+        />
+      </label>
+      <label class="label">
+        OpenAI Chat Model
+        <input
+          class="input"
+          type="text"
+          name="rag_openai_chat_model"
+          value="{{ rag_settings.get('openai_chat_model', 'gpt-4o-mini') }}"
+          placeholder="gpt-4o-mini"
+        />
+      </label>
+      <label class="label">
+        Gemini Chat Model
+        <input
+          class="input"
+          type="text"
+          name="rag_gemini_chat_model"
+          value="{{ rag_settings.get('gemini_chat_model', 'gemini-2.5-flash') }}"
+          placeholder="gemini-2.5-flash"
+        />
+      </label>
+      <label class="label">
+        Chat Temperature
+        <input
+          class="input"
+          type="number"
+          step="0.1"
+          min="0"
+          max="2"
+          name="rag_chat_temperature"
+          value="{{ rag_settings.get('chat_temperature', '0.2') }}"
+        />
+      </label>
+      <label class="label">
+        Default Response Style
+        <select class="input" name="rag_chat_response_style">
+          {% for style in rag_chat_response_style_choices %}
+            <option
+              value="{{ style }}"
+              {% if style == rag_settings.get('chat_response_style', 'high') %}selected{% endif %}
+            >
+              {{ style|capitalize }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="label">
+        Default Top K
+        <input
+          class="input"
+          type="number"
+          min="1"
+          max="20"
+          name="rag_chat_top_k"
+          value="{{ rag_settings.get('chat_top_k', '5') }}"
+        />
+      </label>
+      <label class="label">
+        Default Max History
+        <input
+          class="input"
+          type="number"
+          min="1"
+          max="50"
+          name="rag_chat_max_history"
+          value="{{ rag_settings.get('chat_max_history', '8') }}"
+        />
+      </label>
+      <label class="label">
+        Max Context Characters
+        <input
+          class="input"
+          type="number"
+          min="1000"
+          name="rag_chat_max_context_chars"
+          value="{{ rag_settings.get('chat_max_context_chars', '12000') }}"
+        />
+      </label>
+      <label class="label">
+        Snippet Characters
+        <input
+          class="input"
+          type="number"
+          min="100"
+          name="rag_chat_snippet_chars"
+          value="{{ rag_settings.get('chat_snippet_chars', '600') }}"
+        />
+      </label>
+      <label class="label">
+        Context Budget Tokens
+        <input
+          class="input"
+          type="number"
+          min="256"
+          name="rag_chat_context_budget_tokens"
+          value="{{ rag_settings.get('chat_context_budget_tokens', '8000') }}"
+        />
+      </label>
+      <label class="label">
+        Index Parallel Workers
+        <input
+          class="input"
+          type="number"
+          min="1"
+          max="64"
+          name="rag_index_parallel_workers"
+          value="{{ rag_settings.get('index_parallel_workers', '1') }}"
+        />
+      </label>
+      <label class="label">
+        Embed Parallel Requests
+        <input
+          class="input"
+          type="number"
+          min="1"
+          max="64"
+          name="rag_embed_parallel_requests"
+          value="{{ rag_settings.get('embed_parallel_requests', '1') }}"
+        />
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save rag runtime
+        </button>
       </div>
     </form>
   </div>

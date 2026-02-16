@@ -65,6 +65,7 @@
   <div class="flow-layout" style="margin-top: 16px;">
     <aside class="flow-sidebar">
       <p class="eyebrow">node bar</p>
+      <p class="muted" id="ragPaletteHealthNotice" style="margin-top: 6px;"></p>
       <div class="flow-palette" id="nodePalette"></div>
     </aside>
 
@@ -271,13 +272,59 @@
   }
 
   .flow-node.is-type-end {
+    --end-corner: 29.3%;
     width: 108px;
     min-height: 108px;
     height: 108px;
-    border-radius: 999px;
-    padding: 10px;
-    border-color: rgba(239, 68, 68, 0.8);
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .flow-node.is-type-end::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(239, 68, 68, 0.8);
+    clip-path: polygon(
+      var(--end-corner) 0,
+      calc(100% - var(--end-corner)) 0,
+      100% var(--end-corner),
+      100% calc(100% - var(--end-corner)),
+      calc(100% - var(--end-corner)) 100%,
+      var(--end-corner) 100%,
+      0 calc(100% - var(--end-corner)),
+      0 var(--end-corner)
+    );
+    box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .flow-node.is-type-end::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
     background: linear-gradient(140deg, rgba(77, 21, 21, 0.95), rgba(29, 13, 13, 0.99));
+    clip-path: polygon(
+      var(--end-corner) 0,
+      calc(100% - var(--end-corner)) 0,
+      100% var(--end-corner),
+      100% calc(100% - var(--end-corner)),
+      calc(100% - var(--end-corner)) 100%,
+      var(--end-corner) 100%,
+      0 calc(100% - var(--end-corner)),
+      0 var(--end-corner)
+    );
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .flow-node.is-type-end .flow-node-content {
+    inset: 14px;
+    z-index: 1;
   }
 
   .flow-node.is-type-flowchart {
@@ -465,6 +512,33 @@
 
   .flow-node.is-type-decision.is-running.is-selected::before {
     border-color: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.36), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-end.is-selected,
+  .flow-node.is-type-end.is-running,
+  .flow-node.is-type-end.is-running.is-selected {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .flow-node.is-type-end.is-selected::before {
+    background: rgba(255, 122, 24, 0.75);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.24), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-end.is-running::before {
+    background: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.32), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-end.is-running::after {
+    background: linear-gradient(140deg, rgba(93, 42, 8, 0.96), rgba(27, 18, 13, 0.99));
+  }
+
+  .flow-node.is-type-end.is-running.is-selected::before {
+    background: rgba(255, 122, 24, 0.95);
     box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.36), 0 14px 28px rgba(9, 14, 21, 0.35);
   }
 
@@ -717,6 +791,30 @@
     color: var(--muted);
   }
 
+  .flow-skill-order-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .flow-skill-order-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+    background: rgba(14, 20, 30, 0.62);
+  }
+
+  .flow-skill-order-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   .flow-section-title {
     font-size: 11px;
     text-transform: uppercase;
@@ -814,27 +912,32 @@
     const initialActiveRunId = {{ active_run_id | tojson }};
     const catalog = {{ catalog | tojson }};
     const nodeTypes = {{ node_types | tojson }};
+    const ragPaletteState = {{ rag_palette_state | tojson }};
     const START_NODE_TYPE = "start";
     const END_NODE_TYPE = "end";
     const FLOWCHART_NODE_TYPE = "flowchart";
+    const RAG_NODE_TYPE = "rag";
+    const RAG_HEALTH_UNCONFIGURED = "unconfigured";
+    const RAG_HEALTH_CONFIGURED_UNHEALTHY = "configured_unhealthy";
+    const RAG_HEALTH_CONFIGURED_HEALTHY = "configured_healthy";
     const addableNodeTypes = nodeTypes.filter((nodeType) => nodeType !== START_NODE_TYPE);
     const activeRunStatuses = new Set(["queued", "running", "stopping"]);
     const compatibility = {
-      start: { model: false, mcp: false, scripts: false },
-      end: { model: false, mcp: false, scripts: false },
-      flowchart: { model: false, mcp: false, scripts: false },
-      task: { model: true, mcp: true, scripts: true },
-      plan: { model: true, mcp: true, scripts: true },
-      milestone: { model: true, mcp: true, scripts: true },
-      memory: { model: true, mcp: true, scripts: true },
-      decision: { model: false, mcp: true, scripts: true },
+      start: { model: false, mcp: false, scripts: false, skills: false },
+      end: { model: false, mcp: false, scripts: false, skills: false },
+      flowchart: { model: false, mcp: false, scripts: false, skills: false },
+      task: { model: true, mcp: true, scripts: true, skills: false },
+      plan: { model: true, mcp: true, scripts: true, skills: false },
+      milestone: { model: true, mcp: true, scripts: true, skills: false },
+      memory: { model: true, mcp: true, scripts: true, skills: false },
+      decision: { model: false, mcp: true, scripts: true, skills: false },
+      rag: { model: true, mcp: false, scripts: false, skills: false },
     };
     const scriptTypeLabels = {
       pre_init: "Pre-Init Script",
       init: "Init Script",
       post_init: "Post-Init Script",
       post_run: "Post-Autorun Script",
-      skill: "Skill Script",
     };
     const scriptStageSections = [
       {
@@ -851,12 +954,6 @@
         stage_key: "post_init",
         stage_label: "Post Init",
         script_types: ["post_init"],
-      },
-      {
-        stage_key: "llm_query",
-        stage_label: "LLM Query",
-        script_types: ["skill"],
-        note: "Skill scripts are available to the LLM during this stage.",
       },
       {
         stage_key: "post_run",
@@ -911,6 +1008,16 @@
       { id: "b2", side: "bottom", x: 50, y: 100 },
       { id: "l1", side: "left", x: 0, y: 50 },
     ];
+    const END_CONNECTOR_LAYOUT = [
+      { id: "t1", side: "oct-top-left", x: 29.3, y: 0 },
+      { id: "t3", side: "oct-top-right", x: 70.7, y: 0 },
+      { id: "r2", side: "oct-right-top", x: 100, y: 29.3 },
+      { id: "r3", side: "oct-right-bottom", x: 100, y: 70.7 },
+      { id: "b3", side: "oct-bottom-right", x: 70.7, y: 100 },
+      { id: "b1", side: "oct-bottom-left", x: 29.3, y: 100 },
+      { id: "l3", side: "oct-left-bottom", x: 0, y: 70.7 },
+      { id: "l2", side: "oct-left-top", x: 0, y: 29.3 },
+    ];
     const TASK_CONNECTOR_LAYOUT = CONNECTOR_GEOMETRY;
     const PLAN_CONNECTOR_LAYOUT = CONNECTOR_GEOMETRY;
     const MILESTONE_CONNECTOR_LAYOUT = [
@@ -935,11 +1042,19 @@
     ];
     const DECISION_CONNECTOR_LAYOUT = [
       { id: "t2", side: "top", x: 50, y: 0 },
+      { id: "t3", side: "decision-top-right", x: 76.8, y: 23.2 },
       { id: "r1", side: "right", x: 100, y: 50 },
+      { id: "b3", side: "decision-bottom-right", x: 76.8, y: 76.8 },
       { id: "b2", side: "bottom", x: 50, y: 100 },
+      { id: "b1", side: "decision-bottom-left", x: 23.2, y: 76.8 },
       { id: "l1", side: "left", x: 0, y: 50 },
+      { id: "t1", side: "decision-top-left", x: 23.2, y: 23.2 },
     ];
     const CORE_CONNECTOR_BY_ID = new Map(CONNECTOR_GEOMETRY.map((item) => [item.id, item]));
+    const END_CONNECTOR_BY_ID = new Map(END_CONNECTOR_LAYOUT.map((item) => [item.id, item]));
+    const DECISION_CONNECTOR_BY_ID = new Map(
+      DECISION_CONNECTOR_LAYOUT.map((item) => [item.id, item])
+    );
     const MILESTONE_CONNECTOR_BY_ID = new Map(
       MILESTONE_CONNECTOR_LAYOUT.map((item) => [item.id, item])
     );
@@ -983,8 +1098,11 @@
 
     function connectorLayoutForNode(node) {
       const nodeType = String(node && node.node_type ? node.node_type : "");
-      if (nodeType === START_NODE_TYPE || nodeType === END_NODE_TYPE || nodeType === FLOWCHART_NODE_TYPE) {
+      if (nodeType === START_NODE_TYPE || nodeType === FLOWCHART_NODE_TYPE) {
         return START_CONNECTOR_LAYOUT;
+      }
+      if (nodeType === END_NODE_TYPE) {
+        return END_CONNECTOR_LAYOUT;
       }
       if (nodeType === "task") {
         return TASK_CONNECTOR_LAYOUT;
@@ -1039,6 +1157,7 @@
     const nodeLayerEl = document.getElementById("flowNodeLayer");
     const inspectorEl = document.getElementById("flowInspector");
     const paletteEl = document.getElementById("nodePalette");
+    const ragPaletteNoticeEl = document.getElementById("ragPaletteHealthNotice");
     const messageEl = document.getElementById("flowchartMessage");
     const validationEl = document.getElementById("flowchartValidation");
     const saveButton = document.getElementById("saveGraphButton");
@@ -1205,12 +1324,33 @@
     }
 
     function nodeTypeLabel(nodeType) {
+      if (String(nodeType || "").trim().toLowerCase() === RAG_NODE_TYPE) {
+        return "RAG";
+      }
       return String(nodeType || "").replaceAll("_", " ");
     }
 
     function normalizeEdgeMode(value) {
       const cleaned = String(value || "").trim().toLowerCase();
       return EDGE_MODE_SET.has(cleaned) ? cleaned : EDGE_MODE_SOLID;
+    }
+
+    function ragPaletteVisible() {
+      return ragPaletteState !== RAG_HEALTH_UNCONFIGURED;
+    }
+
+    function ragPaletteEnabled() {
+      return ragPaletteState === RAG_HEALTH_CONFIGURED_HEALTHY;
+    }
+
+    function ragPaletteNoticeText() {
+      if (ragPaletteState === RAG_HEALTH_UNCONFIGURED) {
+        return "RAG node is hidden until Chroma integration is configured.";
+      }
+      if (ragPaletteState === RAG_HEALTH_CONFIGURED_UNHEALTHY) {
+        return "RAG node is disabled while Chroma health check is failing.";
+      }
+      return "RAG node is enabled.";
     }
 
     function defaultNodeTitle(nodeType) {
@@ -1229,6 +1369,22 @@
         return null;
       }
       return Number(options[0].id);
+    }
+
+    function defaultNodeConfigFor(nodeType) {
+      if (nodeType === RAG_NODE_TYPE) {
+        const config = { mode: "query", top_k: 5 };
+        const collections = Array.isArray(catalog.rag_collections)
+          ? catalog.rag_collections
+              .map((item) => String(item.id || "").trim())
+              .filter((item) => item)
+          : [];
+        if (collections.length) {
+          config.collections = [collections[0]];
+        }
+        return config;
+      }
+      return {};
     }
 
     function refOptionsFor(nodeType) {
@@ -1669,6 +1825,65 @@
         `;
       }
 
+      if (node.node_type === RAG_NODE_TYPE) {
+        const mode = String(config.mode || "query").trim().toLowerCase() || "query";
+        const topK = String(config.top_k || "5");
+        const questionPrompt = String(config.question_prompt || "");
+        const selectedCollections = Array.isArray(config.collections)
+          ? new Set(config.collections.map((value) => String(value || "").trim()).filter((value) => value))
+          : new Set();
+        const collectionRows = Array.isArray(catalog.rag_collections)
+          ? catalog.rag_collections
+          : [];
+        const collectionOptions = collectionRows
+          .map((collection) => {
+            const collectionId = String(collection.id || "").trim();
+            const collectionName = String(collection.name || collectionId).trim();
+            if (!collectionId) {
+              return "";
+            }
+            const status = String(collection.status || "").trim();
+            const checked = selectedCollections.has(collectionId) ? "checked" : "";
+            return `
+              <label class="flow-checkbox-item">
+                <input type="checkbox" value="${escapeHtml(collectionId)}" data-role="node-config" data-role-rag-collection="true" ${checked} />
+                <span class="flow-checkbox-label">
+                  <span class="flow-checkbox-name" title="${escapeHtml(collectionName)}">${escapeHtml(collectionName)}</span>
+                  <span class="flow-inline-meta">${escapeHtml(status || "ready")}</span>
+                </span>
+              </label>
+            `;
+          })
+          .join("");
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Query mode uses retrieval + synthesis. Index modes require an embedding-capable model (Codex or Gemini).
+          </p>
+          <label class="label" style="margin-top: 10px;">
+            mode
+            <select class="input" id="cfgRagMode" data-role="node-config">
+              <option value="query" ${mode === "query" ? "selected" : ""}>query</option>
+              <option value="fresh_index" ${mode === "fresh_index" ? "selected" : ""}>fresh_index</option>
+              <option value="delta_index" ${mode === "delta_index" ? "selected" : ""}>delta_index</option>
+            </select>
+          </label>
+          <p class="flow-section-title">Collections</p>
+          <div class="flow-checkbox-list">
+            ${collectionOptions || '<span class="muted">No collections available. Create RAG sources first.</span>'}
+          </div>
+          <div data-rag-query-only="${mode === "query" ? "true" : "false"}" style="${mode === "query" ? "" : "display: none;"}">
+            <label class="label" style="margin-top: 10px;">
+              question prompt
+              <textarea class="textarea" id="cfgRagQuestionPrompt" data-role="node-config" rows="4">${escapeHtml(questionPrompt)}</textarea>
+            </label>
+            <label class="label" style="margin-top: 10px;">
+              top k
+              <input type="number" min="1" max="20" class="input" id="cfgRagTopK" data-role="node-config" value="${escapeHtml(topK)}" />
+            </label>
+          </div>
+        `;
+      }
+
       return '<p class="muted" style="margin-top: 8px;">No node-specific settings available.</p>';
     }
 
@@ -1923,13 +2138,55 @@
         } else {
           delete config.route_key;
         }
+      } else if (node.node_type === RAG_NODE_TYPE) {
+        const mode = configInputValue("cfgRagMode") || "query";
+        config.mode = mode;
+        const collectionInputs = Array.from(
+          inspectorEl.querySelectorAll("[data-role-rag-collection='true']")
+        );
+        const selectedCollections = collectionInputs
+          .filter((input) => input.checked)
+          .map((input) => String(input.value || "").trim())
+          .filter((value, index, values) => value && values.indexOf(value) === index);
+        if (selectedCollections.length) {
+          config.collections = selectedCollections;
+        } else {
+          delete config.collections;
+        }
+        if (mode === "query") {
+          const questionPrompt = configInputValue("cfgRagQuestionPrompt");
+          if (questionPrompt) {
+            config.question_prompt = questionPrompt;
+          } else {
+            delete config.question_prompt;
+          }
+          const topK = parseConfigOptionalInt(configInputValue("cfgRagTopK"), 1, 20);
+          if (topK !== null && topK !== 5) {
+            config.top_k = topK;
+          } else {
+            delete config.top_k;
+          }
+        } else {
+          delete config.question_prompt;
+          delete config.top_k;
+        }
       }
       node.config = config;
     }
 
     function bindNodeConfigInputs(node) {
+      const syncRagModeVisibility = () => {
+        if (node.node_type !== RAG_NODE_TYPE) {
+          return;
+        }
+        const mode = configInputValue("cfgRagMode") || "query";
+        inspectorEl.querySelectorAll("[data-rag-query-only]").forEach((el) => {
+          el.style.display = mode === "query" ? "" : "none";
+        });
+      };
       const syncNodeConfig = () => {
         collectNodeConfigFromInspector(node);
+        syncRagModeVisibility();
         setDirty(true);
       };
       inspectorEl.querySelectorAll("[data-role='node-config']").forEach((input) => {
@@ -1942,6 +2199,7 @@
         input.addEventListener("input", syncNodeConfig);
         input.addEventListener("blur", syncNodeConfig);
       });
+      syncRagModeVisibility();
     }
 
     function setMessage(text, kind = "muted") {
@@ -2082,26 +2340,42 @@
 
     function renderPalette() {
       const fragment = document.createDocumentFragment();
-      addableNodeTypes.forEach((nodeType) => {
+      const filteredNodeTypes = addableNodeTypes.filter((nodeType) => {
+        if (nodeType !== RAG_NODE_TYPE) {
+          return true;
+        }
+        return ragPaletteVisible();
+      });
+      if (ragPaletteNoticeEl) {
+        ragPaletteNoticeEl.textContent = ragPaletteNoticeText();
+      }
+      filteredNodeTypes.forEach((nodeType) => {
+        const ragDisabled = nodeType === RAG_NODE_TYPE && !ragPaletteEnabled();
         const button = document.createElement("button");
         button.type = "button";
         button.className = "btn btn-secondary flow-palette-item";
-        button.draggable = true;
+        button.draggable = !ragDisabled;
         button.dataset.nodeType = nodeType;
+        if (ragDisabled) {
+          button.disabled = true;
+          button.title = "RAG integration is configured but unhealthy.";
+        }
         button.innerHTML = `<i class="fa-solid fa-plus"></i>${escapeHtml(nodeTypeLabel(nodeType))}`;
-        button.addEventListener("dragstart", (event) => {
-          event.dataTransfer.setData("text/flow-node-type", nodeType);
-          event.dataTransfer.effectAllowed = "copy";
-        });
-        button.addEventListener("click", () => {
-          const centerWorldX = (viewportEl.clientWidth / 2 - state.panX) / state.zoom;
-          const centerWorldY = (viewportEl.clientHeight / 2 - state.panY) / state.zoom;
-          addNode(
-            nodeType,
-            worldToGraphX(centerWorldX) - nodeWidthForType(nodeType) / 2,
-            worldToGraphY(centerWorldY) - nodeHeightForType(nodeType) / 2
-          );
-        });
+        if (!ragDisabled) {
+          button.addEventListener("dragstart", (event) => {
+            event.dataTransfer.setData("text/flow-node-type", nodeType);
+            event.dataTransfer.effectAllowed = "copy";
+          });
+          button.addEventListener("click", () => {
+            const centerWorldX = (viewportEl.clientWidth / 2 - state.panX) / state.zoom;
+            const centerWorldY = (viewportEl.clientHeight / 2 - state.panY) / state.zoom;
+            addNode(
+              nodeType,
+              worldToGraphX(centerWorldX) - nodeWidthForType(nodeType) / 2,
+              worldToGraphY(centerWorldY) - nodeHeightForType(nodeType) / 2
+            );
+          });
+        }
         fragment.appendChild(button);
       });
       paletteEl.replaceChildren(fragment);
@@ -2112,6 +2386,10 @@
         setMessage("Start node is added automatically and cannot be added manually.", "error");
         return;
       }
+      if (nodeType === RAG_NODE_TYPE && !ragPaletteEnabled()) {
+        setMessage("RAG node is currently disabled by integration health.", "error");
+        return;
+      }
       const node = {
         id: null,
         client_id: `client-node-${nextClientNodeId++}`,
@@ -2120,7 +2398,7 @@
         ref_id: typesWithRequiredRef.has(nodeType) ? defaultRefFor(nodeType) : null,
         x: coordinateOr(x, 0),
         y: coordinateOr(y, 0),
-        config: {},
+        config: defaultNodeConfigFor(nodeType),
         model_id: null,
         mcp_server_ids: [],
         script_ids: [],
@@ -2170,6 +2448,42 @@
       if (side === "right") {
         return { x: 1, y: 0 };
       }
+      if (side === "oct-top-right") {
+        return { x: 0.3826834323650898, y: -0.9238795325112867 };
+      }
+      if (side === "oct-right-top") {
+        return { x: 0.9238795325112867, y: -0.3826834323650898 };
+      }
+      if (side === "oct-right-bottom") {
+        return { x: 0.9238795325112867, y: 0.3826834323650898 };
+      }
+      if (side === "oct-bottom-right") {
+        return { x: 0.3826834323650898, y: 0.9238795325112867 };
+      }
+      if (side === "oct-bottom-left") {
+        return { x: -0.3826834323650898, y: 0.9238795325112867 };
+      }
+      if (side === "oct-left-bottom") {
+        return { x: -0.9238795325112867, y: 0.3826834323650898 };
+      }
+      if (side === "oct-left-top") {
+        return { x: -0.9238795325112867, y: -0.3826834323650898 };
+      }
+      if (side === "oct-top-left") {
+        return { x: -0.3826834323650898, y: -0.9238795325112867 };
+      }
+      if (side === "decision-top-right") {
+        return { x: Math.SQRT1_2, y: -Math.SQRT1_2 };
+      }
+      if (side === "decision-bottom-right") {
+        return { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+      }
+      if (side === "decision-bottom-left") {
+        return { x: -Math.SQRT1_2, y: Math.SQRT1_2 };
+      }
+      if (side === "decision-top-left") {
+        return { x: -Math.SQRT1_2, y: -Math.SQRT1_2 };
+      }
       if (side === "top") {
         return { x: 0, y: -1 };
       }
@@ -2211,6 +2525,29 @@
       }
       if (normalized === "l1" || normalized === "r1") {
         return normalized;
+      }
+      return null;
+    }
+
+    function resolveEndHandleId(handleId) {
+      const normalized = String(handleId || "").trim();
+      if (!normalized) {
+        return null;
+      }
+      if (END_CONNECTOR_BY_ID.has(normalized)) {
+        return normalized;
+      }
+      if (normalized.startsWith("t")) {
+        return "t1";
+      }
+      if (normalized.startsWith("b")) {
+        return "b3";
+      }
+      if (normalized.startsWith("l")) {
+        return "l2";
+      }
+      if (normalized.startsWith("r")) {
+        return "r2";
       }
       return null;
     }
@@ -2265,6 +2602,9 @@
       if (!normalized) {
         return null;
       }
+      if (DECISION_CONNECTOR_BY_ID.has(normalized)) {
+        return normalized;
+      }
       if (normalized.startsWith("t")) {
         return "t2";
       }
@@ -2309,12 +2649,11 @@
       const nodeType = String(node && node.node_type ? node.node_type : "");
       let normalizedHandleId = String(handleId || "");
       let connector = null;
-      if (
-        nodeType === START_NODE_TYPE ||
-        nodeType === END_NODE_TYPE ||
-        nodeType === FLOWCHART_NODE_TYPE
-      ) {
+      if (nodeType === START_NODE_TYPE || nodeType === FLOWCHART_NODE_TYPE) {
         normalizedHandleId = resolveStartHandleId(handleId);
+      } else if (nodeType === END_NODE_TYPE) {
+        normalizedHandleId = resolveEndHandleId(handleId);
+        connector = END_CONNECTOR_BY_ID.get(String(normalizedHandleId || ""));
       } else if (nodeType === "milestone") {
         normalizedHandleId = resolveMilestoneHandleId(handleId);
         connector = MILESTONE_CONNECTOR_BY_ID.get(String(normalizedHandleId || ""));
@@ -2326,6 +2665,7 @@
         normalizedHandleId = resolveMemoryHandleId(handleId);
       } else if (nodeType === "decision") {
         normalizedHandleId = resolveDecisionHandleId(handleId);
+        connector = DECISION_CONNECTOR_BY_ID.get(String(normalizedHandleId || ""));
       }
       if (!connector) {
         connector = CONNECTOR_BY_ID.get(String(normalizedHandleId || ""));
@@ -2651,6 +2991,7 @@
         model: false,
         mcp: false,
         scripts: false,
+        skills: false,
       };
       const isTaskNode = node.node_type === "task";
       const refOptions = refOptionsFor(node.node_type);
@@ -2665,10 +3006,19 @@
         : [];
 
       const typeOptions = nodeTypes
-        .map(
+        .filter(
           (item) =>
-            `<option value="${escapeHtml(item)}" ${item === node.node_type ? "selected" : ""}>${escapeHtml(nodeTypeLabel(item))}</option>`
+            item !== RAG_NODE_TYPE ||
+            ragPaletteVisible() ||
+            node.node_type === RAG_NODE_TYPE
         )
+        .map((item) => {
+          const ragOptionDisabled =
+            item === RAG_NODE_TYPE &&
+            !ragPaletteEnabled() &&
+            node.node_type !== RAG_NODE_TYPE;
+          return `<option value="${escapeHtml(item)}" ${item === node.node_type ? "selected" : ""} ${ragOptionDisabled ? "disabled" : ""}>${escapeHtml(nodeTypeLabel(item))}</option>`;
+        })
         .join("");
 
       const refOptionHtml =
@@ -3031,6 +3381,15 @@
             const nextType = String(typeSelect.value || "task");
             const previousType = selectedNode.node_type;
             if (
+              nextType === RAG_NODE_TYPE &&
+              !ragPaletteEnabled() &&
+              previousType !== RAG_NODE_TYPE
+            ) {
+              setMessage("RAG node type is disabled by integration health.", "error");
+              typeSelect.value = selectedNode.node_type;
+              return;
+            }
+            if (
               nextType === START_NODE_TYPE &&
               state.nodes.some(
                 (node) =>
@@ -3063,7 +3422,7 @@
               selectedNode.ref_id = null;
             }
             if (nextType !== previousType) {
-              selectedNode.config = {};
+              selectedNode.config = defaultNodeConfigFor(nextType);
             }
             if (nextType !== "task") {
               const config = ensureNodeConfigObject(selectedNode);
@@ -3077,6 +3436,7 @@
               model: false,
               mcp: false,
               scripts: false,
+              skills: false,
             };
             if (!nextCompat.model) {
               selectedNode.model_id = null;

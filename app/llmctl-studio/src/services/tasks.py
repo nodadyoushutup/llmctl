@@ -60,6 +60,7 @@ from core.models import (
     FLOWCHART_NODE_TYPE_MEMORY,
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_RAG,
     FLOWCHART_NODE_TYPE_START,
     FLOWCHART_NODE_TYPE_TASK,
     LLMModel,
@@ -78,8 +79,26 @@ from core.models import (
     SCRIPT_TYPE_POST_INIT,
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
-    SCRIPT_TYPE_SKILL,
     TaskTemplate,
+    flowchart_node_skills,
+)
+from services.instruction_adapters import resolve_instruction_adapter
+from rag.domain import (
+    RAG_FLOWCHART_MODE_DELTA_INDEX,
+    RAG_FLOWCHART_MODE_FRESH_INDEX,
+    RAG_FLOWCHART_MODE_QUERY,
+    RAG_HEALTH_CONFIGURED_HEALTHY,
+    execute_query_contract,
+    normalize_collection_selection as normalize_rag_collection_selection,
+    rag_health_snapshot as rag_runtime_health_snapshot,
+    run_index_for_collections,
+)
+from rag.engine.config import load_config as load_rag_config
+from rag.providers.adapters import (
+    call_chat_completion as rag_call_chat_completion,
+    get_chat_provider as rag_get_chat_provider,
+    has_chat_api_key as rag_has_chat_api_key,
+    missing_api_key_message as rag_missing_api_key_message,
 )
 from storage.script_storage import ensure_script_file
 from core.task_stages import TASK_STAGE_LABELS, TASK_STAGE_ORDER
@@ -87,6 +106,20 @@ from core.task_kinds import is_quick_task_kind
 from core.quick_node import (
     build_quick_node_agent_profile,
     build_quick_node_system_contract,
+)
+from services.skill_adapters import (
+    build_skill_fallback_entries,
+    materialize_skill_set,
+    resolve_agent_skills,
+    skill_ids_payload,
+    skill_versions_payload,
+)
+from services.instructions.compiler import (
+    InstructionCompileInput,
+    compile_instruction_package,
+)
+from services.instructions.package import (
+    materialize_instruction_package,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,10 +129,284 @@ OUTPUT_INSTRUCTIONS_MARKDOWN = (
     "If Markdown is used, ensure it is valid CommonMark "
     "(for example: balanced code fences and valid link syntax)."
 )
+INSTRUCTION_SIZE_WARNING_BYTES = 64 * 1024
+INSTRUCTION_TOTAL_SIZE_WARNING_BYTES = 96 * 1024
+INSTRUCTION_NATIVE_ENABLED_DEFAULTS: dict[str, bool] = {
+    "codex": True,
+    "gemini": True,
+    "claude": True,
+    "vllm_local": False,
+    "vllm_remote": False,
+}
+INSTRUCTION_FALLBACK_ENABLED_DEFAULTS: dict[str, bool] = {
+    provider: True for provider in LLM_PROVIDERS
+}
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _resolve_updated_at_version(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    timestamp = value
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(timezone.utc)
+    return timestamp.isoformat()
+
+
+def _serialize_materialized_paths(paths: list[str]) -> str | None:
+    if not paths:
+        return None
+    return _json_dumps([str(path) for path in paths])
+
+
+def _parse_feature_flag(
+    settings: dict[str, str],
+    *,
+    key: str,
+    default: bool,
+) -> bool:
+    raw = settings.get(key)
+    if raw is None:
+        return default
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    return default
+
+
+def _instruction_native_enabled(
+    provider: str,
+    llm_settings: dict[str, str],
+) -> bool:
+    normalized = str(provider or "").strip().lower()
+    default_enabled = INSTRUCTION_NATIVE_ENABLED_DEFAULTS.get(normalized, False)
+    return _parse_feature_flag(
+        llm_settings,
+        key=f"instruction_native_enabled_{normalized}",
+        default=default_enabled,
+    )
+
+
+def _instruction_fallback_enabled(
+    provider: str,
+    llm_settings: dict[str, str],
+) -> bool:
+    normalized = str(provider or "").strip().lower()
+    default_enabled = INSTRUCTION_FALLBACK_ENABLED_DEFAULTS.get(normalized, True)
+    return _parse_feature_flag(
+        llm_settings,
+        key=f"instruction_fallback_enabled_{normalized}",
+        default=default_enabled,
+    )
+
+
+def _is_subpath(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_instruction_materialized_paths(
+    *,
+    paths: list[str],
+    workspace: Path,
+    runtime_home: Path | None,
+    codex_home: Path | None = None,
+) -> None:
+    allowed_roots = [workspace.resolve()]
+    if runtime_home is not None:
+        allowed_roots.append(runtime_home.resolve())
+    if codex_home is not None:
+        allowed_roots.append(codex_home.resolve())
+    for raw_path in paths:
+        candidate = Path(str(raw_path)).resolve()
+        if any(_is_subpath(candidate, root) for root in allowed_roots):
+            continue
+        raise RuntimeError(
+            "Instruction materialization path escapes run-local roots: "
+            f"{candidate} (allowed roots: {allowed_roots})."
+        )
+
+
+def _log_instruction_package_observability(
+    *,
+    compiled_instruction_package,
+    on_log: Callable[[str], None],
+) -> None:
+    manifest = dict(compiled_instruction_package.manifest or {})
+    instruction_size = int(manifest.get("instruction_size_bytes") or 0)
+    total_size = int(manifest.get("total_size_bytes") or 0)
+    includes_priorities = bool(manifest.get("includes_priorities"))
+    on_log(
+        "Instruction package sizes: "
+        f"instructions={instruction_size} bytes, total={total_size} bytes, "
+        f"includes_priorities={'yes' if includes_priorities else 'no'}."
+    )
+    if instruction_size >= INSTRUCTION_SIZE_WARNING_BYTES:
+        on_log(
+            "Instruction size warning: instructions markdown is "
+            f"{instruction_size} bytes (warning threshold {INSTRUCTION_SIZE_WARNING_BYTES})."
+        )
+    if total_size >= INSTRUCTION_TOTAL_SIZE_WARNING_BYTES:
+        on_log(
+            "Instruction size warning: total package is "
+            f"{total_size} bytes (warning threshold {INSTRUCTION_TOTAL_SIZE_WARNING_BYTES})."
+        )
+
+
+def _log_instruction_reference_risk(
+    *,
+    compiled_instruction_package,
+    on_log: Callable[[str], None],
+) -> None:
+    markdown = str(compiled_instruction_package.artifacts.get("INSTRUCTIONS.md") or "")
+    if not markdown:
+        return
+    matches = re.findall(r"(?<!\w)@([^\s`]+)", markdown)
+    flagged: list[str] = []
+    for token in matches:
+        candidate = str(token).strip()
+        if not candidate:
+            continue
+        if (
+            "/" in candidate
+            or candidate.startswith((".", "~", "$"))
+            or candidate.endswith(
+                (".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".cfg", ".toml")
+            )
+        ):
+            if candidate not in flagged:
+                flagged.append(candidate)
+        if len(flagged) >= 5:
+            break
+    if not flagged:
+        return
+    on_log(
+        "Instruction safety note: detected @file-style references in compiled instructions "
+        "(accepted in phase 1): "
+        + ", ".join(flagged)
+    )
+
+
+def _apply_instruction_adapter_policy(
+    *,
+    provider: str,
+    llm_settings: dict[str, str],
+    compiled_instruction_package,
+    configured_agent_markdown_filename: str | None,
+    workspace: Path,
+    runtime_home: Path,
+    codex_home: Path | None,
+    payload: str,
+    task_kind: str,
+    on_log: Callable[[str], None],
+) -> tuple[str, str, str, list[str]]:
+    instruction_adapter = resolve_instruction_adapter(
+        provider,
+        agent_markdown_filename=configured_agent_markdown_filename,
+    )
+    descriptor = instruction_adapter.describe()
+    native_enabled = _instruction_native_enabled(provider, llm_settings)
+    fallback_enabled = _instruction_fallback_enabled(provider, llm_settings)
+    on_log(
+        "Instruction adapter flags: "
+        f"native={'on' if native_enabled else 'off'}, "
+        f"fallback={'on' if fallback_enabled else 'off'}."
+    )
+
+    def _apply_fallback(reason: str) -> tuple[str, str, str, list[str]]:
+        if not fallback_enabled:
+            raise RuntimeError(f"{reason} Fallback is disabled for provider '{provider}'.")
+        on_log(f"{reason} Downgrading to prompt-envelope fallback.")
+        downgraded_payload = _inject_instruction_fallback(
+            payload,
+            instruction_adapter.fallback_payload(compiled_instruction_package),
+            task_kind,
+        )
+        return downgraded_payload, "fallback", descriptor.adapter, []
+
+    if descriptor.supports_native and not native_enabled:
+        return _apply_fallback(
+            f"Native instruction adapter disabled for provider '{provider}'."
+        )
+
+    try:
+        materialized = instruction_adapter.materialize(
+            compiled_instruction_package,
+            workspace=workspace,
+            runtime_home=runtime_home,
+            codex_home=codex_home,
+        )
+    except Exception as exc:
+        return _apply_fallback(
+            f"Instruction adapter materialization failed ({provider}): {exc}"
+        )
+
+    materialized_paths = list(materialized.materialized_paths)
+    _validate_instruction_materialized_paths(
+        paths=materialized_paths,
+        workspace=workspace,
+        runtime_home=runtime_home,
+        codex_home=codex_home,
+    )
+
+    mode = str(materialized.mode or "").strip().lower() or "fallback"
+    if mode == "fallback":
+        if not fallback_enabled:
+            raise RuntimeError(
+                f"Instruction adapter returned fallback mode but fallback is disabled for '{provider}'."
+            )
+        downgraded_payload = _inject_instruction_fallback(
+            payload,
+            instruction_adapter.fallback_payload(compiled_instruction_package),
+            task_kind,
+        )
+        return downgraded_payload, mode, materialized.adapter, materialized_paths
+    return payload, mode, materialized.adapter, materialized_paths
+
+
+def _validate_runtime_isolation_env(
+    *,
+    llm_env: dict[str, str],
+    runtime_home: Path,
+    codex_home: Path | None = None,
+    on_log: Callable[[str], None] | None = None,
+) -> None:
+    resolved_runtime_home = runtime_home.resolve()
+    configured_home = Path(str(llm_env.get("HOME") or "")).resolve()
+    if configured_home != resolved_runtime_home:
+        raise RuntimeError(
+            "Runtime isolation failure: HOME is not run-local "
+            f"({configured_home} != {resolved_runtime_home})."
+        )
+    if codex_home is not None:
+        configured_codex_home = Path(str(llm_env.get("CODEX_HOME") or "")).resolve()
+        resolved_codex_home = codex_home.resolve()
+        if configured_codex_home != resolved_codex_home:
+            raise RuntimeError(
+                "Runtime isolation failure: CODEX_HOME is not run-local "
+                f"({configured_codex_home} != {resolved_codex_home})."
+            )
+    if on_log is not None:
+        on_log(
+            "Runtime isolation paths: "
+            f"HOME={resolved_runtime_home}"
+            + (
+                f", CODEX_HOME={codex_home.resolve()}"
+                if codex_home is not None
+                else ""
+            )
+            + "."
+        )
 
 
 def _provider_label(provider: str) -> str:
@@ -887,13 +1194,14 @@ def _run_config_cmd(
     cmd: list[str],
     on_log: Callable[[str], None] | None = None,
     cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
     ignore_failure: bool = False,
 ) -> None:
     result = subprocess.run(
         cmd,
         text=True,
         capture_output=True,
-        env=os.environ.copy(),
+        env=dict(env) if env is not None else os.environ.copy(),
         cwd=str(cwd) if cwd is not None else None,
     )
     if result.stdout.strip() and on_log:
@@ -947,6 +1255,7 @@ def _ensure_gemini_mcp_servers(
     configs: dict[str, dict[str, Any]],
     on_log: Callable[[str], None] | None = None,
     cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> None:
     if not configs:
         return
@@ -964,13 +1273,14 @@ def _ensure_gemini_mcp_servers(
             remove_cmd,
             on_log=on_log,
             cwd=cwd,
+            env=env,
             ignore_failure=True,
         )
         add_cmd = _build_gemini_mcp_add_cmd(server_key, configs[server_key], scope)
         debug_enabled = _as_optional_bool(configs[server_key].get("debug"))
         if on_log and debug_enabled:
             on_log(f"Gemini MCP add: {_format_cmd_for_log(add_cmd)}")
-        _run_config_cmd(add_cmd, on_log=on_log, cwd=cwd)
+        _run_config_cmd(add_cmd, on_log=on_log, cwd=cwd, env=env)
         if on_log and debug_enabled:
             _log_gemini_settings(server_key, scope, cwd, on_log)
 
@@ -985,6 +1295,27 @@ def _codex_homes_root() -> Path:
 
 def _build_task_codex_home(task_id: int) -> Path:
     return _codex_homes_root() / f"task-{task_id}"
+
+
+def _build_task_runtime_home(task_id: int) -> Path:
+    return Path(Config.WORKSPACES_DIR) / f"task-{task_id}-home"
+
+
+def _prepare_task_runtime_home(task_id: int) -> Path:
+    runtime_home = _build_task_runtime_home(task_id)
+    _cleanup_workspace(task_id, runtime_home, label="runtime home")
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    (runtime_home / ".config").mkdir(parents=True, exist_ok=True)
+    (runtime_home / ".cache").mkdir(parents=True, exist_ok=True)
+    (runtime_home / ".local" / "share").mkdir(parents=True, exist_ok=True)
+    return runtime_home
+
+
+def _apply_run_local_home_env(env: dict[str, str], runtime_home: Path) -> None:
+    env["HOME"] = str(runtime_home)
+    env["XDG_CONFIG_HOME"] = str(runtime_home / ".config")
+    env["XDG_CACHE_HOME"] = str(runtime_home / ".cache")
+    env["XDG_DATA_HOME"] = str(runtime_home / ".local" / "share")
 
 
 def _resolve_codex_home_from_env(env: dict[str, str]) -> Path:
@@ -1396,6 +1727,95 @@ def _build_role_payload(role: Role) -> dict[str, object]:
     }
 
 
+def _build_role_markdown(role: Role | None) -> str:
+    if role is None:
+        return ""
+    lines = [
+        "# Role",
+        "",
+        f"Name: {role.name}",
+        "",
+        "## Description",
+        "",
+        role.description or "No role description provided.",
+    ]
+    details = _load_role_details(role)
+    if details:
+        lines.extend(
+            [
+                "",
+                "## Details",
+                "",
+                "```json",
+                json.dumps(details, indent=2, sort_keys=True),
+                "```",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _build_agent_markdown(agent: Agent) -> str:
+    lines = [
+        "# Agent",
+        "",
+        f"ID: {agent.id}",
+        f"Name: {agent.name}",
+        "",
+        "## Description",
+        "",
+        agent.description or "No agent description provided.",
+    ]
+    prompt_payload = _load_prompt_payload(agent.prompt_json, agent.prompt_text)
+    if isinstance(prompt_payload, dict) and prompt_payload:
+        lines.extend(
+            [
+                "",
+                "## Prompt Payload",
+                "",
+                "```json",
+                json.dumps(prompt_payload, indent=2, sort_keys=True),
+                "```",
+            ]
+        )
+    elif isinstance(prompt_payload, str) and prompt_payload.strip():
+        lines.extend(
+            [
+                "",
+                "## Prompt Text",
+                "",
+                prompt_payload.strip(),
+            ]
+        )
+    if agent.autonomous_prompt:
+        lines.extend(
+            [
+                "",
+                "## Autorun Prompt",
+                "",
+                agent.autonomous_prompt.strip(),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _serialize_agent_priorities(agent: Agent | None) -> tuple[str, ...]:
+    if agent is None:
+        return tuple()
+    ordered = sorted(
+        list(agent.priorities or []),
+        key=lambda item: (
+            int(item.position) if item.position is not None else 2**31 - 1,
+            int(item.id),
+        ),
+    )
+    serialized: list[str] = []
+    for entry in ordered:
+        content = str(entry.content or "").strip()
+        if content:
+            serialized.append(content)
+    return tuple(serialized)
+
+
 def _build_attachment_entries(
     attachments: list[Attachment],
 ) -> list[dict[str, object]]:
@@ -1624,20 +2044,64 @@ def _format_repo_prompt(prompt: str, repo: str, workspace: str | None = None) ->
     return f"{prefix}\n\n{prompt}"
 
 
-def _format_script_prompt(prompt: str, script_entries: list[dict[str, str]]) -> str:
-    if not script_entries:
+def _format_instruction_fallback_prompt(
+    prompt: str,
+    instruction_payload: dict[str, object] | str,
+) -> str:
+    marker = "Runtime instructions (fallback context):"
+    if marker in prompt:
         return prompt
-    if "Available helper scripts:" in prompt:
+    if isinstance(instruction_payload, dict):
+        markdown = str(instruction_payload.get("instructions_markdown") or "").strip()
+        file_name = str(instruction_payload.get("materialized_filename") or "").strip()
+    else:
+        markdown = str(instruction_payload or "").strip()
+        file_name = ""
+    if not markdown:
         return prompt
-    lines = ["Available helper scripts:"]
-    for entry in script_entries:
-        path = entry.get("path") or entry.get("file_name") or "script"
-        description = entry.get("description") or "No description provided."
-        lines.append(f"- {path}: {description}")
-    block = "\n".join(lines)
+    lines = [marker]
+    if file_name:
+        lines.append(f"- materialized_filename: {file_name}")
+    lines.append(markdown)
+    block = "\n".join(lines).strip()
     if not prompt.strip():
         return block
     return f"{block}\n\n{prompt}"
+
+
+def _inject_instruction_fallback(
+    prompt: str,
+    instruction_payload: dict[str, object] | str,
+    task_kind: str | None,
+) -> str:
+    payload = _load_prompt_dict(prompt)
+    if payload is not None and is_prompt_envelope(payload):
+        task_context = _ensure_task_context(payload)
+        task_context["kind"] = task_kind or task_context.get("kind") or "task"
+        if isinstance(instruction_payload, dict):
+            task_context["instructions"] = instruction_payload
+        else:
+            task_context["instructions"] = {
+                "instructions_markdown": str(instruction_payload or "")
+            }
+        return serialize_prompt_envelope(payload)
+    stripped = prompt.strip()
+    if stripped.startswith("{"):
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            prompt_value = payload.get("prompt")
+            if isinstance(prompt_value, str):
+                payload["prompt"] = _format_instruction_fallback_prompt(
+                    prompt_value,
+                    instruction_payload,
+                )
+            else:
+                payload["instructions"] = instruction_payload
+            return json.dumps(payload, indent=2, sort_keys=True)
+    return _format_instruction_fallback_prompt(prompt, instruction_payload)
 
 
 def _should_use_prompt_payload(task_kind: str | None) -> bool:
@@ -1737,23 +2201,45 @@ def _inject_github_repo(
     return _format_repo_prompt(prompt, repo, workspace_path)
 
 
-def _inject_script_map(
+def _format_skill_fallback_prompt(
     prompt: str,
-    script_entries: list[dict[str, str]],
+    skill_entries: list[dict[str, str]],
+) -> str:
+    if not skill_entries:
+        return prompt
+    if "Available skills (fallback context):" in prompt:
+        return prompt
+    lines = ["Available skills (fallback context):"]
+    for entry in skill_entries:
+        label = entry.get("display_name") or entry.get("name") or "skill"
+        version = entry.get("version") or "unknown"
+        description = entry.get("description") or ""
+        lines.append(f"- {label} @ {version}")
+        if description:
+            lines.append(f"  Description: {description}")
+        content = (entry.get("content") or "").strip()
+        if content:
+            lines.append("  SKILL.md excerpt:")
+            for content_line in content.splitlines():
+                lines.append(f"  {content_line}")
+    block = "\n".join(lines)
+    if not prompt.strip():
+        return block
+    return f"{block}\n\n{prompt}"
+
+
+def _inject_skill_fallback(
+    prompt: str,
+    skill_entries: list[dict[str, str]],
     task_kind: str | None,
 ) -> str:
-    if not script_entries:
+    if not skill_entries:
         return prompt
     payload = _load_prompt_dict(prompt)
     if payload is not None and is_prompt_envelope(payload):
         task_context = _ensure_task_context(payload)
         task_context["kind"] = task_kind or task_context.get("kind") or "task"
-        existing = task_context.get("skill_scripts")
-        if isinstance(existing, list):
-            merged = _merge_attachment_entries(existing, script_entries)
-            task_context["skill_scripts"] = merged
-        else:
-            task_context["skill_scripts"] = script_entries
+        task_context["skills"] = skill_entries
         return serialize_prompt_envelope(payload)
     stripped = prompt.strip()
     if stripped.startswith("{"):
@@ -1762,25 +2248,16 @@ def _inject_script_map(
         except json.JSONDecodeError:
             payload = None
         if isinstance(payload, dict):
-            agent_payload = payload.get("agent")
-            has_agent_scripts = (
-                isinstance(agent_payload, dict) and "scripts" in agent_payload
-            )
-            has_scripts_field = "scripts" in payload
             prompt_value = payload.get("prompt")
             if isinstance(prompt_value, str):
-                if has_agent_scripts or has_scripts_field:
-                    return prompt
-                payload["prompt"] = _format_script_prompt(
+                payload["prompt"] = _format_skill_fallback_prompt(
                     prompt_value,
-                    script_entries,
+                    skill_entries,
                 )
                 return json.dumps(payload, indent=2, sort_keys=True)
-            if has_agent_scripts or has_scripts_field:
-                return prompt
-            payload["scripts"] = script_entries
+            payload["skills"] = skill_entries
             return json.dumps(payload, indent=2, sort_keys=True)
-    return _format_script_prompt(prompt, script_entries)
+    return _format_skill_fallback_prompt(prompt, skill_entries)
 
 
 def _build_integrations_payload(
@@ -2124,10 +2601,10 @@ def _run_llm(
             model=codex_settings.get("model"),
         )
     elif provider == "gemini":
+        env = dict(env or os.environ.copy())
         gemini_settings = _gemini_settings_from_model_config(model_config or {})
-        _ensure_gemini_mcp_servers(mcp_configs, on_log=on_log, cwd=cwd)
+        _ensure_gemini_mcp_servers(mcp_configs, on_log=on_log, cwd=cwd, env=env)
         if gemini_settings.get("sandbox") is not None:
-            env = dict(env or os.environ)
             sandbox_enabled = bool(gemini_settings.get("sandbox"))
             sandbox_value = str(env.get("GEMINI_SANDBOX", "")).strip()
             if sandbox_enabled:
@@ -2443,6 +2920,17 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
     template_scripts: list[Script] = []
     task_scripts: list[Script] = []
     task_attachments: list[Attachment] = []
+    compiled_instruction_package = None
+    configured_agent_markdown_filename: str | None = None
+    resolved_role_id: int | None = None
+    resolved_role_version: str | None = None
+    resolved_agent_id: int | None = None
+    resolved_agent_version: str | None = None
+    resolved_instruction_manifest_hash: str | None = None
+    resolved_skills = None
+    resolved_skill_ids: list[int] = []
+    resolved_skill_versions: list[dict[str, Any]] = []
+    resolved_skill_manifest_hash: str | None = None
     with session_scope() as session:
         task = session.get(AgentTask, task_id)
         if task is None:
@@ -2619,6 +3107,9 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             return
         provider = model.provider
         model_config = _parse_model_config(model.config_json)
+        configured_agent_markdown_filename = str(
+            model_config.get("agent_markdown_filename") or ""
+        ).strip() or None
         if provider is None:
             now = _utcnow()
             task.status = "failed"
@@ -2705,6 +3196,74 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             attachment_entries,
             replace_existing=False,
         )
+        if agent is not None:
+            role_id = agent.role_id if agent.role_id is not None else None
+            role_markdown = _build_role_markdown(agent.role)
+            run_mode = "autorun" if is_run_task else "task"
+            serialized_priorities = (
+                _serialize_agent_priorities(agent) if is_run_task else tuple()
+            )
+            runtime_overrides: tuple[str, ...] = tuple()
+            if task.prompt and task.prompt.strip():
+                runtime_overrides = (task.prompt.strip(),)
+            resolved_agent_id = agent.id
+            resolved_role_id = role_id
+            resolved_agent_version = _resolve_updated_at_version(agent.updated_at)
+            resolved_role_version = _resolve_updated_at_version(
+                agent.role.updated_at if agent.role is not None else None
+            )
+            compiled_instruction_package = compile_instruction_package(
+                InstructionCompileInput(
+                    run_mode=run_mode,
+                    provider=provider,
+                    role_markdown=role_markdown,
+                    agent_markdown=_build_agent_markdown(agent),
+                    priorities=serialized_priorities,
+                    runtime_overrides=runtime_overrides,
+                    source_ids={
+                        "agent_id": agent.id,
+                        "role_id": role_id,
+                    },
+                    source_versions={
+                        "agent_version": resolved_agent_version,
+                        "role_version": resolved_role_version,
+                    },
+                )
+            )
+            resolved_instruction_manifest_hash = compiled_instruction_package.manifest_hash
+            try:
+                resolved_skills = resolve_agent_skills(session, agent.id)
+            except ValueError as exc:
+                now = _utcnow()
+                task.status = "failed"
+                task.error = f"Skill resolution failed for agent {agent.id}: {exc}"
+                task.finished_at = now
+                agent.last_run_at = now
+                agent.last_error = task.error
+                agent.task_id = None
+                agent.last_stopped_at = now
+                if run is not None:
+                    run.last_run_at = now
+                    run.last_error = task.error
+                    run.status = "error"
+                    run.task_id = None
+                    run.last_stopped_at = now
+                    run.run_end_requested = False
+                return
+            resolved_skill_ids = skill_ids_payload(resolved_skills)
+            resolved_skill_versions = skill_versions_payload(resolved_skills)
+            resolved_skill_manifest_hash = resolved_skills.manifest_hash
+        task.resolved_role_id = resolved_role_id
+        task.resolved_role_version = resolved_role_version
+        task.resolved_agent_id = resolved_agent_id
+        task.resolved_agent_version = resolved_agent_version
+        task.resolved_skill_ids_json = _json_dumps(resolved_skill_ids)
+        task.resolved_skill_versions_json = _json_dumps(resolved_skill_versions)
+        task.resolved_skill_manifest_hash = resolved_skill_manifest_hash
+        task.skill_adapter_mode = None
+        task.resolved_instruction_manifest_hash = resolved_instruction_manifest_hash
+        task.instruction_adapter_mode = None
+        task.instruction_materialized_paths_json = None
         task.prompt = payload
         try:
             mcp_configs = _build_task_mcp_configs(task, task_template)
@@ -2738,13 +3297,11 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         list[Script],
         list[Script],
         list[Script],
-        list[Script],
     ]:
         pre_init: list[Script] = []
         init: list[Script] = []
         post_init: list[Script] = []
         post_run: list[Script] = []
-        skill: list[Script] = []
         unknown: list[Script] = []
         for script in scripts:
             if script.script_type == SCRIPT_TYPE_PRE_INIT:
@@ -2755,21 +3312,18 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 post_init.append(script)
             elif script.script_type == SCRIPT_TYPE_POST_RUN:
                 post_run.append(script)
-            elif script.script_type == SCRIPT_TYPE_SKILL:
-                skill.append(script)
             else:
                 unknown.append(script)
-        return pre_init, init, post_init, post_run, skill, unknown
+        return pre_init, init, post_init, post_run, unknown
 
     (
         pre_init_scripts,
         init_scripts,
         post_init_scripts,
         post_run_scripts,
-        skill_scripts,
         unknown_scripts,
     ) = _split_scripts(ordered_scripts)
-    combined_scripts = ordered_scripts
+    combined_scripts = pre_init_scripts + init_scripts + post_init_scripts + post_run_scripts
 
     log_prefix_chunks: list[str] = []
     last_output = ""
@@ -2837,8 +3391,17 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
 
     workspace: Path | None = None
     staging_dir: Path | None = None
+    runtime_home: Path | None = None
     codex_home: Path | None = None
     script_entries: list[dict[str, str]] = []
+    instruction_manifest_hash = resolved_instruction_manifest_hash or ""
+    instruction_materialized_paths: list[str] = []
+    instructions_materialized = False
+    instruction_adapter_mode: str | None = None
+    instruction_adapter_name: str | None = None
+    skill_adapter_mode: str | None = None
+    skill_adapter_name: str | None = None
+    skill_materialized_paths: list[str] = []
     llm_failed = False
     llm_message = ""
     post_run_failed = False
@@ -2856,6 +3419,23 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 task.error = "".join(log_prefix_chunks) + last_error
                 task.current_stage = current_stage
                 task.stage_logs = _serialize_stage_logs()
+                task.resolved_role_id = resolved_role_id
+                task.resolved_role_version = resolved_role_version
+                task.resolved_agent_id = resolved_agent_id
+                task.resolved_agent_version = resolved_agent_version
+                task.resolved_skill_ids_json = _json_dumps(resolved_skill_ids)
+                task.resolved_skill_versions_json = _json_dumps(
+                    resolved_skill_versions
+                )
+                task.resolved_skill_manifest_hash = resolved_skill_manifest_hash
+                task.skill_adapter_mode = skill_adapter_mode
+                task.resolved_instruction_manifest_hash = (
+                    instruction_manifest_hash or resolved_instruction_manifest_hash
+                )
+                task.instruction_adapter_mode = instruction_adapter_mode
+                task.instruction_materialized_paths_json = _serialize_materialized_paths(
+                    instruction_materialized_paths
+                )
                 task.finished_at = now
             if agent is not None:
                 agent.last_run_at = now
@@ -2917,7 +3497,11 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
 
         _set_stage("init")
         try:
-            if workspace is None and combined_scripts:
+            if workspace is None and (
+                combined_scripts
+                or compiled_instruction_package is not None
+                or (resolved_skills is not None and resolved_skills.skills)
+            ):
                 workspace = _build_task_workspace(task_id)
                 workspace.mkdir(parents=True, exist_ok=True)
                 _append_task_log(f"Workspace created: {workspace}.")
@@ -2929,6 +3513,47 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 logger.info("Using workspace %s for task %s", workspace, task_id)
                 _append_task_log(f"Workspace ready: {workspace}.")
                 workspace_ready_logged = True
+            if (
+                workspace is not None
+                and compiled_instruction_package is not None
+                and not instructions_materialized
+            ):
+                _log_instruction_package_observability(
+                    compiled_instruction_package=compiled_instruction_package,
+                    on_log=_append_task_log,
+                )
+                _log_instruction_reference_risk(
+                    compiled_instruction_package=compiled_instruction_package,
+                    on_log=_append_task_log,
+                )
+                materialized = materialize_instruction_package(
+                    workspace,
+                    compiled_instruction_package,
+                )
+                instruction_manifest_hash = materialized.manifest_hash
+                instruction_materialized_paths = list(materialized.materialized_paths)
+                _validate_instruction_materialized_paths(
+                    paths=instruction_materialized_paths,
+                    workspace=workspace,
+                    runtime_home=None,
+                    codex_home=None,
+                )
+                _append_task_log(
+                    f"Instruction package manifest: {instruction_manifest_hash}."
+                )
+                _append_task_log(
+                    f"Instruction package path: {materialized.package_dir}."
+                )
+                instructions_materialized = True
+                with session_scope() as session:
+                    task = session.get(AgentTask, task_id)
+                    if task is not None:
+                        task.resolved_instruction_manifest_hash = (
+                            instruction_manifest_hash
+                        )
+                        task.instruction_materialized_paths_json = (
+                            _serialize_materialized_paths(instruction_materialized_paths)
+                        )
             if workspace is not None and combined_scripts and not script_entries:
                 scripts_dir = workspace / SCRIPTS_DIRNAME
                 script_entries = _materialize_scripts(
@@ -2962,28 +3587,6 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                             task = session.get(AgentTask, task_id)
                             if task is not None:
                                 task.prompt = payload
-                if skill_scripts:
-                    skill_entries = [
-                        {
-                            "path": entry["path"],
-                            "description": entry["description"],
-                            "file_name": entry["file_name"],
-                        }
-                        for entry in script_entries
-                        if entry.get("script_type") == SCRIPT_TYPE_SKILL
-                    ]
-                    if skill_entries:
-                        updated_payload = _inject_script_map(
-                            payload,
-                            skill_entries,
-                            task_kind,
-                        )
-                        if updated_payload != payload:
-                            payload = updated_payload
-                            with session_scope() as session:
-                                task = session.get(AgentTask, task_id)
-                                if task is not None:
-                                    task.prompt = payload
 
             updated_payload = _inject_integrations(
                 payload,
@@ -3020,11 +3623,14 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         result = None
         try:
             llm_env = os.environ.copy()
+            seed_codex_home = _resolve_codex_home_from_env(llm_env)
+            runtime_home = _prepare_task_runtime_home(task_id)
+            _apply_run_local_home_env(llm_env, runtime_home)
+            llm_cwd = workspace if workspace is not None else runtime_home
             if workspace is not None:
                 llm_env["WORKSPACE_PATH"] = str(workspace)
                 llm_env["LLMCTL_STUDIO_WORKSPACE"] = str(workspace)
             if provider == "codex":
-                seed_codex_home = _resolve_codex_home_from_env(llm_env)
                 codex_home = _prepare_task_codex_home(task_id, seed_home=seed_codex_home)
                 llm_env["CODEX_HOME"] = str(codex_home)
                 codex_api_key = _load_codex_auth_key()
@@ -3040,12 +3646,104 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 claude_api_key = _load_claude_auth_key()
                 if claude_api_key:
                     llm_env["ANTHROPIC_API_KEY"] = claude_api_key
+            _validate_runtime_isolation_env(
+                llm_env=llm_env,
+                runtime_home=runtime_home,
+                codex_home=codex_home,
+                on_log=_append_task_log,
+            )
+            if (
+                workspace is not None
+                and runtime_home is not None
+                and compiled_instruction_package is not None
+            ):
+                payload, instruction_adapter_mode, instruction_adapter_name, adapter_paths = (
+                    _apply_instruction_adapter_policy(
+                        provider=provider,
+                        llm_settings=llm_settings,
+                        compiled_instruction_package=compiled_instruction_package,
+                        configured_agent_markdown_filename=configured_agent_markdown_filename,
+                        workspace=workspace,
+                        runtime_home=runtime_home,
+                        codex_home=codex_home,
+                        payload=payload,
+                        task_kind=task_kind or "task",
+                        on_log=_append_task_log,
+                    )
+                )
+                for path in adapter_paths:
+                    if path not in instruction_materialized_paths:
+                        instruction_materialized_paths.append(path)
+                _append_task_log(
+                    "Instruction adapter mode: "
+                    f"{instruction_adapter_mode} ({instruction_adapter_name})."
+                )
+                for path in adapter_paths:
+                    _append_task_log(f"Instruction materialized path: {path}")
+                with session_scope() as session:
+                    task = session.get(AgentTask, task_id)
+                    if task is not None:
+                        task.instruction_adapter_mode = instruction_adapter_mode
+                        task.resolved_instruction_manifest_hash = (
+                            instruction_manifest_hash
+                            or resolved_instruction_manifest_hash
+                        )
+                        task.instruction_materialized_paths_json = (
+                            _serialize_materialized_paths(instruction_materialized_paths)
+                        )
+                if instruction_adapter_mode == "fallback":
+                    with session_scope() as session:
+                        task = session.get(AgentTask, task_id)
+                        if task is not None:
+                            task.prompt = payload
+            if resolved_skills is not None and resolved_skills.skills:
+                assert workspace is not None
+                assert runtime_home is not None
+                fallback_entries: list[dict[str, str]] = []
+                adapter_result = materialize_skill_set(
+                    resolved_skills,
+                    provider=provider,
+                    workspace=workspace,
+                    runtime_home=runtime_home,
+                    codex_home=codex_home,
+                )
+                skill_adapter_mode = adapter_result.mode
+                skill_adapter_name = adapter_result.adapter
+                skill_materialized_paths = list(adapter_result.materialized_paths)
+                fallback_entries = list(adapter_result.fallback_entries)
+                with session_scope() as session:
+                    task = session.get(AgentTask, task_id)
+                    if task is not None:
+                        task.skill_adapter_mode = skill_adapter_mode
+                resolved_summary = ", ".join(
+                    f"{entry.name}@{entry.version}" for entry in resolved_skills.skills
+                )
+                _append_task_log(f"Resolved skills: {resolved_summary}.")
+                _append_task_log(
+                    f"Skill adapter mode: {skill_adapter_mode} ({skill_adapter_name})."
+                )
+                for path in skill_materialized_paths:
+                    _append_task_log(f"Skill materialized path: {path}")
+                if skill_adapter_mode == "fallback" and fallback_entries:
+                    payload = _inject_skill_fallback(
+                        payload,
+                        fallback_entries,
+                        task_kind or "task",
+                    )
+                    with session_scope() as session:
+                        task = session.get(AgentTask, task_id)
+                        if task is not None:
+                            task.prompt = payload
+                elif skill_adapter_mode == "fallback":
+                    _append_task_log(
+                        "Fallback mode selected but no SKILL.md excerpts were available."
+                    )
             if provider == "gemini" and "llmctl-mcp" in mcp_configs:
                 _append_task_log("Running MCP stdio preflight for llmctl-mcp...")
                 _run_llmctl_mcp_stdio_preflight(
                     mcp_configs,
                     on_log=_append_task_log,
-                    cwd=workspace,
+                    cwd=llm_cwd,
                     env=llm_env,
                 )
             _append_task_log(f"Launching {provider_label}...")
@@ -3056,7 +3754,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 model_config=model_config,
                 on_update=_persist_logs,
                 on_log=_append_task_log,
-                cwd=workspace,
+                cwd=llm_cwd,
                 env=llm_env,
             )
         except FileNotFoundError as exc:
@@ -3134,12 +3832,44 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     task.error = "Canceled by user."
                 task.current_stage = current_stage
                 task.stage_logs = _serialize_stage_logs()
+                task.resolved_role_id = resolved_role_id
+                task.resolved_role_version = resolved_role_version
+                task.resolved_agent_id = resolved_agent_id
+                task.resolved_agent_version = resolved_agent_version
+                task.resolved_skill_ids_json = _json_dumps(resolved_skill_ids)
+                task.resolved_skill_versions_json = _json_dumps(
+                    resolved_skill_versions
+                )
+                task.resolved_skill_manifest_hash = resolved_skill_manifest_hash
+                task.skill_adapter_mode = skill_adapter_mode
+                task.resolved_instruction_manifest_hash = (
+                    instruction_manifest_hash or resolved_instruction_manifest_hash
+                )
+                task.instruction_adapter_mode = instruction_adapter_mode
+                task.instruction_materialized_paths_json = _serialize_materialized_paths(
+                    instruction_materialized_paths
+                )
                 return
             task.status = "failed" if final_failed else "succeeded"
             task.finished_at = now
             task.error = "".join(log_prefix_chunks) + last_error
             task.current_stage = current_stage
             task.stage_logs = _serialize_stage_logs()
+            task.resolved_role_id = resolved_role_id
+            task.resolved_role_version = resolved_role_version
+            task.resolved_agent_id = resolved_agent_id
+            task.resolved_agent_version = resolved_agent_version
+            task.resolved_skill_ids_json = _json_dumps(resolved_skill_ids)
+            task.resolved_skill_versions_json = _json_dumps(resolved_skill_versions)
+            task.resolved_skill_manifest_hash = resolved_skill_manifest_hash
+            task.skill_adapter_mode = skill_adapter_mode
+            task.resolved_instruction_manifest_hash = (
+                instruction_manifest_hash or resolved_instruction_manifest_hash
+            )
+            task.instruction_adapter_mode = instruction_adapter_mode
+            task.instruction_materialized_paths_json = _serialize_materialized_paths(
+                instruction_materialized_paths
+            )
             if agent is not None:
                 agent.last_run_at = now
                 if final_failed:
@@ -3156,6 +3886,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     run.run_end_requested = False
     finally:
         _cleanup_codex_home(task_id, codex_home)
+        _cleanup_workspace(task_id, runtime_home, label="runtime home")
         _cleanup_workspace(task_id, staging_dir, label="script staging")
         _cleanup_workspace(task_id, workspace)
 
@@ -3243,10 +3974,24 @@ def _coerce_bool(value: Any) -> bool:
     return bool(value)
 
 
+def _allow_skill_adapter_fallback(node_config: dict[str, Any]) -> bool:
+    mode_raw = node_config.get("skill_adapter_failure_mode")
+    if isinstance(mode_raw, str):
+        normalized = mode_raw.strip().lower()
+        if normalized in {"fallback", "prompt_fallback", "downgrade_to_fallback"}:
+            return True
+        if normalized in {"fail", "strict", "required"}:
+            return False
+    if "skill_fallback_on_adapter_error" in node_config:
+        return _coerce_bool(node_config.get("skill_fallback_on_adapter_error"))
+    if "allow_skill_adapter_fallback" in node_config:
+        return _coerce_bool(node_config.get("allow_skill_adapter_fallback"))
+    return False
+
+
 def _split_scripts_by_stage(
     scripts: list[Script],
 ) -> tuple[
-    list[Script],
     list[Script],
     list[Script],
     list[Script],
@@ -3257,7 +4002,6 @@ def _split_scripts_by_stage(
     init: list[Script] = []
     post_init: list[Script] = []
     post_run: list[Script] = []
-    skill: list[Script] = []
     unknown: list[Script] = []
     for script in scripts:
         if script.script_type == SCRIPT_TYPE_PRE_INIT:
@@ -3268,11 +4012,9 @@ def _split_scripts_by_stage(
             post_init.append(script)
         elif script.script_type == SCRIPT_TYPE_POST_RUN:
             post_run.append(script)
-        elif script.script_type == SCRIPT_TYPE_SKILL:
-            skill.append(script)
         else:
             unknown.append(script)
-    return pre_init, init, post_init, post_run, skill, unknown
+    return pre_init, init, post_init, post_run, unknown
 
 
 def _serialize_memory_for_node(memory: Memory) -> dict[str, Any]:
@@ -3634,6 +4376,48 @@ def _update_flowchart_node_task(
         )
         if output_agent_id > 0:
             task.agent_id = output_agent_id
+        resolved_agent_id = _parse_optional_int(
+            output_state.get("resolved_agent_id"),
+            default=0,
+            minimum=0,
+        )
+        if resolved_agent_id > 0:
+            task.resolved_agent_id = resolved_agent_id
+        resolved_agent_version = output_state.get("resolved_agent_version")
+        if isinstance(resolved_agent_version, str) and resolved_agent_version.strip():
+            task.resolved_agent_version = resolved_agent_version
+        resolved_role_id = output_state.get("resolved_role_id")
+        if isinstance(resolved_role_id, int):
+            task.resolved_role_id = resolved_role_id
+        resolved_role_version = output_state.get("resolved_role_version")
+        if isinstance(resolved_role_version, str) and resolved_role_version.strip():
+            task.resolved_role_version = resolved_role_version
+        resolved_skill_ids = output_state.get("resolved_skill_ids")
+        if isinstance(resolved_skill_ids, list):
+            task.resolved_skill_ids_json = _json_dumps(resolved_skill_ids)
+        resolved_skill_versions = output_state.get("resolved_skill_versions")
+        if isinstance(resolved_skill_versions, list):
+            task.resolved_skill_versions_json = _json_dumps(resolved_skill_versions)
+        resolved_skill_manifest_hash = output_state.get("resolved_skill_manifest_hash")
+        if (
+            isinstance(resolved_skill_manifest_hash, str)
+            and resolved_skill_manifest_hash.strip()
+        ):
+            task.resolved_skill_manifest_hash = resolved_skill_manifest_hash
+        adapter_mode = output_state.get("skill_adapter_mode")
+        if isinstance(adapter_mode, str) and adapter_mode.strip():
+            task.skill_adapter_mode = adapter_mode
+        instruction_manifest_hash = output_state.get("instruction_manifest_hash")
+        if isinstance(instruction_manifest_hash, str) and instruction_manifest_hash.strip():
+            task.resolved_instruction_manifest_hash = instruction_manifest_hash
+        instruction_adapter_mode = output_state.get("instruction_adapter_mode")
+        if isinstance(instruction_adapter_mode, str) and instruction_adapter_mode.strip():
+            task.instruction_adapter_mode = instruction_adapter_mode
+        instruction_materialized_paths = output_state.get("instruction_materialized_paths")
+        if isinstance(instruction_materialized_paths, list):
+            task.instruction_materialized_paths_json = _json_dumps(
+                instruction_materialized_paths
+            )
         stage_raw = output_state.get("task_current_stage")
         if isinstance(stage_raw, str) and stage_raw.strip():
             task.current_stage = stage_raw.strip()
@@ -3657,6 +4441,10 @@ def _update_flowchart_node_task(
 def _flowchart_task_output_display(output_state: dict[str, Any]) -> str:
     node_type = str(output_state.get("node_type") or "").strip()
     if node_type != FLOWCHART_NODE_TYPE_TASK:
+        if node_type == FLOWCHART_NODE_TYPE_RAG:
+            answer = output_state.get("answer")
+            if isinstance(answer, str) and answer.strip():
+                return answer
         if node_type == FLOWCHART_NODE_TYPE_FLOWCHART:
             run_id = _parse_optional_int(
                 output_state.get("triggered_flowchart_run_id"),
@@ -3838,16 +4626,20 @@ def _execute_optional_llm_transform(
     if provider not in enabled_providers:
         raise ValueError(f"Provider disabled: {provider}.")
     model_config = _parse_model_config(model.config_json)
-    result = _run_llm(
-        provider,
-        prompt,
-        mcp_configs=mcp_configs,
-        model_config=model_config,
-        on_update=None,
-        on_log=None,
-        cwd=None,
-        env=os.environ.copy(),
-    )
+    llm_env = os.environ.copy()
+    with tempfile.TemporaryDirectory(prefix="llmctl-flowchart-transform-home-") as tmp_home:
+        runtime_home = Path(tmp_home)
+        _apply_run_local_home_env(llm_env, runtime_home)
+        result = _run_llm(
+            provider,
+            prompt,
+            mcp_configs=mcp_configs,
+            model_config=model_config,
+            on_update=None,
+            on_log=None,
+            cwd=runtime_home,
+            env=llm_env,
+        )
     if result.returncode != 0:
         message = result.stderr.strip() or f"LLM transform failed with code {result.returncode}."
         raise RuntimeError(message)
@@ -3866,10 +4658,18 @@ def _execute_flowchart_task_node(
     default_model_id: int | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     selected_agent_id: int | None = None
+    selected_agent_role_id: int | None = None
+    selected_agent_role_version: str | None = None
+    selected_agent_version: str | None = None
     selected_agent_name: str | None = None
     selected_agent_profile: dict[str, object] | None = None
     selected_system_contract: dict[str, object] | None = None
     selected_agent_source: str | None = None
+    selected_agent_role_markdown = ""
+    selected_agent_markdown = ""
+    selected_agent_priorities: tuple[str, ...] = tuple()
+    compiled_instruction_package = None
+    resolved_skills = None
     with session_scope() as session:
         node = (
             session.execute(
@@ -3923,22 +4723,63 @@ def _execute_flowchart_task_node(
             if selected_agent is None:
                 raise ValueError(f"Agent {selected_agent_id} was not found.")
             selected_agent_name = selected_agent.name
+            selected_agent_role_id = selected_agent.role_id
+            selected_agent_version = _resolve_updated_at_version(selected_agent.updated_at)
+            selected_agent_role_version = _resolve_updated_at_version(
+                selected_agent.role.updated_at if selected_agent.role is not None else None
+            )
             selected_agent_profile = _build_agent_payload(
                 selected_agent,
                 include_autoprompt=False,
             )
             selected_system_contract = _build_system_contract(selected_agent)
+            selected_agent_role_markdown = _build_role_markdown(selected_agent.role)
+            selected_agent_markdown = _build_agent_markdown(selected_agent)
+            selected_agent_priorities = _serialize_agent_priorities(selected_agent)
+        if "skill_ids" in node_config:
+            logger.warning(
+                "Flowchart node %s supplied legacy node-level skill_ids payload; "
+                "runtime ignores this and resolves skills from agent bindings only.",
+                node_id,
+            )
+        legacy_binding_count = int(
+            session.execute(
+                select(func.count())
+                .select_from(flowchart_node_skills)
+                .where(flowchart_node_skills.c.flowchart_node_id == node_id)
+            ).scalar_one()
+            or 0
+        )
+        if legacy_binding_count > 0:
+            logger.warning(
+                "Flowchart node %s has %s legacy node-level skill binding(s); "
+                "runtime ignores node bindings and resolves skills from agent %s.",
+                node_id,
+                legacy_binding_count,
+                selected_agent_id,
+            )
         mcp_servers = list(node.mcp_servers)
         template_scripts = list(task_template.scripts) if task_template is not None else []
         node_scripts = list(node.scripts)
         attachments = list(task_template.attachments) if task_template is not None else []
+        if selected_agent_id is not None:
+            try:
+                resolved_skills = resolve_agent_skills(session, selected_agent_id)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Skill resolution failed for agent {selected_agent_id}: {exc}"
+                ) from exc
 
     provider = model.provider
+    llm_settings = load_integration_settings("llm")
     if provider not in LLM_PROVIDERS:
         raise ValueError(f"Unknown model provider: {provider}.")
     if provider not in enabled_providers:
         raise ValueError(f"Provider disabled: {provider}.")
     model_config = _parse_model_config(model.config_json)
+    configured_agent_markdown_filename = str(
+        model_config.get("agent_markdown_filename") or ""
+    ).strip() or None
     mcp_configs = _build_mcp_config_map(mcp_servers)
     mcp_configs["llmctl-mcp"] = _build_builtin_llmctl_mcp_config()
 
@@ -3962,9 +4803,9 @@ def _execute_flowchart_task_node(
         init_scripts,
         post_init_scripts,
         post_run_scripts,
-        _skill_scripts,
         unknown_scripts,
     ) = _split_scripts_by_stage(ordered_scripts)
+    runnable_scripts = pre_init_scripts + init_scripts + post_init_scripts + post_run_scripts
 
     script_logs: list[str] = []
     stage_log_chunks: dict[str, list[str]] = {}
@@ -4099,6 +4940,27 @@ def _execute_flowchart_task_node(
         selected_integration_keys = set(valid_integration_keys)
     task_template_id = task_template.id if task_template is not None else None
     task_template_name = task_template.name if task_template is not None else None
+    resolved_instruction_manifest_hash: str | None = None
+    if selected_agent_id is not None:
+        compiled_instruction_package = compile_instruction_package(
+            InstructionCompileInput(
+                run_mode="flowchart",
+                provider=provider,
+                role_markdown=selected_agent_role_markdown,
+                agent_markdown=selected_agent_markdown,
+                priorities=selected_agent_priorities,
+                runtime_overrides=(base_prompt,),
+                source_ids={
+                    "agent_id": selected_agent_id,
+                    "role_id": selected_agent_role_id,
+                },
+                source_versions={
+                    "agent_version": selected_agent_version,
+                    "role_version": selected_agent_role_version,
+                },
+            )
+        )
+        resolved_instruction_manifest_hash = compiled_instruction_package.manifest_hash
 
     payload = _build_task_payload("flowchart", base_prompt)
     payload_dict = _load_prompt_dict(payload)
@@ -4135,11 +4997,61 @@ def _execute_flowchart_task_node(
     payload = _inject_attachments(payload, _build_attachment_entries(attachments))
     payload = _inject_runtime_metadata(payload, _build_runtime_payload(provider, model_config))
 
+    resolved_skill_ids = (
+        skill_ids_payload(resolved_skills) if resolved_skills is not None else []
+    )
+    resolved_skill_versions = (
+        skill_versions_payload(resolved_skills) if resolved_skills is not None else []
+    )
+    resolved_skill_manifest_hash = (
+        resolved_skills.manifest_hash if resolved_skills is not None else None
+    )
+    with session_scope() as session:
+        node_run = session.get(FlowchartRunNode, execution_id)
+        if node_run is not None:
+            node_run.resolved_skill_ids_json = _json_dumps(resolved_skill_ids)
+            node_run.resolved_skill_versions_json = _json_dumps(resolved_skill_versions)
+            node_run.resolved_skill_manifest_hash = resolved_skill_manifest_hash
+            node_run.resolved_role_id = selected_agent_role_id
+            node_run.resolved_role_version = selected_agent_role_version
+            node_run.resolved_agent_id = selected_agent_id
+            node_run.resolved_agent_version = selected_agent_version
+            node_run.resolved_instruction_manifest_hash = resolved_instruction_manifest_hash
+            node_run.instruction_adapter_mode = None
+            node_run.instruction_materialized_paths_json = None
+        if execution_task_id is not None:
+            task = session.get(AgentTask, execution_task_id)
+            if task is not None:
+                task.resolved_role_id = selected_agent_role_id
+                task.resolved_role_version = selected_agent_role_version
+                task.resolved_agent_id = selected_agent_id
+                task.resolved_agent_version = selected_agent_version
+                task.resolved_skill_ids_json = _json_dumps(resolved_skill_ids)
+                task.resolved_skill_versions_json = _json_dumps(
+                    resolved_skill_versions
+                )
+                task.resolved_skill_manifest_hash = resolved_skill_manifest_hash
+                task.skill_adapter_mode = None
+                task.resolved_instruction_manifest_hash = (
+                    resolved_instruction_manifest_hash
+                )
+                task.instruction_adapter_mode = None
+                task.instruction_materialized_paths_json = None
+
     workspace: Path | None = None
     staging_dir: Path | None = None
+    runtime_home: Path | None = None
     codex_home: Path | None = None
     script_entries: list[dict[str, str]] = []
+    instruction_manifest_hash = resolved_instruction_manifest_hash or ""
+    instruction_materialized_paths: list[str] = []
+    instructions_materialized = False
     llm_result: subprocess.CompletedProcess[str] | None = None
+    instruction_adapter_mode: str | None = None
+    instruction_adapter_name: str | None = None
+    skill_adapter_mode: str | None = None
+    skill_adapter_name: str | None = None
+    skill_materialized_paths: list[str] = []
 
     try:
         _set_stage("integration")
@@ -4176,15 +5088,66 @@ def _execute_flowchart_task_node(
             _append_script_log("No pre-init scripts configured.")
 
         _set_stage("init")
-        if ordered_scripts:
+        if (
+            runnable_scripts
+            or (resolved_skills is not None and resolved_skills.skills)
+            or compiled_instruction_package is not None
+        ):
             workspace = _build_task_workspace(execution_id)
             workspace.mkdir(parents=True, exist_ok=True)
-            scripts_dir = workspace / SCRIPTS_DIRNAME
-            script_entries = _materialize_scripts(
-                ordered_scripts,
-                scripts_dir,
+            if runnable_scripts:
+                scripts_dir = workspace / SCRIPTS_DIRNAME
+                script_entries = _materialize_scripts(
+                    runnable_scripts,
+                    scripts_dir,
+                    on_log=_append_script_log,
+                )
+        if (
+            workspace is not None
+            and compiled_instruction_package is not None
+            and not instructions_materialized
+        ):
+            _log_instruction_package_observability(
+                compiled_instruction_package=compiled_instruction_package,
                 on_log=_append_script_log,
             )
+            _log_instruction_reference_risk(
+                compiled_instruction_package=compiled_instruction_package,
+                on_log=_append_script_log,
+            )
+            materialized = materialize_instruction_package(
+                workspace,
+                compiled_instruction_package,
+            )
+            instruction_manifest_hash = materialized.manifest_hash
+            instruction_materialized_paths = list(materialized.materialized_paths)
+            _validate_instruction_materialized_paths(
+                paths=instruction_materialized_paths,
+                workspace=workspace,
+                runtime_home=None,
+                codex_home=None,
+            )
+            _append_script_log(
+                f"Instruction package manifest: {instruction_manifest_hash}."
+            )
+            _append_script_log(
+                f"Instruction package path: {materialized.package_dir}."
+            )
+            instructions_materialized = True
+            with session_scope() as session:
+                node_run = session.get(FlowchartRunNode, execution_id)
+                if node_run is not None:
+                    node_run.resolved_instruction_manifest_hash = instruction_manifest_hash
+                    node_run.instruction_materialized_paths_json = (
+                        _serialize_materialized_paths(instruction_materialized_paths)
+                    )
+                if execution_task_id is not None:
+                    task = session.get(AgentTask, execution_task_id)
+                    if task is not None:
+                        task.resolved_instruction_manifest_hash = instruction_manifest_hash
+                        task.instruction_materialized_paths_json = (
+                            _serialize_materialized_paths(instruction_materialized_paths)
+                        )
 
         _run_stage_scripts(
             "init",
@@ -4210,12 +5173,18 @@ def _execute_flowchart_task_node(
         )
 
         llm_env = os.environ.copy()
+        seed_codex_home = _resolve_codex_home_from_env(llm_env)
+        runtime_home = _prepare_task_runtime_home(execution_id)
+        _apply_run_local_home_env(llm_env, runtime_home)
+        llm_cwd = workspace if workspace is not None else runtime_home
         if workspace is not None:
             llm_env["WORKSPACE_PATH"] = str(workspace)
             llm_env["LLMCTL_STUDIO_WORKSPACE"] = str(workspace)
         if provider == "codex":
-            seed_codex_home = _resolve_codex_home_from_env(llm_env)
-            codex_home = _prepare_task_codex_home(execution_id, seed_home=seed_codex_home)
+            codex_home = _prepare_task_codex_home(
+                execution_id,
+                seed_home=seed_codex_home,
+            )
             llm_env["CODEX_HOME"] = str(codex_home)
             codex_api_key = _load_codex_auth_key()
             if codex_api_key:
@@ -4230,6 +5199,118 @@ def _execute_flowchart_task_node(
             claude_api_key = _load_claude_auth_key()
             if claude_api_key:
                 llm_env["ANTHROPIC_API_KEY"] = claude_api_key
+        _validate_runtime_isolation_env(
+            llm_env=llm_env,
+            runtime_home=runtime_home,
+            codex_home=codex_home,
+            on_log=_append_script_log,
+        )
+
+        if (
+            workspace is not None
+            and runtime_home is not None
+            and compiled_instruction_package is not None
+        ):
+            payload, instruction_adapter_mode, instruction_adapter_name, adapter_paths = (
+                _apply_instruction_adapter_policy(
+                    provider=provider,
+                    llm_settings=llm_settings,
+                    compiled_instruction_package=compiled_instruction_package,
+                    configured_agent_markdown_filename=configured_agent_markdown_filename,
+                    workspace=workspace,
+                    runtime_home=runtime_home,
+                    codex_home=codex_home,
+                    payload=payload,
+                    task_kind="flowchart",
+                    on_log=_append_script_log,
+                )
+            )
+            for path in adapter_paths:
+                if path not in instruction_materialized_paths:
+                    instruction_materialized_paths.append(path)
+            _append_script_log(
+                "Instruction adapter mode: "
+                f"{instruction_adapter_mode} ({instruction_adapter_name})."
+            )
+            for path in adapter_paths:
+                _append_script_log(f"Instruction materialized path: {path}")
+            with session_scope() as session:
+                node_run = session.get(FlowchartRunNode, execution_id)
+                if node_run is not None:
+                    node_run.instruction_adapter_mode = instruction_adapter_mode
+                    node_run.resolved_instruction_manifest_hash = (
+                        instruction_manifest_hash or resolved_instruction_manifest_hash
+                    )
+                    node_run.instruction_materialized_paths_json = (
+                        _serialize_materialized_paths(instruction_materialized_paths)
+                    )
+                if execution_task_id is not None:
+                    task = session.get(AgentTask, execution_task_id)
+                    if task is not None:
+                        task.instruction_adapter_mode = instruction_adapter_mode
+                        task.resolved_instruction_manifest_hash = (
+                            instruction_manifest_hash
+                            or resolved_instruction_manifest_hash
+                        )
+                        task.instruction_materialized_paths_json = (
+                            _serialize_materialized_paths(instruction_materialized_paths)
+                        )
+
+        if resolved_skills is not None and resolved_skills.skills:
+            assert workspace is not None
+            assert runtime_home is not None
+            fallback_on_adapter_error = _allow_skill_adapter_fallback(node_config)
+            fallback_entries: list[dict[str, str]] = []
+            try:
+                adapter_result = materialize_skill_set(
+                    resolved_skills,
+                    provider=provider,
+                    workspace=workspace,
+                    runtime_home=runtime_home,
+                    codex_home=codex_home,
+                )
+                skill_adapter_mode = adapter_result.mode
+                skill_adapter_name = adapter_result.adapter
+                skill_materialized_paths = list(adapter_result.materialized_paths)
+                fallback_entries = list(adapter_result.fallback_entries)
+            except Exception as exc:
+                if not fallback_on_adapter_error:
+                    raise
+                _append_script_log(f"Skill adapter materialization failed: {exc}")
+                _append_script_log(
+                    "Downgrading skill adapter to prompt fallback due node policy."
+                )
+                skill_adapter_mode = "fallback"
+                skill_adapter_name = "prompt_fallback"
+                skill_materialized_paths = []
+                fallback_entries = build_skill_fallback_entries(resolved_skills)
+            with session_scope() as session:
+                node_run = session.get(FlowchartRunNode, execution_id)
+                if node_run is not None:
+                    node_run.skill_adapter_mode = skill_adapter_mode
+                if execution_task_id is not None:
+                    task = session.get(AgentTask, execution_task_id)
+                    if task is not None:
+                        task.skill_adapter_mode = skill_adapter_mode
+            resolved_summary = ", ".join(
+                f"{entry.name}@{entry.version}" for entry in resolved_skills.skills
+            )
+            _append_script_log(f"Resolved skills: {resolved_summary}.")
+            _append_script_log(
+                f"Skill adapter mode: {skill_adapter_mode} ({skill_adapter_name})."
+            )
+            for path in skill_materialized_paths:
+                _append_script_log(f"Skill materialized path: {path}")
+            if skill_adapter_mode == "fallback" and fallback_entries:
+                payload = _inject_skill_fallback(
+                    payload,
+                    fallback_entries,
+                    "flowchart",
+                )
+            elif skill_adapter_mode == "fallback":
+                _append_script_log(
+                    "Fallback mode selected but no SKILL.md excerpts were available."
+                )
 
         _set_stage("llm_query")
         _append_script_log(f"Launching {_provider_label(provider)}...")
@@ -4240,7 +5321,7 @@ def _execute_flowchart_task_node(
             model_config=model_config,
             on_update=_capture_llm_updates,
             on_log=_append_script_log,
-            cwd=workspace,
+            cwd=llm_cwd,
             env=llm_env,
         )
 
@@ -4253,6 +5334,7 @@ def _execute_flowchart_task_node(
         )
     finally:
         _cleanup_codex_home(execution_id, codex_home)
+        _cleanup_workspace(execution_id, runtime_home, label="runtime home")
         _cleanup_workspace(execution_id, staging_dir, label="script staging")
         _cleanup_workspace(execution_id, workspace)
         _persist_progress(force=True)
@@ -4276,6 +5358,10 @@ def _execute_flowchart_task_node(
         "agent_id": selected_agent_id,
         "agent_name": selected_agent_name,
         "agent_source": selected_agent_source,
+        "resolved_role_id": selected_agent_role_id,
+        "resolved_role_version": selected_agent_role_version,
+        "resolved_agent_id": selected_agent_id,
+        "resolved_agent_version": selected_agent_version,
         "provider": provider,
         "model_id": model.id,
         "model_name": model.name,
@@ -4285,7 +5371,17 @@ def _execute_flowchart_task_node(
             if selected_integration_keys is not None
             else None
         ),
-        "script_ids": [script.id for script in ordered_scripts],
+        "script_ids": [script.id for script in runnable_scripts],
+        "resolved_skill_ids": resolved_skill_ids,
+        "resolved_skill_versions": resolved_skill_versions,
+        "resolved_skill_manifest_hash": resolved_skill_manifest_hash,
+        "skill_adapter_mode": skill_adapter_mode,
+        "skill_adapter": skill_adapter_name,
+        "skill_materialized_paths": skill_materialized_paths,
+        "instruction_adapter_mode": instruction_adapter_mode,
+        "instruction_adapter": instruction_adapter_name,
+        "instruction_manifest_hash": instruction_manifest_hash or None,
+        "instruction_materialized_paths": instruction_materialized_paths,
         "structured_output": structured_output,
         "raw_output": llm_result.stdout,
         "raw_error": "",
@@ -4765,6 +5861,222 @@ def _execute_flowchart_flowchart_node(
     )
 
 
+def _rag_context_text(entries: object, *, edge_label: str) -> str:
+    if not isinstance(entries, list):
+        return ""
+    context_lines: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        output_state = entry.get("output_state")
+        text = ""
+        if isinstance(output_state, dict):
+            for key in ("answer", "raw_output", "message"):
+                value = output_state.get(key)
+                if isinstance(value, str) and value.strip():
+                    text = value.strip()
+                    break
+            if not text:
+                text = _json_dumps(_json_safe(output_state))
+        elif isinstance(output_state, str):
+            text = output_state.strip()
+        elif output_state is not None:
+            text = _json_dumps(_json_safe(output_state))
+        if not text:
+            continue
+        node_id = _parse_optional_int(
+            entry.get("node_id"),
+            default=0,
+            minimum=0,
+        )
+        prefix = f"[node {node_id}] " if node_id > 0 else ""
+        context_lines.append(f"{prefix}{text[:2000]}")
+    if not context_lines:
+        return ""
+    return f"{edge_label} connector context:\n" + "\n\n".join(context_lines)
+
+
+def _build_flowchart_rag_query_prompt(
+    *,
+    question_prompt: str,
+    input_context: dict[str, Any],
+) -> str:
+    parts: list[str] = [question_prompt.strip()]
+    solid_text = _rag_context_text(
+        input_context.get("upstream_nodes"),
+        edge_label="Solid",
+    )
+    if solid_text:
+        parts.append(solid_text)
+    dotted_text = _rag_context_text(
+        input_context.get("dotted_upstream_nodes"),
+        edge_label="Dotted",
+    )
+    if dotted_text:
+        parts.append(dotted_text)
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _execute_flowchart_rag_node(
+    *,
+    node_id: int,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    execution_id: int,
+    default_model_id: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    mode = str(node_config.get("mode") or "").strip().lower()
+    if mode not in {
+        RAG_FLOWCHART_MODE_FRESH_INDEX,
+        RAG_FLOWCHART_MODE_DELTA_INDEX,
+        RAG_FLOWCHART_MODE_QUERY,
+    }:
+        raise ValueError(
+            "RAG node config.mode must be fresh_index, delta_index, or query."
+        )
+
+    collections = normalize_rag_collection_selection(node_config.get("collections"))
+    if not collections:
+        raise ValueError("RAG node requires at least one selected collection.")
+
+    with session_scope() as session:
+        node = session.get(FlowchartNode, node_id)
+        if node is None:
+            raise ValueError(f"Flowchart node {node_id} was not found.")
+        model = _resolve_node_model(
+            session,
+            node=node,
+            template=None,
+            default_model_id=default_model_id,
+        )
+
+    model_provider = str(model.provider or "").strip().lower()
+    if mode in {RAG_FLOWCHART_MODE_FRESH_INDEX, RAG_FLOWCHART_MODE_DELTA_INDEX}:
+        if model_provider not in {"codex", "gemini"}:
+            raise ValueError(
+                "RAG index modes require an embedding-capable model provider (codex or gemini)."
+            )
+        index_summary = run_index_for_collections(
+            mode=mode,
+            collections=collections,
+            model_provider=model_provider,
+        )
+        output_state = {
+            "node_type": FLOWCHART_NODE_TYPE_RAG,
+            "answer": None,
+            "retrieval_context": [],
+            "retrieval_stats": {
+                "provider": "chroma",
+                "retrieved_count": 0,
+                "top_k": 0,
+                "source_count": int(index_summary.get("source_count") or 0),
+                "total_files": int(index_summary.get("total_files") or 0),
+                "total_chunks": int(index_summary.get("total_chunks") or 0),
+            },
+            "synthesis_error": None,
+            "mode": mode,
+            "collections": collections,
+            "index_summary": index_summary,
+            "model_id": model.id,
+            "model_name": model.name,
+            "model_provider": model_provider,
+        }
+        return output_state, {}
+
+    question_prompt = str(node_config.get("question_prompt") or "").strip()
+    if not question_prompt:
+        raise ValueError("RAG query mode requires config.question_prompt.")
+    query_text = _build_flowchart_rag_query_prompt(
+        question_prompt=question_prompt,
+        input_context=input_context,
+    )
+    top_k = _parse_optional_int(
+        node_config.get("top_k"),
+        default=5,
+        minimum=1,
+    )
+    if top_k is None:
+        top_k = 5
+    top_k = min(top_k, 20)
+
+    flowchart_payload = (
+        input_context.get("flowchart")
+        if isinstance(input_context.get("flowchart"), dict)
+        else {}
+    )
+    flowchart_run_id = _parse_optional_int(
+        flowchart_payload.get("run_id"),
+        default=0,
+        minimum=0,
+    )
+    if flowchart_run_id <= 0:
+        flowchart_run_id = None
+    request_id = (
+        f"flowchart-{flowchart_run_id}-node-{node_id}-run-{execution_id}"
+        if flowchart_run_id is not None
+        else f"flowchart-node-{node_id}-run-{execution_id}"
+    )
+
+    def _synthesize_answer(
+        question: str,
+        retrieval_context: list[dict[str, Any]],
+    ) -> str | None:
+        config = load_rag_config()
+        if not rag_has_chat_api_key(config):
+            raise RuntimeError(
+                rag_missing_api_key_message(
+                    rag_get_chat_provider(config),
+                    "RAG query synthesis",
+                )
+            )
+        context_text = "\n\n".join(
+            str(item.get("text") or "").strip()
+            for item in retrieval_context
+            if isinstance(item, dict) and str(item.get("text") or "").strip()
+        )
+        max_context_chars = int(getattr(config, "chat_max_context_chars", 12000) or 12000)
+        if max_context_chars > 0 and len(context_text) > max_context_chars:
+            context_text = context_text[:max_context_chars]
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a helpful assistant for flowchart RAG query synthesis. "
+                    "Use retrieval context when available and be explicit when uncertain."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Answer the question using retrieval context.\n\n"
+                    f"Question: {question}\n\n"
+                    "Retrieval Context:\n"
+                    f"{context_text or '(no retrieval context)'}"
+                ),
+            },
+        ]
+        return rag_call_chat_completion(config, messages)
+
+    query_result = execute_query_contract(
+        question=query_text,
+        collections=collections,
+        top_k=top_k,
+        request_id=request_id,
+        runtime_kind="flowchart",
+        flowchart_run_id=flowchart_run_id,
+        flowchart_node_run_id=execution_id,
+        synthesize_answer=_synthesize_answer,
+    )
+    output_state = {
+        "node_type": FLOWCHART_NODE_TYPE_RAG,
+        **query_result,
+        "model_id": model.id,
+        "model_name": model.name,
+        "model_provider": model_provider,
+    }
+    return output_state, {}
+
+
 def _execute_flowchart_node(
     *,
     node_id: int,
@@ -4779,7 +6091,7 @@ def _execute_flowchart_node(
     default_model_id: int | None,
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    # Node config contract is documented in planning/guides/flowchart-node-config.md.
+    # Node config contract is documented in docs/guides/flowchart-node-config.md.
     if node_type == FLOWCHART_NODE_TYPE_START:
         return (
             {
@@ -4809,6 +6121,14 @@ def _execute_flowchart_node(
             execution_id=execution_id,
             execution_task_id=execution_task_id,
             enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+        )
+    if node_type == FLOWCHART_NODE_TYPE_RAG:
+        return _execute_flowchart_rag_node(
+            node_id=node_id,
+            node_config=node_config,
+            input_context=input_context,
+            execution_id=execution_id,
             default_model_id=default_model_id,
         )
     if node_type == FLOWCHART_NODE_TYPE_DECISION:
@@ -4887,6 +6207,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     init_engine(Config.SQLALCHEMY_DATABASE_URI)
     init_db()
 
+    rag_precheck_failure: tuple[int, str] | None = None
     with session_scope() as session:
         run = session.get(FlowchartRun, run_id)
         if run is None:
@@ -4981,6 +6302,40 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             default=1,
             minimum=1,
         )
+        rag_node_ids = sorted(
+            node_id
+            for node_id, spec in node_specs.items()
+            if str(spec.get("node_type") or "").strip().lower()
+            == FLOWCHART_NODE_TYPE_RAG
+        )
+        if rag_node_ids:
+            rag_health = rag_runtime_health_snapshot()
+            rag_health_state = str(rag_health.get("state") or "").strip().lower()
+            if rag_health_state != RAG_HEALTH_CONFIGURED_HEALTHY:
+                message = (
+                    "RAG pre-run validation failed: integration state is "
+                    f"'{rag_health_state or 'unknown'}'."
+                )
+                run.status = "failed"
+                run.finished_at = _utcnow()
+                rag_precheck_failure = (int(rag_node_ids[0]), message)
+
+    if rag_precheck_failure is not None:
+        failed_node_id, failure_message = rag_precheck_failure
+        _record_flowchart_guardrail_failure(
+            flowchart_id=flowchart_id,
+            run_id=run_id,
+            node_id=failed_node_id,
+            node_type=FLOWCHART_NODE_TYPE_RAG,
+            node_ref_id=None,
+            execution_index=1,
+            total_execution_count=0,
+            incoming_edges=incoming_by_target.get(failed_node_id, []),
+            latest_results={},
+            upstream_results=[],
+            message=failure_message,
+        )
+        return
 
     llm_settings = load_integration_settings("llm")
     enabled_providers = resolve_enabled_llm_providers(llm_settings)
@@ -5245,6 +6600,61 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     succeeded_node_run.status = "succeeded"
                     succeeded_node_run.output_state_json = _json_dumps(output_state)
                     succeeded_node_run.routing_state_json = _json_dumps(routing_state)
+                    skill_ids = output_state.get("resolved_skill_ids")
+                    if isinstance(skill_ids, list):
+                        succeeded_node_run.resolved_skill_ids_json = _json_dumps(skill_ids)
+                    skill_versions = output_state.get("resolved_skill_versions")
+                    if isinstance(skill_versions, list):
+                        succeeded_node_run.resolved_skill_versions_json = _json_dumps(
+                            skill_versions
+                        )
+                    manifest_hash = output_state.get("resolved_skill_manifest_hash")
+                    if isinstance(manifest_hash, str) and manifest_hash.strip():
+                        succeeded_node_run.resolved_skill_manifest_hash = manifest_hash
+                    adapter_mode = output_state.get("skill_adapter_mode")
+                    if isinstance(adapter_mode, str) and adapter_mode.strip():
+                        succeeded_node_run.skill_adapter_mode = adapter_mode
+                    resolved_role_id = output_state.get("resolved_role_id")
+                    if isinstance(resolved_role_id, int):
+                        succeeded_node_run.resolved_role_id = resolved_role_id
+                    resolved_role_version = output_state.get("resolved_role_version")
+                    if (
+                        isinstance(resolved_role_version, str)
+                        and resolved_role_version.strip()
+                    ):
+                        succeeded_node_run.resolved_role_version = resolved_role_version
+                    resolved_agent_id = output_state.get("resolved_agent_id")
+                    if isinstance(resolved_agent_id, int):
+                        succeeded_node_run.resolved_agent_id = resolved_agent_id
+                    resolved_agent_version = output_state.get("resolved_agent_version")
+                    if (
+                        isinstance(resolved_agent_version, str)
+                        and resolved_agent_version.strip()
+                    ):
+                        succeeded_node_run.resolved_agent_version = resolved_agent_version
+                    instruction_manifest_hash = output_state.get("instruction_manifest_hash")
+                    if (
+                        isinstance(instruction_manifest_hash, str)
+                        and instruction_manifest_hash.strip()
+                    ):
+                        succeeded_node_run.resolved_instruction_manifest_hash = (
+                            instruction_manifest_hash
+                        )
+                    instruction_adapter_mode = output_state.get("instruction_adapter_mode")
+                    if (
+                        isinstance(instruction_adapter_mode, str)
+                        and instruction_adapter_mode.strip()
+                    ):
+                        succeeded_node_run.instruction_adapter_mode = (
+                            instruction_adapter_mode
+                        )
+                    instruction_materialized_paths = output_state.get(
+                        "instruction_materialized_paths"
+                    )
+                    if isinstance(instruction_materialized_paths, list):
+                        succeeded_node_run.instruction_materialized_paths_json = _json_dumps(
+                            instruction_materialized_paths
+                        )
                     succeeded_node_run.finished_at = finished_at
                 _update_flowchart_node_task(
                     session,

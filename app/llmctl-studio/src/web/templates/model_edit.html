@@ -342,6 +342,19 @@
         placeholder="240"
       />
     </label>
+    <label class="label" data-providers="vllm_local,vllm_remote" style="grid-column: 1 / -1;">
+      Runtime instruction markdown filename
+      <input
+        class="input"
+        type="text"
+        name="agent_markdown_filename"
+        value="{% if selected_provider == 'vllm_local' %}{{ vllm_local_config.agent_markdown_filename }}{% elif selected_provider == 'vllm_remote' %}{{ vllm_remote_config.agent_markdown_filename }}{% else %}{{ vllm_local_config.agent_markdown_filename }}{% endif %}"
+        placeholder="AGENT.md"
+      />
+      <p class="muted" style="margin-top: 6px; font-size: 12px;">
+        Used only for non-frontier providers. Allowed: A-Z a-z 0-9 . _ - and must end in .md.
+      </p>
+    </label>
 
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">
@@ -358,12 +371,17 @@
 
 <script>
   const providerSelect = document.querySelector('select[name="provider"]');
-  const providerFields = document.querySelectorAll("[data-provider]");
+  const providerFields = document.querySelectorAll("[data-provider], [data-providers]");
   if (providerSelect) {
     const updateFields = () => {
       const selected = providerSelect.value;
       providerFields.forEach((field) => {
-        field.style.display = field.dataset.provider === selected ? "" : "none";
+        const providerAttr = field.dataset.provider || "";
+        const providersAttr = field.dataset.providers || "";
+        const allowedProviders = providersAttr
+          ? providersAttr.split(",").map((item) => item.trim()).filter(Boolean)
+          : [providerAttr];
+        field.style.display = allowedProviders.includes(selected) ? "" : "none";
       });
     };
     providerSelect.addEventListener("change", updateFields);

@@ -6,10 +6,10 @@ PYTHON3 := .venv/bin/python3
 endif
 
 docs:
-	$(PYTHON3) -m sphinx -b html docs docs/_build/html
+	$(PYTHON3) -m sphinx -b html docs/sphinx docs/sphinx/_build/html
 
 docs-clean:
-	rm -rf docs/_build docs/api
+	rm -rf docs/sphinx/_build docs/sphinx/api
 
 docs-linkcheck:
-	$(PYTHON3) -m sphinx -b linkcheck docs docs/_build/linkcheck
+	$(PYTHON3) -m sphinx -b linkcheck docs/sphinx docs/sphinx/_build/linkcheck

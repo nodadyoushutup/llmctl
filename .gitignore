@@ -18,8 +18,8 @@ dist/
 htmlcov/
 .coverage
 .coverage.*
-docs/_build/
-docs/api/
+docs/sphinx/_build/
+docs/sphinx/api/
 
 # Virtual environments
 .venv/

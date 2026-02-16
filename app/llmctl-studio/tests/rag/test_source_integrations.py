@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+import importlib.util
 from pathlib import Path
 from unittest.mock import call, patch
 
@@ -26,7 +27,17 @@ from rag.integrations.git_sync import (
     git_fetch_and_reset,
     safe_git_url,
 )
-from tests.rag.helpers import test_config
+
+_HELPERS_SPEC = importlib.util.spec_from_file_location(
+    "rag_test_helpers",
+    STUDIO_APP_ROOT / "tests" / "rag" / "helpers.py",
+)
+if _HELPERS_SPEC is None or _HELPERS_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError("Failed to load rag test helpers.")
+_HELPERS_MODULE = importlib.util.module_from_spec(_HELPERS_SPEC)
+_HELPERS_SPEC.loader.exec_module(_HELPERS_MODULE)
+test_config = _HELPERS_MODULE.test_config
+
 try:
     import core.db as core_db
     from rag.repositories.sources import (

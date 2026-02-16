@@ -103,6 +103,7 @@ def _ensure_schema() -> None:
         _migrate_agent_descriptions(connection)
         _migrate_agent_status_column(connection)
         _drop_agent_is_active_column(connection)
+        _ensure_agent_priority_schema(connection)
         _drop_run_is_active_column(connection)
         run_columns = {
             "name": "TEXT",
@@ -178,6 +179,13 @@ def _ensure_schema() -> None:
             "resolved_skill_versions_json": "TEXT",
             "resolved_skill_manifest_hash": "VARCHAR(128)",
             "skill_adapter_mode": "VARCHAR(32)",
+            "resolved_role_id": "INTEGER",
+            "resolved_role_version": "VARCHAR(128)",
+            "resolved_agent_id": "INTEGER",
+            "resolved_agent_version": "VARCHAR(128)",
+            "resolved_instruction_manifest_hash": "VARCHAR(128)",
+            "instruction_adapter_mode": "VARCHAR(32)",
+            "instruction_materialized_paths_json": "TEXT",
             "error": "TEXT",
             "started_at": "DATETIME",
             "finished_at": "DATETIME",
@@ -189,6 +197,8 @@ def _ensure_schema() -> None:
         _ensure_columns(connection, "task_template_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "flowchart_node_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "flowchart_node_skills", {"position": "INTEGER"})
+        _ensure_agent_skill_binding_schema(connection)
+        _migrate_flowchart_node_skills_to_agent_bindings(connection)
 
         milestone_columns = {
             "status": "TEXT NOT NULL DEFAULT 'planned'",
@@ -216,6 +226,17 @@ def _ensure_schema() -> None:
             "integration_keys_json": "TEXT",
             "current_stage": "TEXT",
             "stage_logs": "TEXT",
+            "resolved_role_id": "INTEGER",
+            "resolved_role_version": "VARCHAR(128)",
+            "resolved_agent_id": "INTEGER",
+            "resolved_agent_version": "VARCHAR(128)",
+            "resolved_skill_ids_json": "TEXT",
+            "resolved_skill_versions_json": "TEXT",
+            "resolved_skill_manifest_hash": "VARCHAR(128)",
+            "skill_adapter_mode": "VARCHAR(32)",
+            "resolved_instruction_manifest_hash": "VARCHAR(128)",
+            "instruction_adapter_mode": "VARCHAR(32)",
+            "instruction_materialized_paths_json": "TEXT",
         }
         _ensure_columns(connection, "agent_tasks", task_columns)
         _migrate_agent_task_agent_nullable(connection)
@@ -224,6 +245,8 @@ def _ensure_schema() -> None:
         _ensure_flowchart_indexes(connection)
         _ensure_rag_schema(connection)
         _ensure_rag_indexes(connection)
+        _ensure_chat_schema(connection)
+        _ensure_chat_indexes(connection)
         _drop_agent_utility_ownership(connection)
         _ensure_canonical_workflow_views(connection)
 
@@ -1175,6 +1198,347 @@ def _migrate_flowchart_edge_modes(connection) -> None:
     )
 
 
+def _ensure_agent_priority_schema(connection) -> None:
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS agent_priorities ("
+            "id INTEGER PRIMARY KEY, "
+            "agent_id INTEGER NOT NULL, "
+            "position INTEGER NOT NULL DEFAULT 1, "
+            "content TEXT NOT NULL, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY(agent_id) REFERENCES agents (id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "agent_priorities",
+        {
+            "agent_id": "INTEGER NOT NULL",
+            "position": "INTEGER NOT NULL DEFAULT 1",
+            "content": "TEXT NOT NULL",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_agent_priorities_agent_id "
+            "ON agent_priorities (agent_id)"
+        )
+    )
+
+
+def _parse_optional_positive_int(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            parsed = int(cleaned)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _extract_agent_id_from_node_config(raw_config_json: str | None) -> int | None:
+    if not raw_config_json:
+        return None
+    try:
+        payload = json.loads(raw_config_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return _parse_optional_positive_int(payload.get("agent_id"))
+
+
+def _ensure_agent_skill_binding_schema(connection) -> None:
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS agent_skill_bindings ("
+            "agent_id INTEGER NOT NULL, "
+            "skill_id INTEGER NOT NULL, "
+            "position INTEGER NOT NULL DEFAULT 1, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "PRIMARY KEY (agent_id, skill_id), "
+            "FOREIGN KEY(agent_id) REFERENCES agents (id), "
+            "FOREIGN KEY(skill_id) REFERENCES skills (id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "agent_skill_bindings",
+        {
+            "agent_id": "INTEGER NOT NULL",
+            "skill_id": "INTEGER NOT NULL",
+            "position": "INTEGER NOT NULL DEFAULT 1",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_agent_skill_bindings_agent_id "
+            "ON agent_skill_bindings (agent_id)"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_agent_skill_bindings_skill_id "
+            "ON agent_skill_bindings (skill_id)"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS legacy_unmapped_node_skills ("
+            "id INTEGER PRIMARY KEY, "
+            "flowchart_node_id INTEGER NOT NULL, "
+            "skill_id INTEGER NOT NULL, "
+            "legacy_position INTEGER, "
+            "node_ref_id INTEGER, "
+            "node_config_json TEXT, "
+            "reason TEXT NOT NULL, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "UNIQUE(flowchart_node_id, skill_id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "legacy_unmapped_node_skills",
+        {
+            "flowchart_node_id": "INTEGER NOT NULL",
+            "skill_id": "INTEGER NOT NULL",
+            "legacy_position": "INTEGER",
+            "node_ref_id": "INTEGER",
+            "node_config_json": "TEXT",
+            "reason": "TEXT NOT NULL",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_legacy_unmapped_node_skills_flowchart_node_id "
+            "ON legacy_unmapped_node_skills (flowchart_node_id)"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_legacy_unmapped_node_skills_skill_id "
+            "ON legacy_unmapped_node_skills (skill_id)"
+        )
+    )
+    _ensure_node_skill_binding_deprecation_triggers(connection)
+
+
+def _ensure_node_skill_binding_deprecation_triggers(connection) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    connection.execute(
+        text(
+            "CREATE TRIGGER IF NOT EXISTS trg_flowchart_node_skills_reject_insert "
+            "BEFORE INSERT ON flowchart_node_skills "
+            "WHEN EXISTS ("
+            "  SELECT 1 FROM integration_settings "
+            "  WHERE provider = 'llm' "
+            "    AND key = 'node_skill_binding_mode' "
+            "    AND lower(trim(value)) = 'reject'"
+            ") "
+            "BEGIN "
+            "  SELECT RAISE(ABORT, 'Node-level skill bindings are deprecated. Assign skills to the Agent.'); "
+            "END"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE TRIGGER IF NOT EXISTS trg_flowchart_node_skills_reject_update "
+            "BEFORE UPDATE ON flowchart_node_skills "
+            "WHEN EXISTS ("
+            "  SELECT 1 FROM integration_settings "
+            "  WHERE provider = 'llm' "
+            "    AND key = 'node_skill_binding_mode' "
+            "    AND lower(trim(value)) = 'reject'"
+            ") "
+            "BEGIN "
+            "  SELECT RAISE(ABORT, 'Node-level skill bindings are deprecated. Assign skills to the Agent.'); "
+            "END"
+        )
+    )
+
+
+def _migrate_flowchart_node_skills_to_agent_bindings(connection) -> None:
+    tables = _table_names(connection)
+    required_tables = {
+        "flowchart_node_skills",
+        "flowchart_nodes",
+        "task_templates",
+        "agents",
+        "skills",
+        "agent_skill_bindings",
+        "legacy_unmapped_node_skills",
+    }
+    if not required_tables.issubset(tables):
+        return
+
+    valid_agent_ids = {
+        int(row[0])
+        for row in connection.execute(text("SELECT id FROM agents")).fetchall()
+        if row[0] is not None
+    }
+    valid_skill_ids = {
+        int(row[0])
+        for row in connection.execute(text("SELECT id FROM skills")).fetchall()
+        if row[0] is not None
+    }
+    template_agent_by_id = {
+        int(row[0]): int(row[1])
+        for row in connection.execute(
+            text(
+                "SELECT id, agent_id "
+                "FROM task_templates "
+                "WHERE agent_id IS NOT NULL"
+            )
+        ).fetchall()
+        if row[0] is not None and row[1] is not None
+    }
+
+    existing_pairs: set[tuple[int, int]] = set()
+    max_position_by_agent: dict[int, int] = {}
+    existing_rows = connection.execute(
+        text(
+            "SELECT agent_id, skill_id, position "
+            "FROM agent_skill_bindings "
+            "ORDER BY agent_id ASC, position ASC, skill_id ASC"
+        )
+    ).fetchall()
+    for row in existing_rows:
+        agent_id = _parse_optional_positive_int(row[0])
+        skill_id = _parse_optional_positive_int(row[1])
+        if agent_id is None or skill_id is None:
+            continue
+        existing_pairs.add((agent_id, skill_id))
+        position = _parse_optional_positive_int(row[2]) or 0
+        max_position_by_agent[agent_id] = max(
+            max_position_by_agent.get(agent_id, 0), position
+        )
+
+    legacy_rows = connection.execute(
+        text(
+            "SELECT "
+            "  fns.flowchart_node_id, "
+            "  fns.skill_id, "
+            "  fns.position, "
+            "  fn.ref_id, "
+            "  fn.config_json "
+            "FROM flowchart_node_skills AS fns "
+            "JOIN flowchart_nodes AS fn "
+            "  ON fn.id = fns.flowchart_node_id "
+            "ORDER BY "
+            "  fns.flowchart_node_id ASC, "
+            "  CASE WHEN fns.position IS NULL THEN 1 ELSE 0 END ASC, "
+            "  fns.position ASC, "
+            "  fns.skill_id ASC"
+        )
+    ).fetchall()
+
+    for row in legacy_rows:
+        flowchart_node_id = _parse_optional_positive_int(row[0])
+        skill_id = _parse_optional_positive_int(row[1])
+        legacy_position = _parse_optional_positive_int(row[2])
+        node_ref_id = _parse_optional_positive_int(row[3])
+        node_config_json = row[4] if isinstance(row[4], str) else None
+        if flowchart_node_id is None or skill_id is None:
+            continue
+
+        if skill_id not in valid_skill_ids:
+            connection.execute(
+                text(
+                    "INSERT OR IGNORE INTO legacy_unmapped_node_skills ("
+                    "flowchart_node_id, skill_id, legacy_position, node_ref_id, node_config_json, reason"
+                    ") VALUES ("
+                    ":flowchart_node_id, :skill_id, :legacy_position, :node_ref_id, :node_config_json, :reason"
+                    ")"
+                ),
+                {
+                    "flowchart_node_id": flowchart_node_id,
+                    "skill_id": skill_id,
+                    "legacy_position": legacy_position,
+                    "node_ref_id": node_ref_id,
+                    "node_config_json": node_config_json,
+                    "reason": "skill_not_found",
+                },
+            )
+            continue
+
+        resolved_agent_id = None
+        config_agent_id = _extract_agent_id_from_node_config(node_config_json)
+        if config_agent_id is not None and config_agent_id in valid_agent_ids:
+            resolved_agent_id = config_agent_id
+        elif node_ref_id is not None:
+            template_agent_id = template_agent_by_id.get(node_ref_id)
+            if template_agent_id is not None and template_agent_id in valid_agent_ids:
+                resolved_agent_id = template_agent_id
+
+        if resolved_agent_id is None:
+            reason = "missing_agent_mapping"
+            if config_agent_id is not None and config_agent_id not in valid_agent_ids:
+                reason = "node_config_agent_not_found"
+            elif node_ref_id is not None and node_ref_id in template_agent_by_id:
+                reason = "task_template_agent_not_found"
+            connection.execute(
+                text(
+                    "INSERT OR IGNORE INTO legacy_unmapped_node_skills ("
+                    "flowchart_node_id, skill_id, legacy_position, node_ref_id, node_config_json, reason"
+                    ") VALUES ("
+                    ":flowchart_node_id, :skill_id, :legacy_position, :node_ref_id, :node_config_json, :reason"
+                    ")"
+                ),
+                {
+                    "flowchart_node_id": flowchart_node_id,
+                    "skill_id": skill_id,
+                    "legacy_position": legacy_position,
+                    "node_ref_id": node_ref_id,
+                    "node_config_json": node_config_json,
+                    "reason": reason,
+                },
+            )
+            continue
+
+        pair = (resolved_agent_id, skill_id)
+        if pair in existing_pairs:
+            continue
+
+        next_position = max_position_by_agent.get(resolved_agent_id, 0) + 1
+        connection.execute(
+            text(
+                "INSERT OR IGNORE INTO agent_skill_bindings ("
+                "agent_id, skill_id, position"
+                ") VALUES ("
+                ":agent_id, :skill_id, :position"
+                ")"
+            ),
+            {
+                "agent_id": resolved_agent_id,
+                "skill_id": skill_id,
+                "position": next_position,
+            },
+        )
+        existing_pairs.add(pair)
+        max_position_by_agent[resolved_agent_id] = next_position
+
+
 def _ensure_rag_schema(connection) -> None:
     tables = _table_names(connection)
 
@@ -1202,24 +1566,6 @@ def _ensure_rag_schema(connection) -> None:
     if "rag_sources" in tables:
         _ensure_columns(connection, "rag_sources", rag_source_columns)
 
-    rag_index_job_columns = {
-        "kind": "VARCHAR(32) NOT NULL DEFAULT 'index'",
-        "trigger_mode": "VARCHAR(16) NOT NULL DEFAULT 'manual'",
-        "mode": "VARCHAR(16) NOT NULL DEFAULT 'fresh'",
-        "status": "VARCHAR(24) NOT NULL DEFAULT 'queued'",
-        "source_id": "INTEGER",
-        "celery_task_id": "VARCHAR(255)",
-        "output": "TEXT",
-        "error": "TEXT",
-        "meta_json": "TEXT",
-        "started_at": "DATETIME",
-        "finished_at": "DATETIME",
-        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
-        "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
-    }
-    if "rag_index_jobs" in tables:
-        _ensure_columns(connection, "rag_index_jobs", rag_index_job_columns)
-
     rag_file_state_columns = {
         "source_id": "INTEGER",
         "path": "TEXT",
@@ -1243,10 +1589,26 @@ def _ensure_rag_schema(connection) -> None:
     if "rag_settings" in tables:
         _ensure_columns(connection, "rag_settings", rag_settings_columns)
 
+    rag_retrieval_audit_columns = {
+        "request_id": "VARCHAR(128)",
+        "runtime_kind": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+        "flowchart_run_id": "INTEGER",
+        "flowchart_node_run_id": "INTEGER",
+        "provider": "VARCHAR(32) NOT NULL DEFAULT 'chroma'",
+        "collection": "VARCHAR(255)",
+        "source_id": "VARCHAR(255)",
+        "path": "TEXT",
+        "chunk_id": "VARCHAR(255)",
+        "score": "FLOAT",
+        "snippet": "TEXT",
+        "retrieval_rank": "INTEGER",
+        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    if "rag_retrieval_audits" in tables:
+        _ensure_columns(connection, "rag_retrieval_audits", rag_retrieval_audit_columns)
+
     _migrate_rag_source_schedule_modes(connection)
-    _migrate_rag_index_job_modes(connection)
-    _migrate_rag_index_job_trigger_modes(connection)
-    _migrate_rag_index_job_statuses(connection)
+    _drop_rag_index_job_schema(connection)
 
 
 def _migrate_rag_source_schedule_modes(connection) -> None:
@@ -1322,6 +1684,14 @@ def _migrate_rag_index_job_statuses(connection) -> None:
     )
 
 
+def _drop_rag_index_job_schema(connection) -> None:
+    # Stage 6 cutover: Index Jobs are fully decommissioned in favor of flowchart RAG nodes.
+    connection.execute(text("DROP INDEX IF EXISTS ix_rag_index_jobs_source_id"))
+    connection.execute(text("DROP INDEX IF EXISTS ix_rag_index_jobs_status"))
+    connection.execute(text("DROP INDEX IF EXISTS ix_rag_index_jobs_created_at"))
+    connection.execute(text("DROP TABLE IF EXISTS rag_index_jobs"))
+
+
 def _ensure_rag_indexes(connection) -> None:
     tables = _table_names(connection)
     if "rag_sources" in tables:
@@ -1341,26 +1711,6 @@ def _ensure_rag_indexes(connection) -> None:
             )
         )
 
-    if "rag_index_jobs" in tables:
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_rag_index_jobs_source_id ON rag_index_jobs (source_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_rag_index_jobs_status ON rag_index_jobs (status)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_rag_index_jobs_created_at ON rag_index_jobs (created_at)"
-            )
-        )
-
     if "rag_source_file_states" in tables:
         connection.execute(
             text(
@@ -1374,6 +1724,289 @@ def _ensure_rag_indexes(connection) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS "
                 "ix_rag_settings_provider ON rag_settings (provider)"
+            )
+        )
+    if "rag_retrieval_audits" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_retrieval_audits_request_id ON rag_retrieval_audits (request_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_retrieval_audits_runtime_kind ON rag_retrieval_audits (runtime_kind)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_retrieval_audits_flowchart_run_id ON rag_retrieval_audits (flowchart_run_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_retrieval_audits_flowchart_node_run_id ON rag_retrieval_audits (flowchart_node_run_id)"
+            )
+        )
+
+
+def _ensure_chat_schema(connection) -> None:
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS chat_threads ("
+            "id INTEGER PRIMARY KEY, "
+            "title VARCHAR(255) NOT NULL DEFAULT 'New chat', "
+            "status VARCHAR(32) NOT NULL DEFAULT 'active', "
+            "model_id INTEGER, "
+            "selected_rag_collections_json TEXT, "
+            "compaction_summary_json TEXT, "
+            "last_activity_at DATETIME, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY(model_id) REFERENCES llm_models (id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "chat_threads",
+        {
+            "title": "VARCHAR(255) NOT NULL DEFAULT 'New chat'",
+            "status": "VARCHAR(32) NOT NULL DEFAULT 'active'",
+            "model_id": "INTEGER",
+            "selected_rag_collections_json": "TEXT",
+            "compaction_summary_json": "TEXT",
+            "last_activity_at": "DATETIME",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS chat_messages ("
+            "id INTEGER PRIMARY KEY, "
+            "thread_id INTEGER NOT NULL, "
+            "role VARCHAR(32) NOT NULL, "
+            "content TEXT NOT NULL, "
+            "token_estimate INTEGER, "
+            "metadata_json TEXT, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY(thread_id) REFERENCES chat_threads (id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "chat_messages",
+        {
+            "thread_id": "INTEGER NOT NULL",
+            "role": "VARCHAR(32) NOT NULL",
+            "content": "TEXT NOT NULL",
+            "token_estimate": "INTEGER",
+            "metadata_json": "TEXT",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS chat_turns ("
+            "id INTEGER PRIMARY KEY, "
+            "thread_id INTEGER NOT NULL, "
+            "request_id VARCHAR(64) NOT NULL, "
+            "model_id INTEGER, "
+            "user_message_id INTEGER, "
+            "assistant_message_id INTEGER, "
+            "status VARCHAR(32) NOT NULL DEFAULT 'succeeded', "
+            "reason_code VARCHAR(128), "
+            "error_message TEXT, "
+            "selected_rag_collections_json TEXT, "
+            "selected_mcp_server_keys_json TEXT, "
+            "rag_health_state VARCHAR(64), "
+            "context_limit_tokens INTEGER, "
+            "context_usage_before INTEGER, "
+            "context_usage_after INTEGER, "
+            "history_tokens INTEGER, "
+            "rag_tokens INTEGER, "
+            "mcp_tokens INTEGER, "
+            "compaction_applied BOOLEAN NOT NULL DEFAULT 0, "
+            "compaction_metadata_json TEXT, "
+            "citation_metadata_json TEXT, "
+            "runtime_metadata_json TEXT, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY(thread_id) REFERENCES chat_threads (id), "
+            "FOREIGN KEY(model_id) REFERENCES llm_models (id), "
+            "FOREIGN KEY(user_message_id) REFERENCES chat_messages (id), "
+            "FOREIGN KEY(assistant_message_id) REFERENCES chat_messages (id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "chat_turns",
+        {
+            "thread_id": "INTEGER NOT NULL",
+            "request_id": "VARCHAR(64) NOT NULL",
+            "model_id": "INTEGER",
+            "user_message_id": "INTEGER",
+            "assistant_message_id": "INTEGER",
+            "status": "VARCHAR(32) NOT NULL DEFAULT 'succeeded'",
+            "reason_code": "VARCHAR(128)",
+            "error_message": "TEXT",
+            "selected_rag_collections_json": "TEXT",
+            "selected_mcp_server_keys_json": "TEXT",
+            "rag_health_state": "VARCHAR(64)",
+            "context_limit_tokens": "INTEGER",
+            "context_usage_before": "INTEGER",
+            "context_usage_after": "INTEGER",
+            "history_tokens": "INTEGER",
+            "rag_tokens": "INTEGER",
+            "mcp_tokens": "INTEGER",
+            "compaction_applied": "BOOLEAN NOT NULL DEFAULT 0",
+            "compaction_metadata_json": "TEXT",
+            "citation_metadata_json": "TEXT",
+            "runtime_metadata_json": "TEXT",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS chat_activity_events ("
+            "id INTEGER PRIMARY KEY, "
+            "thread_id INTEGER NOT NULL, "
+            "turn_id INTEGER, "
+            "event_class VARCHAR(64) NOT NULL, "
+            "event_type VARCHAR(64) NOT NULL, "
+            "reason_code VARCHAR(128), "
+            "message TEXT, "
+            "metadata_json TEXT, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY(thread_id) REFERENCES chat_threads (id), "
+            "FOREIGN KEY(turn_id) REFERENCES chat_turns (id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "chat_activity_events",
+        {
+            "thread_id": "INTEGER NOT NULL",
+            "turn_id": "INTEGER",
+            "event_class": "VARCHAR(64) NOT NULL",
+            "event_type": "VARCHAR(64) NOT NULL",
+            "reason_code": "VARCHAR(128)",
+            "message": "TEXT",
+            "metadata_json": "TEXT",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS chat_thread_mcp_servers ("
+            "chat_thread_id INTEGER NOT NULL, "
+            "mcp_server_id INTEGER NOT NULL, "
+            "PRIMARY KEY (chat_thread_id, mcp_server_id), "
+            "FOREIGN KEY(chat_thread_id) REFERENCES chat_threads (id), "
+            "FOREIGN KEY(mcp_server_id) REFERENCES mcp_servers (id)"
+            ")"
+        )
+    )
+
+
+def _ensure_chat_indexes(connection) -> None:
+    tables = _table_names(connection)
+    if "chat_threads" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_threads_status "
+                "ON chat_threads (status)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_threads_model_id "
+                "ON chat_threads (model_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_threads_last_activity_at "
+                "ON chat_threads (last_activity_at)"
+            )
+        )
+    if "chat_messages" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_messages_thread_id "
+                "ON chat_messages (thread_id)"
+            )
+        )
+    if "chat_turns" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_turns_thread_id "
+                "ON chat_turns (thread_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_turns_request_id "
+                "ON chat_turns (request_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_turns_reason_code "
+                "ON chat_turns (reason_code)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_turns_thread_request "
+                "ON chat_turns (thread_id, request_id)"
+            )
+        )
+    if "chat_activity_events" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_activity_events_thread_id "
+                "ON chat_activity_events (thread_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_activity_events_turn_id "
+                "ON chat_activity_events (turn_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_activity_events_event_class "
+                "ON chat_activity_events (event_class)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_activity_events_event_type "
+                "ON chat_activity_events (event_type)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_activity_events_reason_code "
+                "ON chat_activity_events (reason_code)"
             )
         )
 

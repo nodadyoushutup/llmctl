@@ -27,6 +27,7 @@ from core.models import (
     SCRIPT_TYPE_INIT,
     Script,
     TaskTemplate,
+    flowchart_node_skills,
     flowchart_node_scripts,
 )
 import tools as mcp_tools
@@ -114,6 +115,13 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
         bind_mcp = self.mcp.tools["llmctl_bind_flowchart_node_mcp"]
         bind_script = self.mcp.tools["llmctl_bind_flowchart_node_script"]
         reorder_scripts = self.mcp.tools["llmctl_reorder_flowchart_node_scripts"]
+        create_skill = self.mcp.tools["llmctl_create_skill"]
+        get_skill = self.mcp.tools["llmctl_get_skill"]
+        update_skill = self.mcp.tools["llmctl_update_skill"]
+        archive_skill = self.mcp.tools["llmctl_archive_skill"]
+        bind_skill = self.mcp.tools["llmctl_bind_flowchart_node_skill"]
+        unbind_skill = self.mcp.tools["llmctl_unbind_flowchart_node_skill"]
+        reorder_skills = self.mcp.tools["llmctl_reorder_flowchart_node_skills"]
         start_flowchart = self.mcp.tools["start_flowchart"]
         get_run = self.mcp.tools["llmctl_get_flowchart_run"]
         cancel_run = self.mcp.tools["cancel_flowchart_run"]
@@ -207,6 +215,88 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
             ]
         self.assertEqual([script_b_id, script_a_id], ordered_script_ids)
 
+        created_skill_a = create_skill(
+            name="mcp-skill-a",
+            display_name="MCP Skill A",
+            description="MCP skill A",
+            version="1.0.0",
+            status="active",
+        )
+        self.assertTrue(created_skill_a["ok"])
+        skill_a_id = int(created_skill_a["skill_id"])
+        created_skill_b = create_skill(
+            name="mcp-skill-b",
+            display_name="MCP Skill B",
+            description="MCP skill B",
+            version="1.0.0",
+            status="active",
+        )
+        self.assertTrue(created_skill_b["ok"])
+        skill_b_id = int(created_skill_b["skill_id"])
+
+        fetched_skill = get_skill(skill_id=skill_a_id, include_versions=True)
+        self.assertTrue(fetched_skill["ok"])
+        self.assertTrue(fetched_skill.get("versions"))
+        updated_skill = update_skill(
+            skill_id=skill_a_id,
+            patch={
+                "display_name": "MCP Skill A Updated",
+                "description": "Updated",
+                "status": "active",
+            },
+        )
+        self.assertTrue(updated_skill["ok"])
+        self.assertEqual("MCP Skill A Updated", updated_skill["item"]["display_name"])
+
+        self.assertTrue(
+            bind_skill(
+                flowchart_id=flowchart_id,
+                node_id=task_node_id,
+                skill_id=skill_a_id,
+            )["ok"]
+        )
+        self.assertTrue(
+            bind_skill(
+                flowchart_id=flowchart_id,
+                node_id=task_node_id,
+                skill_id=skill_b_id,
+            )["ok"]
+        )
+        reordered_skills = reorder_skills(
+            flowchart_id=flowchart_id,
+            node_id=task_node_id,
+            skill_ids=[skill_b_id, skill_a_id],
+        )
+        self.assertTrue(reordered_skills["ok"])
+        self.assertEqual({skill_a_id, skill_b_id}, set(reordered_skills["node"]["skill_ids"]))
+        with session_scope() as session:
+            ordered_skill_ids = [
+                int(row[0])
+                for row in session.execute(
+                    select(flowchart_node_skills.c.skill_id)
+                    .where(flowchart_node_skills.c.flowchart_node_id == task_node_id)
+                    .order_by(flowchart_node_skills.c.position.asc())
+                ).all()
+            ]
+        self.assertEqual([skill_b_id, skill_a_id], ordered_skill_ids)
+
+        self.assertTrue(
+            unbind_skill(
+                flowchart_id=flowchart_id,
+                node_id=task_node_id,
+                skill_id=skill_b_id,
+            )["ok"]
+        )
+        archived = archive_skill(skill_id=skill_b_id)
+        self.assertTrue(archived["ok"])
+        self.assertEqual("archived", archived["item"]["status"])
+        archived_attach = bind_skill(
+            flowchart_id=flowchart_id,
+            node_id=task_node_id,
+            skill_id=skill_b_id,
+        )
+        self.assertFalse(archived_attach["ok"])
+
         fetched = get_flowchart(
             flowchart_id=flowchart_id,
             include_graph=True,
@@ -220,6 +310,8 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
         self.assertEqual(model_id, task_node["model_id"])
         self.assertIn(mcp_server_id, task_node["mcp_server_ids"])
         self.assertEqual({script_a_id, script_b_id}, set(task_node["script_ids"]))
+        self.assertIn(skill_a_id, task_node["skill_ids"])
+        self.assertNotIn(skill_b_id, task_node["skill_ids"])
 
         with patch.object(
             mcp_tools.run_flowchart, "delay", return_value=SimpleNamespace(id="flow-job")

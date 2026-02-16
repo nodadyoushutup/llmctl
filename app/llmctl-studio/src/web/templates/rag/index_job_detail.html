@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('rag.index_jobs_page') }}">
+      <i class="fa-solid fa-arrow-left"></i>
+      back to index jobs
+    </a>
+    {% if source %}
+      <a class="btn btn-secondary" href="{{ url_for('rag.source_detail_page', source_id=source.id) }}">
+        <i class="fa-solid fa-database"></i>
+        open source
+      </a>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card" data-rag-job-detail data-rag-job-detail-id="{{ job.id }}" data-rag-job-detail-status="{{ job.status }}">
+  <div class="card-header">
+    <div>
+      <h2 class="section-title">Index Job {{ job.id }}</h2>
+      <p class="muted" style="margin-top: 6px;">Detailed status and output.</p>
+    </div>
+    {% set badge_class = status_badge_class.get(job.status, 'status-idle') %}
+    <span class="status {{ badge_class }}" id="rag-job-detail-status">{{ job.status }}</span>
+  </div>
+
+  <div class="grid grid-2" style="margin-top: 16px; gap: 14px;">
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Source</p>
+      <p id="rag-job-detail-source">
+        {% if source %}
+          <a href="{{ url_for('rag.source_detail_page', source_id=source.id) }}">{{ source.name }}</a>
+        {% else %}
+          Source {{ job.source_id }}
+        {% endif %}
+      </p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Mode</p>
+      <p class="mono" id="rag-job-detail-mode">{{ job.mode }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Trigger</p>
+      <p id="rag-job-detail-trigger">{{ job.trigger_mode }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Created</p>
+      <p id="rag-job-detail-created">{{ format_source_time(job.created_at) }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Started</p>
+      <p id="rag-job-detail-started">{{ format_source_time(job.started_at) }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Finished</p>
+      <p id="rag-job-detail-finished">{{ format_source_time(job.finished_at) }}</p>
+    </div>
+  </div>
+
+  <div style="margin-top: 18px;">
+    <h3 class="section-title" style="font-size: 14px;">Progress</h3>
+    <p class="muted" id="rag-job-detail-progress">
+      {% if progress and progress.summary %}
+        {{ progress.summary }}
+      {% else %}
+        No progress details yet.
+      {% endif %}
+    </p>
+  </div>
+
+  <div style="margin-top: 18px;">
+    <h3 class="section-title" style="font-size: 14px;">Output</h3>
+    {% if job.output %}
+      <pre class="code-block" id="rag-job-detail-output">{{ job.output }}</pre>
+    {% else %}
+      <p class="muted" id="rag-job-detail-output-empty">No output yet.</p>
+      <pre class="code-block" id="rag-job-detail-output" style="display: none;"></pre>
+    {% endif %}
+  </div>
+
+  <div style="margin-top: 18px;">
+    <h3 class="section-title" style="font-size: 14px;">Error</h3>
+    <p id="rag-job-detail-error">{{ job.error or 'none' }}</p>
+  </div>
+</section>
+
+<script src="{{ url_for('static', filename='rag/app.js') }}"></script>
+{% endblock %}

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from core.db import session_scope
 from core.mcp_config import format_mcp_config
 from core.models import (
-    SCRIPT_TYPE_SKILL,
+    SCRIPT_TYPE_INIT,
     Agent,
     LLMModel,
     MCP_SERVER_TYPE_CUSTOM,
@@ -1133,7 +1133,7 @@ LLM_MODEL_SEEDS = [
 MCP_SERVER_SEEDS: list[dict[str, object]] = []
 
 INDEX_FILES_NOTE = (
-    "Before starting, run the workspace tree skill script "
+    "Before starting, run the workspace tree helper script "
     "(`index_workspace_tree.sh`) to capture a full file listing."
 )
 
@@ -1206,7 +1206,7 @@ SCRIPT_SEEDS = [
             "available; falls back to find. Defaults to WORKSPACE_PATH when set "
             "and ignores common cache directories."
         ),
-        "script_type": SCRIPT_TYPE_SKILL,
+        "script_type": SCRIPT_TYPE_INIT,
         "content": WORKSPACE_TREE_SCRIPT,
     },
 ]

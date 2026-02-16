@@ -23,17 +23,28 @@ SCRIPT_TYPE_PRE_INIT = "pre_init"
 SCRIPT_TYPE_INIT = "init"
 SCRIPT_TYPE_POST_INIT = "post_init"
 SCRIPT_TYPE_POST_RUN = "post_run"
-SCRIPT_TYPE_SKILL = "skill"
+_LEGACY_SKILL_SCRIPT_TYPE = "skill"
+LEGACY_SKILL_SCRIPT_WRITE_ERROR = (
+    "Legacy script_type=skill writes are disabled. Use first-class Skills instead."
+)
 
 SCRIPT_TYPE_CHOICES = [
     (SCRIPT_TYPE_PRE_INIT, "Pre-Init Script"),
     (SCRIPT_TYPE_INIT, "Init Script"),
     (SCRIPT_TYPE_POST_INIT, "Post-Init Script"),
     (SCRIPT_TYPE_POST_RUN, "Post-Autorun Script"),
-    (SCRIPT_TYPE_SKILL, "Skill Script"),
 ]
 
 SCRIPT_TYPE_LABELS = dict(SCRIPT_TYPE_CHOICES)
+
+
+def is_legacy_skill_script_type(value: str | None) -> bool:
+    return str(value or "").strip().lower() == _LEGACY_SKILL_SCRIPT_TYPE
+
+
+def ensure_legacy_skill_script_writable(value: str | None) -> None:
+    if is_legacy_skill_script_type(value):
+        raise ValueError(LEGACY_SKILL_SCRIPT_WRITE_ERROR)
 
 RUN_ACTIVE_STATUSES = ("starting", "running", "stopping")
 
@@ -54,6 +65,7 @@ FLOWCHART_NODE_TYPE_PLAN = "plan"
 FLOWCHART_NODE_TYPE_MILESTONE = "milestone"
 FLOWCHART_NODE_TYPE_MEMORY = "memory"
 FLOWCHART_NODE_TYPE_DECISION = "decision"
+FLOWCHART_NODE_TYPE_RAG = "rag"
 FLOWCHART_NODE_TYPE_CHOICES = (
     FLOWCHART_NODE_TYPE_START,
     FLOWCHART_NODE_TYPE_END,
@@ -63,6 +75,7 @@ FLOWCHART_NODE_TYPE_CHOICES = (
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_MEMORY,
     FLOWCHART_NODE_TYPE_DECISION,
+    FLOWCHART_NODE_TYPE_RAG,
 )
 FLOWCHART_EDGE_MODE_SOLID = "solid"
 FLOWCHART_EDGE_MODE_DOTTED = "dotted"
@@ -173,6 +186,20 @@ RAG_INDEX_JOB_ACTIVE_STATUSES = (
     RAG_INDEX_JOB_STATUS_PAUSING,
 )
 
+CHAT_THREAD_STATUS_ACTIVE = "active"
+CHAT_THREAD_STATUS_ARCHIVED = "archived"
+CHAT_THREAD_STATUS_CHOICES = (
+    CHAT_THREAD_STATUS_ACTIVE,
+    CHAT_THREAD_STATUS_ARCHIVED,
+)
+
+CHAT_TURN_STATUS_SUCCEEDED = "succeeded"
+CHAT_TURN_STATUS_FAILED = "failed"
+CHAT_TURN_STATUS_CHOICES = (
+    CHAT_TURN_STATUS_SUCCEEDED,
+    CHAT_TURN_STATUS_FAILED,
+)
+
 agent_task_scripts = Table(
     "agent_task_scripts",
     Base.metadata,
@@ -240,6 +267,21 @@ flowchart_node_skills = Table(
     Column("position", Integer, nullable=True),
 )
 
+agent_skill_bindings = Table(
+    "agent_skill_bindings",
+    Base.metadata,
+    Column("agent_id", ForeignKey("agents.id"), primary_key=True),
+    Column("skill_id", ForeignKey("skills.id"), primary_key=True),
+    Column("position", Integer, nullable=False, default=1),
+)
+
+chat_thread_mcp_servers = Table(
+    "chat_thread_mcp_servers",
+    Base.metadata,
+    Column("chat_thread_id", ForeignKey("chat_threads.id"), primary_key=True),
+    Column("mcp_server_id", ForeignKey("mcp_servers.id"), primary_key=True),
+)
+
 
 class Skill(BaseModel):
     __tablename__ = "skills"
@@ -274,6 +316,12 @@ class Skill(BaseModel):
         secondary=flowchart_node_skills,
         back_populates="skills",
         order_by=flowchart_node_skills.c.position.asc(),
+    )
+    agents: Mapped[list["Agent"]] = relationship(
+        "Agent",
+        secondary=agent_skill_bindings,
+        back_populates="skills",
+        order_by=agent_skill_bindings.c.position.asc(),
     )
 
 
@@ -363,6 +411,11 @@ class MCPServer(BaseModel):
         secondary=flowchart_node_mcp_servers,
         back_populates="mcp_servers",
     )
+    chat_threads: Mapped[list["ChatThread"]] = relationship(
+        "ChatThread",
+        secondary=chat_thread_mcp_servers,
+        back_populates="mcp_servers",
+    )
     tasks: Mapped[list["AgentTask"]] = relationship(
         "AgentTask",
         secondary=agent_task_mcp_servers,
@@ -404,6 +457,11 @@ class Script(BaseModel):
         secondary=flowchart_node_scripts,
         back_populates="scripts",
     )
+
+    @classmethod
+    def create(cls, session, **kwargs):
+        ensure_legacy_skill_script_writable(kwargs.get("script_type"))
+        return super().create(session, **kwargs)
 
 
 class Attachment(BaseModel):
@@ -596,6 +654,34 @@ class RAGSourceFileState(BaseModel):
     )
 
 
+class RAGRetrievalAudit(BaseModel):
+    __tablename__ = "rag_retrieval_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    runtime_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown", index=True
+    )
+    flowchart_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("flowchart_runs.id"), nullable=True, index=True
+    )
+    flowchart_node_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("flowchart_run_nodes.id"), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    collection: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunk_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retrieval_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 class RAGSetting(BaseModel):
     __tablename__ = "rag_settings"
     __table_args__ = (
@@ -688,6 +774,37 @@ class Agent(BaseModel):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+    priorities: Mapped[list["AgentPriority"]] = relationship(
+        "AgentPriority",
+        back_populates="agent",
+        cascade="all, delete-orphan",
+        order_by="AgentPriority.position.asc(), AgentPriority.id.asc()",
+    )
+    skills: Mapped[list["Skill"]] = relationship(
+        "Skill",
+        secondary=agent_skill_bindings,
+        back_populates="agents",
+        order_by=agent_skill_bindings.c.position.asc(),
+    )
+
+
+class AgentPriority(BaseModel):
+    __tablename__ = "agent_priorities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    agent: Mapped["Agent"] = relationship("Agent", back_populates="priorities")
 
 
 class Run(BaseModel):
@@ -775,6 +892,27 @@ class AgentTask(BaseModel):
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
     kind: Mapped[str | None] = mapped_column(String(32), default="task", nullable=True)
     integration_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_role_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resolved_role_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    resolved_agent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resolved_agent_version: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    resolved_skill_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_skill_versions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_skill_manifest_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    skill_adapter_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    resolved_instruction_manifest_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    instruction_adapter_mode: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    instruction_materialized_paths_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
 
     prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1052,6 +1190,21 @@ class FlowchartRunNode(BaseModel):
         String(128), nullable=True
     )
     skill_adapter_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    resolved_role_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resolved_role_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    resolved_agent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resolved_agent_version: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    resolved_instruction_manifest_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    instruction_adapter_mode: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    instruction_materialized_paths_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -1187,6 +1340,183 @@ class Milestone(BaseModel):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class ChatThread(BaseModel):
+    __tablename__ = "chat_threads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="New chat", server_default=text("'New chat'")
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=CHAT_THREAD_STATUS_ACTIVE,
+        server_default=text("'active'"),
+        index=True,
+    )
+    model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_models.id"), nullable=True, index=True
+    )
+    selected_rag_collections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compaction_summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    model: Mapped["LLMModel | None"] = relationship("LLMModel", lazy="joined")
+    mcp_servers: Mapped[list["MCPServer"]] = relationship(
+        "MCPServer",
+        secondary=chat_thread_mcp_servers,
+        back_populates="chat_threads",
+    )
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        "ChatMessage",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.id.asc()",
+    )
+    turns: Mapped[list["ChatTurn"]] = relationship(
+        "ChatTurn",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="ChatTurn.id.asc()",
+    )
+    activity_events: Mapped[list["ChatActivityEvent"]] = relationship(
+        "ChatActivityEvent",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="ChatActivityEvent.id.asc()",
+    )
+
+
+class ChatMessage(BaseModel):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_threads.id"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    token_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    thread: Mapped["ChatThread"] = relationship("ChatThread", back_populates="messages")
+
+
+class ChatTurn(BaseModel):
+    __tablename__ = "chat_turns"
+    __table_args__ = (
+        UniqueConstraint("thread_id", "request_id", name="uq_chat_turns_thread_request"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_threads.id"), nullable=False, index=True
+    )
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_models.id"), nullable=True, index=True
+    )
+    user_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_messages.id"), nullable=True, index=True
+    )
+    assistant_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_messages.id"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=CHAT_TURN_STATUS_SUCCEEDED,
+        server_default=text("'succeeded'"),
+        index=True,
+    )
+    reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_rag_collections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_mcp_server_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rag_health_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    context_limit_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    context_usage_before: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    context_usage_after: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    history_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rag_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mcp_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    compaction_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    compaction_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    citation_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    runtime_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    thread: Mapped["ChatThread"] = relationship("ChatThread", back_populates="turns")
+    model: Mapped["LLMModel | None"] = relationship("LLMModel", lazy="joined")
+    user_message: Mapped["ChatMessage | None"] = relationship(
+        "ChatMessage", foreign_keys=[user_message_id]
+    )
+    assistant_message: Mapped["ChatMessage | None"] = relationship(
+        "ChatMessage", foreign_keys=[assistant_message_id]
+    )
+    activity_events: Mapped[list["ChatActivityEvent"]] = relationship(
+        "ChatActivityEvent",
+        back_populates="turn",
+        cascade="all, delete-orphan",
+        order_by="ChatActivityEvent.id.asc()",
+    )
+
+
+class ChatActivityEvent(BaseModel):
+    __tablename__ = "chat_activity_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_threads.id"), nullable=False, index=True
+    )
+    turn_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_turns.id"), nullable=True, index=True
+    )
+    event_class: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    thread: Mapped["ChatThread"] = relationship(
+        "ChatThread", back_populates="activity_events"
+    )
+    turn: Mapped["ChatTurn | None"] = relationship(
+        "ChatTurn", back_populates="activity_events"
     )
 
 

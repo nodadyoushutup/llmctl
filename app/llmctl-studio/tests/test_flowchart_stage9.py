@@ -41,7 +41,6 @@ from core.models import (
     SCRIPT_TYPE_POST_INIT,
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
-    SCRIPT_TYPE_SKILL,
     Script,
     TaskTemplate,
     Flowchart,
@@ -214,17 +213,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             Script(id=3, file_name="c.sh", content="", script_type=SCRIPT_TYPE_INIT),
             Script(id=4, file_name="d.sh", content="", script_type=SCRIPT_TYPE_POST_RUN),
             Script(id=5, file_name="e.sh", content="", script_type=SCRIPT_TYPE_POST_INIT),
-            Script(id=6, file_name="f.sh", content="", script_type=SCRIPT_TYPE_SKILL),
+            Script(id=6, file_name="f.sh", content="", script_type="skill"),
         ]
-        pre_init, init, post_init, post_run, skill, unknown = (
-            studio_tasks._split_scripts_by_stage(scripts)
-        )
+        pre_init, init, post_init, post_run, unknown = studio_tasks._split_scripts_by_stage(scripts)
         self.assertEqual([2], [item.id for item in pre_init])
         self.assertEqual([1, 3], [item.id for item in init])
         self.assertEqual([5], [item.id for item in post_init])
         self.assertEqual([4], [item.id for item in post_run])
-        self.assertEqual([6], [item.id for item in skill])
-        self.assertEqual([], unknown)
+        self.assertEqual([6], [item.id for item in unknown])
 
     def test_node_model_resolver_precedence_and_override(self) -> None:
         with session_scope() as session:

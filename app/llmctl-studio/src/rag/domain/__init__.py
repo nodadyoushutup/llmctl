@@ -1,1 +1,39 @@
 """RAG domain services (source lifecycle, index orchestration, chat)."""
+
+from rag.domain.contracts import (
+    RAG_CONTRACT_VERSION,
+    RAG_FLOWCHART_MODE_CHOICES,
+    RAG_FLOWCHART_MODE_DELTA_INDEX,
+    RAG_FLOWCHART_MODE_FRESH_INDEX,
+    RAG_FLOWCHART_MODE_QUERY,
+    RAG_HEALTH_CONFIGURED_HEALTHY,
+    RAG_HEALTH_CONFIGURED_UNHEALTHY,
+    RAG_HEALTH_UNCONFIGURED,
+    RAG_REASON_RETRIEVAL_EXECUTION_FAILED,
+    RAG_REASON_UNAVAILABLE_FOR_SELECTED_COLLECTIONS,
+    RagContractError,
+    execute_query_contract,
+    list_collection_contract,
+    normalize_collection_selection,
+    rag_health_snapshot,
+    run_index_for_collections,
+)
+
+__all__ = [
+    "RAG_CONTRACT_VERSION",
+    "RAG_FLOWCHART_MODE_CHOICES",
+    "RAG_FLOWCHART_MODE_DELTA_INDEX",
+    "RAG_FLOWCHART_MODE_FRESH_INDEX",
+    "RAG_FLOWCHART_MODE_QUERY",
+    "RAG_HEALTH_CONFIGURED_HEALTHY",
+    "RAG_HEALTH_CONFIGURED_UNHEALTHY",
+    "RAG_HEALTH_UNCONFIGURED",
+    "RAG_REASON_RETRIEVAL_EXECUTION_FAILED",
+    "RAG_REASON_UNAVAILABLE_FOR_SELECTED_COLLECTIONS",
+    "RagContractError",
+    "execute_query_contract",
+    "list_collection_contract",
+    "normalize_collection_selection",
+    "rag_health_snapshot",
+    "run_index_for_collections",
+]

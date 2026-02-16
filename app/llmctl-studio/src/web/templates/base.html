@@ -562,43 +562,6 @@
         border: 0;
       }
 
-      .settings-nav {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-      }
-
-      .settings-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        border-radius: 999px;
-        border: 1px solid var(--line);
-        background: rgba(24, 33, 43, 0.6);
-        color: var(--muted);
-        padding: 8px 16px;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.28em;
-        font-weight: 600;
-        transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
-      }
-
-      .settings-link:hover {
-        border-color: rgba(255, 122, 24, 0.4);
-        color: #fff;
-      }
-
-      .settings-link.is-active {
-        border-color: rgba(255, 122, 24, 0.6);
-        background: rgba(255, 122, 24, 0.12);
-        color: #fff;
-      }
-
-      .settings-link i {
-        font-size: 12px;
-      }
-
       .grid {
         display: grid;
         gap: 24px;
@@ -2520,6 +2483,18 @@
       "icon": "fa-solid fa-comment-dots",
       "url": url_for("agents.quick_task"),
     } %}
+    {% set nav_chat = {
+      "id": "chat",
+      "label": "Chat",
+      "icon": "fa-solid fa-comments",
+      "url": url_for("agents.chat_page"),
+    } %}
+    {% set nav_chat_activity = {
+      "id": "chat_activity",
+      "label": "Chat",
+      "icon": "fa-solid fa-comments",
+      "url": url_for("agents.chat_activity"),
+    } %}
     {% set nav_mcps = {
       "id": "mcps",
       "label": "MCP Servers",
@@ -2538,6 +2513,12 @@
       "icon": "fa-solid fa-code",
       "url": url_for("agents.list_scripts"),
     } %}
+    {% set nav_skills = {
+      "id": "skills",
+      "label": "Skills",
+      "icon": "fa-solid fa-wand-magic-sparkles",
+      "url": url_for("agents.list_skills"),
+    } %}
     {% set nav_attachments = {
       "id": "attachments",
       "label": "Attachments",
@@ -2549,6 +2530,14 @@
       "label": "Memories",
       "icon": "fa-solid fa-brain",
       "url": url_for("agents.list_memories"),
+    } %}
+    {% set rag_health_state = (rag_nav_health.state if rag_nav_health and rag_nav_health.state else "unconfigured") %}
+    {% set nav_rag_sources = {
+      "id": "rag_sources",
+      "label": "Sources (Unhealthy)" if rag_health_state == "configured_unhealthy" else "Sources",
+      "icon": "fa-solid fa-database",
+      "url": url_for("rag.sources_page"),
+      "visible": rag_health_state != "unconfigured",
     } %}
     {% set nav_github = {
       "id": "github",
@@ -2578,11 +2567,53 @@
       "url": url_for("agents.chroma_collections"),
       "visible": integration_overview.chroma.connected if integration_overview else False,
     } %}
-    {% set nav_settings = {
-      "id": "settings",
-      "label": "Settings",
-      "icon": "fa-solid fa-sliders",
+    {% set nav_settings_overview = {
+      "id": "settings_overview",
+      "label": "Overview",
+      "icon": "fa-solid fa-compass",
       "url": url_for("agents.settings"),
+    } %}
+    {% set nav_settings_core = {
+      "id": "settings_core",
+      "label": "Core",
+      "icon": "fa-solid fa-gear",
+      "url": url_for("agents.settings_core"),
+    } %}
+    {% set nav_settings_provider = {
+      "id": "settings_provider",
+      "label": "Provider",
+      "icon": "fa-solid fa-wave-square",
+      "url": url_for("agents.settings_provider"),
+    } %}
+    {% set nav_settings_gitconfig = {
+      "id": "settings_gitconfig",
+      "label": "GitConfig",
+      "icon": "fa-solid fa-code-branch",
+      "url": url_for("agents.settings_gitconfig"),
+    } %}
+    {% set nav_settings_integrations = {
+      "id": "settings_integrations",
+      "label": "Integrations",
+      "icon": "fa-solid fa-plug",
+      "url": url_for("agents.settings_integrations"),
+    } %}
+    {% set nav_settings_celery = {
+      "id": "settings_celery",
+      "label": "Celery",
+      "icon": "fa-solid fa-network-wired",
+      "url": url_for("agents.settings_celery"),
+    } %}
+    {% set nav_settings_runtime = {
+      "id": "settings_runtime",
+      "label": "Runtime",
+      "icon": "fa-solid fa-circle-info",
+      "url": url_for("agents.settings_runtime"),
+    } %}
+    {% set nav_settings_chat = {
+      "id": "settings_chat",
+      "label": "Chat",
+      "icon": "fa-solid fa-comments",
+      "url": url_for("agents.settings_chat"),
     } %}
     {% set nav_sections = [
       {
@@ -2591,7 +2622,7 @@
       },
       {
         "label": "Launch",
-        "items": [nav_flowcharts, nav_quick],
+        "items": [nav_chat, nav_flowcharts, nav_quick],
       },
       {
         "label": "Workflow",
@@ -2599,19 +2630,36 @@
       },
       {
         "label": "Activity",
-        "items": [nav_nodes, nav_runs],
+        "items": [nav_chat_activity, nav_nodes, nav_runs],
+      },
+      {
+        "label": "RAG",
+        "items": [nav_rag_sources],
       },
       {
         "label": "Node Resources",
-        "items": [nav_mcps, nav_models, nav_scripts],
+        "items": [nav_mcps, nav_models, nav_skills, nav_scripts],
       },
       {
         "label": "Integration",
         "items": [nav_github, nav_jira, nav_confluence, nav_chroma],
       },
       {
+        "label": "Settings",
+        "items": [
+          nav_settings_overview,
+          nav_settings_core,
+          nav_settings_provider,
+          nav_settings_gitconfig,
+          nav_settings_integrations,
+          nav_settings_celery,
+          nav_settings_runtime,
+          nav_settings_chat,
+        ],
+      },
+      {
         "label": "System",
-        "items": [nav_overview, nav_attachments, nav_settings],
+        "items": [nav_overview, nav_attachments],
       },
     ] %}
     {% set nav_items = [
@@ -2619,22 +2667,33 @@
       nav_roles,
       nav_flowcharts,
       nav_quick,
+      nav_chat,
       nav_templates,
       nav_plans,
       nav_milestones,
       nav_memories,
+      nav_chat_activity,
       nav_nodes,
       nav_runs,
+      nav_rag_sources,
       nav_mcps,
       nav_models,
+      nav_skills,
       nav_scripts,
       nav_github,
       nav_jira,
       nav_confluence,
       nav_chroma,
+      nav_settings_overview,
+      nav_settings_core,
+      nav_settings_provider,
+      nav_settings_gitconfig,
+      nav_settings_integrations,
+      nav_settings_celery,
+      nav_settings_runtime,
+      nav_settings_chat,
       nav_overview,
       nav_attachments,
-      nav_settings,
     ] %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

@@ -7,9 +7,9 @@ runtime implementation work.
 from __future__ import annotations
 
 RAG_DB_TABLE_SOURCES = "rag_sources"
-RAG_DB_TABLE_INDEX_JOBS = "rag_index_jobs"
 RAG_DB_TABLE_SOURCE_FILE_STATES = "rag_source_file_states"
 RAG_DB_TABLE_SETTINGS = "rag_settings"
+RAG_DB_TABLE_RETRIEVAL_AUDITS = "rag_retrieval_audits"
 
 RAG_QUEUE_NAMESPACE = "llmctl_studio.rag"
 RAG_QUEUE_INDEX = f"{RAG_QUEUE_NAMESPACE}.index"
@@ -38,9 +38,7 @@ RAG_STATIC_SUBDIR = "rag"
 RAG_NAV_SECTION_LABEL = "RAG"
 RAG_NAV_PAGE_CHAT = "Chat"
 RAG_NAV_PAGE_SOURCES = "Sources"
-RAG_NAV_PAGE_INDEX_JOBS = "Index Jobs"
 RAG_NAV_PAGE_LABELS = (
     RAG_NAV_PAGE_CHAT,
     RAG_NAV_PAGE_SOURCES,
-    RAG_NAV_PAGE_INDEX_JOBS,
 )
