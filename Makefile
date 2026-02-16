@@ -9,7 +9,7 @@ docs:
 	$(PYTHON3) -m sphinx -b html docs docs/_build/html
 
 docs-clean:
-	rm -rf docs/_build
+	rm -rf docs/_build docs/api
 
 docs-linkcheck:
 	$(PYTHON3) -m sphinx -b linkcheck docs docs/_build/linkcheck

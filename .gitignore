@@ -19,6 +19,7 @@ htmlcov/
 .coverage
 .coverage.*
 docs/_build/
+docs/api/
 
 # Virtual environments
 .venv/

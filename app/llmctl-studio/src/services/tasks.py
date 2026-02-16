@@ -4779,7 +4779,7 @@ def _execute_flowchart_node(
     default_model_id: int | None,
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    # Node config contract is documented in docs/flowchart-node-config.md.
+    # Node config contract is documented in planning/guides/flowchart-node-config.md.
     if node_type == FLOWCHART_NODE_TYPE_START:
         return (
             {

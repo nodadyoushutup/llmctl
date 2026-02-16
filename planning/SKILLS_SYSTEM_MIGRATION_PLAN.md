@@ -12,7 +12,7 @@ Goal: replace legacy `Skill Script` prompt-injection behavior with a first-class
 Current state in runtime and docs:
 - [ ] `SCRIPT_TYPE_SKILL` is modeled as a script type in `app/llmctl-studio/src/core/models.py`.
 - [ ] Skills are currently staged as script files and injected into prompts via `_inject_script_map` in `app/llmctl-studio/src/services/tasks.py`.
-- [ ] Docs state that skill scripts are not executed, only exposed in prompt payloads (`docs/task-types/README.md`).
+- [ ] Docs state that skill scripts are not executed, only exposed in prompt payloads (`planning/guides/task-types/README.md`).
 
 Target state:
 - [ ] Skills are first-class records/packages, separate from stage scripts.
@@ -226,7 +226,7 @@ Deliverables:
 
 Deliverables:
 - [ ] Updated task execution flow in `app/llmctl-studio/src/services/tasks.py`.
-- [ ] Updated task payload docs in `docs/task-types/README.md`.
+- [ ] Updated task payload docs in `planning/guides/task-types/README.md`.
 
 ## Stage 5 - UI and MCP/API surface
 

@@ -1,6 +1,6 @@
 # GitHub Code Review Task (kind = "github")
 
-See `docs/task-types/README.md` for shared execution details and payload conventions.
+See `planning/guides/task-types/README.md` for shared execution details and payload conventions.
 
 How it works
 - Created by `github_pull_request_code_review` in `app/llmctl-studio/src/web/views.py`.
