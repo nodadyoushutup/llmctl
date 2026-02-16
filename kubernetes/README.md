@@ -10,7 +10,7 @@ This folder deploys `llmctl-studio` with Redis and enables Kubernetes-based ephe
 - `studio-rbac.yaml`: service accounts and RBAC for Studio to create/read/delete executor Jobs.
 - `studio-pvc.yaml`: persistent storage for `/app/data`.
 - `studio-deployment.yaml`: Studio Deployment.
-- `studio-service.yaml`: ClusterIP Service on port `5155` (test port, separate from local Docker defaults).
+- `studio-service.yaml`: NodePort Service (`30155`) targeting Studio port `5155` (test port, separate from local Docker defaults).
 - `studio-secret.example.yaml`: optional secret template for API keys and `FLASK_SECRET_KEY`.
 - `executor-smoke-job.example.yaml`: optional one-off Job to validate `llmctl-executor` image.
 
@@ -32,6 +32,13 @@ Port-forward Studio:
 
 ```bash
 kubectl -n llmctl port-forward svc/llmctl-studio 5155:5155
+```
+
+Direct NodePort access (Minikube):
+
+```bash
+minikube -p llmctl ip
+# open http://<minikube-ip>:30155/
 ```
 
 ## ArgoCD application
