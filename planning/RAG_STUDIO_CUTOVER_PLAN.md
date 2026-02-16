@@ -84,7 +84,7 @@ Goal: migrate all llmctl-rag capabilities into llmctl-studio using new, Studio-o
   - [x] schedule units: minutes/hours/days/weeks
   - [x] schedule mode selectable: `fresh` or `delta`
 - [x] Baseline references:
-  - [x] Capture current RAG behavior snapshot (API/UI/screens/test outputs): `docs/RAG_STAGE0_BASELINE_SNAPSHOT_2026-02-16.md`.
+  - [x] Capture current RAG behavior snapshot (API/UI/screens/test outputs): `planning/RAG_STAGE0_BASELINE_SNAPSHOT_2026-02-16.md`.
   - [x] Record baseline commit hashes for Studio and RAG: `7b7adda10e54208a84d9812f6e0c5072baa2fdac`.
 
 Deliverables:
@@ -159,8 +159,8 @@ Deliverables:
   - [x] Map each test to a Studio parity target.
 
 Deliverables:
-- [x] Capability matrix with source files, destination modules, parity status: `docs/RAG_STAGE1_AUDIT_2026-02-16.md`.
-- [x] Risk register (high/medium/low) for cutover blockers: `docs/RAG_STAGE1_AUDIT_2026-02-16.md`.
+- [x] Capability matrix with source files, destination modules, parity status: `planning/RAG_STAGE1_AUDIT_2026-02-16.md`.
+- [x] Risk register (high/medium/low) for cutover blockers: `planning/RAG_STAGE1_AUDIT_2026-02-16.md`.
 
 ## Stage 2 - Studio target architecture and destination map
 
@@ -337,24 +337,29 @@ Stage 5 verification artifacts:
 
 ## Stage 6 - Task orchestration, queues, scheduler, checkpoints
 
-- [ ] Add Studio Celery tasks for RAG index runs.
-- [ ] Add queue routing by source type.
-- [ ] Keep RAG queue workers isolated from node execution queues.
-- [ ] Keep orchestration scoped to per-source indexing jobs in v1.
-- [ ] Port pause/resume/cancel lifecycle.
-- [ ] Port checkpoint persistence and resume behavior:
-  - [ ] fresh mode
-  - [ ] delta mode
-- [ ] Port progress payload shape for UI polling.
-- [ ] Port scheduler thread for timed source indexing.
-- [ ] Add duplicate-task guardrails per source.
-- [ ] Explicitly exclude v1 trigger modes:
-  - [ ] no filesystem watch-mode trigger path
-  - [ ] no git-poll trigger path
+- [x] Add Studio Celery tasks for RAG index runs.
+- [x] Add queue routing by source type.
+- [x] Keep RAG queue workers isolated from node execution queues.
+- [x] Keep orchestration scoped to per-source indexing jobs in v1.
+- [x] Port pause/resume/cancel lifecycle.
+- [x] Port checkpoint persistence and resume behavior:
+  - [x] fresh mode
+  - [x] delta mode
+- [x] Port progress payload shape for UI polling.
+- [x] Port scheduler thread for timed source indexing.
+- [x] Add duplicate-task guardrails per source.
+- [x] Explicitly exclude v1 trigger modes:
+  - [x] no filesystem watch-mode trigger path
+  - [x] no git-poll trigger path
 
 Deliverables:
-- [ ] Studio worker runtime reaches feature parity with RAG task lifecycle.
+- [x] Studio worker runtime reaches feature parity with RAG task lifecycle.
 - [ ] Queue and scheduler behavior validated under load.
+
+Stage 6 verification artifacts:
+- [x] Added Studio worker orchestration runtime: `app/llmctl-studio/src/rag/worker/tasks.py`.
+- [x] Added Studio source scheduler runtime: `app/llmctl-studio/src/rag/web/scheduler.py`.
+- [x] Added Stage 6 queue/orchestration tests: `app/llmctl-studio/tests/test_rag_stage6.py`.
 
 ## Stage 7 - Studio UI and API cutover
 

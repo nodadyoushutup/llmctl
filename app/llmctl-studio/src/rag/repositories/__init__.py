@@ -3,6 +3,7 @@
 from rag.repositories.index_jobs import (
     INDEX_JOB_META_DEFAULTS,
     active_index_job,
+    append_index_job_output,
     cancel_index_job,
     create_index_job,
     delete_index_job,
@@ -59,6 +60,7 @@ __all__ = [
     "SourceFileStateInput",
     "SourceFileStats",
     "active_index_job",
+    "append_index_job_output",
     "cancel_index_job",
     "clear_source_next_index",
     "create_index_job",

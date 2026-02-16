@@ -113,6 +113,19 @@ def set_index_job_celery_id(job_id: int, celery_task_id: str | None) -> RAGIndex
     return update_index_job(job_id, celery_task_id=celery_task_id)
 
 
+def append_index_job_output(job_id: int, message: str) -> RAGIndexJob | None:
+    if not message:
+        return None
+    with session_scope() as session:
+        job = session.get(RAGIndexJob, job_id)
+        if not job:
+            return None
+        existing = job.output or ""
+        job.output = f"{existing}\n{message}" if existing else message
+        job.updated_at = utcnow()
+        return job.save(session)
+
+
 def mark_index_job_running(
     job_id: int,
     *,

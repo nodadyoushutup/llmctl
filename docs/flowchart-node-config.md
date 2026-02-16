@@ -2,9 +2,8 @@
 
 This document defines `flowchart_nodes.config_json` keys used by Stage 3 node behavior handlers.
 For connector behavior and rollout guidance, see:
-- `docs/FLOWCHART_CONNECTOR_USER_GUIDE.md`
-- `docs/FLOWCHART_CONNECTOR_RELEASE_NOTE_2026-02-16.md`
-- `docs/FLOWCHART_CONNECTOR_ROLLOUT_2026-02-16.md`
+- `FLOWCHART_CONNECTOR_USER_GUIDE.md`
+- `FLOWCHART_CONNECTOR_RELEASE_NOTE_2026-02-16.md`
 
 ## Shared conventions
 

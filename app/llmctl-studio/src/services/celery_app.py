@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from celery import Celery
+from kombu import Queue
 
 from core.config import Config
 from rag.contracts import RAG_QUEUE_DRIVE, RAG_QUEUE_GIT, RAG_QUEUE_INDEX
@@ -17,6 +18,12 @@ celery_config = {
     "accept_content": ["json"],
     "result_serializer": "json",
     "timezone": "UTC",
+    "task_queues": [
+        Queue(STUDIO_TASK_QUEUE),
+        Queue(RAG_QUEUE_INDEX),
+        Queue(RAG_QUEUE_DRIVE),
+        Queue(RAG_QUEUE_GIT),
+    ],
     "task_routes": {
         "rag.worker.tasks.run_index_task": {"queue": RAG_QUEUE_INDEX},
     },

@@ -4,16 +4,44 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
-import chromadb
-from celery.utils.log import get_task_logger
+try:
+    import chromadb
+except ImportError:  # pragma: no cover
+    chromadb = None
 
-from services.celery_app import celery_app
+try:
+    from celery.utils.log import get_task_logger
+except ModuleNotFoundError:  # pragma: no cover
+    def get_task_logger(name: str):
+        return logging.getLogger(name)
+
+try:
+    from services.celery_app import celery_app
+except ModuleNotFoundError:  # pragma: no cover
+    class _NoopControl:
+        def revoke(self, *args, **kwargs) -> None:
+            return None
+
+    class _NoopCeleryApp:
+        control = _NoopControl()
+
+        def task(self, *args, **kwargs):
+            def _decorator(fn):
+                fn.run = fn
+                fn.apply_async = lambda *a, **k: SimpleNamespace(id=None)
+                return fn
+
+            return _decorator
+
+    celery_app = _NoopCeleryApp()
 from rag.engine.config import build_source_config, load_config
 from rag.integrations.git_sync import ensure_git_repo, git_fetch_and_reset
 from rag.integrations.google_drive_sync import DriveSyncStats, count_syncable_files, sync_folder
@@ -44,6 +72,7 @@ from core.models import (
 )
 from rag.repositories.index_jobs import (
     active_index_job,
+    append_index_job_output,
     cancel_index_job,
     create_index_job,
     get_index_job,
@@ -57,7 +86,6 @@ from rag.repositories.index_jobs import (
     resume_index_job,
     set_index_job_celery_id,
     set_index_job_meta,
-    update_index_job,
 )
 from rag.worker.queues import queue_for_source_kind
 
@@ -100,14 +128,7 @@ def set_task_meta(task_id: int, meta: dict[str, Any]):
 
 
 def append_task_output(task_id: int, message: str):
-    if not message:
-        return None
-    task = get_index_job(task_id)
-    if not task:
-        return None
-    existing = task.output or ""
-    output = f"{existing}\n{message}" if existing else message
-    return update_index_job(task_id, output=output)
+    return append_index_job_output(task_id, message)
 
 
 def mark_task_running(task_id: int, *, celery_task_id: str | None = None):
@@ -875,6 +896,8 @@ def run_index_task(
 
     try:
         with log_sink(_task_output_sink(task_id)):
+            if chromadb is None:
+                raise RuntimeError("chromadb package is required for RAG index jobs.")
             config = load_config()
             append_task_output(
                 task_id,

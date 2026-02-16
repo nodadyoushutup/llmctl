@@ -1,0 +1,14 @@
+# Planning Artifacts
+
+This directory contains internal planning, execution, audit, and rollout artifacts.
+
+## Current documents
+
+- `AGENT_ROLE_MARKDOWN_RUNTIME_PLAN.md`
+- `FLOWCHART_CONNECTOR_EXECUTION_PLAN.md`
+- `FLOWCHART_CONNECTOR_ROLLOUT_2026-02-16.md`
+- `RAG_STUDIO_CUTOVER_PLAN.md`
+- `RAG_STAGE0_BASELINE_SNAPSHOT_2026-02-16.md`
+- `RAG_STAGE1_AUDIT_2026-02-16.md`
+- `SKILLS_SYSTEM_MIGRATION_PLAN.md`
+- `SKILLS_STAGE0_ARCHITECTURE_DECISION_RECORD_2026-02-16.md`

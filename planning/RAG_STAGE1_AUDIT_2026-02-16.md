@@ -4,7 +4,7 @@ Stage audited from `RAG_STUDIO_CUTOVER_PLAN.md`:
 - Stage 1 - Full RAG functional audit (reference inventory)
 
 Baseline references:
-- `docs/RAG_STAGE0_BASELINE_SNAPSHOT_2026-02-16.md`
+- `planning/RAG_STAGE0_BASELINE_SNAPSHOT_2026-02-16.md`
 - `app/llmctl-rag/*` (read-only reference implementation)
 
 Audit method:

@@ -8,7 +8,7 @@ Scope: llmctl Studio Skills migration (`Skill Script` -> first-class Skills).
 
 The legacy runtime path treats skills as script records (`script_type=skill`) and injects them into prompt payloads. Stage 1 schema work is complete for first-class skill entities (`skills`, `skill_versions`, `skill_files`, `flowchart_node_skills`), but Stage 0 required scope and behavior lock for runtime and rollout.
 
-This ADR is the source of truth for Stage 0 decisions referenced by `SKILLS_SYSTEM_MIGRATION_PLAN.md`.
+This ADR is the source of truth for Stage 0 decisions referenced by `planning/SKILLS_SYSTEM_MIGRATION_PLAN.md`.
 
 ## Decisions
 
@@ -68,7 +68,7 @@ This ADR is the source of truth for Stage 0 decisions referenced by `SKILLS_SYST
 
 9. GA success criteria ownership
 
-- GA criteria are defined in `SKILLS_SYSTEM_MIGRATION_PLAN.md` under `Acceptance criteria`.
+- GA criteria are defined in `planning/SKILLS_SYSTEM_MIGRATION_PLAN.md` under `Acceptance criteria`.
 
 ## v1 scope and non-goals
 

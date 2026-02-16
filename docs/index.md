@@ -1,6 +1,7 @@
 # llmctl Documentation
 
 This site is built with Sphinx and the Read the Docs theme.
+Planning and execution artifacts are tracked in the repository `planning/` directory.
 
 ## Local build
 
@@ -17,13 +18,9 @@ vllm-local-gpu
 flowchart-node-config
 FLOWCHART_CONNECTOR_USER_GUIDE
 FLOWCHART_CONNECTOR_RELEASE_NOTE_2026-02-16
-FLOWCHART_CONNECTOR_ROLLOUT_2026-02-16
 llmctl-mcp-tool-prompts
 task-types/README
 task-types/quick
 task-types/autorun
 task-types/github
-RAG_STAGE0_BASELINE_SNAPSHOT_2026-02-16
-RAG_STAGE1_AUDIT_2026-02-16
-SKILLS_STAGE0_ARCHITECTURE_DECISION_RECORD_2026-02-16
 ```
