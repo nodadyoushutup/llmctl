@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.view_plan', plan_id=plan.id) }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to plan
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_plans') }}">
+    <i class="fa-solid fa-list"></i>
+    all plans
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">plan {{ plan.id }}</p>
+      <h2 class="section-title">Edit Plan</h2>
+    </div>
+  </div>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_plan', plan_id=plan.id) }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
+    <input
+      type="hidden"
+      name="next"
+      value="{{ request.args.get('next', url_for('agents.view_plan', plan_id=plan.id)) }}"
+    />
+    <label class="label">
+      name
+      <input type="text" name="name" value="{{ plan.name }}" class="input" required />
+    </label>
+    <label class="label">
+      completed at (optional)
+      <input
+        type="datetime-local"
+        name="completed_at"
+        value="{{ plan.completed_at.astimezone().strftime('%Y-%m-%dT%H:%M') if plan.completed_at else '' }}"
+        class="input"
+      />
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      description (optional)
+      <textarea
+        name="description"
+        class="textarea"
+      >{{ plan.description or "" }}</textarea>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save changes
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.view_plan', plan_id=plan.id) }}">
+        <i class="fa-solid fa-arrow-left"></i>
+        cancel
+      </a>
+    </div>
+  </form>
+</section>
+{% endblock %}

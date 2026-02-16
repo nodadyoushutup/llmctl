@@ -1,6 +1,6 @@
-# Quick Task (kind = "quick" or "chat")
+# Quick Node (kind = "quick" or "chat")
 
-Quick tasks do not accept task-level scripts. An agent is required (the seeded "Quick" agent is the default selection), and any scripts in the final payload are sourced from the selected agent profile, so `agent.scripts` is omitted from the examples below. The agent autoprompt is also omitted for quick tasks so the user prompt is the only instruction; the prompt text is preserved exactly as entered.
+Quick nodes do not accept task-level scripts. If no override agent is selected, runtime uses a hard-coded Quick profile (not a seeded database agent). Selecting an agent overrides that profile for the node. Quick nodes also support direct node-level model selection and optional MCP server selection. If no model is explicitly selected, runtime uses the configured default model, otherwise the first model in the list.
 
 ## Example Payloads
 

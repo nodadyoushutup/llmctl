@@ -1,68 +1,136 @@
-# LLMCTL MCP tool prompt examples
+# LLMCTL MCP Tool Prompt Examples
 
-Each example is a single-line prompt you can paste into a task. The intent is to make the tool call unambiguous.
-
-This first section only covers read-only tools that fetch data from the LLMCTL Studio DB.
+Each example is a single-line prompt you can paste into a task so tool calls are explicit.
 
 ## llmctl_get_model
-Explicit: (verified - note, it gets all known flask models and we have a Models we can set up in our DB, how do we want to handle that? maybe we call them something else, maybe we clarify this tool or make a second tool?)
+Explicit:
 ```text
 Call llmctl-mcp tool llmctl_get_model and return the model names as a simple list.
 ```
-Natural: (verified, same note as above, also took 2 tries)
+Natural:
 ```text
 What models can I query in LLMCTL Studio? List them plainly.
 ```
 
 ## llmctl_get_model_schema
-Explicit: (verified)
+Explicit:
 ```text
-Call llmctl-mcp tool llmctl_get_model_schema with model "Pipeline" and return the columns + relationships.
+Call llmctl-mcp tool llmctl_get_model_schema with model "Flowchart" and return columns + relationships.
 ```
-Natural: (verified)
+Natural:
 ```text
-Show me the LLMCTL Studio schema for the Pipeline model, including its fields and relationships.
+Show me the LLMCTL Studio schema for Flowchart, including fields and relationships.
 ```
 
 ## llmctl_get_model_rows
 Explicit:
 ```text
-Call llmctl-mcp tool llmctl_get_model_rows with {"model":"PipelineStep","filters":{"pipeline_id":1},"order_by":"step_order"} and return step IDs + task_template_id.
+Call llmctl-mcp tool llmctl_get_model_rows with {"model":"FlowchartNode","filters":{"flowchart_id":1},"order_by":"id"} and return node IDs + node_type.
 ```
 Natural:
 ```text
-List PipelineStep rows for pipeline ID 1, ordered by step_order, and include step IDs + task_template_id.
+List FlowchartNode rows for flowchart 1 and include each node id and type.
 ```
 
-## llmctl_get_pipeline
-Explicit: (verified)
+## llmctl_get_flowchart
+Explicit:
 ```text
-Call llmctl-mcp tool llmctl_get_pipeline with {"limit":50,"order_by":"id"} and return pipeline IDs + names only.
+Call llmctl-mcp tool llmctl_get_flowchart with {"limit":50,"order_by":"id"} and return flowchart IDs + names.
 ```
-Natural: (verified)
+Natural:
 ```text
-List the LLMCTL Studio pipelines and include each ID and name.
+List all flowcharts in LLMCTL Studio with their IDs and names.
 ```
 
-## llmctl_get_pipeline (by id)
-Explicit: (failed, doesnt look like it used the tool)
+## llmctl_get_flowchart (by id with graph)
+Explicit:
 ```text
-Call llmctl-mcp tool llmctl_get_pipeline with {"pipeline_id":1,"include_steps":true} and summarize the pipeline ID 1 name + steps.
+Call llmctl-mcp tool llmctl_get_flowchart with {"flowchart_id":1,"include_graph":true,"include_validation":true} and summarize nodes, edges, and validation errors.
 ```
-Natural: (failed)
+Natural:
 ```text
-Show me LLMCTL Studio pipeline ID 1 with its steps.
+Show flowchart 1 with its full graph and whether it validates.
+```
+
+## llmctl_get_flowchart_graph
+Explicit:
+```text
+Call llmctl-mcp tool llmctl_get_flowchart_graph with {"flowchart_id":1} and return node IDs, edge count, and validation.
+```
+Natural:
+```text
+Give me the graph for flowchart 1 and tell me if it is valid.
+```
+
+## llmctl_get_flowchart_run
+Explicit:
+```text
+Call llmctl-mcp tool llmctl_get_flowchart_run with {"run_id":1,"include_node_runs":true} and summarize run status and node-run statuses.
+```
+Natural:
+```text
+Show flowchart run 1, including all node runs.
+```
+
+## llmctl_get_node_run
+Explicit:
+```text
+Call llmctl-mcp tool llmctl_get_node_run with {"flowchart_run_id":1,"order_by":"execution_index"} and return node run id, flowchart_node_id, status.
+```
+Natural:
+```text
+List node runs for flowchart run 1 and include node id and status.
 ```
 
 ## llmctl_get_agent_task
-Explicit: (verified)
+Explicit:
 ```text
 Call llmctl-mcp tool llmctl_get_agent_task with {"hours":24,"limit":50,"order_by":"finished_at","descending":true} and return task IDs + statuses.
 ```
 Natural:
 ```text
-What LLMCTL Studio tasks completed in the last 24 hours? List their IDs and statuses.
+What tasks completed in the last 24 hours? List IDs and statuses.
 ```
 
-## (Write / action tools)
-Write/action tools are intentionally omitted for now to keep the prompt list focused on read-only queries. We can add them back once the read tools are behaving as expected.
+## llmctl_get_plan
+Explicit:
+```text
+Call llmctl-mcp tool llmctl_get_plan with {"plan_id":1,"include_stages":true,"include_tasks":true} and summarize stages + tasks.
+```
+Natural:
+```text
+Show me plan 1 with all stages and tasks.
+```
+
+## llmctl_get_milestone
+Explicit:
+```text
+Call llmctl-mcp tool llmctl_get_milestone with {"limit":50,"order_by":"due_date"} and return milestone IDs, names, status, progress_percent.
+```
+Natural:
+```text
+List milestones with status and progress.
+```
+
+## llmctl_get_memory
+Explicit:
+```text
+Call llmctl-mcp tool llmctl_get_memory with {"order_by":"updated_at","descending":true,"limit":20}.
+```
+Natural:
+```text
+Show the latest memories.
+```
+
+## Write/Action Tools Now Available
+- `llmctl_create_flowchart`, `llmctl_update_flowchart`, `llmctl_delete_flowchart`
+- `llmctl_update_flowchart_graph`
+- `start_flowchart`, `cancel_flowchart_run`
+- `llmctl_set_flowchart_node_model`
+- `llmctl_bind_flowchart_node_mcp`, `llmctl_unbind_flowchart_node_mcp`
+- `llmctl_bind_flowchart_node_script`, `llmctl_unbind_flowchart_node_script`, `llmctl_reorder_flowchart_node_scripts`
+- `llmctl_create_memory`, `llmctl_update_memory`, `llmctl_delete_memory`
+- `llmctl_create_milestone`, `llmctl_update_milestone`, `llmctl_delete_milestone`
+- `llmctl_create_plan`, `llmctl_update_plan`, `llmctl_delete_plan`
+- `llmctl_create_plan_stage`, `llmctl_update_plan_stage`, `llmctl_delete_plan_stage`
+- `llmctl_create_plan_task`, `llmctl_update_plan_task`, `llmctl_delete_plan_task`

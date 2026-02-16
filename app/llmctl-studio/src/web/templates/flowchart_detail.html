@@ -1,0 +1,3640 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_flowcharts') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to flowcharts
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.edit_flowchart', flowchart_id=flowchart.id) }}">
+    <i class="fa-solid fa-pen-to-square"></i>
+    edit metadata
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.view_flowchart_history', flowchart_id=flowchart.id) }}">
+    <i class="fa-solid fa-clock-rotate-left"></i>
+    history
+  </a>
+{% endblock %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <button type="button" class="btn btn-primary" id="saveGraphButton">
+      <i class="fa-solid fa-floppy-disk"></i>
+      save graph
+    </button>
+    <button type="button" class="btn btn-secondary" id="runFlowchartButton">
+      <i class="fa-solid fa-play"></i>
+      run flowchart
+    </button>
+    <button type="button" class="btn btn-secondary" id="stopFlowchartButton">
+      <i class="fa-solid fa-stop"></i>
+      stop flowchart
+    </button>
+    <button type="button" class="btn btn-danger" id="forceStopFlowchartButton">
+      <i class="fa-solid fa-ban"></i>
+      force stop
+    </button>
+    <form
+      method="post"
+      action="{{ url_for('agents.delete_flowchart', flowchart_id=flowchart.id) }}"
+      onsubmit="return confirm('Delete this flowchart?');"
+    >
+      <input type="hidden" name="next" value="{{ url_for('agents.list_flowcharts') }}" />
+      <button type="submit" class="icon-button icon-button-danger" aria-label="Delete flowchart" title="Delete flowchart">
+        <i class="fa-solid fa-trash"></i>
+      </button>
+    </form>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card flowchart-workspace-card">
+  <p class="muted flowchart-meta-inline" style="margin-top: 12px;">
+    flowchart {{ flowchart.id }}: {{ flowchart.name }}
+    {% if flowchart.description %}
+      | {{ flowchart.description }}
+    {% endif %}
+    | nodes {{ flowchart.max_node_executions if flowchart.max_node_executions else "-" }}
+    | runtime {{ flowchart.max_runtime_minutes if flowchart.max_runtime_minutes else "-" }}
+    | parallel {{ flowchart.max_parallel_nodes }}
+    | created {{ flowchart.created_at }}
+    | updated {{ flowchart.updated_at }}
+    | <span id="flowchartValidation" class="flowchart-inline-status"></span>
+    <span id="flowchartMessage" class="flowchart-inline-status"></span>
+  </p>
+
+  <div class="flow-layout" style="margin-top: 16px;">
+    <aside class="flow-sidebar">
+      <p class="eyebrow">node bar</p>
+      <div class="flow-palette" id="nodePalette"></div>
+    </aside>
+
+    <div class="flow-editor">
+      <div class="flow-editor-toolbar">
+        <div class="row" style="gap: 8px; align-items: center;">
+          <button type="button" class="icon-button" id="zoomOutButton" aria-label="Zoom out" title="Zoom out">
+            <i class="fa-solid fa-magnifying-glass-minus"></i>
+          </button>
+          <button type="button" class="icon-button" id="zoomInButton" aria-label="Zoom in" title="Zoom in">
+            <i class="fa-solid fa-magnifying-glass-plus"></i>
+          </button>
+          <button type="button" class="icon-button" id="resetViewButton" aria-label="Reset view" title="Reset view">
+            <i class="fa-solid fa-compass"></i>
+          </button>
+          <span class="muted" id="zoomLabel">100%</span>
+        </div>
+        <div class="muted" id="editorStateLabel">ready</div>
+      </div>
+
+      <div class="flow-viewport" id="flowViewport">
+        <div class="flow-world" id="flowWorld">
+          <svg class="flow-edge-layer" id="flowEdgeLayer" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="flow-arrow" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L10,4 L0,8 z" fill="currentColor"></path>
+              </marker>
+            </defs>
+          </svg>
+          <div class="flow-node-layer" id="flowNodeLayer"></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="flow-inspector" id="flowInspector"></aside>
+  </div>
+
+</section>
+
+<style>
+  .main {
+    overflow: hidden;
+  }
+
+  .content {
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    padding-bottom: 24px;
+  }
+
+  .flowchart-workspace-card {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .flowchart-meta-inline {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .flowchart-inline-status {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #94a3b8;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 0 auto;
+  }
+
+  .flowchart-inline-status.is-success {
+    color: #86efac;
+  }
+
+  .flowchart-inline-status.is-error {
+    color: #fca5a5;
+  }
+
+  .flow-layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) 320px;
+    gap: 14px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .flow-sidebar,
+  .flow-inspector,
+  .flow-editor {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(17, 24, 33, 0.66);
+  }
+
+  .flow-sidebar,
+  .flow-inspector {
+    padding: 12px;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .flow-palette {
+    margin-top: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .flow-palette-item {
+    width: 100%;
+    justify-content: flex-start;
+    cursor: grab;
+    text-transform: capitalize;
+  }
+
+  .flow-editor {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .flow-editor-toolbar {
+    border-bottom: 1px solid var(--line);
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .flow-viewport {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background-image: radial-gradient(circle at 1px 1px, rgba(150, 164, 180, 0.2) 1px, transparent 0);
+    background-size: 24px 24px;
+    cursor: grab;
+  }
+
+  .flow-viewport.is-panning {
+    cursor: grabbing;
+  }
+
+  .flow-world {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 200000px;
+    height: 200000px;
+    transform-origin: 0 0;
+  }
+
+  .flow-edge-layer,
+  .flow-node-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .flow-edge-layer {
+    overflow: visible;
+  }
+
+  .flow-node-layer {
+    pointer-events: none;
+  }
+
+  .flow-node {
+    position: absolute;
+    width: 190px;
+    min-height: 90px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(19, 28, 39, 0.96);
+    padding: 12px;
+    color: #e2e8f0;
+    box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
+    user-select: none;
+    pointer-events: auto;
+  }
+
+  .flow-node.is-type-start {
+    width: 108px;
+    min-height: 108px;
+    height: 108px;
+    border-radius: 999px;
+    padding: 10px;
+    border-color: rgba(34, 197, 94, 0.74);
+    background: linear-gradient(140deg, rgba(16, 46, 34, 0.94), rgba(17, 24, 33, 0.98));
+  }
+
+  .flow-node.is-type-end {
+    width: 108px;
+    min-height: 108px;
+    height: 108px;
+    border-radius: 999px;
+    padding: 10px;
+    border-color: rgba(239, 68, 68, 0.8);
+    background: linear-gradient(140deg, rgba(77, 21, 21, 0.95), rgba(29, 13, 13, 0.99));
+  }
+
+  .flow-node.is-type-flowchart {
+    width: 108px;
+    min-height: 108px;
+    height: 108px;
+    border-radius: 999px;
+    padding: 10px;
+    border-color: rgba(56, 189, 248, 0.74);
+    background: linear-gradient(140deg, rgba(10, 49, 69, 0.94), rgba(17, 24, 33, 0.98));
+  }
+
+  .flow-node.is-type-task {
+    border-color: rgba(59, 130, 246, 0.74);
+    background: linear-gradient(140deg, rgba(18, 37, 68, 0.94), rgba(17, 24, 33, 0.98));
+  }
+
+  .flow-node.is-type-plan {
+    width: 132px;
+    min-height: 132px;
+    height: 132px;
+    border-radius: 12px;
+  }
+
+  .flow-node.is-type-plan {
+    border-color: rgba(250, 204, 21, 0.78);
+    background: linear-gradient(140deg, rgba(66, 57, 16, 0.94), rgba(17, 24, 33, 0.98));
+  }
+
+  .flow-node.is-type-memory {
+    --memory-corner-x: 27px;
+    width: 190px;
+    min-height: 108px;
+    height: 108px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .flow-node.is-type-memory::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(236, 72, 153, 0.74);
+    clip-path: polygon(
+      var(--memory-corner-x) 0,
+      calc(100% - var(--memory-corner-x)) 0,
+      100% 100%,
+      0 100%
+    );
+    box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .flow-node.is-type-memory::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    background: linear-gradient(140deg, rgba(70, 20, 54, 0.94), rgba(17, 24, 33, 0.98));
+    clip-path: polygon(
+      var(--memory-corner-x) 0,
+      calc(100% - var(--memory-corner-x)) 0,
+      100% 100%,
+      0 100%
+    );
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .flow-node.is-type-memory .flow-node-content {
+    inset: 12px 18px;
+    z-index: 1;
+  }
+
+  .flow-node.is-type-milestone {
+    --milestone-corner-x: 23px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .flow-node.is-type-milestone::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(168, 85, 247, 0.74);
+    clip-path: polygon(
+      var(--milestone-corner-x) 0,
+      calc(100% - var(--milestone-corner-x)) 0,
+      100% 50%,
+      calc(100% - var(--milestone-corner-x)) 100%,
+      var(--milestone-corner-x) 100%,
+      0 50%
+    );
+    box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .flow-node.is-type-milestone::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    background: linear-gradient(140deg, rgba(56, 26, 84, 0.94), rgba(17, 24, 33, 0.98));
+    clip-path: polygon(
+      var(--milestone-corner-x) 0,
+      calc(100% - var(--milestone-corner-x)) 0,
+      100% 50%,
+      calc(100% - var(--milestone-corner-x)) 100%,
+      var(--milestone-corner-x) 100%,
+      0 50%
+    );
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .flow-node.is-type-milestone .flow-node-content {
+    inset: 12px 20px;
+    z-index: 1;
+  }
+
+  .flow-node.is-type-decision {
+    width: 144px;
+    min-height: 144px;
+    height: 144px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .flow-node.is-type-decision::before {
+    content: "";
+    position: absolute;
+    inset: 17.5px;
+    border: 1px solid rgba(20, 184, 166, 0.74);
+    border-radius: 12px;
+    background: linear-gradient(140deg, rgba(14, 58, 58, 0.94), rgba(17, 24, 33, 0.98));
+    transform: rotate(45deg);
+    transform-origin: center;
+    box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
+    z-index: 0;
+  }
+
+  .flow-node.is-running {
+    border-color: rgba(255, 122, 24, 0.95);
+    background: linear-gradient(140deg, rgba(93, 42, 8, 0.96), rgba(27, 18, 13, 0.99));
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.32), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-selected {
+    border-color: rgba(255, 122, 24, 0.75);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.24);
+  }
+
+  .flow-node.is-running.is-selected {
+    border-color: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.36), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-decision.is-selected,
+  .flow-node.is-type-decision.is-running,
+  .flow-node.is-type-decision.is-running.is-selected {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .flow-node.is-type-decision.is-selected::before {
+    border-color: rgba(255, 122, 24, 0.75);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.24), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-decision.is-running::before {
+    border-color: rgba(255, 122, 24, 0.95);
+    background: linear-gradient(140deg, rgba(93, 42, 8, 0.96), rgba(27, 18, 13, 0.99));
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.32), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-decision.is-running.is-selected::before {
+    border-color: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.36), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-memory.is-selected,
+  .flow-node.is-type-memory.is-running,
+  .flow-node.is-type-memory.is-running.is-selected {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .flow-node.is-type-memory.is-selected::before {
+    background: rgba(255, 122, 24, 0.75);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.24), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-memory.is-running::before {
+    background: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.32), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-memory.is-running::after {
+    background: linear-gradient(140deg, rgba(93, 42, 8, 0.96), rgba(27, 18, 13, 0.99));
+  }
+
+  .flow-node.is-type-memory.is-running.is-selected::before {
+    background: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.36), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-milestone.is-selected,
+  .flow-node.is-type-milestone.is-running,
+  .flow-node.is-type-milestone.is-running.is-selected {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .flow-node.is-type-milestone.is-selected::before {
+    background: rgba(255, 122, 24, 0.75);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.24), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-milestone.is-running::before {
+    background: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.32), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node.is-type-milestone.is-running::after {
+    background: linear-gradient(140deg, rgba(93, 42, 8, 0.96), rgba(27, 18, 13, 0.99));
+  }
+
+  .flow-node.is-type-milestone.is-running.is-selected::before {
+    background: rgba(255, 122, 24, 0.95);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.36), 0 14px 28px rgba(9, 14, 21, 0.35);
+  }
+
+  .flow-node-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin: 0;
+    color: #fff;
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .flow-node-content {
+    pointer-events: none;
+    position: absolute;
+    inset: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    overflow: hidden;
+  }
+
+  .flow-node.is-type-decision .flow-node-content {
+    inset: 30px;
+    z-index: 1;
+  }
+
+  .flow-node.is-type-decision .flow-node-title {
+    -webkit-line-clamp: 3;
+  }
+
+  .flow-node-connector {
+    position: absolute;
+    left: var(--connector-x);
+    top: var(--connector-y);
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.55);
+    background: rgba(15, 23, 34, 0.98);
+    transform: translate(-50%, -50%) scale(0.86);
+    cursor: crosshair;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+    z-index: 2;
+  }
+
+  .flow-node:hover .flow-node-connector,
+  .flow-node.is-selected .flow-node-connector,
+  .flow-node.is-connecting .flow-node-connector {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  .flow-node-connector.is-hot {
+    border-color: rgba(255, 122, 24, 0.95);
+    background: rgba(255, 122, 24, 0.9);
+    box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.28);
+  }
+
+  .flow-edge-path {
+    stroke: rgba(148, 163, 184, 0.72);
+    stroke-width: 2;
+    fill: none;
+    marker-end: url(#flow-arrow);
+    color: rgba(148, 163, 184, 0.72);
+    cursor: pointer;
+  }
+
+  .flow-edge-hit {
+    stroke: transparent;
+    stroke-width: 18;
+    fill: none;
+    marker-end: none;
+    pointer-events: stroke;
+    cursor: pointer;
+  }
+
+  .flow-edge-path.is-selected {
+    stroke: rgba(255, 122, 24, 0.95);
+    color: rgba(255, 122, 24, 0.95);
+    stroke-width: 2.5;
+  }
+
+  .flow-edge-label {
+    fill: #cbd5e1;
+    font-size: 11px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
+  .flow-inspector .label {
+    font-size: 12px;
+  }
+
+  .flow-checkbox-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+    min-width: 0;
+    max-height: 170px;
+    overflow: auto;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(14, 20, 30, 0.72);
+  }
+
+  .flow-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    font-size: 12px;
+    color: #d5deea;
+  }
+
+  .flow-checkbox-item input {
+    flex: 0 0 auto;
+  }
+
+  .flow-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .flow-checkbox-name {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .flow-inline-meta {
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--muted);
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .flow-stage-script-sections {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+    min-width: 0;
+  }
+
+  .flow-stage-script-section {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px;
+    background: rgba(14, 20, 30, 0.62);
+    min-width: 0;
+  }
+
+  .flow-stage-script-header {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #9fb0c4;
+    margin: 0;
+  }
+
+  .flow-stage-script-note {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .flow-section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 14px 0 8px;
+  }
+
+  .flow-inspector-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .flow-inspector-panel {
+    margin-top: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(14, 20, 30, 0.52);
+    overflow: hidden;
+  }
+
+  .flow-inspector-panel-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .flow-inspector-panel-body {
+    border-top: 1px solid var(--line);
+    padding: 10px;
+  }
+
+  .flow-inspector-heading {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .flow-inspector-heading .section-title {
+    margin: 0;
+    min-width: 0;
+  }
+
+  @media (max-width: 1320px) {
+    .flow-layout {
+      grid-template-columns: 220px minmax(0, 1fr);
+    }
+
+    .flow-inspector {
+      grid-column: 1 / -1;
+      min-height: 280px;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .content {
+      overflow: auto;
+    }
+
+    .flowchart-meta-inline {
+      font-size: 10px;
+    }
+
+    .flow-layout {
+      grid-template-columns: 1fr;
+      overflow: auto;
+    }
+
+    .flow-sidebar,
+    .flow-inspector {
+      min-height: 0;
+    }
+
+    .flow-viewport {
+      min-height: 460px;
+    }
+
+  }
+</style>
+
+<script>
+  (() => {
+    const flowchartId = Number({{ flowchart.id | tojson }});
+    const initialGraph = {{ graph | tojson }};
+    const initialValidation = {{ validation | tojson }};
+    const initialSelectedNodeId = {{ selected_node_id | tojson }};
+    const initialActiveRunId = {{ active_run_id | tojson }};
+    const catalog = {{ catalog | tojson }};
+    const nodeTypes = {{ node_types | tojson }};
+    const START_NODE_TYPE = "start";
+    const END_NODE_TYPE = "end";
+    const FLOWCHART_NODE_TYPE = "flowchart";
+    const addableNodeTypes = nodeTypes.filter((nodeType) => nodeType !== START_NODE_TYPE);
+    const activeRunStatuses = new Set(["queued", "running", "stopping"]);
+    const compatibility = {
+      start: { model: false, mcp: false, scripts: false },
+      end: { model: false, mcp: false, scripts: false },
+      flowchart: { model: false, mcp: false, scripts: false },
+      task: { model: true, mcp: true, scripts: true },
+      plan: { model: true, mcp: true, scripts: true },
+      milestone: { model: true, mcp: true, scripts: true },
+      memory: { model: true, mcp: true, scripts: true },
+      decision: { model: false, mcp: true, scripts: true },
+    };
+    const scriptTypeLabels = {
+      pre_init: "Pre-Init Script",
+      init: "Init Script",
+      post_init: "Post-Init Script",
+      post_run: "Post-Autorun Script",
+      skill: "Skill Script",
+    };
+    const scriptStageSections = [
+      {
+        stage_key: "pre_init",
+        stage_label: "Pre Init",
+        script_types: ["pre_init"],
+      },
+      {
+        stage_key: "init",
+        stage_label: "Init",
+        script_types: ["init"],
+      },
+      {
+        stage_key: "post_init",
+        stage_label: "Post Init",
+        script_types: ["post_init"],
+      },
+      {
+        stage_key: "llm_query",
+        stage_label: "LLM Query",
+        script_types: ["skill"],
+        note: "Skill scripts are available to the LLM during this stage.",
+      },
+      {
+        stage_key: "post_run",
+        stage_label: "Post Autorun",
+        script_types: ["post_run"],
+      },
+    ];
+    const typesWithRef = new Set([FLOWCHART_NODE_TYPE, "plan", "milestone", "memory"]);
+    const typesWithRequiredRef = new Set([FLOWCHART_NODE_TYPE, "plan", "milestone"]);
+    const NODE_WIDTH = 190;
+    const NODE_HEIGHT = 92;
+    const START_NODE_SIZE = 108;
+    const PLAN_NODE_SIZE = 132;
+    const MEMORY_NODE_WIDTH = 190;
+    const MEMORY_NODE_HEIGHT = 108;
+    const DECISION_NODE_SIZE = 144;
+    const DEFAULT_MAX_OUTGOING_EDGES = 1;
+    const DECISION_MAX_OUTGOING_EDGES = 3;
+    const END_MAX_OUTGOING_EDGES = 0;
+    const WORKSPACE_WIDTH = 200000;
+    const WORKSPACE_HEIGHT = 200000;
+    let worldOriginX = WORKSPACE_WIDTH / 2;
+    let worldOriginY = WORKSPACE_HEIGHT / 2;
+    const CONNECTOR_GEOMETRY = [
+      { id: "t1", side: "top", x: 22, y: 0 },
+      { id: "t2", side: "top", x: 50, y: 0 },
+      { id: "t3", side: "top", x: 78, y: 0 },
+      { id: "l1", side: "left", x: 0, y: 50 },
+      { id: "l2", side: "left", x: 0, y: 22 },
+      { id: "l3", side: "left", x: 0, y: 78 },
+      { id: "r1", side: "right", x: 100, y: 50 },
+      { id: "r2", side: "right", x: 100, y: 22 },
+      { id: "r3", side: "right", x: 100, y: 78 },
+      { id: "b1", side: "bottom", x: 22, y: 100 },
+      { id: "b2", side: "bottom", x: 50, y: 100 },
+      { id: "b3", side: "bottom", x: 78, y: 100 },
+    ];
+    const DEFAULT_CONNECTOR_LAYOUT = [
+      { id: "t1", side: "top", x: 22, y: 0 },
+      { id: "t2", side: "top", x: 50, y: 0 },
+      { id: "t3", side: "top", x: 78, y: 0 },
+      { id: "l1", side: "left", x: 0, y: 50 },
+      { id: "r1", side: "right", x: 100, y: 50 },
+      { id: "b1", side: "bottom", x: 22, y: 100 },
+      { id: "b2", side: "bottom", x: 50, y: 100 },
+      { id: "b3", side: "bottom", x: 78, y: 100 },
+    ];
+    const START_CONNECTOR_LAYOUT = [
+      { id: "t2", side: "top", x: 50, y: 0 },
+      { id: "r1", side: "right", x: 100, y: 50 },
+      { id: "b2", side: "bottom", x: 50, y: 100 },
+      { id: "l1", side: "left", x: 0, y: 50 },
+    ];
+    const TASK_CONNECTOR_LAYOUT = CONNECTOR_GEOMETRY;
+    const PLAN_CONNECTOR_LAYOUT = CONNECTOR_GEOMETRY;
+    const MILESTONE_CONNECTOR_LAYOUT = [
+      { id: "t1", side: "top", x: 12.1, y: 0 },
+      { id: "t2", side: "top", x: 50, y: 0 },
+      { id: "t3", side: "top", x: 87.9, y: 0 },
+      { id: "l1", side: "left", x: 0, y: 50 },
+      { id: "r1", side: "right", x: 100, y: 50 },
+      { id: "b1", side: "bottom", x: 12.1, y: 100 },
+      { id: "b2", side: "bottom", x: 50, y: 100 },
+      { id: "b3", side: "bottom", x: 87.9, y: 100 },
+    ];
+    const MEMORY_CONNECTOR_LAYOUT = [
+      { id: "m1", side: "top", x: 14.2, y: 0 },
+      { id: "m2", side: "top", x: 50, y: 0 },
+      { id: "m3", side: "top", x: 85.8, y: 0 },
+      { id: "m4", side: "left", x: 7.1, y: 50 },
+      { id: "m5", side: "right", x: 92.9, y: 50 },
+      { id: "m6", side: "bottom", x: 0, y: 100 },
+      { id: "m7", side: "bottom", x: 50, y: 100 },
+      { id: "m8", side: "bottom", x: 100, y: 100 },
+    ];
+    const DECISION_CONNECTOR_LAYOUT = [
+      { id: "t2", side: "top", x: 50, y: 0 },
+      { id: "r1", side: "right", x: 100, y: 50 },
+      { id: "b2", side: "bottom", x: 50, y: 100 },
+      { id: "l1", side: "left", x: 0, y: 50 },
+    ];
+    const CORE_CONNECTOR_BY_ID = new Map(CONNECTOR_GEOMETRY.map((item) => [item.id, item]));
+    const MILESTONE_CONNECTOR_BY_ID = new Map(
+      MILESTONE_CONNECTOR_LAYOUT.map((item) => [item.id, item])
+    );
+    const CONNECTOR_BY_ID = new Map(
+      [...CONNECTOR_GEOMETRY, ...MEMORY_CONNECTOR_LAYOUT].map((item) => [item.id, item])
+    );
+
+    function nodeWidthForType(nodeType) {
+      const type = String(nodeType || "");
+      if (type === START_NODE_TYPE || type === END_NODE_TYPE || type === FLOWCHART_NODE_TYPE) {
+        return START_NODE_SIZE;
+      }
+      if (type === "plan") {
+        return PLAN_NODE_SIZE;
+      }
+      if (type === "memory") {
+        return MEMORY_NODE_WIDTH;
+      }
+      if (type === "decision") {
+        return DECISION_NODE_SIZE;
+      }
+      return NODE_WIDTH;
+    }
+
+    function nodeHeightForType(nodeType) {
+      const type = String(nodeType || "");
+      if (type === START_NODE_TYPE || type === END_NODE_TYPE || type === FLOWCHART_NODE_TYPE) {
+        return START_NODE_SIZE;
+      }
+      if (type === "plan") {
+        return PLAN_NODE_SIZE;
+      }
+      if (type === "memory") {
+        return MEMORY_NODE_HEIGHT;
+      }
+      if (type === "decision") {
+        return DECISION_NODE_SIZE;
+      }
+      return NODE_HEIGHT;
+    }
+
+    function connectorLayoutForNode(node) {
+      const nodeType = String(node && node.node_type ? node.node_type : "");
+      if (nodeType === START_NODE_TYPE || nodeType === END_NODE_TYPE || nodeType === FLOWCHART_NODE_TYPE) {
+        return START_CONNECTOR_LAYOUT;
+      }
+      if (nodeType === "task") {
+        return TASK_CONNECTOR_LAYOUT;
+      }
+      if (nodeType === "plan") {
+        return PLAN_CONNECTOR_LAYOUT;
+      }
+      if (nodeType === "milestone") {
+        return MILESTONE_CONNECTOR_LAYOUT;
+      }
+      if (nodeType === "memory") {
+        return MEMORY_CONNECTOR_LAYOUT;
+      }
+      if (nodeType === "decision") {
+        return DECISION_CONNECTOR_LAYOUT;
+      }
+      return DEFAULT_CONNECTOR_LAYOUT;
+    }
+
+    function nodeWidth(node) {
+      return nodeWidthForType(node && node.node_type ? node.node_type : "");
+    }
+
+    function nodeHeight(node) {
+      return nodeHeightForType(node && node.node_type ? node.node_type : "");
+    }
+
+    function coordinateOr(value, fallback = 0) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function graphToWorldX(x) {
+      return coordinateOr(x, 0) + worldOriginX;
+    }
+
+    function graphToWorldY(y) {
+      return coordinateOr(y, 0) + worldOriginY;
+    }
+
+    function worldToGraphX(x) {
+      return coordinateOr(x, 0) - worldOriginX;
+    }
+
+    function worldToGraphY(y) {
+      return coordinateOr(y, 0) - worldOriginY;
+    }
+
+    const viewportEl = document.getElementById("flowViewport");
+    const worldEl = document.getElementById("flowWorld");
+    const edgeLayerEl = document.getElementById("flowEdgeLayer");
+    const nodeLayerEl = document.getElementById("flowNodeLayer");
+    const inspectorEl = document.getElementById("flowInspector");
+    const paletteEl = document.getElementById("nodePalette");
+    const messageEl = document.getElementById("flowchartMessage");
+    const validationEl = document.getElementById("flowchartValidation");
+    const saveButton = document.getElementById("saveGraphButton");
+    const runButton = document.getElementById("runFlowchartButton");
+    const stopButton = document.getElementById("stopFlowchartButton");
+    const forceStopButton = document.getElementById("forceStopFlowchartButton");
+    const zoomInButton = document.getElementById("zoomInButton");
+    const zoomOutButton = document.getElementById("zoomOutButton");
+    const resetViewButton = document.getElementById("resetViewButton");
+    const zoomLabelEl = document.getElementById("zoomLabel");
+    const editorStateLabel = document.getElementById("editorStateLabel");
+
+    let nextClientNodeId = 1;
+    let nextClientEdgeId = 1;
+    const state = {
+      nodes: [],
+      edges: [],
+      selectedNodeToken: null,
+      selectedEdgeId: null,
+      connectingFromToken: null,
+      connectingFromHandleId: null,
+      connectingHoverToken: null,
+      connectingHoverHandleId: null,
+      pointerGraph: null,
+      draggingNodeToken: null,
+      dragOffsetX: 0,
+      dragOffsetY: 0,
+      panning: false,
+      panStartClientX: 0,
+      panStartClientY: 0,
+      panStartX: 0,
+      panStartY: 0,
+      panX: 0,
+      panY: 0,
+      zoom: 1,
+      validation: initialValidation,
+      dirty: false,
+      saving: false,
+      runningNodeIds: new Set(),
+      activeRunId: Number.isInteger(initialActiveRunId) && initialActiveRunId > 0 ? initialActiveRunId : null,
+      runPollTimer: null,
+      runActionPending: false,
+      inspectorPanelOpen: new Map(),
+    };
+
+    function setWorldOriginFromStartNode() {
+      const startNode = state.nodes.find((node) => String(node.node_type || "") === START_NODE_TYPE);
+      if (!startNode) {
+        worldOriginX = WORKSPACE_WIDTH / 2;
+        worldOriginY = WORKSPACE_HEIGHT / 2;
+        return;
+      }
+      worldOriginX = WORKSPACE_WIDTH / 2 - coordinateOr(startNode.x, 0);
+      worldOriginY = WORKSPACE_HEIGHT / 2 - coordinateOr(startNode.y, 0);
+    }
+
+    function centerViewOnStartNode() {
+      const startNode = state.nodes.find((node) => String(node.node_type || "") === START_NODE_TYPE);
+      const targetWorldX = startNode
+        ? graphToWorldX(startNode.x) + nodeWidth(startNode) / 2
+        : WORKSPACE_WIDTH / 2;
+      const targetWorldY = startNode
+        ? graphToWorldY(startNode.y) + nodeHeight(startNode) / 2
+        : WORKSPACE_HEIGHT / 2;
+      state.panX = viewportEl.clientWidth / 2 - targetWorldX * state.zoom;
+      state.panY = viewportEl.clientHeight / 2 - targetWorldY * state.zoom;
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function nodeToken(node) {
+      if (node.id !== null && node.id !== undefined) {
+        return String(node.id);
+      }
+      return String(node.client_id);
+    }
+
+    function inspectorPanelStorageKey(node, panelKey) {
+      return `${nodeToken(node)}::${String(panelKey || "").trim().toLowerCase()}`;
+    }
+
+    function defaultInspectorPanelOpen(panelKey) {
+      const key = String(panelKey || "").trim().toLowerCase();
+      if (key === "metadata") {
+        return true;
+      }
+      return false;
+    }
+
+    function isInspectorPanelOpen(node, panelKey) {
+      const key = inspectorPanelStorageKey(node, panelKey);
+      if (state.inspectorPanelOpen.has(key)) {
+        return Boolean(state.inspectorPanelOpen.get(key));
+      }
+      return defaultInspectorPanelOpen(panelKey);
+    }
+
+    function setInspectorPanelOpen(node, panelKey, open) {
+      const key = inspectorPanelStorageKey(node, panelKey);
+      state.inspectorPanelOpen.set(key, Boolean(open));
+    }
+
+    function findNode(token) {
+      return state.nodes.find((node) => nodeToken(node) === String(token)) || null;
+    }
+
+    function maxOutgoingEdgesForNode(node) {
+      if (node && String(node.node_type || "") === END_NODE_TYPE) {
+        return END_MAX_OUTGOING_EDGES;
+      }
+      if (node && String(node.node_type || "") === "decision") {
+        return DECISION_MAX_OUTGOING_EDGES;
+      }
+      return DEFAULT_MAX_OUTGOING_EDGES;
+    }
+
+    function outgoingEdgeCount(nodeTokenValue) {
+      const sourceToken = String(nodeTokenValue);
+      return state.edges.filter((edge) => String(edge.source_node_id) === sourceToken).length;
+    }
+
+    function outgoingEdgeLimitMessage(node) {
+      if (node && String(node.node_type || "") === END_NODE_TYPE) {
+        return "End nodes cannot have outgoing edges.";
+      }
+      if (node && String(node.node_type || "") === "decision") {
+        return `Decision nodes support up to ${DECISION_MAX_OUTGOING_EDGES} outgoing edges.`;
+      }
+      return `This node supports up to ${DEFAULT_MAX_OUTGOING_EDGES} outgoing edge.`;
+    }
+
+    function findEdge(id) {
+      return state.edges.find((edge) => String(edge.id) === String(id)) || null;
+    }
+
+    function nodeTypeLabel(nodeType) {
+      return String(nodeType || "").replaceAll("_", " ");
+    }
+
+    function defaultNodeTitle(nodeType) {
+      if (nodeType === START_NODE_TYPE) {
+        return "Start";
+      }
+      if (nodeType === END_NODE_TYPE) {
+        return "End";
+      }
+      return `${nodeTypeLabel(nodeType)} node`;
+    }
+
+    function defaultRefFor(nodeType) {
+      const options = refOptionsFor(nodeType);
+      if (!options.length) {
+        return null;
+      }
+      return Number(options[0].id);
+    }
+
+    function refOptionsFor(nodeType) {
+      if (nodeType === FLOWCHART_NODE_TYPE) {
+        return catalog.flowcharts || [];
+      }
+      if (nodeType === "plan") {
+        return catalog.plans || [];
+      }
+      if (nodeType === "milestone") {
+        return catalog.milestones || [];
+      }
+      if (nodeType === "memory") {
+        return catalog.memories || [];
+      }
+      return [];
+    }
+
+    function refLabelFor(nodeType, option) {
+      if (!option) {
+        return "";
+      }
+      if (nodeType === "memory") {
+        return option.title || `Memory ${option.id}`;
+      }
+      return option.name || `${nodeTypeLabel(nodeType)} ${option.id}`;
+    }
+
+    function ensureNodeConfigObject(node) {
+      if (!node.config || typeof node.config !== "object" || Array.isArray(node.config)) {
+        node.config = {};
+      }
+      return node.config;
+    }
+
+    function taskConfigFor(node) {
+      const config = ensureNodeConfigObject(node);
+      const taskPrompt = typeof config.task_prompt === "string" ? config.task_prompt : "";
+      const rawAgentId = Number.parseInt(String(config.agent_id || ""), 10);
+      const agentId = Number.isInteger(rawAgentId) && rawAgentId > 0 ? rawAgentId : null;
+      return { taskPrompt, agentId };
+    }
+
+    function taskIntegrationConfigFor(node) {
+      const config = ensureNodeConfigObject(node);
+      const integrationOptions = Array.isArray(catalog.task_integrations)
+        ? catalog.task_integrations
+        : [];
+      const availableKeys = integrationOptions
+        .map((option) => String(option.key || "").trim().toLowerCase())
+        .filter((value) => value);
+      const availableKeySet = new Set(availableKeys);
+      const rawKeys = config.integration_keys;
+      if (!Array.isArray(rawKeys)) {
+        return { availableKeys, selectedKeys: new Set(availableKeys) };
+      }
+      const selectedKeys = new Set();
+      rawKeys.forEach((rawKey) => {
+        const key = String(rawKey || "").trim().toLowerCase();
+        if (availableKeySet.has(key)) {
+          selectedKeys.add(key);
+        }
+      });
+      return { availableKeys, selectedKeys };
+    }
+
+    function setTaskConfigValue(node, key, value) {
+      const config = ensureNodeConfigObject(node);
+      const cleaned = String(value || "");
+      if (cleaned.trim()) {
+        config[key] = cleaned;
+      } else {
+        delete config[key];
+      }
+      node.config = config;
+    }
+
+    function configInputValue(id) {
+      const input = document.getElementById(id);
+      if (!input) {
+        return "";
+      }
+      return String(input.value || "").trim();
+    }
+
+    function configCheckboxValue(id) {
+      const input = document.getElementById(id);
+      return Boolean(input && input.checked);
+    }
+
+    function parseConfigOptionalInt(rawValue, minimum = 0, maximum = null) {
+      const value = String(rawValue || "").trim();
+      if (!value) {
+        return null;
+      }
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isNaN(parsed)) {
+        return null;
+      }
+      let next = parsed;
+      if (next < minimum) {
+        next = minimum;
+      }
+      if (maximum !== null && next > maximum) {
+        next = maximum;
+      }
+      return next;
+    }
+
+    function csvIntList(value) {
+      if (!Array.isArray(value)) {
+        return "";
+      }
+      return value
+        .map((item) => Number.parseInt(String(item), 10))
+        .filter((item) => Number.isInteger(item) && item > 0)
+        .join(", ");
+    }
+
+    function parseCsvIntList(rawValue) {
+      const seen = new Set();
+      const values = [];
+      String(rawValue || "")
+        .split(/[\s,]+/)
+        .forEach((item) => {
+          const token = item.trim();
+          if (!token) {
+            return;
+          }
+          const parsed = Number.parseInt(token, 10);
+          if (!Number.isInteger(parsed) || parsed <= 0 || seen.has(parsed)) {
+            return;
+          }
+          seen.add(parsed);
+          values.push(parsed);
+        });
+      return values;
+    }
+
+    function nodeConfigEditorHtml(node) {
+      const config = ensureNodeConfigObject(node);
+      if (node.node_type === "start") {
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Start nodes run automatically and do not need node-specific settings.
+          </p>
+        `;
+      }
+
+      if (node.node_type === END_NODE_TYPE) {
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            End nodes always terminate the current flowchart run successfully.
+          </p>
+        `;
+      }
+
+      if (node.node_type === "task") {
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Task routing is driven by your flowchart edges.
+          </p>
+        `;
+      }
+
+      if (node.node_type === FLOWCHART_NODE_TYPE) {
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Triggers a new run of the selected flowchart each time this node executes.
+          </p>
+        `;
+      }
+
+      if (node.node_type === "decision") {
+        const routeFieldPath = String(config.route_field_path || "");
+        const fallbackConditionKey = String(config.fallback_condition_key || "");
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Optional route controls. Defaults already work for common flows.
+          </p>
+          <label class="label" style="margin-top: 10px;">
+            route field path (optional)
+            <input type="text" class="input" id="cfgDecisionRouteFieldPath" data-role="node-config" value="${escapeHtml(routeFieldPath)}" placeholder="latest_upstream.output_state.structured_output.route_key" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            fallback condition key (optional)
+            <input type="text" class="input" id="cfgDecisionFallbackConditionKey" data-role="node-config" value="${escapeHtml(fallbackConditionKey)}" />
+          </label>
+        `;
+      }
+
+      if (node.node_type === "plan") {
+        const action = String(config.action || "read");
+        const patch = config.patch && typeof config.patch === "object" && !Array.isArray(config.patch)
+          ? config.patch
+          : {};
+        const completionSourcePath = String(config.completion_source_path || "");
+        const transformWithLlm = config.transform_with_llm ? "checked" : "";
+        const transformPrompt = String(config.transform_prompt || "");
+        const routeKey = String(config.route_key || "");
+        const routeKeyOnComplete = String(config.route_key_on_complete || "");
+        const markPlanComplete = patch.mark_plan_complete ? "checked" : "";
+        const completeStageIds = csvIntList(patch.complete_stage_ids);
+        const completeTaskIds = csvIntList(patch.complete_task_ids);
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Optional plan behavior overrides. Leave fields empty for defaults.
+          </p>
+          <label class="label" style="margin-top: 10px;">
+            action
+            <select class="input" id="cfgPlanAction" data-role="node-config">
+              <option value="read" ${action === "read" ? "selected" : ""}>read (default)</option>
+              <option value="update" ${action === "update" ? "selected" : ""}>update</option>
+              <option value="update_completion" ${action === "update_completion" ? "selected" : ""}>update completion</option>
+              <option value="complete" ${action === "complete" ? "selected" : ""}>complete</option>
+            </select>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            completion source path (optional)
+            <input type="text" class="input" id="cfgPlanCompletionSourcePath" data-role="node-config" value="${escapeHtml(completionSourcePath)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            route key (optional)
+            <input type="text" class="input" id="cfgPlanRouteKey" data-role="node-config" value="${escapeHtml(routeKey)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            route key on complete (optional)
+            <input type="text" class="input" id="cfgPlanRouteKeyOnComplete" data-role="node-config" value="${escapeHtml(routeKeyOnComplete)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            <span style="display: flex; gap: 8px; align-items: center;">
+              <input type="checkbox" id="cfgPlanTransformWithLlm" data-role="node-config" ${transformWithLlm} />
+              <span>transform with LLM</span>
+            </span>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            transform prompt (optional)
+            <textarea class="textarea" id="cfgPlanTransformPrompt" data-role="node-config" rows="3">${escapeHtml(transformPrompt)}</textarea>
+          </label>
+          <p class="flow-section-title">completion patch</p>
+          <label class="label" style="margin-top: 10px;">
+            <span style="display: flex; gap: 8px; align-items: center;">
+              <input type="checkbox" id="cfgPlanPatchMarkPlanComplete" data-role="node-config" ${markPlanComplete} />
+              <span>mark plan complete</span>
+            </span>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            complete stage IDs (comma separated)
+            <input type="text" class="input" id="cfgPlanPatchCompleteStageIds" data-role="node-config" value="${escapeHtml(completeStageIds)}" placeholder="1, 2, 3" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            complete task IDs (comma separated)
+            <input type="text" class="input" id="cfgPlanPatchCompleteTaskIds" data-role="node-config" value="${escapeHtml(completeTaskIds)}" placeholder="10, 11" />
+          </label>
+        `;
+      }
+
+      if (node.node_type === "milestone") {
+        const action = String(config.action || "read");
+        const patch = config.patch && typeof config.patch === "object" && !Array.isArray(config.patch)
+          ? config.patch
+          : {};
+        const completionSourcePath = String(config.completion_source_path || "");
+        const markComplete = config.mark_complete ? "checked" : "";
+        const loopCheckpointEvery = String(config.loop_checkpoint_every || "");
+        const terminateOnCheckpoint = config.terminate_on_checkpoint ? "checked" : "";
+        const loopExitAfterRuns = String(config.loop_exit_after_runs || "");
+        const terminateOnComplete = config.terminate_on_complete ? "checked" : "";
+        const terminateAlways = config.terminate_always ? "checked" : "";
+        const transformWithLlm = config.transform_with_llm ? "checked" : "";
+        const transformPrompt = String(config.transform_prompt || "");
+        const routeKey = String(config.route_key || "");
+        const routeKeyOnTerminate = String(config.route_key_on_terminate || "");
+        const patchName = String(patch.name || "");
+        const patchDescription = String(patch.description || "");
+        const patchStatus = String(patch.status || "");
+        const patchPriority = String(patch.priority || "");
+        const patchOwner = String(patch.owner || "");
+        const patchProgressPercent = String(patch.progress_percent || "");
+        const patchHealth = String(patch.health || "");
+        const patchLatestUpdate = String(patch.latest_update || "");
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Optional milestone and loop controls. Defaults are automatic.
+          </p>
+          <label class="label" style="margin-top: 10px;">
+            action
+            <select class="input" id="cfgMilestoneAction" data-role="node-config">
+              <option value="read" ${action === "read" ? "selected" : ""}>read (default)</option>
+              <option value="update" ${action === "update" ? "selected" : ""}>update</option>
+              <option value="checkpoint" ${action === "checkpoint" ? "selected" : ""}>checkpoint</option>
+              <option value="complete" ${action === "complete" ? "selected" : ""}>complete</option>
+            </select>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            completion source path (optional)
+            <input type="text" class="input" id="cfgMilestoneCompletionSourcePath" data-role="node-config" value="${escapeHtml(completionSourcePath)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            route key (optional)
+            <input type="text" class="input" id="cfgMilestoneRouteKey" data-role="node-config" value="${escapeHtml(routeKey)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            route key on terminate (optional)
+            <input type="text" class="input" id="cfgMilestoneRouteKeyOnTerminate" data-role="node-config" value="${escapeHtml(routeKeyOnTerminate)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            loop checkpoint every N runs (optional)
+            <input type="number" min="0" class="input" id="cfgMilestoneLoopCheckpointEvery" data-role="node-config" value="${escapeHtml(loopCheckpointEvery)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            loop exit after runs (optional)
+            <input type="number" min="0" class="input" id="cfgMilestoneLoopExitAfterRuns" data-role="node-config" value="${escapeHtml(loopExitAfterRuns)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            <span style="display: flex; gap: 8px; align-items: center;">
+              <input type="checkbox" id="cfgMilestoneMarkComplete" data-role="node-config" ${markComplete} />
+              <span>mark complete</span>
+            </span>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            <span style="display: flex; gap: 8px; align-items: center;">
+              <input type="checkbox" id="cfgMilestoneTerminateOnCheckpoint" data-role="node-config" ${terminateOnCheckpoint} />
+              <span>terminate on checkpoint</span>
+            </span>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            <span style="display: flex; gap: 8px; align-items: center;">
+              <input type="checkbox" id="cfgMilestoneTerminateOnComplete" data-role="node-config" ${terminateOnComplete} />
+              <span>terminate on complete</span>
+            </span>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            <span style="display: flex; gap: 8px; align-items: center;">
+              <input type="checkbox" id="cfgMilestoneTerminateAlways" data-role="node-config" ${terminateAlways} />
+              <span>always terminate after this node</span>
+            </span>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            <span style="display: flex; gap: 8px; align-items: center;">
+              <input type="checkbox" id="cfgMilestoneTransformWithLlm" data-role="node-config" ${transformWithLlm} />
+              <span>transform with LLM</span>
+            </span>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            transform prompt (optional)
+            <textarea class="textarea" id="cfgMilestoneTransformPrompt" data-role="node-config" rows="3">${escapeHtml(transformPrompt)}</textarea>
+          </label>
+          <p class="flow-section-title">milestone patch</p>
+          <label class="label" style="margin-top: 10px;">
+            name (optional)
+            <input type="text" class="input" id="cfgMilestonePatchName" data-role="node-config" value="${escapeHtml(patchName)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            description (optional)
+            <textarea class="textarea" id="cfgMilestonePatchDescription" data-role="node-config" rows="2">${escapeHtml(patchDescription)}</textarea>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            status (optional)
+            <input type="text" class="input" id="cfgMilestonePatchStatus" data-role="node-config" value="${escapeHtml(patchStatus)}" placeholder="planned | in_progress | done" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            priority (optional)
+            <input type="text" class="input" id="cfgMilestonePatchPriority" data-role="node-config" value="${escapeHtml(patchPriority)}" placeholder="low | medium | high" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            owner (optional)
+            <input type="text" class="input" id="cfgMilestonePatchOwner" data-role="node-config" value="${escapeHtml(patchOwner)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            progress percent (optional)
+            <input type="number" min="0" max="100" class="input" id="cfgMilestonePatchProgressPercent" data-role="node-config" value="${escapeHtml(patchProgressPercent)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            health (optional)
+            <input type="text" class="input" id="cfgMilestonePatchHealth" data-role="node-config" value="${escapeHtml(patchHealth)}" placeholder="green | yellow | red" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            latest update (optional)
+            <textarea class="textarea" id="cfgMilestonePatchLatestUpdate" data-role="node-config" rows="2">${escapeHtml(patchLatestUpdate)}</textarea>
+          </label>
+        `;
+      }
+
+      if (node.node_type === "memory") {
+        const action = String(config.action || "fetch");
+        const limit = String(config.limit || "");
+        const query = String(config.query || "");
+        const querySourcePath = String(config.query_source_path || "");
+        const text = String(config.text || "");
+        const textSourcePath = String(config.text_source_path || "");
+        const storeMode = String(config.store_mode || "replace");
+        const routeKey = String(config.route_key || "");
+        return `
+          <p class="muted" style="margin-top: 8px;">
+            Optional memory behavior overrides. Leave blank for defaults.
+          </p>
+          <label class="label" style="margin-top: 10px;">
+            action
+            <select class="input" id="cfgMemoryAction" data-role="node-config">
+              <option value="fetch" ${action === "fetch" ? "selected" : ""}>fetch (default)</option>
+              <option value="store" ${action === "store" ? "selected" : ""}>store</option>
+              <option value="upsert" ${action === "upsert" ? "selected" : ""}>upsert</option>
+              <option value="append" ${action === "append" ? "selected" : ""}>append</option>
+            </select>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            fetch limit (optional)
+            <input type="number" min="1" class="input" id="cfgMemoryLimit" data-role="node-config" value="${escapeHtml(limit)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            query (optional)
+            <input type="text" class="input" id="cfgMemoryQuery" data-role="node-config" value="${escapeHtml(query)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            query source path (optional)
+            <input type="text" class="input" id="cfgMemoryQuerySourcePath" data-role="node-config" value="${escapeHtml(querySourcePath)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            text to store (optional)
+            <textarea class="textarea" id="cfgMemoryText" data-role="node-config" rows="2">${escapeHtml(text)}</textarea>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            text source path (optional)
+            <input type="text" class="input" id="cfgMemoryTextSourcePath" data-role="node-config" value="${escapeHtml(textSourcePath)}" />
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            store mode
+            <select class="input" id="cfgMemoryStoreMode" data-role="node-config">
+              <option value="replace" ${storeMode === "replace" ? "selected" : ""}>replace (default)</option>
+              <option value="append" ${storeMode === "append" ? "selected" : ""}>append</option>
+            </select>
+          </label>
+          <label class="label" style="margin-top: 10px;">
+            route key (optional)
+            <input type="text" class="input" id="cfgMemoryRouteKey" data-role="node-config" value="${escapeHtml(routeKey)}" />
+          </label>
+        `;
+      }
+
+      return '<p class="muted" style="margin-top: 8px;">No node-specific settings available.</p>';
+    }
+
+    function collectNodeConfigFromInspector(node) {
+      const config = ensureNodeConfigObject(node);
+      if (node.node_type === "task") {
+        delete config.route_key_path;
+      } else if (node.node_type === "decision") {
+        const routeFieldPath = configInputValue("cfgDecisionRouteFieldPath");
+        const fallbackConditionKey = configInputValue("cfgDecisionFallbackConditionKey");
+        if (routeFieldPath) {
+          config.route_field_path = routeFieldPath;
+        } else {
+          delete config.route_field_path;
+        }
+        if (fallbackConditionKey) {
+          config.fallback_condition_key = fallbackConditionKey;
+        } else {
+          delete config.fallback_condition_key;
+        }
+      } else if (node.node_type === "plan") {
+        const action = configInputValue("cfgPlanAction");
+        const completionSourcePath = configInputValue("cfgPlanCompletionSourcePath");
+        const transformPrompt = configInputValue("cfgPlanTransformPrompt");
+        const routeKey = configInputValue("cfgPlanRouteKey");
+        const routeKeyOnComplete = configInputValue("cfgPlanRouteKeyOnComplete");
+        if (action && action !== "read") {
+          config.action = action;
+        } else {
+          delete config.action;
+        }
+        if (completionSourcePath) {
+          config.completion_source_path = completionSourcePath;
+        } else {
+          delete config.completion_source_path;
+        }
+        if (configCheckboxValue("cfgPlanTransformWithLlm")) {
+          config.transform_with_llm = true;
+        } else {
+          delete config.transform_with_llm;
+        }
+        if (transformPrompt) {
+          config.transform_prompt = transformPrompt;
+        } else {
+          delete config.transform_prompt;
+        }
+        if (routeKey) {
+          config.route_key = routeKey;
+        } else {
+          delete config.route_key;
+        }
+        if (routeKeyOnComplete) {
+          config.route_key_on_complete = routeKeyOnComplete;
+        } else {
+          delete config.route_key_on_complete;
+        }
+        const patch = config.patch && typeof config.patch === "object" && !Array.isArray(config.patch)
+          ? config.patch
+          : {};
+        if (configCheckboxValue("cfgPlanPatchMarkPlanComplete")) {
+          patch.mark_plan_complete = true;
+        } else {
+          delete patch.mark_plan_complete;
+        }
+        const completeStageIds = parseCsvIntList(configInputValue("cfgPlanPatchCompleteStageIds"));
+        if (completeStageIds.length) {
+          patch.complete_stage_ids = completeStageIds;
+        } else {
+          delete patch.complete_stage_ids;
+        }
+        const completeTaskIds = parseCsvIntList(configInputValue("cfgPlanPatchCompleteTaskIds"));
+        if (completeTaskIds.length) {
+          patch.complete_task_ids = completeTaskIds;
+        } else {
+          delete patch.complete_task_ids;
+        }
+        if (Object.keys(patch).length) {
+          config.patch = patch;
+        } else {
+          delete config.patch;
+        }
+      } else if (node.node_type === "milestone") {
+        const action = configInputValue("cfgMilestoneAction");
+        const completionSourcePath = configInputValue("cfgMilestoneCompletionSourcePath");
+        const transformPrompt = configInputValue("cfgMilestoneTransformPrompt");
+        const routeKey = configInputValue("cfgMilestoneRouteKey");
+        const routeKeyOnTerminate = configInputValue("cfgMilestoneRouteKeyOnTerminate");
+        if (action && action !== "read") {
+          config.action = action;
+        } else {
+          delete config.action;
+        }
+        if (completionSourcePath) {
+          config.completion_source_path = completionSourcePath;
+        } else {
+          delete config.completion_source_path;
+        }
+        if (routeKey) {
+          config.route_key = routeKey;
+        } else {
+          delete config.route_key;
+        }
+        if (routeKeyOnTerminate) {
+          config.route_key_on_terminate = routeKeyOnTerminate;
+        } else {
+          delete config.route_key_on_terminate;
+        }
+        const loopCheckpointEvery = parseConfigOptionalInt(configInputValue("cfgMilestoneLoopCheckpointEvery"), 0);
+        if (loopCheckpointEvery !== null && loopCheckpointEvery > 0) {
+          config.loop_checkpoint_every = loopCheckpointEvery;
+        } else {
+          delete config.loop_checkpoint_every;
+        }
+        const loopExitAfterRuns = parseConfigOptionalInt(configInputValue("cfgMilestoneLoopExitAfterRuns"), 0);
+        if (loopExitAfterRuns !== null && loopExitAfterRuns > 0) {
+          config.loop_exit_after_runs = loopExitAfterRuns;
+        } else {
+          delete config.loop_exit_after_runs;
+        }
+        if (configCheckboxValue("cfgMilestoneMarkComplete")) {
+          config.mark_complete = true;
+        } else {
+          delete config.mark_complete;
+        }
+        if (configCheckboxValue("cfgMilestoneTerminateOnCheckpoint")) {
+          config.terminate_on_checkpoint = true;
+        } else {
+          delete config.terminate_on_checkpoint;
+        }
+        if (configCheckboxValue("cfgMilestoneTerminateOnComplete")) {
+          config.terminate_on_complete = true;
+        } else {
+          delete config.terminate_on_complete;
+        }
+        if (configCheckboxValue("cfgMilestoneTerminateAlways")) {
+          config.terminate_always = true;
+        } else {
+          delete config.terminate_always;
+        }
+        if (configCheckboxValue("cfgMilestoneTransformWithLlm")) {
+          config.transform_with_llm = true;
+        } else {
+          delete config.transform_with_llm;
+        }
+        if (transformPrompt) {
+          config.transform_prompt = transformPrompt;
+        } else {
+          delete config.transform_prompt;
+        }
+        const patch = config.patch && typeof config.patch === "object" && !Array.isArray(config.patch)
+          ? config.patch
+          : {};
+        const patchName = configInputValue("cfgMilestonePatchName");
+        const patchDescription = configInputValue("cfgMilestonePatchDescription");
+        const patchStatus = configInputValue("cfgMilestonePatchStatus");
+        const patchPriority = configInputValue("cfgMilestonePatchPriority");
+        const patchOwner = configInputValue("cfgMilestonePatchOwner");
+        const patchHealth = configInputValue("cfgMilestonePatchHealth");
+        const patchLatestUpdate = configInputValue("cfgMilestonePatchLatestUpdate");
+        const patchProgressPercent = parseConfigOptionalInt(configInputValue("cfgMilestonePatchProgressPercent"), 0, 100);
+        if (patchName) {
+          patch.name = patchName;
+        } else {
+          delete patch.name;
+        }
+        if (patchDescription) {
+          patch.description = patchDescription;
+        } else {
+          delete patch.description;
+        }
+        if (patchStatus) {
+          patch.status = patchStatus;
+        } else {
+          delete patch.status;
+        }
+        if (patchPriority) {
+          patch.priority = patchPriority;
+        } else {
+          delete patch.priority;
+        }
+        if (patchOwner) {
+          patch.owner = patchOwner;
+        } else {
+          delete patch.owner;
+        }
+        if (patchProgressPercent !== null) {
+          patch.progress_percent = patchProgressPercent;
+        } else {
+          delete patch.progress_percent;
+        }
+        if (patchHealth) {
+          patch.health = patchHealth;
+        } else {
+          delete patch.health;
+        }
+        if (patchLatestUpdate) {
+          patch.latest_update = patchLatestUpdate;
+        } else {
+          delete patch.latest_update;
+        }
+        if (Object.keys(patch).length) {
+          config.patch = patch;
+        } else {
+          delete config.patch;
+        }
+      } else if (node.node_type === "memory") {
+        const action = configInputValue("cfgMemoryAction");
+        const limit = parseConfigOptionalInt(configInputValue("cfgMemoryLimit"), 1);
+        const query = configInputValue("cfgMemoryQuery");
+        const querySourcePath = configInputValue("cfgMemoryQuerySourcePath");
+        const text = configInputValue("cfgMemoryText");
+        const textSourcePath = configInputValue("cfgMemoryTextSourcePath");
+        const storeMode = configInputValue("cfgMemoryStoreMode");
+        const routeKey = configInputValue("cfgMemoryRouteKey");
+        if (action && action !== "fetch") {
+          config.action = action;
+        } else {
+          delete config.action;
+        }
+        if (limit !== null && limit !== 10) {
+          config.limit = limit;
+        } else {
+          delete config.limit;
+        }
+        if (query) {
+          config.query = query;
+        } else {
+          delete config.query;
+        }
+        if (querySourcePath) {
+          config.query_source_path = querySourcePath;
+        } else {
+          delete config.query_source_path;
+        }
+        if (text) {
+          config.text = text;
+        } else {
+          delete config.text;
+        }
+        if (textSourcePath) {
+          config.text_source_path = textSourcePath;
+        } else {
+          delete config.text_source_path;
+        }
+        if (storeMode && storeMode !== "replace") {
+          config.store_mode = storeMode;
+        } else {
+          delete config.store_mode;
+        }
+        if (routeKey) {
+          config.route_key = routeKey;
+        } else {
+          delete config.route_key;
+        }
+      }
+      node.config = config;
+    }
+
+    function bindNodeConfigInputs(node) {
+      const syncNodeConfig = () => {
+        collectNodeConfigFromInspector(node);
+        setDirty(true);
+      };
+      inspectorEl.querySelectorAll("[data-role='node-config']").forEach((input) => {
+        const inputType = String(input.getAttribute("type") || "").toLowerCase();
+        const tagName = String(input.tagName || "").toLowerCase();
+        if (inputType === "checkbox" || tagName === "select") {
+          input.addEventListener("change", syncNodeConfig);
+          return;
+        }
+        input.addEventListener("input", syncNodeConfig);
+        input.addEventListener("blur", syncNodeConfig);
+      });
+    }
+
+    function setMessage(text, kind = "muted") {
+      const cleaned = String(text || "").trim();
+      messageEl.className = "flowchart-inline-status";
+      if (kind === "error") {
+        messageEl.classList.add("is-error");
+      } else if (kind === "success") {
+        messageEl.classList.add("is-success");
+      }
+      messageEl.textContent = cleaned;
+      messageEl.title = cleaned;
+    }
+
+    function setDirty(flag) {
+      state.dirty = flag;
+      if (state.saving) {
+        editorStateLabel.textContent = "saving...";
+        return;
+      }
+      editorStateLabel.textContent = flag ? "unsaved changes" : "saved";
+    }
+
+    function updateRunActionButtons() {
+      const hasActiveRun = Number.isInteger(state.activeRunId) && state.activeRunId > 0;
+      const disabled = state.runActionPending || !hasActiveRun;
+      stopButton.disabled = disabled;
+      forceStopButton.disabled = disabled;
+    }
+
+    function hydrationNodes(rawNodes) {
+      return (rawNodes || []).map((rawNode) => {
+        const node = {
+          id: rawNode.id !== null && rawNode.id !== undefined ? Number(rawNode.id) : null,
+          client_id: rawNode.client_id || `client-node-${nextClientNodeId++}`,
+          node_type: String(rawNode.node_type || "task"),
+          title: rawNode.title || "",
+          ref_id:
+            rawNode.ref_id !== null && rawNode.ref_id !== undefined
+              ? Number(rawNode.ref_id)
+              : null,
+          x: coordinateOr(rawNode.x, 40),
+          y: coordinateOr(rawNode.y, 40),
+          config:
+            rawNode.config && typeof rawNode.config === "object" && !Array.isArray(rawNode.config)
+              ? rawNode.config
+              : {},
+          model_id:
+            rawNode.model_id !== null && rawNode.model_id !== undefined
+              ? Number(rawNode.model_id)
+              : null,
+          mcp_server_ids: Array.isArray(rawNode.mcp_server_ids)
+            ? rawNode.mcp_server_ids.map((value) => Number(value))
+            : [],
+          script_ids: Array.isArray(rawNode.script_ids)
+            ? rawNode.script_ids.map((value) => Number(value))
+            : [],
+          runtime_status: String(rawNode.runtime_status || "").trim().toLowerCase(),
+        };
+        if (!node.title) {
+          node.title = defaultNodeTitle(node.node_type);
+        }
+        if (typesWithRequiredRef.has(node.node_type) && node.ref_id === null) {
+          node.ref_id = defaultRefFor(node.node_type);
+        }
+        return node;
+      });
+    }
+
+    function hydrationEdges(rawEdges) {
+      return (rawEdges || []).map((rawEdge) => ({
+        id:
+          rawEdge.id !== null && rawEdge.id !== undefined
+            ? String(rawEdge.id)
+            : `client-edge-${nextClientEdgeId++}`,
+        source_node_id: String(rawEdge.source_node_id),
+        target_node_id: String(rawEdge.target_node_id),
+        source_handle_id:
+          rawEdge.source_handle_id !== null && rawEdge.source_handle_id !== undefined
+            ? String(rawEdge.source_handle_id)
+            : null,
+        target_handle_id:
+          rawEdge.target_handle_id !== null && rawEdge.target_handle_id !== undefined
+            ? String(rawEdge.target_handle_id)
+            : null,
+        condition_key: rawEdge.condition_key || "",
+        label: rawEdge.label || "",
+      }));
+    }
+
+    function applyGraphResponse(payload) {
+      state.nodes = hydrationNodes(payload.nodes || []);
+      state.edges = hydrationEdges(payload.edges || []);
+      state.validation = payload.validation || { valid: true, errors: [] };
+      setWorldOriginFromStartNode();
+      if (state.selectedNodeToken && !findNode(state.selectedNodeToken)) {
+        state.selectedNodeToken = null;
+      }
+      if (state.selectedEdgeId && !findEdge(state.selectedEdgeId)) {
+        state.selectedEdgeId = null;
+      }
+      state.connectingFromToken = null;
+      state.connectingFromHandleId = null;
+      state.connectingHoverToken = null;
+      state.connectingHoverHandleId = null;
+      state.pointerGraph = null;
+      setDirty(false);
+      renderAll();
+    }
+
+    function graphToPayload() {
+      return {
+        nodes: state.nodes.map((node) => ({
+          id: node.id,
+          client_id: node.client_id,
+          node_type: node.node_type,
+          title: node.title || null,
+          ref_id: node.ref_id,
+          x: Number(node.x),
+          y: Number(node.y),
+          config: node.config || {},
+          model_id: node.model_id,
+          mcp_server_ids: node.mcp_server_ids,
+          script_ids: node.script_ids,
+        })),
+        edges: state.edges.map((edge) => ({
+          source_node_id: edge.source_node_id,
+          target_node_id: edge.target_node_id,
+          source_handle_id: edge.source_handle_id || null,
+          target_handle_id: edge.target_handle_id || null,
+          condition_key: edge.condition_key || null,
+          label: edge.label || null,
+        })),
+      };
+    }
+
+    function renderPalette() {
+      const fragment = document.createDocumentFragment();
+      addableNodeTypes.forEach((nodeType) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn btn-secondary flow-palette-item";
+        button.draggable = true;
+        button.dataset.nodeType = nodeType;
+        button.innerHTML = `<i class="fa-solid fa-plus"></i>${escapeHtml(nodeTypeLabel(nodeType))}`;
+        button.addEventListener("dragstart", (event) => {
+          event.dataTransfer.setData("text/flow-node-type", nodeType);
+          event.dataTransfer.effectAllowed = "copy";
+        });
+        button.addEventListener("click", () => {
+          const centerWorldX = (viewportEl.clientWidth / 2 - state.panX) / state.zoom;
+          const centerWorldY = (viewportEl.clientHeight / 2 - state.panY) / state.zoom;
+          addNode(
+            nodeType,
+            worldToGraphX(centerWorldX) - nodeWidthForType(nodeType) / 2,
+            worldToGraphY(centerWorldY) - nodeHeightForType(nodeType) / 2
+          );
+        });
+        fragment.appendChild(button);
+      });
+      paletteEl.replaceChildren(fragment);
+    }
+
+    function addNode(nodeType, x, y) {
+      if (nodeType === START_NODE_TYPE) {
+        setMessage("Start node is added automatically and cannot be added manually.", "error");
+        return;
+      }
+      const node = {
+        id: null,
+        client_id: `client-node-${nextClientNodeId++}`,
+        node_type: nodeType,
+        title: defaultNodeTitle(nodeType),
+        ref_id: typesWithRequiredRef.has(nodeType) ? defaultRefFor(nodeType) : null,
+        x: coordinateOr(x, 0),
+        y: coordinateOr(y, 0),
+        config: {},
+        model_id: null,
+        mcp_server_ids: [],
+        script_ids: [],
+      };
+      state.nodes.push(node);
+      state.selectedNodeToken = nodeToken(node);
+      state.selectedEdgeId = null;
+      setMessage(`${nodeTypeLabel(nodeType)} node added.`, "success");
+      setDirty(true);
+      renderAll();
+    }
+
+    function removeSelectedNode() {
+      const selectedNode = findNode(state.selectedNodeToken);
+      if (!selectedNode) {
+        return;
+      }
+      if (selectedNode.node_type === START_NODE_TYPE) {
+        setMessage("Start node cannot be deleted.", "error");
+        return;
+      }
+      const selectedToken = nodeToken(selectedNode);
+      state.nodes = state.nodes.filter((node) => nodeToken(node) !== selectedToken);
+      state.edges = state.edges.filter(
+        (edge) => edge.source_node_id !== selectedToken && edge.target_node_id !== selectedToken
+      );
+      state.selectedNodeToken = null;
+      state.selectedEdgeId = null;
+      setDirty(true);
+      renderAll();
+    }
+
+    function removeSelectedEdge() {
+      if (!state.selectedEdgeId) {
+        return;
+      }
+      state.edges = state.edges.filter((edge) => String(edge.id) !== String(state.selectedEdgeId));
+      state.selectedEdgeId = null;
+      setDirty(true);
+      renderAll();
+    }
+
+    function sideVector(side) {
+      if (side === "left") {
+        return { x: -1, y: 0 };
+      }
+      if (side === "right") {
+        return { x: 1, y: 0 };
+      }
+      if (side === "top") {
+        return { x: 0, y: -1 };
+      }
+      return { x: 0, y: 1 };
+    }
+
+    function defaultSourceHandleId(source, target) {
+      const dx =
+        (Number(target.x) + nodeWidth(target) / 2) - (Number(source.x) + nodeWidth(source) / 2);
+      const dy =
+        (Number(target.y) + nodeHeight(target) / 2) - (Number(source.y) + nodeHeight(source) / 2);
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        return dx >= 0 ? "r1" : "l1";
+      }
+      return dy >= 0 ? "b2" : "t2";
+    }
+
+    function defaultTargetHandleId(source, target) {
+      const dx =
+        (Number(target.x) + nodeWidth(target) / 2) - (Number(source.x) + nodeWidth(source) / 2);
+      const dy =
+        (Number(target.y) + nodeHeight(target) / 2) - (Number(source.y) + nodeHeight(source) / 2);
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        return dx >= 0 ? "l1" : "r1";
+      }
+      return dy >= 0 ? "t2" : "b2";
+    }
+
+    function resolveStartHandleId(handleId) {
+      const normalized = String(handleId || "").trim();
+      if (!normalized) {
+        return null;
+      }
+      if (normalized.startsWith("t")) {
+        return "t2";
+      }
+      if (normalized.startsWith("b")) {
+        return "b2";
+      }
+      if (normalized === "l1" || normalized === "r1") {
+        return normalized;
+      }
+      return null;
+    }
+
+    function resolveTaskHandleId(handleId) {
+      const normalized = String(handleId || "").trim();
+      if (!normalized) {
+        return null;
+      }
+      if (CORE_CONNECTOR_BY_ID.has(normalized)) {
+        return normalized;
+      }
+      return null;
+    }
+
+    function resolvePlanHandleId(handleId) {
+      const normalized = String(handleId || "").trim();
+      if (!normalized) {
+        return null;
+      }
+      if (CORE_CONNECTOR_BY_ID.has(normalized)) {
+        return normalized;
+      }
+      return null;
+    }
+
+    function resolveMilestoneHandleId(handleId) {
+      const normalized = String(handleId || "").trim();
+      if (!normalized) {
+        return null;
+      }
+      if (MILESTONE_CONNECTOR_BY_ID.has(normalized)) {
+        return normalized;
+      }
+      if (normalized.startsWith("t")) {
+        return "t2";
+      }
+      if (normalized.startsWith("b")) {
+        return "b2";
+      }
+      if (normalized.startsWith("l")) {
+        return "l1";
+      }
+      if (normalized.startsWith("r")) {
+        return "r1";
+      }
+      return null;
+    }
+
+    function resolveDecisionHandleId(handleId) {
+      const normalized = String(handleId || "").trim();
+      if (!normalized) {
+        return null;
+      }
+      if (normalized.startsWith("t")) {
+        return "t2";
+      }
+      if (normalized.startsWith("b")) {
+        return "b2";
+      }
+      if (normalized.startsWith("l")) {
+        return "l1";
+      }
+      if (normalized.startsWith("r")) {
+        return "r1";
+      }
+      return null;
+    }
+
+    function resolveMemoryHandleId(handleId) {
+      const normalized = String(handleId || "").trim();
+      if (!normalized) {
+        return null;
+      }
+      if (/^m[1-8]$/.test(normalized)) {
+        return normalized;
+      }
+      if (normalized.startsWith("t")) {
+        return "m2";
+      }
+      if (normalized.startsWith("b")) {
+        return "m7";
+      }
+      if (normalized.startsWith("l")) {
+        return "m4";
+      }
+      if (normalized.startsWith("r")) {
+        return "m5";
+      }
+      return null;
+    }
+
+    function connectorPoint(node, handleId, fallbackSide) {
+      const width = nodeWidth(node);
+      const height = nodeHeight(node);
+      const nodeType = String(node && node.node_type ? node.node_type : "");
+      let normalizedHandleId = String(handleId || "");
+      let connector = null;
+      if (
+        nodeType === START_NODE_TYPE ||
+        nodeType === END_NODE_TYPE ||
+        nodeType === FLOWCHART_NODE_TYPE
+      ) {
+        normalizedHandleId = resolveStartHandleId(handleId);
+      } else if (nodeType === "milestone") {
+        normalizedHandleId = resolveMilestoneHandleId(handleId);
+        connector = MILESTONE_CONNECTOR_BY_ID.get(String(normalizedHandleId || ""));
+      } else if (nodeType === "task") {
+        normalizedHandleId = resolveTaskHandleId(handleId);
+      } else if (nodeType === "plan") {
+        normalizedHandleId = resolvePlanHandleId(handleId);
+      } else if (nodeType === "memory") {
+        normalizedHandleId = resolveMemoryHandleId(handleId);
+      } else if (nodeType === "decision") {
+        normalizedHandleId = resolveDecisionHandleId(handleId);
+      }
+      if (!connector) {
+        connector = CONNECTOR_BY_ID.get(String(normalizedHandleId || ""));
+      }
+      if (connector) {
+        return {
+          x: graphToWorldX(node.x) + (width * connector.x) / 100,
+          y: graphToWorldY(node.y) + (height * connector.y) / 100,
+          side: connector.side,
+        };
+      }
+      const side = fallbackSide || "right";
+      if (side === "left") {
+        return { x: graphToWorldX(node.x), y: graphToWorldY(node.y) + height / 2, side };
+      }
+      if (side === "top") {
+        return { x: graphToWorldX(node.x) + width / 2, y: graphToWorldY(node.y), side };
+      }
+      if (side === "bottom") {
+        return {
+          x: graphToWorldX(node.x) + width / 2,
+          y: graphToWorldY(node.y) + height,
+          side,
+        };
+      }
+      return { x: graphToWorldX(node.x) + width, y: graphToWorldY(node.y) + height / 2, side };
+    }
+
+    function bezierPath(sourcePoint, targetPoint) {
+      const dx = targetPoint.x - sourcePoint.x;
+      const dy = targetPoint.y - sourcePoint.y;
+      const distance = Math.hypot(dx, dy);
+      const bend = Math.max(44, Math.min(220, distance * 0.42));
+      const sourceVector = sideVector(sourcePoint.side);
+      const targetVector = sideVector(targetPoint.side);
+      const c1x = sourcePoint.x + sourceVector.x * bend;
+      const c1y = sourcePoint.y + sourceVector.y * bend;
+      const c2x = targetPoint.x + targetVector.x * bend;
+      const c2y = targetPoint.y + targetVector.y * bend;
+      const t = 0.5;
+      const oneMinusT = 1 - t;
+      const labelBaseX =
+        oneMinusT * oneMinusT * oneMinusT * sourcePoint.x +
+        3 * oneMinusT * oneMinusT * t * c1x +
+        3 * oneMinusT * t * t * c2x +
+        t * t * t * targetPoint.x;
+      const labelBaseY =
+        oneMinusT * oneMinusT * oneMinusT * sourcePoint.y +
+        3 * oneMinusT * oneMinusT * t * c1y +
+        3 * oneMinusT * t * t * c2y +
+        t * t * t * targetPoint.y;
+      const tangentX =
+        3 * oneMinusT * oneMinusT * (c1x - sourcePoint.x) +
+        6 * oneMinusT * t * (c2x - c1x) +
+        3 * t * t * (targetPoint.x - c2x);
+      const tangentY =
+        3 * oneMinusT * oneMinusT * (c1y - sourcePoint.y) +
+        6 * oneMinusT * t * (c2y - c1y) +
+        3 * t * t * (targetPoint.y - c2y);
+      const tangentLength = Math.hypot(tangentX, tangentY) || 1;
+      const normalX = -tangentY / tangentLength;
+      const normalY = tangentX / tangentLength;
+      const labelOffset = 10;
+      return {
+        d: `M ${sourcePoint.x} ${sourcePoint.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${targetPoint.x} ${targetPoint.y}`,
+        labelX: labelBaseX + normalX * labelOffset,
+        labelY: labelBaseY + normalY * labelOffset,
+      };
+    }
+
+    function pathForEdge(source, target, sourceHandleId, targetHandleId) {
+      const resolvedSourceHandle = sourceHandleId || defaultSourceHandleId(source, target);
+      const resolvedTargetHandle = targetHandleId || defaultTargetHandleId(source, target);
+      const sourcePoint = connectorPoint(source, resolvedSourceHandle, "right");
+      const targetPoint = connectorPoint(target, resolvedTargetHandle, "left");
+      return bezierPath(sourcePoint, targetPoint);
+    }
+
+    function pointerSideForDraft(sourcePoint, pointer) {
+      const dx = pointer.x - sourcePoint.x;
+      const dy = pointer.y - sourcePoint.y;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        return dx >= 0 ? "left" : "right";
+      }
+      return dy >= 0 ? "top" : "bottom";
+    }
+
+    function connectorAtClientPoint(clientX, clientY) {
+      const element = document.elementFromPoint(clientX, clientY);
+      const connectorEl = element && element.closest ? element.closest(".flow-node-connector") : null;
+      if (!connectorEl) {
+        return null;
+      }
+      const card = connectorEl.closest(".flow-node");
+      const nodeTokenValue = card && card.dataset ? card.dataset.nodeToken : null;
+      const handleIdValue = connectorEl.dataset ? connectorEl.dataset.handleId : null;
+      if (!nodeTokenValue || !handleIdValue) {
+        return null;
+      }
+      return { nodeToken: String(nodeTokenValue), handleId: String(handleIdValue) };
+    }
+
+    function renderEdges() {
+      const defs = edgeLayerEl.querySelector("defs");
+      edgeLayerEl.replaceChildren(defs);
+      const fragment = document.createDocumentFragment();
+
+      state.edges.forEach((edge) => {
+        const source = findNode(edge.source_node_id);
+        const target = findNode(edge.target_node_id);
+        if (!source || !target) {
+          return;
+        }
+        const { d, labelX, labelY } = pathForEdge(
+          source,
+          target,
+          edge.source_handle_id,
+          edge.target_handle_id
+        );
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        path.classList.add("flow-edge-path");
+        if (String(state.selectedEdgeId) === String(edge.id)) {
+          path.classList.add("is-selected");
+        }
+        const onSelectEdge = (event) => {
+          event.stopPropagation();
+          state.selectedEdgeId = String(edge.id);
+          state.selectedNodeToken = null;
+          renderInspector();
+          renderEdges();
+        };
+        path.addEventListener("click", onSelectEdge);
+        fragment.appendChild(path);
+
+        const label = edge.label || edge.condition_key;
+        if (label) {
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.textContent = label;
+          text.setAttribute("x", String(labelX));
+          text.setAttribute("y", String(labelY));
+          text.setAttribute("text-anchor", "middle");
+          text.classList.add("flow-edge-label");
+          fragment.appendChild(text);
+        }
+
+        const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        hitPath.setAttribute("d", d);
+        hitPath.classList.add("flow-edge-hit");
+        hitPath.addEventListener("click", onSelectEdge);
+        fragment.appendChild(hitPath);
+      });
+
+      if (state.connectingFromToken && state.pointerGraph) {
+        const source = findNode(state.connectingFromToken);
+        if (source) {
+          const sourcePoint = connectorPoint(source, state.connectingFromHandleId || "r1", "right");
+          let targetPoint = null;
+          if (state.connectingHoverToken && state.connectingHoverHandleId) {
+            const hoveredNode = findNode(state.connectingHoverToken);
+            if (hoveredNode) {
+              targetPoint = connectorPoint(hoveredNode, state.connectingHoverHandleId, "left");
+            }
+          }
+          if (!targetPoint) {
+            const draftSide = pointerSideForDraft(sourcePoint, state.pointerGraph);
+            targetPoint = {
+              x: state.pointerGraph.x,
+              y: state.pointerGraph.y,
+              side: draftSide,
+            };
+          }
+          const { d } = bezierPath(sourcePoint, targetPoint);
+          const draft = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          draft.setAttribute("d", d);
+          draft.classList.add("flow-edge-path", "is-selected");
+          fragment.appendChild(draft);
+        }
+      }
+
+      edgeLayerEl.appendChild(fragment);
+    }
+
+    function renderNodes() {
+      const fragment = document.createDocumentFragment();
+      state.nodes.forEach((node) => {
+        const token = nodeToken(node);
+        const card = document.createElement("div");
+        card.className = "flow-node";
+        card.classList.add(`is-type-${String(node.node_type || "").trim().toLowerCase()}`);
+        const hasSavedId = Number.isInteger(node.id) && node.id > 0;
+        const isRunning =
+          (hasSavedId && state.runningNodeIds.has(Number(node.id))) ||
+          node.runtime_status === "running";
+        if (isRunning) {
+          card.classList.add("is-running");
+        }
+        if (token === state.selectedNodeToken) {
+          card.classList.add("is-selected");
+        }
+        if (state.connectingFromToken) {
+          card.classList.add("is-connecting");
+        }
+        card.dataset.nodeToken = token;
+        card.style.left = `${graphToWorldX(node.x)}px`;
+        card.style.top = `${graphToWorldY(node.y)}px`;
+        const connectorHtml = connectorLayoutForNode(node).map((connector) => {
+          const isHot =
+            token === state.connectingHoverToken &&
+            connector.id === state.connectingHoverHandleId
+              ? " is-hot"
+              : "";
+          return `
+            <button
+              type="button"
+              class="flow-node-connector${isHot}"
+              data-handle-id="${connector.id}"
+              style="--connector-x: ${connector.x}%; --connector-y: ${connector.y}%;"
+              aria-label="Node connector"
+              title="Drag to connect"
+            ></button>
+          `;
+        }).join("");
+        card.innerHTML = `
+          ${connectorHtml}
+          <div class="flow-node-content">
+            <p class="flow-node-title">${escapeHtml(node.title || defaultNodeTitle(node.node_type))}</p>
+          </div>
+        `;
+
+        card.addEventListener("click", (event) => {
+          event.stopPropagation();
+          state.selectedNodeToken = token;
+          state.selectedEdgeId = null;
+          renderInspector();
+          renderNodes();
+          renderEdges();
+        });
+
+        card.addEventListener("pointerdown", (event) => {
+          if (event.target.closest(".flow-node-connector")) {
+            return;
+          }
+          if (node.node_type === START_NODE_TYPE) {
+            return;
+          }
+          event.preventDefault();
+          state.draggingNodeToken = token;
+          const pointer = toGraphCoords(event.clientX, event.clientY);
+          state.dragOffsetX = pointer.x - Number(node.x);
+          state.dragOffsetY = pointer.y - Number(node.y);
+          state.selectedNodeToken = token;
+          state.selectedEdgeId = null;
+          renderInspector();
+          renderNodes();
+          renderEdges();
+        });
+
+        card.querySelectorAll(".flow-node-connector").forEach((connectorEl) => {
+          connectorEl.addEventListener("pointerdown", (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            const outgoingCount = outgoingEdgeCount(token);
+            const maxOutgoingEdges = maxOutgoingEdgesForNode(node);
+            if (outgoingCount >= maxOutgoingEdges) {
+              setMessage(outgoingEdgeLimitMessage(node), "error");
+              return;
+            }
+            state.connectingFromToken = token;
+            state.connectingFromHandleId = String(connectorEl.dataset.handleId || "r1");
+            state.connectingHoverToken = null;
+            state.connectingHoverHandleId = null;
+            state.pointerGraph = toWorldCoords(event.clientX, event.clientY);
+            state.selectedNodeToken = token;
+            state.selectedEdgeId = null;
+            renderInspector();
+            renderNodes();
+            renderEdges();
+          });
+        });
+
+        fragment.appendChild(card);
+      });
+      nodeLayerEl.replaceChildren(fragment);
+    }
+
+    function selectedNodeInspectorHtml(node) {
+      if (node.node_type === START_NODE_TYPE) {
+        const metadataPanelOpen = isInspectorPanelOpen(node, "metadata");
+        return `
+          <p class="eyebrow">node inspector</p>
+          <div class="flow-inspector-heading">
+            <h3 class="section-title">${escapeHtml(node.title || nodeTypeLabel(node.node_type))}</h3>
+          </div>
+
+          <details class="flow-inspector-panel" data-panel-key="metadata" ${metadataPanelOpen ? "open" : ""}>
+            <summary class="collapse-summary flow-inspector-panel-summary">
+              <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+              Metadata
+            </summary>
+            <div class="flow-inspector-panel-body">
+              <label class="label" style="margin-top: 0;">
+                node name
+                <input type="text" class="input" id="inspectorNodeTitle" value="${escapeHtml(node.title || "")}" />
+              </label>
+              <label class="label">
+                node type
+                <input type="text" class="input" value="${escapeHtml(nodeTypeLabel(node.node_type))}" disabled />
+              </label>
+              <p class="muted" style="margin-top: 8px;">
+                Start nodes are permanent. They cannot be moved, deleted, or changed to another node type.
+              </p>
+            </div>
+          </details>
+        `;
+      }
+
+      const nodeCompat = compatibility[node.node_type] || {
+        model: false,
+        mcp: false,
+        scripts: false,
+      };
+      const isTaskNode = node.node_type === "task";
+      const refOptions = refOptionsFor(node.node_type);
+      const refDisabled = !typesWithRef.has(node.node_type);
+      const refRequired = typesWithRequiredRef.has(node.node_type);
+      const showReferenceField = !refDisabled;
+      const nodeSettingsHtml = nodeConfigEditorHtml(node);
+      const taskConfig = isTaskNode ? taskConfigFor(node) : { taskPrompt: "", agentId: null };
+      const taskIntegrationConfig = isTaskNode ? taskIntegrationConfigFor(node) : null;
+      const taskIntegrationOptions = Array.isArray(catalog.task_integrations)
+        ? catalog.task_integrations
+        : [];
+
+      const typeOptions = nodeTypes
+        .map(
+          (item) =>
+            `<option value="${escapeHtml(item)}" ${item === node.node_type ? "selected" : ""}>${escapeHtml(nodeTypeLabel(item))}</option>`
+        )
+        .join("");
+
+      const refOptionHtml =
+        `<option value="">(none)</option>` +
+        refOptions
+          .map((option) => {
+            const selected = Number(option.id) === Number(node.ref_id) ? "selected" : "";
+            return `<option value="${Number(option.id)}" ${selected}>${escapeHtml(refLabelFor(node.node_type, option))}</option>`;
+          })
+          .join("");
+
+      const modelOptions =
+        `<option value="">(none)</option>` +
+        (catalog.models || [])
+          .map((model) => {
+            const selected = Number(model.id) === Number(node.model_id) ? "selected" : "";
+            const label = model.model_name || model.name;
+            return `<option value="${Number(model.id)}" ${selected}>${escapeHtml(label)}</option>`;
+          })
+          .join("");
+      const agentOptions =
+        `<option value="">No agent (optional)</option>` +
+        (catalog.agents || [])
+          .map((agent) => {
+            const selected = Number(agent.id) === Number(taskConfig.agentId) ? "selected" : "";
+            return `<option value="${Number(agent.id)}" ${selected}>${escapeHtml(agent.name || `Agent ${agent.id}`)}</option>`;
+          })
+          .join("");
+
+      const mcpItems = (catalog.mcp_servers || [])
+        .map((server) => {
+          const checked = node.mcp_server_ids.includes(Number(server.id)) ? "checked" : "";
+          return `
+            <label class="flow-checkbox-item">
+              <input type="checkbox" value="${Number(server.id)}" data-role="node-mcp" ${checked} ${nodeCompat.mcp ? "" : "disabled"} />
+              <span class="flow-checkbox-name" title="${escapeHtml(server.name)}">${escapeHtml(server.name)}</span>
+            </label>
+          `;
+        })
+        .join("");
+      const taskIntegrationItems = isTaskNode
+        ? taskIntegrationOptions
+            .map((option) => {
+              const key = String(option.key || "").trim().toLowerCase();
+              if (!key) {
+                return "";
+              }
+              const label = String(option.label || key);
+              const configured = option.connected ? "configured" : "not configured";
+              const checked = taskIntegrationConfig.selectedKeys.has(key) ? "checked" : "";
+              return `
+                <label class="flow-checkbox-item">
+                  <input type="checkbox" value="${escapeHtml(key)}" data-role="node-integration" ${checked} />
+                  <span class="flow-checkbox-label">
+                    <span class="flow-checkbox-name" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+                    <span class="flow-inline-meta">${escapeHtml(configured)}</span>
+                  </span>
+                </label>
+              `;
+            })
+            .join("")
+        : "";
+
+      const scriptItems = (catalog.scripts || [])
+        .slice()
+        .sort((left, right) =>
+          String(left.file_name || "").localeCompare(String(right.file_name || ""), undefined, {
+            sensitivity: "base",
+          })
+        );
+      const scriptsByType = new Map();
+      scriptItems.forEach((script) => {
+        const scriptType = String(script.script_type || "").trim();
+        if (!scriptType) {
+          return;
+        }
+        if (!scriptsByType.has(scriptType)) {
+          scriptsByType.set(scriptType, []);
+        }
+        scriptsByType.get(scriptType).push(script);
+      });
+      const knownScriptTypes = new Set(
+        scriptStageSections.flatMap((section) => section.script_types)
+      );
+      const unknownScripts = scriptItems.filter(
+        (script) => !knownScriptTypes.has(String(script.script_type || "").trim())
+      );
+      const unknownSection =
+        unknownScripts.length > 0
+          ? [
+              {
+                stage_key: "other",
+                stage_label: "Other",
+                script_types: [],
+                note: "Scripts with unrecognized type.",
+                scripts: unknownScripts,
+              },
+            ]
+          : [];
+      const stageScriptSectionsHtml = scriptStageSections
+        .concat(unknownSection)
+        .map((section) => {
+          const sectionScripts =
+            section.scripts ||
+            section.script_types.flatMap((scriptType) => scriptsByType.get(scriptType) || []);
+          const sectionScriptHtml = sectionScripts
+            .map((script) => {
+              const checked = node.script_ids.includes(Number(script.id)) ? "checked" : "";
+              const scriptTypeLabel =
+                scriptTypeLabels[String(script.script_type || "").trim()] ||
+                String(script.script_type || "");
+              return `
+                <label class="flow-checkbox-item">
+                  <input type="checkbox" value="${Number(script.id)}" data-role="node-script" ${checked} ${nodeCompat.scripts ? "" : "disabled"} />
+                  <span class="flow-checkbox-label">
+                    <span class="flow-checkbox-name" title="${escapeHtml(script.file_name)}">${escapeHtml(script.file_name)}</span>
+                    <span class="flow-inline-meta">${escapeHtml(scriptTypeLabel)}</span>
+                  </span>
+                </label>
+              `;
+            })
+            .join("");
+          const sectionContent = sectionScriptHtml
+            ? `<div class="flow-checkbox-list">${sectionScriptHtml}</div>`
+            : '<p class="flow-stage-script-note">No scripts available for this stage.</p>';
+          const noteHtml = section.note
+            ? `<p class="flow-stage-script-note">${escapeHtml(section.note)}</p>`
+            : "";
+          return `
+            <div class="flow-stage-script-section">
+              <p class="flow-stage-script-header">${escapeHtml(section.stage_label)}</p>
+              ${noteHtml}
+              ${sectionContent}
+            </div>
+          `;
+        })
+        .join("");
+
+      const referenceLabel = `reference${refRequired ? " (required)" : ""}`;
+      const metadataPanelOpen = isInspectorPanelOpen(node, "metadata");
+      const agentPanelOpen = isInspectorPanelOpen(node, "agent");
+      const mcpPanelOpen = isInspectorPanelOpen(node, "mcp");
+      const integrationPanelOpen = isInspectorPanelOpen(node, "integration");
+      const stagesPanelOpen = isInspectorPanelOpen(node, "stages");
+
+      const referenceFieldHtml = showReferenceField
+        ? `
+            <label class="label">
+              ${referenceLabel}
+              <select class="input" id="inspectorNodeRef">
+                ${refOptionHtml}
+              </select>
+            </label>
+          `
+        : "";
+      const taskPromptHtml = isTaskNode
+        ? `
+            <label class="label">
+              task prompt
+              <textarea class="textarea" id="inspectorTaskPrompt" rows="8">${escapeHtml(taskConfig.taskPrompt)}</textarea>
+            </label>
+            <p class="muted" style="margin-top: 8px;">
+              Task nodes are defined inline. Add the prompt here.
+            </p>
+          `
+        : '<p class="muted" style="margin-top: 8px;">Prompt is available for task nodes.</p>';
+      const nodeSettingsSectionHtml =
+        node.node_type === "task"
+          ? ""
+          : `
+              <p class="flow-section-title">Node Settings</p>
+              <div>${nodeSettingsHtml}</div>
+            `;
+      const agentPanelBody = isTaskNode
+        ? `
+            <label class="label">
+              agent
+              <select class="input" id="inspectorTaskAgent">
+                ${agentOptions}
+              </select>
+            </label>
+            ${
+              (catalog.agents || []).length
+                ? ""
+                : '<p class="muted" style="margin-top: 8px;">Create an agent when you want to assign one.</p>'
+            }
+          `
+        : '<p class="muted" style="margin-top: 8px;">Agent assignment is available for task nodes.</p>';
+      const mcpPanelBody = nodeCompat.mcp
+        ? `<div class="flow-checkbox-list">${mcpItems || '<span class="muted">No MCP servers available.</span>'}</div>`
+        : '<p class="muted" style="margin-top: 8px;">MCP servers are not supported by this node type.</p>';
+      const integrationPanelBody = isTaskNode
+        ? `
+            <div class="flow-checkbox-list">${taskIntegrationItems || '<span class="muted">No integrations available.</span>'}</div>
+            <p class="muted" style="margin-top: 8px;">Selected integrations are injected into prompt context.</p>
+          `
+        : '<p class="muted" style="margin-top: 8px;">Integrations are available for task nodes.</p>';
+      const stagesPanelBody = nodeCompat.scripts
+        ? `<div class="flow-stage-script-sections">${stageScriptSectionsHtml || '<span class="muted">No scripts available.</span>'}</div>`
+        : '<p class="muted" style="margin-top: 8px;">Stage scripts are not supported by this node type.</p>';
+
+      return `
+        <p class="eyebrow">node inspector</p>
+        <div class="flow-inspector-heading">
+          <h3 class="section-title">${escapeHtml(node.title || nodeTypeLabel(node.node_type))}</h3>
+          <button
+            type="button"
+            class="icon-button icon-button-danger"
+            id="deleteNodeButton"
+            aria-label="Delete node"
+            title="Delete node"
+          >
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+
+        <details class="flow-inspector-panel" data-panel-key="metadata" ${metadataPanelOpen ? "open" : ""}>
+          <summary class="collapse-summary flow-inspector-panel-summary">
+            <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+            Metadata
+          </summary>
+          <div class="flow-inspector-panel-body">
+            <label class="label" style="margin-top: 0;">
+              node name
+              <input type="text" class="input" id="inspectorNodeTitle" value="${escapeHtml(node.title || "")}" />
+            </label>
+            <label class="label">
+              node type
+              <select class="input" id="inspectorNodeType">
+                ${typeOptions}
+              </select>
+            </label>
+            ${referenceFieldHtml}
+            <label class="label">
+              model
+              <select class="input" id="inspectorNodeModel" ${nodeCompat.model ? "" : "disabled"}>
+                ${modelOptions}
+              </select>
+            </label>
+            ${taskPromptHtml}
+            ${nodeSettingsSectionHtml}
+          </div>
+        </details>
+
+        <details class="flow-inspector-panel" data-panel-key="agent" ${agentPanelOpen ? "open" : ""}>
+          <summary class="collapse-summary flow-inspector-panel-summary">
+            <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+            Agent
+          </summary>
+          <div class="flow-inspector-panel-body">
+            ${agentPanelBody}
+          </div>
+        </details>
+
+        <details class="flow-inspector-panel" data-panel-key="mcp" ${mcpPanelOpen ? "open" : ""}>
+          <summary class="collapse-summary flow-inspector-panel-summary">
+            <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+            MCP
+          </summary>
+          <div class="flow-inspector-panel-body">
+            ${mcpPanelBody}
+          </div>
+        </details>
+
+        <details class="flow-inspector-panel" data-panel-key="integration" ${integrationPanelOpen ? "open" : ""}>
+          <summary class="collapse-summary flow-inspector-panel-summary">
+            <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+            Integration
+          </summary>
+          <div class="flow-inspector-panel-body">
+            ${integrationPanelBody}
+          </div>
+        </details>
+
+        <details class="flow-inspector-panel" data-panel-key="stages" ${stagesPanelOpen ? "open" : ""}>
+          <summary class="collapse-summary flow-inspector-panel-summary">
+            <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+            Stages
+          </summary>
+          <div class="flow-inspector-panel-body">
+            ${stagesPanelBody}
+          </div>
+        </details>
+      `;
+    }
+
+    function selectedEdgeInspectorHtml(edge) {
+      const source = findNode(edge.source_node_id);
+      const target = findNode(edge.target_node_id);
+      return `
+        <p class="eyebrow">edge inspector</p>
+        <h3 class="section-title" style="margin-top: 6px;">${escapeHtml(source ? source.title : edge.source_node_id)} -> ${escapeHtml(target ? target.title : edge.target_node_id)}</h3>
+
+        <label class="label" style="margin-top: 12px;">
+          condition key (required for decision branches)
+          <input type="text" class="input" id="inspectorEdgeCondition" value="${escapeHtml(edge.condition_key || "")}" />
+        </label>
+
+        <label class="label" style="margin-top: 10px;">
+          label (optional)
+          <input type="text" class="input" id="inspectorEdgeLabel" value="${escapeHtml(edge.label || "")}" />
+        </label>
+
+        <div class="flow-inspector-actions">
+          <button type="button" class="btn btn-danger" id="deleteEdgeButton">
+            <i class="fa-solid fa-trash"></i>
+            delete edge
+          </button>
+        </div>
+      `;
+    }
+
+    function renderInspector() {
+      const selectedNode = state.selectedNodeToken ? findNode(state.selectedNodeToken) : null;
+      const selectedEdge = state.selectedEdgeId ? findEdge(state.selectedEdgeId) : null;
+
+      if (selectedNode) {
+        inspectorEl.innerHTML = selectedNodeInspectorHtml(selectedNode);
+
+        const titleInput = document.getElementById("inspectorNodeTitle");
+        const typeSelect = document.getElementById("inspectorNodeType");
+        const refSelect = document.getElementById("inspectorNodeRef");
+        const taskAgentSelect = document.getElementById("inspectorTaskAgent");
+        const taskPromptInput = document.getElementById("inspectorTaskPrompt");
+        const modelSelect = document.getElementById("inspectorNodeModel");
+        const deleteButton = document.getElementById("deleteNodeButton");
+
+        titleInput.addEventListener("input", () => {
+          selectedNode.title = titleInput.value.trim();
+          setDirty(true);
+          renderNodes();
+        });
+
+        if (typeSelect) {
+          typeSelect.addEventListener("change", () => {
+            const nextType = String(typeSelect.value || "task");
+            const previousType = selectedNode.node_type;
+            if (
+              nextType === START_NODE_TYPE &&
+              state.nodes.some(
+                (node) =>
+                  node.node_type === START_NODE_TYPE &&
+                  nodeToken(node) !== nodeToken(selectedNode)
+              )
+            ) {
+              setMessage("Only one start node is allowed.", "error");
+              typeSelect.value = selectedNode.node_type;
+              return;
+            }
+            selectedNode.node_type = nextType;
+            if (typesWithRef.has(nextType)) {
+              const refIds = refOptionsFor(nextType).map((item) => Number(item.id));
+              if (
+                selectedNode.ref_id !== null &&
+                selectedNode.ref_id !== undefined &&
+                !refIds.includes(Number(selectedNode.ref_id))
+              ) {
+                selectedNode.ref_id = typesWithRequiredRef.has(nextType)
+                  ? defaultRefFor(nextType)
+                  : null;
+              } else if (
+                (selectedNode.ref_id === null || selectedNode.ref_id === undefined) &&
+                typesWithRequiredRef.has(nextType)
+              ) {
+                selectedNode.ref_id = defaultRefFor(nextType);
+              }
+            } else {
+              selectedNode.ref_id = null;
+            }
+            if (nextType !== previousType) {
+              selectedNode.config = {};
+            }
+            if (nextType !== "task") {
+              const config = ensureNodeConfigObject(selectedNode);
+              delete config.task_name;
+              delete config.task_prompt;
+              delete config.agent_id;
+              delete config.integration_keys;
+              delete config.route_key_path;
+            }
+            const nextCompat = compatibility[nextType] || {
+              model: false,
+              mcp: false,
+              scripts: false,
+            };
+            if (!nextCompat.model) {
+              selectedNode.model_id = null;
+            }
+            if (!nextCompat.mcp) {
+              selectedNode.mcp_server_ids = [];
+            }
+            if (!nextCompat.scripts) {
+              selectedNode.script_ids = [];
+            }
+            if (!selectedNode.title) {
+              selectedNode.title = defaultNodeTitle(nextType);
+            }
+            setDirty(true);
+            renderAll();
+          });
+        }
+
+        if (refSelect) {
+          refSelect.addEventListener("change", () => {
+            const value = refSelect.value.trim();
+            selectedNode.ref_id = value ? Number(value) : null;
+            setDirty(true);
+            renderAll();
+          });
+        }
+        bindNodeConfigInputs(selectedNode);
+
+        if (taskPromptInput) {
+          taskPromptInput.addEventListener("input", () => {
+            setTaskConfigValue(selectedNode, "task_prompt", taskPromptInput.value);
+            setDirty(true);
+          });
+        }
+        if (taskAgentSelect) {
+          taskAgentSelect.addEventListener("change", () => {
+            const config = ensureNodeConfigObject(selectedNode);
+            const value = taskAgentSelect.value.trim();
+            if (value) {
+              config.agent_id = Number(value);
+            } else {
+              delete config.agent_id;
+            }
+            selectedNode.config = config;
+            setDirty(true);
+          });
+        }
+
+        if (modelSelect) {
+          modelSelect.addEventListener("change", () => {
+            const value = modelSelect.value.trim();
+            selectedNode.model_id = value ? Number(value) : null;
+            setDirty(true);
+          });
+        }
+
+        inspectorEl.querySelectorAll("details.flow-inspector-panel[data-panel-key]").forEach((panel) => {
+          panel.addEventListener("toggle", () => {
+            const panelKey = String(panel.dataset.panelKey || "").trim().toLowerCase();
+            if (!panelKey) {
+              return;
+            }
+            setInspectorPanelOpen(selectedNode, panelKey, panel.open);
+          });
+        });
+
+        inspectorEl.querySelectorAll("input[data-role='node-mcp']").forEach((input) => {
+          input.addEventListener("change", () => {
+            const selected = Array.from(
+              inspectorEl.querySelectorAll("input[data-role='node-mcp']:checked")
+            ).map((item) => Number(item.value));
+            selectedNode.mcp_server_ids = selected;
+            setDirty(true);
+          });
+        });
+
+        inspectorEl.querySelectorAll("input[data-role='node-integration']").forEach((input) => {
+          input.addEventListener("change", () => {
+            const selected = Array.from(
+              inspectorEl.querySelectorAll("input[data-role='node-integration']:checked")
+            )
+              .map((item) => String(item.value || "").trim().toLowerCase())
+              .filter((value) => value)
+              .sort();
+            const config = ensureNodeConfigObject(selectedNode);
+            config.integration_keys = selected;
+            selectedNode.config = config;
+            setDirty(true);
+          });
+        });
+
+        inspectorEl.querySelectorAll("input[data-role='node-script']").forEach((input) => {
+          input.addEventListener("change", () => {
+            const selected = Array.from(
+              inspectorEl.querySelectorAll("input[data-role='node-script']:checked")
+            ).map((item) => Number(item.value));
+            selectedNode.script_ids = selected;
+            setDirty(true);
+          });
+        });
+
+        if (deleteButton) {
+          deleteButton.addEventListener("click", () => {
+            removeSelectedNode();
+          });
+        }
+        return;
+      }
+
+      if (selectedEdge) {
+        inspectorEl.innerHTML = selectedEdgeInspectorHtml(selectedEdge);
+        const conditionInput = document.getElementById("inspectorEdgeCondition");
+        const labelInput = document.getElementById("inspectorEdgeLabel");
+        const deleteButton = document.getElementById("deleteEdgeButton");
+
+        conditionInput.addEventListener("input", () => {
+          selectedEdge.condition_key = conditionInput.value.trim();
+          setDirty(true);
+          renderEdges();
+        });
+
+        labelInput.addEventListener("input", () => {
+          selectedEdge.label = labelInput.value.trim();
+          setDirty(true);
+          renderEdges();
+        });
+
+        deleteButton.addEventListener("click", () => {
+          removeSelectedEdge();
+        });
+        return;
+      }
+
+      inspectorEl.innerHTML = `
+        <p class="eyebrow">inspector</p>
+        <h3 class="section-title" style="margin-top: 6px;">Nothing selected</h3>
+        <p class="muted" style="margin-top: 10px;">
+          Select a node to edit node name, type, refs, settings, model, MCP servers, integrations, and stage scripts.
+          Select an edge to edit condition keys and labels.
+        </p>
+      `;
+    }
+
+    function renderValidation() {
+      if (!state.validation || state.validation.valid) {
+        validationEl.className = "flowchart-inline-status is-success";
+        validationEl.textContent = "validation valid";
+        validationEl.title = "Graph validation: valid";
+        return;
+      }
+      const errors = Array.isArray(state.validation.errors) ? state.validation.errors : [];
+      validationEl.className = "flowchart-inline-status is-error";
+      validationEl.textContent = `validation failed (${errors.length})`;
+      validationEl.title = errors.join(" | ");
+    }
+
+    function updateWorldTransform() {
+      worldEl.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+      zoomLabelEl.textContent = `${Math.round(state.zoom * 100)}%`;
+      viewportEl.classList.toggle("is-panning", state.panning);
+    }
+
+    function renderAll() {
+      updateWorldTransform();
+      renderNodes();
+      renderEdges();
+      renderInspector();
+      renderValidation();
+    }
+
+    function toWorldCoords(clientX, clientY) {
+      const rect = viewportEl.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - state.panX) / state.zoom,
+        y: (clientY - rect.top - state.panY) / state.zoom,
+      };
+    }
+
+    function toGraphCoords(clientX, clientY) {
+      const worldPoint = toWorldCoords(clientX, clientY);
+      return {
+        x: worldToGraphX(worldPoint.x),
+        y: worldToGraphY(worldPoint.y),
+      };
+    }
+
+    function onPointerMove(event) {
+      if (state.draggingNodeToken) {
+        const node = findNode(state.draggingNodeToken);
+        if (!node) {
+          return;
+        }
+        const pointer = toGraphCoords(event.clientX, event.clientY);
+        node.x = pointer.x - state.dragOffsetX;
+        node.y = pointer.y - state.dragOffsetY;
+        setDirty(true);
+        renderNodes();
+        renderEdges();
+        return;
+      }
+      if (state.panning) {
+        state.panX = state.panStartX + (event.clientX - state.panStartClientX);
+        state.panY = state.panStartY + (event.clientY - state.panStartClientY);
+        updateWorldTransform();
+        return;
+      }
+      if (state.connectingFromToken) {
+        state.pointerGraph = toWorldCoords(event.clientX, event.clientY);
+        const hoveredConnector = connectorAtClientPoint(event.clientX, event.clientY);
+        const nextHoverToken = hoveredConnector ? hoveredConnector.nodeToken : null;
+        const nextHoverHandleId = hoveredConnector ? hoveredConnector.handleId : null;
+        const hoverChanged =
+          nextHoverToken !== state.connectingHoverToken ||
+          nextHoverHandleId !== state.connectingHoverHandleId;
+        state.connectingHoverToken = nextHoverToken;
+        state.connectingHoverHandleId = nextHoverHandleId;
+        if (hoverChanged) {
+          renderNodes();
+        }
+        renderEdges();
+      }
+    }
+
+    function maybeCreateEdge(targetToken, targetHandleId) {
+      const sourceToken = state.connectingFromToken;
+      const sourceHandleId = state.connectingFromHandleId;
+      if (!sourceToken || !targetToken) {
+        return;
+      }
+      const sourceNode = findNode(sourceToken);
+      const targetNode = findNode(targetToken);
+      if (!sourceNode || !targetNode) {
+        return;
+      }
+      const outgoingCount = outgoingEdgeCount(sourceToken);
+      const maxOutgoingEdges = maxOutgoingEdgesForNode(sourceNode);
+      if (outgoingCount >= maxOutgoingEdges) {
+        setMessage(outgoingEdgeLimitMessage(sourceNode), "error");
+        return;
+      }
+      state.edges.push({
+        id: `client-edge-${nextClientEdgeId++}`,
+        source_node_id: sourceToken,
+        target_node_id: targetToken,
+        source_handle_id: String(sourceHandleId || "").trim() || null,
+        target_handle_id: String(targetHandleId || "").trim() || null,
+        condition_key: sourceNode.node_type === "decision" ? `route_${outgoingCount + 1}` : "",
+        label: "",
+      });
+      state.selectedEdgeId = String(state.edges[state.edges.length - 1].id);
+      state.selectedNodeToken = null;
+      setDirty(true);
+    }
+
+    function onPointerUp(event) {
+      let shouldRender = false;
+      if (state.draggingNodeToken) {
+        state.draggingNodeToken = null;
+        shouldRender = true;
+      }
+      if (state.panning) {
+        state.panning = false;
+        shouldRender = true;
+      }
+      if (state.connectingFromToken) {
+        const hoveredConnector = connectorAtClientPoint(event.clientX, event.clientY);
+        const targetToken = hoveredConnector
+          ? hoveredConnector.nodeToken
+          : state.connectingHoverToken;
+        const targetHandleId = hoveredConnector
+          ? hoveredConnector.handleId
+          : state.connectingHoverHandleId;
+        if (targetToken) {
+          maybeCreateEdge(targetToken, targetHandleId);
+        }
+        state.connectingFromToken = null;
+        state.connectingFromHandleId = null;
+        state.connectingHoverToken = null;
+        state.connectingHoverHandleId = null;
+        state.pointerGraph = null;
+        shouldRender = true;
+      }
+      if (shouldRender) {
+        renderAll();
+      }
+    }
+
+    async function saveGraph() {
+      if (state.saving) {
+        return;
+      }
+      state.saving = true;
+      saveButton.disabled = true;
+      setDirty(state.dirty);
+      try {
+        const response = await fetch(`/flowcharts/${flowchartId}/graph`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(graphToPayload()),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          state.validation = payload.validation || { valid: false, errors: [payload.error || "Save failed."] };
+          setMessage(payload.error || "Failed to save graph.", "error");
+          renderValidation();
+          return;
+        }
+        applyGraphResponse(payload);
+        setMessage("Flowchart graph saved.", "success");
+      } catch (error) {
+        setMessage(error.message || "Failed to save graph.", "error");
+      } finally {
+        state.saving = false;
+        saveButton.disabled = false;
+        setDirty(state.dirty);
+      }
+    }
+
+    function stopRunPolling() {
+      if (state.runPollTimer !== null) {
+        clearTimeout(state.runPollTimer);
+        state.runPollTimer = null;
+      }
+    }
+
+    function applyRuntimePayload(payload) {
+      const nextActiveRunId = Number(payload && payload.active_run_id);
+      state.activeRunId =
+        Number.isInteger(nextActiveRunId) && nextActiveRunId > 0 ? nextActiveRunId : null;
+
+      const runningIds = new Set();
+      (payload && Array.isArray(payload.running_node_ids) ? payload.running_node_ids : []).forEach(
+        (rawNodeId) => {
+          const nodeId = Number(rawNodeId);
+          if (Number.isInteger(nodeId) && nodeId > 0) {
+            runningIds.add(nodeId);
+          }
+        }
+      );
+      const runningUnchanged =
+        runningIds.size === state.runningNodeIds.size &&
+        Array.from(runningIds).every((nodeId) => state.runningNodeIds.has(nodeId));
+      if (!runningUnchanged) {
+        state.runningNodeIds = runningIds;
+        if (!state.draggingNodeToken && !state.connectingFromToken && !state.panning) {
+          renderNodes();
+        }
+      }
+      updateRunActionButtons();
+    }
+
+    async function fetchFlowchartRuntime() {
+      const response = await fetch(`/flowcharts/${flowchartId}/runtime`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error("Failed to load flowchart runtime status.");
+      }
+      return response.json();
+    }
+
+    async function syncFlowchartRuntime() {
+      const payload = await fetchFlowchartRuntime();
+      applyRuntimePayload(payload);
+      return payload;
+    }
+
+    async function pollFlowchartRuntime() {
+      try {
+        await syncFlowchartRuntime();
+        const delay = state.activeRunId ? 250 : 900;
+        state.runPollTimer = window.setTimeout(() => {
+          pollFlowchartRuntime();
+        }, delay);
+      } catch (_error) {
+        state.runPollTimer = window.setTimeout(() => {
+          pollFlowchartRuntime();
+        }, 1200);
+      }
+    }
+
+    function startRunPolling(runId = null) {
+      if (runId !== null && runId !== undefined) {
+        const numericRunId = Number(runId);
+        if (Number.isInteger(numericRunId) && numericRunId > 0) {
+          state.activeRunId = numericRunId;
+        }
+      }
+      stopRunPolling();
+      updateRunActionButtons();
+      pollFlowchartRuntime();
+    }
+
+    async function stopFlowchart(force = false) {
+      let numericRunId = Number(state.activeRunId);
+      if (!Number.isInteger(numericRunId) || numericRunId <= 0) {
+        try {
+          await syncFlowchartRuntime();
+        } catch (_error) {
+          // Keep user-facing error message below if no active run is found.
+        }
+        numericRunId = Number(state.activeRunId);
+      }
+      if (!Number.isInteger(numericRunId) || numericRunId <= 0) {
+        setMessage("No active flowchart run to stop.", "error");
+        updateRunActionButtons();
+        return;
+      }
+      state.runActionPending = true;
+      updateRunActionButtons();
+      try {
+        const response = await fetch(`/flowcharts/runs/${numericRunId}/cancel`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ force }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || "Failed to stop flowchart run.");
+        }
+        const action = String(payload.action || "").trim().toLowerCase();
+        const nextStatus = String(
+          payload.flowchart_run && payload.flowchart_run.status ? payload.flowchart_run.status : ""
+        )
+          .trim()
+          .toLowerCase();
+        if (action === "canceled") {
+          setMessage("Flowchart force stop requested.", "success");
+        } else if (action === "stopped") {
+          setMessage("Flowchart stopped.", "success");
+        } else if (action === "stopping") {
+          setMessage("Flowchart stop requested. It will stop after the current node finishes.", "success");
+        } else {
+          setMessage("Flowchart run is not active.", "error");
+        }
+        if (!activeRunStatuses.has(nextStatus)) {
+          state.activeRunId = null;
+        }
+        try {
+          await syncFlowchartRuntime();
+        } catch (_error) {
+          // Polling will retry and refresh shortly.
+        }
+      } catch (error) {
+        setMessage(error.message || "Failed to stop flowchart run.", "error");
+      } finally {
+        state.runActionPending = false;
+        updateRunActionButtons();
+      }
+    }
+
+    async function runFlowchart() {
+      runButton.disabled = true;
+      try {
+        const response = await fetch(`/flowcharts/${flowchartId}/run`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          const errorText = payload.error || "Flowchart run request failed.";
+          setMessage(errorText, "error");
+          state.validation = payload.validation || state.validation;
+          renderValidation();
+          return;
+        }
+        const run = payload.flowchart_run;
+        if (run) {
+          setMessage(`Flowchart run ${run.id} queued. See history for details.`, "success");
+          startRunPolling(run.id);
+        }
+      } catch (error) {
+        setMessage(error.message || "Failed to queue flowchart run.", "error");
+      } finally {
+        runButton.disabled = false;
+      }
+    }
+
+    viewportEl.addEventListener("pointerdown", (event) => {
+      const inNode = event.target.closest(".flow-node");
+      if (
+        inNode ||
+        event.target.closest(".flow-node-connector") ||
+        event.target.closest(".flow-edge-path") ||
+        event.target.closest(".flow-edge-hit")
+      ) {
+        return;
+      }
+      state.selectedNodeToken = null;
+      state.selectedEdgeId = null;
+      state.panning = true;
+      state.panStartClientX = event.clientX;
+      state.panStartClientY = event.clientY;
+      state.panStartX = state.panX;
+      state.panStartY = state.panY;
+      renderInspector();
+      updateWorldTransform();
+    });
+
+    viewportEl.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const rect = viewportEl.getBoundingClientRect();
+      const pointX = event.clientX - rect.left;
+      const pointY = event.clientY - rect.top;
+      const worldX = (pointX - state.panX) / state.zoom;
+      const worldY = (pointY - state.panY) / state.zoom;
+      const delta = event.deltaY < 0 ? 1.1 : 0.9;
+      const nextZoom = Math.min(2.4, Math.max(0.4, state.zoom * delta));
+      state.zoom = nextZoom;
+      state.panX = pointX - worldX * nextZoom;
+      state.panY = pointY - worldY * nextZoom;
+      updateWorldTransform();
+      renderEdges();
+    });
+
+    viewportEl.addEventListener("dragover", (event) => {
+      event.preventDefault();
+    });
+
+    viewportEl.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const nodeType = event.dataTransfer.getData("text/flow-node-type");
+      if (!nodeType) {
+        return;
+      }
+      const point = toGraphCoords(event.clientX, event.clientY);
+      addNode(
+        nodeType,
+        point.x - nodeWidthForType(nodeType) / 2,
+        point.y - nodeHeightForType(nodeType) / 2
+      );
+    });
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+
+    document.addEventListener("keydown", (event) => {
+      const tagName = (event.target && event.target.tagName ? event.target.tagName : "").toLowerCase();
+      if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+        return;
+      }
+      if (event.key === "Escape") {
+        state.connectingFromToken = null;
+        state.connectingFromHandleId = null;
+        state.connectingHoverToken = null;
+        state.connectingHoverHandleId = null;
+        state.pointerGraph = null;
+        renderAll();
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (state.selectedNodeToken) {
+          const selectedNode = findNode(state.selectedNodeToken);
+          if (selectedNode && selectedNode.node_type === START_NODE_TYPE) {
+            setMessage("Start node cannot be deleted.", "error");
+            event.preventDefault();
+            return;
+          }
+          removeSelectedNode();
+          event.preventDefault();
+          return;
+        }
+        if (state.selectedEdgeId) {
+          removeSelectedEdge();
+          event.preventDefault();
+        }
+      }
+    });
+
+    saveButton.addEventListener("click", () => {
+      saveGraph();
+    });
+
+    runButton.addEventListener("click", () => {
+      runFlowchart();
+    });
+
+    stopButton.addEventListener("click", () => {
+      stopFlowchart(false);
+    });
+
+    forceStopButton.addEventListener("click", () => {
+      stopFlowchart(true);
+    });
+
+    zoomInButton.addEventListener("click", () => {
+      state.zoom = Math.min(2.4, state.zoom * 1.1);
+      updateWorldTransform();
+      renderEdges();
+    });
+
+    zoomOutButton.addEventListener("click", () => {
+      state.zoom = Math.max(0.4, state.zoom * 0.9);
+      updateWorldTransform();
+      renderEdges();
+    });
+
+    resetViewButton.addEventListener("click", () => {
+      state.zoom = 1;
+      centerViewOnStartNode();
+      updateWorldTransform();
+      renderEdges();
+    });
+
+    applyGraphResponse(initialGraph);
+    centerViewOnStartNode();
+    updateWorldTransform();
+    if (Number.isInteger(initialSelectedNodeId) && initialSelectedNodeId > 0) {
+      const selectedNode = state.nodes.find((node) => node.id === Number(initialSelectedNodeId));
+      if (selectedNode) {
+        state.selectedNodeToken = nodeToken(selectedNode);
+        renderAll();
+      }
+    }
+    renderPalette();
+    state.validation = initialValidation;
+    renderValidation();
+    setMessage("");
+    updateRunActionButtons();
+    startRunPolling(state.activeRunId);
+    window.addEventListener("beforeunload", stopRunPolling);
+  })();
+</script>
+{% endblock %}

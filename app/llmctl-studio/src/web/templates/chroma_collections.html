@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% macro pagination_controls() %}
+  <nav class="pagination" aria-label="Chroma collections pages">
+    {% if page > 1 %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('agents.chroma_collections', page=page - 1, per_page=per_page) }}"
+      >
+        Prev
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+    {% endif %}
+    <div class="pagination-pages">
+      {% for item in pagination_items %}
+        {% if item.type == "gap" %}
+          <span class="pagination-ellipsis">&hellip;</span>
+        {% else %}
+          {% if item.page == page %}
+            <span class="pagination-link is-active" aria-current="page">
+              {{ item.page }}
+            </span>
+          {% else %}
+            <a
+              class="pagination-link"
+              href="{{ url_for('agents.chroma_collections', page=item.page, per_page=per_page) }}"
+            >
+              {{ item.page }}
+            </a>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if page < total_pages %}
+      <a
+        class="pagination-btn"
+        href="{{ url_for('agents.chroma_collections', page=page + 1, per_page=per_page) }}"
+      >
+        Next
+      </a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+{% endmacro %}
+
+{% block action_header %}
+  <div class="pagination-bar pagination-bar-header">
+    {{ pagination_controls() }}
+    <div class="pagination-bar-actions">
+      <form class="pagination-size" method="get" action="{{ url_for('agents.chroma_collections') }}">
+        <input type="hidden" name="page" value="1" />
+        <label for="chroma-per-page">Rows per page</label>
+        <select name="per_page" id="chroma-per-page" onchange="this.form.submit()">
+          {% for option in per_page_options %}
+            <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>
+              {{ option }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="section-title">ChromaDB Collections</h2>
+      <p class="muted" style="margin-top: 6px;">
+        Click a collection to view details or delete it.
+      </p>
+    </div>
+    <span class="status status-idle">
+      {{ chroma_host }}:{{ chroma_port }} ({{ chroma_ssl }})
+    </span>
+  </div>
+  {% if chroma_normalized_hint %}
+    <div class="alert alert-info" style="margin-top: 16px;">
+      {{ chroma_normalized_hint }}
+    </div>
+  {% endif %}
+  {% if chroma_error %}
+    <div class="alert alert-error" style="margin-top: 16px;">
+      {{ chroma_error }}
+    </div>
+  {% endif %}
+  {% if collections and not chroma_error %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Documents</th>
+            <th>Metadata</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for collection in collections %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.chroma_collection_detail', name=collection.name) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.chroma_collection_detail', name=collection.name) }}">
+                  <span class="mono">{{ collection.name }}</span>
+                </a>
+              </td>
+              <td>
+                {% if collection.count is not none %}
+                  {{ collection.count }}
+                {% else %}
+                  <span class="muted">-</span>
+                {% endif %}
+              </td>
+              <td class="mono truncate">
+                {{ collection.metadata_preview }}
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.delete_chroma_collection') }}"
+                    onsubmit="return confirm('Delete this collection from ChromaDB?');"
+                  >
+                    <input type="hidden" name="collection_name" value="{{ collection.name }}" />
+                    <button
+                      type="submit"
+                      class="icon-button icon-button-danger"
+                      aria-label="Delete collection"
+                      title="Delete collection"
+                    >
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% elif not chroma_error %}
+    <p class="muted" style="margin-top: 16px;">No collections found.</p>
+  {% endif %}
+</section>
+
+<script>
+  const collectionRows = document.querySelectorAll(".table-row-link");
+  const isInteractiveTarget = (target) =>
+    target.closest(
+      "a, button, input, select, textarea, label, summary, details"
+    );
+  collectionRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (isInteractiveTarget(event.target)) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

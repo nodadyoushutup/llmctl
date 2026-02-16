@@ -284,6 +284,10 @@
         overflow-y: auto;
       }
 
+      .main.is-fixed-list {
+        overflow: hidden;
+      }
+
       .topbar {
         position: sticky;
         top: 0;
@@ -372,12 +376,32 @@
         gap: 24px;
       }
 
+      .content.is-fixed-list {
+        min-height: 0;
+        overflow: hidden;
+      }
+
       .card {
         border-radius: 18px;
         border: 1px solid var(--line);
         background: rgba(17, 24, 33, 0.9);
         padding: 24px;
         box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+      }
+
+      .workflow-list-card {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .workflow-list-table-shell {
+        margin-top: 20px;
+        flex: 1;
+        min-height: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
       }
 
       .card-header {
@@ -1952,42 +1976,6 @@
         background: rgba(24, 33, 43, 0.55);
       }
 
-      .table.table-pipelines th,
-      .table.table-pipelines td {
-        padding: 14px 12px;
-      }
-
-      .table.table-pipelines .pipeline-name {
-        font-size: 15px;
-        font-weight: 600;
-        color: #fff;
-      }
-
-      .table.table-pipelines .pipeline-description {
-        max-width: 420px;
-        line-height: 1.5;
-      }
-
-      .table.table-pipelines .steps-cell {
-        text-align: center;
-        width: 80px;
-      }
-
-      .table.table-pipelines .steps-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 32px;
-        padding: 4px 10px;
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        background: rgba(15, 23, 32, 0.8);
-        color: #e2e8f0;
-        font-size: 12px;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-      }
-
       .table .table-actions-cell {
         text-align: right;
         width: 1%;
@@ -1995,20 +1983,6 @@
       }
 
       .table .table-actions {
-        display: inline-flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 10px;
-        flex-wrap: nowrap;
-      }
-
-      .table.table-pipelines .table-actions-cell {
-        text-align: right;
-        width: 1%;
-        white-space: nowrap;
-      }
-
-      .table.table-pipelines .table-actions {
         display: inline-flex;
         align-items: center;
         justify-content: flex-end;
@@ -2178,6 +2152,66 @@
         word-break: break-word;
         max-width: 100%;
         min-width: 0;
+      }
+
+      .markdown-content {
+        line-height: 1.5;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .markdown-content > :first-child {
+        margin-top: 0;
+      }
+
+      .markdown-content > :last-child {
+        margin-bottom: 0;
+      }
+
+      .markdown-content p {
+        margin: 0 0 10px;
+      }
+
+      .markdown-content ul,
+      .markdown-content ol {
+        margin: 0 0 10px 20px;
+      }
+
+      .markdown-content li {
+        margin: 4px 0;
+      }
+
+      .markdown-content blockquote {
+        margin: 0 0 10px;
+        padding: 6px 10px;
+        border-left: 3px solid var(--line);
+        color: var(--muted);
+        background: rgba(11, 15, 20, 0.32);
+        border-radius: 8px;
+      }
+
+      .markdown-content code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        background: rgba(11, 15, 20, 0.55);
+        padding: 0 4px;
+        border-radius: 6px;
+      }
+
+      .markdown-content pre {
+        margin: 0 0 10px;
+        white-space: pre-wrap;
+      }
+
+      .markdown-content pre code {
+        background: transparent;
+        padding: 0;
+        border-radius: 0;
+      }
+
+      .markdown-content a {
+        color: #7ec8ff;
       }
 
       summary::-webkit-details-marker {
@@ -2360,16 +2394,6 @@
           padding: 8px 0;
         }
 
-        .table.table-pipelines .table-actions-cell {
-          text-align: left;
-          white-space: normal;
-        }
-
-        .table.table-pipelines .table-actions {
-          justify-content: flex-start;
-          flex-wrap: wrap;
-        }
-
         .pagination-bar {
           flex-direction: column;
           align-items: flex-start;
@@ -2460,23 +2484,29 @@
       "icon": "fa-solid fa-bolt",
       "url": url_for("agents.runs"),
     } %}
-    {% set nav_pipelines = {
-      "id": "pipelines",
-      "label": "Pipelines",
+    {% set nav_flowcharts = {
+      "id": "flowcharts",
+      "label": "Flowcharts",
       "icon": "fa-solid fa-diagram-project",
-      "url": url_for("agents.list_pipelines"),
+      "url": url_for("agents.list_flowcharts"),
     } %}
     {% set nav_templates = {
       "id": "templates",
-      "label": "Templates",
+      "label": "Tasks",
       "icon": "fa-solid fa-layer-group",
       "url": url_for("agents.list_task_templates"),
     } %}
-    {% set nav_tasks = {
-      "id": "tasks",
-      "label": "Tasks",
+    {% set nav_plans = {
+      "id": "plans",
+      "label": "Plans",
+      "icon": "fa-solid fa-map",
+      "url": url_for("agents.list_plans"),
+    } %}
+    {% set nav_nodes = {
+      "id": "nodes",
+      "label": "Nodes",
       "icon": "fa-solid fa-list-check",
-      "url": url_for("agents.list_tasks"),
+      "url": url_for("agents.list_nodes"),
     } %}
     {% set nav_milestones = {
       "id": "milestones",
@@ -2486,7 +2516,7 @@
     } %}
     {% set nav_quick = {
       "id": "quick",
-      "label": "Quick Tasks",
+      "label": "Quick Nodes",
       "icon": "fa-solid fa-comment-dots",
       "url": url_for("agents.quick_task"),
     } %}
@@ -2541,6 +2571,13 @@
       "url": url_for("agents.confluence_workspace"),
       "visible": integration_overview.confluence.connected if integration_overview else False,
     } %}
+    {% set nav_chroma = {
+      "id": "chroma",
+      "label": "ChromaDB",
+      "icon": "fa-solid fa-layer-group",
+      "url": url_for("agents.chroma_collections"),
+      "visible": integration_overview.chroma.connected if integration_overview else False,
+    } %}
     {% set nav_settings = {
       "id": "settings",
       "label": "Settings",
@@ -2554,23 +2591,23 @@
       },
       {
         "label": "Activity",
-        "items": [nav_tasks, nav_runs],
+        "items": [nav_nodes, nav_runs],
       },
       {
         "label": "Launch",
-        "items": [nav_quick, nav_pipelines],
+        "items": [nav_flowcharts, nav_quick],
       },
       {
         "label": "Workflow",
-        "items": [nav_templates, nav_milestones, nav_memories],
+        "items": [nav_templates, nav_plans, nav_milestones, nav_memories],
       },
       {
-        "label": "Utility",
+        "label": "Node Resources",
         "items": [nav_mcps, nav_models, nav_scripts],
       },
       {
         "label": "Integration",
-        "items": [nav_github, nav_jira, nav_confluence],
+        "items": [nav_github, nav_jira, nav_confluence, nav_chroma],
       },
       {
         "label": "System",
@@ -2580,11 +2617,12 @@
     {% set nav_items = [
       nav_agents,
       nav_roles,
-      nav_tasks,
+      nav_nodes,
       nav_runs,
+      nav_flowcharts,
       nav_quick,
-      nav_pipelines,
       nav_templates,
+      nav_plans,
       nav_milestones,
       nav_mcps,
       nav_models,
@@ -2593,6 +2631,7 @@
       nav_github,
       nav_jira,
       nav_confluence,
+      nav_chroma,
       nav_overview,
       nav_attachments,
       nav_settings,
@@ -2657,7 +2696,7 @@
             {% endfor %}
           </nav>
         </aside>
-        <div class="main">
+        <div class="main{% if fixed_list_page %} is-fixed-list{% endif %}">
           <header class="topbar content-header" id="content-header">
             <div class="topbar-row">
               <div>
@@ -2669,12 +2708,6 @@
                   <a class="btn btn-secondary" href="{{ url_for('agents.new_agent') }}">
                     <i class="fa-solid fa-plus"></i>
                     create agent
-                  </a>
-                {% endif %}
-                {% if active_page == "pipelines" %}
-                  <a class="btn btn-secondary" href="{{ url_for('agents.pipeline_history') }}">
-                    <i class="fa-solid fa-clock"></i>
-                    pipeline history
                   </a>
                 {% endif %}
               {% endblock %}
@@ -2705,7 +2738,7 @@
               </div>
             </div>
           {% endif %}
-          <main class="content">
+          <main class="content{% if fixed_list_page %} is-fixed-list{% endif %}">
             {% block content %}{% endblock %}
           </main>
         </div>

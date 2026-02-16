@@ -1,4 +1,5 @@
 services:
+  # Database services
   llmctl-redis:
     image: redis:7.2-alpine
     command: ["redis-server", "--appendonly", "yes", "--port", "6380"]
@@ -8,84 +9,10 @@ services:
       - 8.8.8.8
     ports:
       - "6380:6380"
-  github-mcp:
-    build:
-      context: ..
-      dockerfile: app/llmctl-mcp/docker/github-mcp-proxy.Dockerfile
-    container_name: github-mcp
-    environment:
-      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
-      - GITHUB_HOST=${GITHUB_HOST:-}
-    dns:
-      - 192.168.1.1
-      - 1.1.1.1
-      - 8.8.8.8
-    entrypoint: ["/bin/busybox", "sleep", "infinity"]
-    restart: unless-stopped
-  jira-mcp:
-    image: ghcr.io/sooperset/mcp-atlassian:latest
-    container_name: jira-mcp
-    environment:
-      - JIRA_URL=${JIRA_URL}
-      - JIRA_USERNAME=${JIRA_USERNAME}
-      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
-      - CONFLUENCE_URL=${CONFLUENCE_URL}
-      - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
-      - CONFLUENCE_API_TOKEN=${CONFLUENCE_API_TOKEN}
-    dns:
-      - 192.168.1.1
-      - 1.1.1.1
-      - 8.8.8.8
-    entrypoint: ["sleep", "infinity"]
-    restart: unless-stopped
-  chromadb-mcp:
-    image: llmctl-chromadb-mcp:latest
-    build:
-      context: ..
-      dockerfile: app/llmctl-mcp/docker/chromadb-mcp-proxy.Dockerfile
-    container_name: chromadb-mcp
-    environment:
-      - CHROMA_CLIENT_TYPE=${CHROMA_CLIENT_TYPE:-http}
-      - CHROMA_HOST=${CHROMA_HOST:-chromadb}
-      - CHROMA_PORT=${CHROMA_PORT:-8000}
-      - CHROMA_SSL=${CHROMA_SSL:-false}
-    dns:
-      - 192.168.1.1
-      - 1.1.1.1
-      - 8.8.8.8
-    entrypoint: ["sleep", "infinity"]
-    depends_on:
-      - chromadb
-    restart: unless-stopped
-  llmctl-mcp:
-    image: llmctl-mcp:latest
-    build:
-      context: ..
-      dockerfile: app/llmctl-mcp/docker/llmctl-mcp.Dockerfile
-    container_name: llmctl-mcp
-    environment:
-      - LLMCTL_MCP_HOST=0.0.0.0
-      - LLMCTL_MCP_PORT=${LLMCTL_MCP_PORT:-9020}
-      - LLMCTL_MCP_PATH=${LLMCTL_MCP_PATH:-/mcp}
-      - LLMCTL_MCP_TRANSPORT=${LLMCTL_MCP_TRANSPORT:-stdio}
-      - LLMCTL_STUDIO_DATA_DIR=/app/data
-      - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-llmctl-redis}
-      - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
-      - CELERY_REDIS_BROKER_DB=${CELERY_REDIS_BROKER_DB:-0}
-      - CELERY_REDIS_BACKEND_DB=${CELERY_REDIS_BACKEND_DB:-1}
-    dns:
-      - 192.168.1.1
-      - 1.1.1.1
-      - 8.8.8.8
-    entrypoint: ["sleep", "infinity"]
-    volumes:
-      - ../data:/app/data
-      - ../app/llmctl-mcp:/app/app/llmctl-mcp
-      - ../app/llmctl-studio/src:/app/app/llmctl-studio/src
-    restart: unless-stopped
-  chromadb:
+
+  llmctl-chromadb:
     image: chromadb/chroma:latest
-    container_name: chromadb
+    container_name: llmctl-chromadb
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
@@ -95,9 +22,15 @@ services:
       - 8.8.8.8
     ports:
       - "${CHROMA_HOST_PORT:-8000}:8000"
+    networks:
+      default:
+        aliases:
+          - chromadb
     volumes:
       - chroma_data:/chroma/chroma
     restart: unless-stopped
+
+  # App services
   llmctl-rag:
     build:
       context: ..
@@ -146,8 +79,9 @@ services:
       - ../data/llmctl-rag:/data/llmctl-rag
       - ../example:/example:ro
     depends_on:
-      - chromadb
+      - llmctl-chromadb
     restart: unless-stopped
+
   llmctl-studio:
     image: llmctl-studio:latest
     build:
@@ -157,12 +91,21 @@ services:
         APP_UID: ${APP_UID:-1000}
         APP_GID: ${APP_GID:-1000}
         DOCKER_GID: ${DOCKER_GID:-999}
+        INSTALL_VLLM: ${INSTALL_VLLM:-true}
     container_name: llmctl-studio
     environment:
       - CELERY_REDIS_HOST=${CELERY_REDIS_HOST:-llmctl-redis}
       - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
       - CELERY_REDIS_BROKER_DB=${CELERY_REDIS_BROKER_DB:-0}
       - CELERY_REDIS_BACKEND_DB=${CELERY_REDIS_BACKEND_DB:-1}
+      - CHROMA_HOST=${CHROMA_HOST:-}
+      - CHROMA_PORT=${CHROMA_PORT:-}
+      - CHROMA_SSL=${CHROMA_SSL:-false}
+      - LLMCTL_STUDIO_VLLM_LOCAL_CUSTOM_MODELS_DIR=${LLMCTL_STUDIO_VLLM_LOCAL_CUSTOM_MODELS_DIR:-/app/models/custom}
+      - VLLM_LOCAL_FALLBACK_MODEL=${VLLM_LOCAL_FALLBACK_MODEL:-/app/models/custom/qwen2.5-0.5b-instruct}
+      - VLLM_LOCAL_CMD=${VLLM_LOCAL_CMD:-vllm}
+      - VLLM_REMOTE_BASE_URL=${VLLM_REMOTE_BASE_URL:-}
+    gpus: all
     dns:
       - 192.168.1.1
       - 1.1.1.1
@@ -172,9 +115,12 @@ services:
     volumes:
       - ../app/llmctl-studio/run.py:/app/app/llmctl-studio/run.py
       - ../app/llmctl-studio/src:/app/app/llmctl-studio/src
+      - ../app/llmctl-mcp:/app/app/llmctl-mcp
       - ../data:/app/data
+      - ${LLMCTL_VLLM_MODELS_DIR:-../models}:/app/models/custom
       - ${HOME}/.gitconfig:/home/llmctl-studio/.gitconfig:ro
       - /var/run/docker.sock:/var/run/docker.sock
+
   dozzle:
     image: amir20/dozzle:latest
     container_name: dozzle
@@ -185,5 +131,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
+
 volumes:
   chroma_data:

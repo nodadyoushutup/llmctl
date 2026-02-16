@@ -94,7 +94,6 @@ def _ensure_schema() -> None:
             "description": "TEXT",
             "autonomous_prompt": "TEXT",
             "role_id": "INTEGER",
-            "model_id": "INTEGER",
             "is_system": "BOOLEAN NOT NULL DEFAULT 0",
             "last_run_task_id": "TEXT",
             "run_max_loops": "INTEGER",
@@ -114,45 +113,115 @@ def _ensure_schema() -> None:
             "file_path": "TEXT",
         }
         _ensure_columns(connection, "scripts", script_columns)
-        _ensure_columns(connection, "agent_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "agent_task_scripts", {"position": "INTEGER"})
         _migrate_script_storage(connection)
         _migrate_script_positions(connection)
 
         task_template_columns = {
             "agent_id": "INTEGER",
+            "model_id": "INTEGER",
         }
         _ensure_columns(connection, "task_templates", task_template_columns)
 
-        pipeline_columns = {
-            "loop_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        mcp_server_columns = {
+            "server_type": "TEXT NOT NULL DEFAULT 'custom'",
         }
-        _ensure_columns(connection, "pipelines", pipeline_columns)
+        _ensure_columns(connection, "mcp_servers", mcp_server_columns)
 
-        pipeline_step_columns = {
-            "additional_prompt": "TEXT",
+        flowchart_columns = {
+            "description": "VARCHAR(512)",
+            "max_node_executions": "INTEGER",
+            "max_runtime_minutes": "INTEGER",
+            "max_parallel_nodes": "INTEGER NOT NULL DEFAULT 1",
         }
-        _ensure_columns(connection, "pipeline_steps", pipeline_step_columns)
+        _ensure_columns(connection, "flowcharts", flowchart_columns)
 
-        pipeline_run_columns = {
+        flowchart_node_columns = {
+            "node_type": "TEXT NOT NULL DEFAULT 'task'",
+            "ref_id": "INTEGER",
+            "title": "VARCHAR(255)",
+            "x": "FLOAT NOT NULL DEFAULT 0",
+            "y": "FLOAT NOT NULL DEFAULT 0",
+            "config_json": "TEXT",
+            "model_id": "INTEGER",
+        }
+        _ensure_columns(connection, "flowchart_nodes", flowchart_node_columns)
+
+        flowchart_edge_columns = {
+            "source_handle_id": "VARCHAR(32)",
+            "target_handle_id": "VARCHAR(32)",
+            "condition_key": "VARCHAR(128)",
+            "label": "VARCHAR(255)",
+        }
+        _ensure_columns(connection, "flowchart_edges", flowchart_edge_columns)
+
+        flowchart_run_columns = {
+            "celery_task_id": "VARCHAR(255)",
+            "status": "VARCHAR(32) NOT NULL DEFAULT 'queued'",
+            "started_at": "DATETIME",
+            "finished_at": "DATETIME",
             "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
             "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
         }
-        _ensure_columns(connection, "pipeline_runs", pipeline_run_columns)
+        _ensure_columns(connection, "flowchart_runs", flowchart_run_columns)
+
+        flowchart_run_node_columns = {
+            "execution_index": "INTEGER NOT NULL DEFAULT 1",
+            "agent_task_id": "INTEGER",
+            "status": "VARCHAR(32) NOT NULL DEFAULT 'queued'",
+            "input_context_json": "TEXT",
+            "output_state_json": "TEXT",
+            "routing_state_json": "TEXT",
+            "resolved_skill_ids_json": "TEXT",
+            "resolved_skill_versions_json": "TEXT",
+            "resolved_skill_manifest_hash": "VARCHAR(128)",
+            "skill_adapter_mode": "VARCHAR(32)",
+            "error": "TEXT",
+            "started_at": "DATETIME",
+            "finished_at": "DATETIME",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        }
+        _ensure_columns(connection, "flowchart_run_nodes", flowchart_run_node_columns)
+
+        _ensure_columns(connection, "task_template_scripts", {"position": "INTEGER"})
+        _ensure_columns(connection, "flowchart_node_scripts", {"position": "INTEGER"})
+        _ensure_columns(connection, "flowchart_node_skills", {"position": "INTEGER"})
+
+        milestone_columns = {
+            "status": "TEXT NOT NULL DEFAULT 'planned'",
+            "priority": "TEXT NOT NULL DEFAULT 'medium'",
+            "owner": "TEXT",
+            "start_date": "DATETIME",
+            "progress_percent": "INTEGER NOT NULL DEFAULT 0",
+            "health": "TEXT NOT NULL DEFAULT 'green'",
+            "success_criteria": "TEXT",
+            "dependencies": "TEXT",
+            "links": "TEXT",
+            "latest_update": "TEXT",
+        }
+        _ensure_columns(connection, "milestones", milestone_columns)
+        _migrate_milestone_status(connection)
 
         task_columns = {
             "run_id": "INTEGER",
-            "pipeline_id": "INTEGER",
-            "pipeline_run_id": "INTEGER",
-            "pipeline_step_id": "INTEGER",
             "task_template_id": "INTEGER",
+            "model_id": "INTEGER",
+            "flowchart_id": "INTEGER",
+            "flowchart_run_id": "INTEGER",
+            "flowchart_node_id": "INTEGER",
             "kind": "TEXT",
+            "integration_keys_json": "TEXT",
             "current_stage": "TEXT",
             "stage_logs": "TEXT",
         }
         _ensure_columns(connection, "agent_tasks", task_columns)
         _migrate_agent_task_agent_nullable(connection)
-        _migrate_pipeline_agent_columns(connection)
+        _migrate_agent_task_kind_values(connection)
+        _drop_pipeline_schema(connection)
+        _ensure_flowchart_indexes(connection)
+        _drop_agent_utility_ownership(connection)
+        _ensure_canonical_workflow_views(connection)
 
 
 def _ensure_columns(connection, table: str, columns: dict[str, str]) -> None:
@@ -182,6 +251,49 @@ def _table_names(connection) -> set[str]:
         text("SELECT name FROM sqlite_master WHERE type='table'")
     ).fetchall()
     return {row[0] for row in rows}
+
+
+def _quote_identifier(identifier: str) -> str:
+    return '"' + str(identifier).replace('"', '""') + '"'
+
+
+def _capture_sqlite_views_for_table(
+    connection, table: str
+) -> list[tuple[str, str]]:
+    if connection.dialect.name != "sqlite":
+        return []
+    rows = connection.execute(
+        text(
+            "SELECT name, sql "
+            "FROM sqlite_master "
+            "WHERE type='view' "
+            "ORDER BY rowid"
+        )
+    ).fetchall()
+    normalized_table = str(table).strip().lower()
+    views: list[tuple[str, str]] = []
+    for row in rows:
+        name = row[0]
+        create_sql = row[1]
+        if not name or not create_sql:
+            continue
+        if normalized_table in str(create_sql).lower():
+            views.append((str(name), str(create_sql)))
+    return views
+
+
+def _drop_sqlite_views(connection, views: list[tuple[str, str]]) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    for name, _ in views:
+        connection.execute(text(f"DROP VIEW IF EXISTS {_quote_identifier(name)}"))
+
+
+def _restore_sqlite_views(connection, views: list[tuple[str, str]]) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    for _, create_sql in views:
+        connection.execute(text(create_sql))
 
 
 def _migrate_roles_schema(connection) -> None:
@@ -563,9 +675,11 @@ def _drop_columns_sqlite(
     table_columns = _table_columns(connection, table)
     if not table_columns or not (drop_columns & table_columns):
         return
+    dependent_views = _capture_sqlite_views_for_table(connection, table)
     foreign_keys_on = connection.execute(text("PRAGMA foreign_keys")).scalar()
     connection.execute(text("PRAGMA foreign_keys=OFF"))
     try:
+        _drop_sqlite_views(connection, dependent_views)
         info_rows = connection.execute(
             text(f"PRAGMA table_info({table})")
         ).fetchall()
@@ -641,6 +755,7 @@ def _drop_columns_sqlite(
             for statement in index_statements:
                 connection.execute(text(statement))
     finally:
+        _restore_sqlite_views(connection, dependent_views)
         connection.execute(
             text(f"PRAGMA foreign_keys={'ON' if foreign_keys_on else 'OFF'}")
         )
@@ -695,14 +810,7 @@ def _migrate_script_storage(connection) -> None:
 def _migrate_script_positions(connection) -> None:
     if connection.dialect.name != "sqlite":
         return
-    agent_columns = _table_columns(connection, "agent_scripts")
     task_columns = _table_columns(connection, "agent_task_scripts")
-    if "position" in agent_columns:
-        _assign_missing_script_positions(
-            connection,
-            table="agent_scripts",
-            owner_id_column="agent_id",
-        )
     if "position" in task_columns:
         _assign_missing_script_positions(
             connection,
@@ -849,85 +957,26 @@ def _migrate_agent_role_column(connection, agent_columns: set[str]) -> None:
         )
 
 
-def _migrate_pipeline_agent_columns(connection) -> None:
+def _drop_pipeline_schema(connection) -> None:
     if connection.dialect.name != "sqlite":
         return
-    pipeline_columns = _table_columns(connection, "pipelines")
-    run_columns = _table_columns(connection, "pipeline_runs")
-    needs_pipeline = "agent_id" in pipeline_columns
-    needs_runs = "agent_id" in run_columns
-    if not needs_pipeline and not needs_runs:
-        return
-
-    foreign_keys_on = connection.execute(text("PRAGMA foreign_keys")).scalar()
-    connection.execute(text("PRAGMA foreign_keys=OFF"))
-    try:
-        connection.execute(text("DROP TABLE IF EXISTS pipelines_new"))
-        connection.execute(text("DROP TABLE IF EXISTS pipeline_runs_new"))
-
-        if needs_pipeline:
-            connection.execute(
-                text(
-                    "CREATE TABLE pipelines_new ("
-                    "id INTEGER NOT NULL, "
-                    "name VARCHAR(255) NOT NULL, "
-                    "description VARCHAR(512), "
-                    "created_at DATETIME NOT NULL, "
-                    "updated_at DATETIME NOT NULL, "
-                    "PRIMARY KEY (id)"
-                    ")"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO pipelines_new "
-                    "(id, name, description, created_at, updated_at) "
-                    "SELECT id, name, description, created_at, updated_at FROM pipelines"
-                )
-            )
-            connection.execute(text("DROP TABLE pipelines"))
-            connection.execute(text("ALTER TABLE pipelines_new RENAME TO pipelines"))
-
-        if needs_runs:
-            connection.execute(
-                text(
-                    "CREATE TABLE pipeline_runs_new ("
-                    "id INTEGER NOT NULL, "
-                    "pipeline_id INTEGER NOT NULL, "
-                    "celery_task_id VARCHAR(255), "
-                    "status VARCHAR(32) NOT NULL, "
-                    "started_at DATETIME, "
-                    "finished_at DATETIME, "
-                    "created_at DATETIME NOT NULL, "
-                    "updated_at DATETIME NOT NULL, "
-                    "PRIMARY KEY (id), "
-                    "FOREIGN KEY(pipeline_id) REFERENCES pipelines (id)"
-                    ")"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO pipeline_runs_new "
-                    "(id, pipeline_id, celery_task_id, status, started_at, "
-                    "finished_at, created_at, updated_at) "
-                    "SELECT id, pipeline_id, celery_task_id, status, started_at, "
-                    "finished_at, created_at, updated_at FROM pipeline_runs"
-                )
-            )
-            connection.execute(text("DROP TABLE pipeline_runs"))
-            connection.execute(
-                text("ALTER TABLE pipeline_runs_new RENAME TO pipeline_runs")
-            )
-            connection.execute(
-                text(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_pipeline_runs_pipeline_id ON pipeline_runs (pipeline_id)"
-                )
-            )
-    finally:
-        connection.execute(
-            text(f"PRAGMA foreign_keys={'ON' if foreign_keys_on else 'OFF'}")
-        )
+    _drop_columns_sqlite(
+        connection,
+        "agent_tasks",
+        {"pipeline_id", "pipeline_run_id", "pipeline_step_id"},
+        index_statements=[
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_agent_id ON agent_tasks (agent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_run_id ON agent_tasks (run_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_task_template_id ON agent_tasks (task_template_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)",
+        ],
+    )
+    connection.execute(text("DROP TABLE IF EXISTS pipeline_step_attachments"))
+    connection.execute(text("DROP TABLE IF EXISTS pipeline_steps"))
+    connection.execute(text("DROP TABLE IF EXISTS pipeline_runs"))
+    connection.execute(text("DROP TABLE IF EXISTS pipelines"))
 
 
 def _migrate_agent_task_agent_nullable(connection) -> None:
@@ -942,49 +991,56 @@ def _migrate_agent_task_agent_nullable(connection) -> None:
     if agent_row[3] == 0:
         return
 
+    dependent_views = _capture_sqlite_views_for_table(connection, "agent_tasks")
     foreign_keys_on = connection.execute(text("PRAGMA foreign_keys")).scalar()
     connection.execute(text("PRAGMA foreign_keys=OFF"))
     try:
+        _drop_sqlite_views(connection, dependent_views)
         connection.execute(text("DROP TABLE IF EXISTS agent_tasks_new"))
         connection.execute(
             text(
                 "CREATE TABLE agent_tasks_new ("
                 "id INTEGER NOT NULL, "
                 "agent_id INTEGER, "
+                "run_id INTEGER, "
                 "run_task_id VARCHAR(255), "
                 "celery_task_id VARCHAR(255), "
-                "pipeline_id INTEGER, "
-                "pipeline_run_id INTEGER, "
-                "pipeline_step_id INTEGER, "
                 "task_template_id INTEGER, "
+                "flowchart_id INTEGER, "
+                "flowchart_run_id INTEGER, "
+                "flowchart_node_id INTEGER, "
                 "status VARCHAR(32) NOT NULL, "
                 "kind VARCHAR(32), "
                 "prompt TEXT, "
                 "output TEXT, "
                 "error TEXT, "
+                "current_stage VARCHAR(32), "
+                "stage_logs TEXT, "
                 "started_at DATETIME, "
                 "finished_at DATETIME, "
                 "created_at DATETIME NOT NULL, "
                 "updated_at DATETIME NOT NULL, "
                 "PRIMARY KEY (id), "
                 "FOREIGN KEY(agent_id) REFERENCES agents (id), "
-                "FOREIGN KEY(pipeline_id) REFERENCES pipelines (id), "
-                "FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs (id), "
-                "FOREIGN KEY(pipeline_step_id) REFERENCES pipeline_steps (id), "
-                "FOREIGN KEY(task_template_id) REFERENCES task_templates (id)"
+                "FOREIGN KEY(run_id) REFERENCES runs (id), "
+                "FOREIGN KEY(task_template_id) REFERENCES task_templates (id), "
+                "FOREIGN KEY(flowchart_id) REFERENCES flowcharts (id), "
+                "FOREIGN KEY(flowchart_run_id) REFERENCES flowchart_runs (id), "
+                "FOREIGN KEY(flowchart_node_id) REFERENCES flowchart_nodes (id)"
                 ")"
             )
         )
         connection.execute(
             text(
                 "INSERT INTO agent_tasks_new "
-                "(id, agent_id, run_task_id, celery_task_id, pipeline_id, "
-                "pipeline_run_id, pipeline_step_id, task_template_id, status, "
-                "kind, prompt, output, error, started_at, finished_at, "
+                "(id, agent_id, run_id, run_task_id, celery_task_id, task_template_id, flowchart_id, "
+                "flowchart_run_id, flowchart_node_id, status, kind, prompt, output, "
+                "error, current_stage, stage_logs, started_at, finished_at, "
                 "created_at, updated_at) "
-                "SELECT id, agent_id, run_task_id, celery_task_id, pipeline_id, "
-                "pipeline_run_id, pipeline_step_id, task_template_id, status, "
-                "kind, prompt, output, error, started_at, finished_at, "
+                "SELECT id, agent_id, run_id, run_task_id, celery_task_id, "
+                "task_template_id, flowchart_id, flowchart_run_id, flowchart_node_id, status, kind, "
+                "prompt, output, error, current_stage, stage_logs, started_at, "
+                "finished_at, "
                 "created_at, updated_at FROM agent_tasks"
             )
         )
@@ -999,19 +1055,7 @@ def _migrate_agent_task_agent_nullable(connection) -> None:
         connection.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_pipeline_id ON agent_tasks (pipeline_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_pipeline_run_id ON agent_tasks (pipeline_run_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_pipeline_step_id ON agent_tasks (pipeline_step_id)"
+                "ix_agent_tasks_run_id ON agent_tasks (run_id)"
             )
         )
         connection.execute(
@@ -1020,10 +1064,165 @@ def _migrate_agent_task_agent_nullable(connection) -> None:
                 "ix_agent_tasks_task_template_id ON agent_tasks (task_template_id)"
             )
         )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)"
+            )
+        )
     finally:
+        _restore_sqlite_views(connection, dependent_views)
         connection.execute(
             text(f"PRAGMA foreign_keys={'ON' if foreign_keys_on else 'OFF'}")
         )
+
+
+def _migrate_agent_task_kind_values(connection) -> None:
+    task_columns = _table_columns(connection, "agent_tasks")
+    if "kind" not in task_columns or "flowchart_node_id" not in task_columns:
+        return
+
+    flowchart_node_columns = _table_columns(connection, "flowchart_nodes")
+    if "node_type" in flowchart_node_columns:
+        connection.execute(
+            text(
+                "UPDATE agent_tasks "
+                "SET kind = ("
+                "  SELECT 'flowchart_' || lower(trim(flowchart_nodes.node_type)) "
+                "  FROM flowchart_nodes "
+                "  WHERE flowchart_nodes.id = agent_tasks.flowchart_node_id"
+                ") "
+                "WHERE flowchart_node_id IS NOT NULL "
+                "AND EXISTS ("
+                "  SELECT 1 FROM flowchart_nodes "
+                "  WHERE flowchart_nodes.id = agent_tasks.flowchart_node_id"
+                ") "
+                "AND (kind IS NULL OR trim(kind) = '' OR lower(trim(kind)) != ("
+                "  SELECT 'flowchart_' || lower(trim(flowchart_nodes.node_type)) "
+                "  FROM flowchart_nodes "
+                "  WHERE flowchart_nodes.id = agent_tasks.flowchart_node_id"
+                "))"
+            )
+        )
+
+    connection.execute(
+        text(
+            "UPDATE agent_tasks "
+            "SET kind = NULL "
+            "WHERE flowchart_node_id IS NULL "
+            "AND kind IS NOT NULL "
+            "AND ("
+            "  lower(trim(kind)) IN ('task', 'node', 'flowchart', 'flowchart_node') "
+            "  OR lower(trim(kind)) LIKE 'flowchart_%'"
+            ")"
+        )
+    )
+
+
+def _migrate_milestone_status(connection) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    milestone_columns = _table_columns(connection, "milestones")
+    if "status" not in milestone_columns or "completed" not in milestone_columns:
+        return
+    connection.execute(
+        text(
+            "UPDATE milestones "
+            "SET status = 'done' "
+            "WHERE completed = 1 AND (status IS NULL OR status != 'done')"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE milestones "
+            "SET completed = 1 "
+            "WHERE status = 'done' AND (completed IS NULL OR completed = 0)"
+        )
+    )
+
+
+def _ensure_flowchart_indexes(connection) -> None:
+    tables = _table_names(connection)
+    required_tables = {
+        "flowchart_nodes",
+        "flowchart_edges",
+        "flowchart_runs",
+        "flowchart_run_nodes",
+        "agent_tasks",
+    }
+    if not required_tables.issubset(tables):
+        return
+
+    statements = [
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_nodes_flowchart_id ON flowchart_nodes (flowchart_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_edges_flowchart_id ON flowchart_edges (flowchart_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_edges_source_node_id ON flowchart_edges (source_node_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_edges_target_node_id ON flowchart_edges (target_node_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_runs_flowchart_id ON flowchart_runs (flowchart_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_flowchart_run_id ON flowchart_run_nodes (flowchart_run_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_flowchart_node_id ON flowchart_run_nodes (flowchart_node_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_agent_task_id ON flowchart_run_nodes (agent_task_id)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)",
+    ]
+    for statement in statements:
+        connection.execute(text(statement))
+
+    if "flowchart_node_skills" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_flowchart_node_skills_skill_id ON flowchart_node_skills (skill_id)"
+            )
+        )
+
+    # SQLite supports partial indexes; this enforces exactly one start node per flowchart.
+    if connection.dialect.name == "sqlite":
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_flowchart_nodes_start_per_flowchart "
+                "ON flowchart_nodes (flowchart_id) WHERE node_type = 'start'"
+            )
+        )
+
+
+def _drop_agent_utility_ownership(connection) -> None:
+    _drop_columns_sqlite(
+        connection,
+        "agents",
+        {"model_id"},
+        index_statements=[
+            "CREATE INDEX IF NOT EXISTS ix_agents_role_id ON agents (role_id)"
+        ],
+    )
+    connection.execute(text("DROP TABLE IF EXISTS agent_mcp_servers"))
+    connection.execute(text("DROP TABLE IF EXISTS agent_scripts"))
+
+
+def _ensure_canonical_workflow_views(connection) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    tables = _table_names(connection)
+    if "task_templates" in tables:
+        connection.execute(text("DROP VIEW IF EXISTS tasks"))
+        connection.execute(text("CREATE VIEW tasks AS SELECT * FROM task_templates"))
+    if "agent_tasks" in tables:
+        connection.execute(text("DROP VIEW IF EXISTS node_runs"))
+        connection.execute(text("CREATE VIEW node_runs AS SELECT * FROM agent_tasks"))
 
 
 @contextmanager

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.view_milestone', milestone_id=milestone.id) }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_milestones') }}">
+    <i class="fa-solid fa-list"></i>
+    all milestones
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">milestone {{ milestone.id }}</p>
+      <h2 class="section-title">Edit Milestone</h2>
+    </div>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Update milestone planning, ownership, and delivery details.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_milestone', milestone_id=milestone.id) }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
+    <label class="label">
+      name
+      <input class="input" type="text" name="name" value="{{ milestone.name }}" required />
+    </label>
+    <label class="label">
+      status
+      <select class="input" name="status">
+        {% set current_status = milestone_status_value(milestone) %}
+        {% for value, label in milestone_status_options %}
+          <option value="{{ value }}" {% if value == current_status %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      priority
+      <select class="input" name="priority">
+        {% set current_priority = milestone_priority_value(milestone) %}
+        {% for value, label in milestone_priority_options %}
+          <option value="{{ value }}" {% if value == current_priority %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      health
+      <select class="input" name="health">
+        {% set current_health = milestone_health_value(milestone) %}
+        {% for value, label in milestone_health_options %}
+          <option value="{{ value }}" {% if value == current_health %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      owner
+      <input class="input" type="text" name="owner" value="{{ milestone.owner or '' }}" />
+    </label>
+    <label class="label">
+      start date
+      <input class="input" type="date" name="start_date" value="{{ milestone.start_date.strftime('%Y-%m-%d') if milestone.start_date else '' }}" />
+    </label>
+    <label class="label">
+      due date
+      <input class="input" type="date" name="due_date" value="{{ milestone.due_date.strftime('%Y-%m-%d') if milestone.due_date else '' }}" />
+    </label>
+    <label class="label">
+      progress %
+      <input
+        class="input"
+        type="number"
+        name="progress_percent"
+        min="0"
+        max="100"
+        value="{{ milestone_progress_value(milestone) }}"
+      />
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      description
+      <textarea name="description" class="textarea">{{ milestone.description or '' }}</textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      success criteria
+      <textarea name="success_criteria" class="textarea">{{ milestone.success_criteria or '' }}</textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      dependencies
+      <textarea name="dependencies" class="textarea">{{ milestone.dependencies or '' }}</textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      links
+      <textarea name="links" class="textarea">{{ milestone.links or '' }}</textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      latest update
+      <textarea name="latest_update" class="textarea">{{ milestone.latest_update or '' }}</textarea>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.view_milestone', milestone_id=milestone.id) }}">
+        <i class="fa-solid fa-arrow-left"></i>
+        cancel
+      </a>
+    </div>
+  </form>
+</section>
+{% endblock %}

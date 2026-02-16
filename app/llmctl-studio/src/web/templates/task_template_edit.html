@@ -3,11 +3,11 @@
 {% block topbar_actions %}
   <a class="btn btn-secondary" href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
     <i class="fa-solid fa-arrow-left"></i>
-    back to template
+    back to task
   </a>
   <a class="btn btn-secondary" href="{{ url_for('agents.list_task_templates') }}">
     <i class="fa-solid fa-list"></i>
-    all templates
+    all tasks
   </a>
 {% endblock %}
 
@@ -15,12 +15,12 @@
 <section class="card">
   <div class="card-header">
     <div>
-      <p class="eyebrow">template {{ template.id }}</p>
-      <h2 class="section-title">Edit Template</h2>
+      <p class="eyebrow">task {{ template.id }}</p>
+      <h2 class="section-title">Edit Task</h2>
     </div>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Update template metadata without running a task.
+    Update task metadata without running a node.
   </p>
   <form
     method="post"

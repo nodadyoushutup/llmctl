@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from core.db import session_scope
 from core.mcp_config import format_mcp_config
 from core.models import (
     SCRIPT_TYPE_SKILL,
     Agent,
+    LLMModel,
+    MCP_SERVER_TYPE_CUSTOM,
     MCPServer,
-    Pipeline,
-    PipelineStep,
     Role,
     Script,
     TaskTemplate,
-    agent_scripts,
 )
 from storage.script_storage import ensure_script_file
 
@@ -1015,20 +1014,6 @@ ROLE_SEEDS = [
 
 AGENT_SEEDS = [
     {
-        "name": "Quick",
-        "description": "Default quick task agent for running free-form prompts.",
-        "role": "Quick",
-        "prompt_payload": json.loads(
-            r"""
-            {
-              "description": "Default quick task agent for running free-form prompts."
-            }
-            """,
-        ),
-        "mcp_servers": ["github", "jira"],
-        "sync_mcp_servers": False,
-    },
-    {
         "name": "Coder",
         "description": "Default Coder agent.",
         "role": "Coder",
@@ -1039,7 +1024,7 @@ AGENT_SEEDS = [
             }
             """,
         ),
-        "mcp_servers": ["github", "jira"],
+        "mcp_servers": [],
     },
     {
         "name": "Technical Lead",
@@ -1052,7 +1037,7 @@ AGENT_SEEDS = [
             }
             """,
         ),
-        "mcp_servers": ["github", "jira"],
+        "mcp_servers": [],
     },
     {
         "name": "Business Analyst",
@@ -1065,7 +1050,7 @@ AGENT_SEEDS = [
             }
             """,
         ),
-        "mcp_servers": ["github", "jira"],
+        "mcp_servers": [],
     },
     {
         "name": "End User",
@@ -1078,7 +1063,7 @@ AGENT_SEEDS = [
             }
             """,
         ),
-        "mcp_servers": ["github", "jira"],
+        "mcp_servers": [],
     },
     {
         "name": "Project Manager",
@@ -1091,7 +1076,7 @@ AGENT_SEEDS = [
             }
             """,
         ),
-        "mcp_servers": ["github", "jira"],
+        "mcp_servers": [],
     },
     {
         "name": "Quality Assurance",
@@ -1104,53 +1089,48 @@ AGENT_SEEDS = [
             }
             """,
         ),
-        "mcp_servers": ["github", "jira"],
+        "mcp_servers": [],
     },
 ]
 
 
-MCP_SERVER_SEEDS = [
+LLM_MODEL_SEEDS = [
     {
-        "name": "GitHub MCP",
-        "server_key": "github",
-        "description": "GitHub MCP server from docker compose.",
-        "config_toml": (
-            "[mcp_servers.github]\n"
-            "command = \"docker\"\n"
-            "args = [\"exec\", \"-i\", \"github-mcp\", \"/server/github-mcp-server\", \"stdio\"]\n"
+        "name": "Codex 5.2",
+        "description": (
+            "YOLO/full-send Codex profile with unrestricted approvals, "
+            "sandboxing, and network access."
         ),
+        "provider": "codex",
+        "config": {
+            "model": "gpt-5.2-codex",
+            "approval_policy": "never",
+            "sandbox_mode": "danger-full-access",
+            "network_access": "enabled",
+            "model_reasoning_effort": "high",
+            "shell_env_inherit": "all",
+            "shell_env_ignore_default_excludes": True,
+            "notice_hide_key": "",
+            "notice_hide_enabled": False,
+            "notice_migration_from": "",
+            "notice_migration_to": "",
+        },
     },
     {
-        "name": "Jira MCP",
-        "server_key": "jira",
-        "description": "Jira MCP server from docker compose.",
-        "config_toml": (
-            "[mcp_servers.jira]\n"
-            "command = \"docker\"\n"
-            "args = [\"exec\", \"-i\", \"jira-mcp\", \"mcp-atlassian\", \"--transport\", \"stdio\"]\n"
-        ),
-    },
-    {
-        "name": "Chroma MCP",
-        "server_key": "chroma",
-        "description": "Chroma MCP server from docker compose.",
-        "config_toml": (
-            "[mcp_servers.chroma]\n"
-            "command = \"docker\"\n"
-            "args = [\"exec\", \"-i\", \"chromadb-mcp\", \"chromadb-mcp\", \"--client-type\", \"http\", \"--host\", \"chromadb\", \"--port\", \"8000\", \"--ssl\", \"false\"]\n"
-        ),
-    },
-    {
-        "name": "LLMCTL MCP",
-        "server_key": "llmctl-mcp",
-        "description": "LLMCTL MCP server.",
-        "config_toml": (
-            "[mcp_servers.llmctl-mcp]\n"
-            "command = \"docker\"\n"
-            "args = [\"exec\", \"-i\", \"llmctl-mcp\", \"env\", \"LLMCTL_MCP_TRANSPORT=stdio\", \"python3\", \"app/llmctl-mcp/run.py\"]\n"
-        ),
+        "name": "Gemini",
+        "description": "YOLO/full-send Gemini profile.",
+        "provider": "gemini",
+        "config": {
+            "model": "gemini-3-pro-preview",
+            "approval_mode": "yolo",
+            "sandbox": False,
+            "extra_args": [],
+        },
     },
 ]
+
+
+MCP_SERVER_SEEDS: list[dict[str, object]] = []
 
 INDEX_FILES_NOTE = (
     "Before starting, run the workspace tree skill script "
@@ -1229,11 +1209,6 @@ SCRIPT_SEEDS = [
         "script_type": SCRIPT_TYPE_SKILL,
         "content": WORKSPACE_TREE_SCRIPT,
     },
-]
-
-AGENT_SCRIPT_SEEDS = [
-    {"agent": "Technical Lead", "script_file_name": "index_workspace_tree.sh"},
-    {"agent": "Coder", "script_file_name": "index_workspace_tree.sh"},
 ]
 
 TASK_TEMPLATE_SEEDS = [
@@ -1385,86 +1360,14 @@ TASK_TEMPLATE_SEEDS = [
 ]
 
 
-PIPELINE_SEEDS = [
-    {
-        "name": "Active Development",
-        "description": (
-            "Pipeline for creating a new features, from planning, to coding, to "
-            "merging"
-        ),
-        "loop_enabled": False,
-    },
-]
-
-PIPELINE_STEP_SEEDS = [
-    {
-        "pipeline": "Active Development",
-        "template": "Technical Lead Assessment",
-        "step_order": 2,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Plan & Risk Check",
-        "step_order": 3,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Create Jira Story",
-        "step_order": 4,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Requirement Gathering Questions",
-        "step_order": 5,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Answer Technical Questions",
-        "step_order": 6,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Update Jira Story",
-        "step_order": 7,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Code Development",
-        "step_order": 8,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Code Review",
-        "step_order": 9,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Testing",
-        "step_order": 10,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Merge Code",
-        "step_order": 11,
-    },
-    {
-        "pipeline": "Active Development",
-        "template": "Wrap Up",
-        "step_order": 12,
-    },
-]
-
-
 def seed_defaults() -> None:
     with session_scope() as session:
         _seed_roles(session)
         _seed_mcp_servers(session)
+        _seed_models(session)
         _seed_agents(session)
         _seed_scripts(session)
-        _seed_agent_scripts(session)
         _seed_task_templates(session)
-        _seed_pipelines(session)
-        _seed_pipeline_steps(session)
 
 
 def _seed_roles(session) -> None:
@@ -1507,10 +1410,6 @@ def _seed_agents(session) -> None:
     roles_by_name = {
         role.name: role for role in session.execute(select(Role)).scalars().all()
     }
-    mcp_by_key = {
-        server.server_key: server
-        for server in session.execute(select(MCPServer)).scalars().all()
-    }
     for payload in AGENT_SEEDS:
         name = payload.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -1526,16 +1425,6 @@ def _seed_agents(session) -> None:
             role = roles_by_name.get(role_name)
             if role is not None:
                 role_id = role.id
-        mcp_servers: list[MCPServer] = []
-        mcp_keys = payload.get("mcp_servers")
-        if isinstance(mcp_keys, list):
-            for key in mcp_keys:
-                if not isinstance(key, str) or not key.strip():
-                    continue
-                server = mcp_by_key.get(key)
-                if server is not None:
-                    mcp_servers.append(server)
-        sync_mcp_servers = payload.get("sync_mcp_servers", True)
         agent = existing.get(name)
         if agent is None:
             Agent.create(
@@ -1546,7 +1435,6 @@ def _seed_agents(session) -> None:
                 prompt_text=None,
                 autonomous_prompt=None,
                 role_id=role_id,
-                mcp_servers=mcp_servers,
                 is_system=True,
             )
             continue
@@ -1558,10 +1446,46 @@ def _seed_agents(session) -> None:
             agent.prompt_json = prompt_json
         if agent.role_id is None and role_id is not None:
             agent.role_id = role_id
-        if sync_mcp_servers and mcp_servers:
-            for server in mcp_servers:
-                if server not in agent.mcp_servers:
-                    agent.mcp_servers.append(server)
+
+
+def _seed_models(session) -> None:
+    existing = {
+        model.name: model
+        for model in session.execute(select(LLMModel)).scalars().all()
+    }
+    allowed_providers = {"codex", "gemini", "claude", "vllm_local", "vllm_remote"}
+    for payload in LLM_MODEL_SEEDS:
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        provider = payload.get("provider")
+        if not isinstance(provider, str):
+            continue
+        provider = provider.strip().lower()
+        if provider not in allowed_providers:
+            continue
+        description = payload.get("description")
+        config = payload.get("config")
+        if not isinstance(config, dict):
+            continue
+        config_json = json.dumps(config, indent=2, sort_keys=True)
+        model = existing.get(name)
+        if model is None:
+            model = LLMModel.create(
+                session,
+                name=name,
+                description=description if isinstance(description, str) else None,
+                provider=provider,
+                config_json=config_json,
+            )
+            existing[name] = model
+            continue
+        if not model.description and isinstance(description, str):
+            model.description = description
+        if not model.provider:
+            model.provider = provider
+        if not model.config_json or not model.config_json.strip():
+            model.config_json = config_json
 
 
 def _seed_scripts(session) -> None:
@@ -1606,68 +1530,6 @@ def _seed_scripts(session) -> None:
             script.file_path = str(path)
 
 
-def _next_script_position(session, agent_id: int, script_type: str) -> int:
-    max_position = (
-        session.execute(
-            select(func.max(agent_scripts.c.position))
-            .select_from(agent_scripts.join(Script, Script.id == agent_scripts.c.script_id))
-            .where(
-                agent_scripts.c.agent_id == agent_id,
-                Script.script_type == script_type,
-            )
-        )
-        .scalars()
-        .first()
-    )
-    return (max_position or 0) + 1
-
-
-def _seed_agent_scripts(session) -> None:
-    agents_by_name = {
-        agent.name: agent
-        for agent in session.execute(select(Agent)).scalars().all()
-    }
-    scripts_by_key = {
-        (script.file_name, script.script_type): script
-        for script in session.execute(select(Script)).scalars().all()
-    }
-    existing = {
-        (row.agent_id, row.script_id)
-        for row in session.execute(
-            select(agent_scripts.c.agent_id, agent_scripts.c.script_id)
-        )
-    }
-    for payload in AGENT_SCRIPT_SEEDS:
-        agent_name = payload.get("agent")
-        file_name = payload.get("script_file_name")
-        script_type = payload.get("script_type", SCRIPT_TYPE_SKILL)
-        if (
-            not isinstance(agent_name, str)
-            or not agent_name.strip()
-            or not isinstance(file_name, str)
-            or not file_name.strip()
-            or not isinstance(script_type, str)
-            or not script_type.strip()
-        ):
-            continue
-        agent = agents_by_name.get(agent_name)
-        script = scripts_by_key.get((file_name, script_type))
-        if agent is None or script is None:
-            continue
-        key = (agent.id, script.id)
-        if key in existing:
-            continue
-        position = _next_script_position(session, agent.id, script.script_type)
-        session.execute(
-            agent_scripts.insert().values(
-                agent_id=agent.id,
-                script_id=script.id,
-                position=position,
-            )
-        )
-        existing.add(key)
-
-
 def _seed_mcp_servers(session) -> None:
     existing = {
         server.server_key: server
@@ -1695,6 +1557,7 @@ def _seed_mcp_servers(session) -> None:
                 server_key=server_key,
                 description=description if isinstance(description, str) else None,
                 config_json=config_json,
+                server_type=MCP_SERVER_TYPE_CUSTOM,
             )
             continue
         if not server.name and isinstance(name, str):
@@ -1763,89 +1626,3 @@ def _seed_task_templates(session) -> None:
             template.prompt = prompt
         elif isinstance(append_if_missing, str):
             template.prompt = _append_prompt_once(template.prompt, append_if_missing)
-
-
-def _seed_pipelines(session) -> None:
-    existing = {
-        pipeline.name: pipeline
-        for pipeline in session.execute(select(Pipeline)).scalars().all()
-    }
-    for payload in PIPELINE_SEEDS:
-        name = payload.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        description = payload.get("description")
-        loop_enabled = bool(payload.get("loop_enabled", False))
-        pipeline = existing.get(name)
-        if pipeline is None:
-            Pipeline.create(
-                session,
-                name=name,
-                description=description if isinstance(description, str) else None,
-                loop_enabled=loop_enabled,
-            )
-            continue
-        if not pipeline.description and isinstance(description, str):
-            pipeline.description = description
-        if not pipeline.loop_enabled and loop_enabled:
-            pipeline.loop_enabled = True
-
-
-def _seed_pipeline_steps(session) -> None:
-    pipelines_by_name = {
-        pipeline.name: pipeline
-        for pipeline in session.execute(select(Pipeline)).scalars().all()
-    }
-    templates_by_name = {
-        template.name: template
-        for template in session.execute(select(TaskTemplate)).scalars().all()
-    }
-    existing_steps = session.execute(select(PipelineStep)).scalars().all()
-    steps_by_key: dict[tuple[int, int], list[PipelineStep]] = {}
-    for step in existing_steps:
-        key = (step.pipeline_id, step.task_template_id)
-        steps_by_key.setdefault(key, []).append(step)
-    kept_steps: dict[tuple[int, int], PipelineStep] = {}
-    for key, step_list in steps_by_key.items():
-        if len(step_list) > 1:
-            step_list.sort(key=lambda item: (item.step_order, item.id))
-            for extra in step_list[1:]:
-                session.delete(extra)
-        kept_steps[key] = step_list[0]
-    existing = kept_steps
-    for payload in PIPELINE_STEP_SEEDS:
-        pipeline_name = payload.get("pipeline")
-        template_name = payload.get("template")
-        step_order = payload.get("step_order")
-        if (
-            not isinstance(pipeline_name, str)
-            or not pipeline_name.strip()
-            or not isinstance(template_name, str)
-            or not template_name.strip()
-            or not isinstance(step_order, int)
-        ):
-            continue
-        pipeline = pipelines_by_name.get(pipeline_name)
-        template = templates_by_name.get(template_name)
-        if pipeline is None or template is None:
-            continue
-        additional_prompt = payload.get("additional_prompt")
-        key = (pipeline.id, template.id)
-        step = existing.get(key)
-        if step is None:
-            PipelineStep.create(
-                session,
-                pipeline_id=pipeline.id,
-                task_template_id=template.id,
-                step_order=step_order,
-                additional_prompt=(
-                    additional_prompt
-                    if isinstance(additional_prompt, str)
-                    else None
-                ),
-            )
-            continue
-        if step.step_order != step_order:
-            step.step_order = step_order
-        if not step.additional_prompt and isinstance(additional_prompt, str):
-            step.additional_prompt = additional_prompt

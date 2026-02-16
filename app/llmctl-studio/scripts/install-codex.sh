@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PACKAGE="@openai/codex"
+PACKAGE_TAG="${CODEX_NPM_TAG:-latest}"
+PACKAGE_SPEC="${PACKAGE}@${PACKAGE_TAG}"
 BIN_NAME="codex"
 MIN_NODE_MAJOR=16
 
@@ -26,9 +28,9 @@ if [[ "$use_npm" == "true" ]]; then
   fi
 
   if [[ "$install_prefix" == "$npm_prefix" ]]; then
-    npm install -g "$PACKAGE"
+    npm install -g "$PACKAGE_SPEC"
   else
-    npm install -g --prefix "$install_prefix" "$PACKAGE"
+    npm install -g --prefix "$install_prefix" "$PACKAGE_SPEC"
   fi
 
   bin_dir="$install_prefix/bin"
@@ -36,7 +38,7 @@ if [[ "$use_npm" == "true" ]]; then
     echo "Add ${bin_dir} to PATH to use ${BIN_NAME}." >&2
   fi
 
-  echo "${BIN_NAME} installed. Try: ${bin_dir}/${BIN_NAME} --version" >&2
+  echo "${BIN_NAME} installed from ${PACKAGE_SPEC}. Try: ${bin_dir}/${BIN_NAME} --version" >&2
 elif command -v brew >/dev/null 2>&1; then
   brew install --cask codex
   echo "${BIN_NAME} installed. Try: ${BIN_NAME} --version" >&2

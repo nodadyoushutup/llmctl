@@ -116,22 +116,54 @@
       <div class="subcard">
         <div class="row-between">
           <div>
-            <p class="eyebrow">Atlassian</p>
+            <p class="eyebrow">Jira</p>
             <p class="muted" style="margin-top: 8px; font-size: 12px;">
               Jira board: {{ integration_overview.jira.board }}
             </p>
             <p class="muted" style="margin-top: 6px; font-size: 12px;">
               Jira project: {{ integration_overview.jira.project_key }}
             </p>
+          </div>
+          <span
+            class="status {% if integration_overview.jira.connected %}status-success{% else %}status-warning{% endif %}"
+          >
+            {% if integration_overview.jira.connected %}connected{% else %}needs key{% endif %}
+          </span>
+        </div>
+      </div>
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">Confluence</p>
             <p class="muted" style="margin-top: 6px; font-size: 12px;">
               Confluence space: {{ integration_overview.confluence.space }}
             </p>
           </div>
-          {% set atlassian_connected = integration_overview.jira.connected or integration_overview.confluence.connected %}
           <span
-            class="status {% if atlassian_connected %}status-success{% else %}status-warning{% endif %}"
+            class="status {% if integration_overview.confluence.connected %}status-success{% else %}status-warning{% endif %}"
           >
-            {% if atlassian_connected %}connected{% else %}needs key{% endif %}
+            {% if integration_overview.confluence.connected %}connected{% else %}needs key{% endif %}
+          </span>
+        </div>
+      </div>
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">ChromaDB</p>
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              Host: {{ integration_overview.chroma.host }}
+            </p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              Port: {{ integration_overview.chroma.port }}
+            </p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              TLS: {{ integration_overview.chroma.ssl }}
+            </p>
+          </div>
+          <span
+            class="status {% if integration_overview.chroma.connected %}status-success{% else %}status-warning{% endif %}"
+          >
+            {% if integration_overview.chroma.connected %}connected{% else %}needs host + port{% endif %}
           </span>
         </div>
       </div>

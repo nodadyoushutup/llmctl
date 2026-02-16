@@ -89,209 +89,213 @@
   <div class="card">
     <div class="card-header">
       <div>
-        <h2 class="section-title">Atlassian</h2>
+        <h2 class="section-title">Jira</h2>
         <p class="muted" style="margin-top: 6px;">
-          Jira + Confluence credentials and workspace selection.
+          API token, email, site, project, and board selection.
         </p>
       </div>
-      {% set atlassian_connected = jira_connected or confluence_connected %}
-      <span class="status {% if atlassian_connected %}status-success{% else %}status-warning{% endif %}">
-        {% if atlassian_connected %}connected{% else %}needs key{% endif %}
+      <span class="status {% if jira_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if jira_connected %}connected{% else %}needs key{% endif %}
       </span>
     </div>
-    <div class="stack" style="margin-top: 12px;">
-      <div class="subcard">
-        <div class="row-between">
-          <div>
-            <p class="eyebrow">Jira</p>
-            <p class="muted" style="margin-top: 6px; font-size: 12px;">
-              API token, email, site, and board selection.
-            </p>
-          </div>
-          <span class="status {% if jira_connected %}status-success{% else %}status-warning{% endif %}">
-            {% if jira_connected %}connected{% else %}needs key{% endif %}
-          </span>
+    <form method="post" action="{{ url_for('agents.update_jira_settings') }}" class="form-grid" id="jira-settings-form">
+      <label class="label" style="grid-column: 1 / -1;">
+        Jira API Key
+        <div class="input-row">
+          <input
+            class="input"
+            type="password"
+            name="jira_api_key"
+            value="{{ jira_settings.get('api_key', '') }}"
+            placeholder="api_key_xxxxxxxxxx"
+          />
+          <button class="btn btn-secondary" type="submit" name="action" value="refresh">
+            <i class="fa-solid fa-rotate"></i>
+            refresh
+          </button>
         </div>
-        <form method="post" action="{{ url_for('agents.update_jira_settings') }}" class="form-grid" style="margin-top: 16px;" id="jira-settings-form">
-          <label class="label" style="grid-column: 1 / -1;">
-            Jira API Key
-            <div class="input-row">
-              <input
-                class="input"
-                type="password"
-                name="jira_api_key"
-                value="{{ jira_settings.get('api_key', '') }}"
-                placeholder="api_key_xxxxxxxxxx"
-              />
-              <button class="btn btn-secondary" type="submit" name="action" value="refresh">
-                <i class="fa-solid fa-rotate"></i>
-                refresh
-              </button>
-            </div>
-          </label>
-          <label class="label" style="grid-column: 1 / -1;">
-            Atlassian email
-            <input
-              class="input"
-              type="email"
-              name="jira_email"
-              value="{{ jira_settings.get('email', '') }}"
-              placeholder="me@company.com"
-            />
-          </label>
-          <label class="label" style="grid-column: 1 / -1;">
-            Jira site URL
-            <input
-              class="input"
-              type="text"
-              name="jira_site"
-              value="{{ jira_settings.get('site', '') }}"
-              placeholder="https://your-domain.atlassian.net"
-            />
-          </label>
-          <label class="label" style="grid-column: 1 / -1;">
-            Project
-            {% if jira_project_options %}
-              <select class="input" name="jira_project_key" id="jira-project-select">
-                {% set selected_project = jira_settings.get('project_key', '') %}
-                {% for project in jira_project_options %}
-                  {% if project.value is defined %}
-                    <option value="{{ project.value }}" {% if project.value == selected_project %}selected{% endif %}>
-                      {{ project.label }}
-                    </option>
-                  {% else %}
-                    <option value="{{ project }}" {% if project == selected_project %}selected{% endif %}>
-                      {{ project }}
-                    </option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-            {% else %}
-              <span class="muted" style="font-size: 12px;">
-                Refresh to load projects.
-              </span>
-            {% endif %}
-          </label>
-          <label class="label" style="grid-column: 1 / -1;">
-            Board name
-            {% if jira_board_options %}
-              <select class="input" name="jira_board">
-                {% set selected_board = jira_settings.get('board', '') %}
-                {% for board in jira_board_options %}
-                  {% if board.value is defined %}
-                    <option value="{{ board.value }}" {% if board.value == selected_board %}selected{% endif %}>
-                      {{ board.label }}
-                    </option>
-                  {% else %}
-                    <option value="{{ board }}" {% if board == selected_board %}selected{% endif %}>
-                      {{ board }}
-                    </option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-            {% else %}
-              <span class="muted" style="font-size: 12px;">
-                Select a project and refresh to load boards.
-              </span>
-            {% endif %}
-          </label>
-          <div class="form-actions">
-            <button class="btn btn-primary" type="submit">
-              <i class="fa-solid fa-floppy-disk"></i>
-              save jira
-            </button>
-            <a class="btn btn-secondary" href="{{ url_for('agents.jira_workspace') }}">
-              <i class="fa-solid fa-arrow-right"></i>
-              open jira
-            </a>
-          </div>
-        </form>
-      </div>
-      <div class="subcard">
-        <div class="row-between">
-          <div>
-            <p class="eyebrow">Confluence</p>
-            <p class="muted" style="margin-top: 6px; font-size: 12px;">
-              API token, email, site, and space selection.
-            </p>
-          </div>
-          <span class="status {% if confluence_connected %}status-success{% else %}status-warning{% endif %}">
-            {% if confluence_connected %}connected{% else %}needs key{% endif %}
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Atlassian email
+        <input
+          class="input"
+          type="email"
+          name="jira_email"
+          value="{{ jira_settings.get('email', '') }}"
+          placeholder="me@company.com"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Jira site URL
+        <input
+          class="input"
+          type="text"
+          name="jira_site"
+          value="{{ jira_settings.get('site', '') }}"
+          placeholder="https://your-domain.atlassian.net"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Project
+        {% if jira_project_options %}
+          <select class="input" name="jira_project_key" id="jira-project-select">
+            {% set selected_project = jira_settings.get('project_key', '') %}
+            {% for project in jira_project_options %}
+              {% if project.value is defined %}
+                <option value="{{ project.value }}" {% if project.value == selected_project %}selected{% endif %}>
+                  {{ project.label }}
+                </option>
+              {% else %}
+                <option value="{{ project }}" {% if project == selected_project %}selected{% endif %}>
+                  {{ project }}
+                </option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        {% else %}
+          <span class="muted" style="font-size: 12px;">
+            Refresh to load projects.
           </span>
-        </div>
-        <form method="post" action="{{ url_for('agents.update_confluence_settings') }}" class="form-grid" style="margin-top: 16px;">
-          <label class="label" style="grid-column: 1 / -1;">
-            Confluence API Key
-            <div class="input-row">
-              <input
-                class="input"
-                type="password"
-                name="confluence_api_key"
-                value="{{ confluence_settings.get('api_key', '') }}"
-                placeholder="api_key_xxxxxxxxxx"
-              />
-              <button class="btn btn-secondary" type="submit" name="action" value="refresh">
-                <i class="fa-solid fa-rotate"></i>
-                refresh
-              </button>
-            </div>
-          </label>
-          <label class="label" style="grid-column: 1 / -1;">
-            Atlassian email
-            <input
-              class="input"
-              type="email"
-              name="confluence_email"
-              value="{{ confluence_settings.get('email', '') }}"
-              placeholder="me@company.com"
-            />
-          </label>
-          <label class="label" style="grid-column: 1 / -1;">
-            Confluence site URL
-            <input
-              class="input"
-              type="text"
-              name="confluence_site"
-              value="{{ confluence_settings.get('site', '') }}"
-              placeholder="https://your-domain.atlassian.net/wiki"
-            />
-          </label>
-          <label class="label" style="grid-column: 1 / -1;">
-            Space key or name
-            {% if confluence_space_options %}
-              <select class="input" name="confluence_space">
-                {% set selected_space = confluence_settings.get('space', '') %}
-                {% for space in confluence_space_options %}
-                  {% if space.value is defined %}
-                    <option value="{{ space.value }}" {% if space.value == selected_space %}selected{% endif %}>
-                      {{ space.label }}
-                    </option>
-                  {% else %}
-                    <option value="{{ space }}" {% if space == selected_space %}selected{% endif %}>
-                      {{ space }}
-                    </option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-            {% else %}
-              <span class="muted" style="font-size: 12px;">
-                Refresh to load spaces.
-              </span>
-            {% endif %}
-          </label>
-          <div class="form-actions">
-            <button class="btn btn-primary" type="submit">
-              <i class="fa-solid fa-floppy-disk"></i>
-              save confluence
-            </button>
-            <a class="btn btn-secondary" href="{{ url_for('agents.confluence_workspace') }}">
-              <i class="fa-solid fa-arrow-right"></i>
-              open confluence
-            </a>
-          </div>
-        </form>
+        {% endif %}
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Board name
+        {% if jira_board_options %}
+          <select class="input" name="jira_board">
+            {% set selected_board = jira_settings.get('board', '') %}
+            {% for board in jira_board_options %}
+              {% if board.value is defined %}
+                <option value="{{ board.value }}" {% if board.value == selected_board %}selected{% endif %}>
+                  {{ board.label }}
+                </option>
+              {% else %}
+                <option value="{{ board }}" {% if board == selected_board %}selected{% endif %}>
+                  {{ board }}
+                </option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        {% else %}
+          <span class="muted" style="font-size: 12px;">
+            Select a project and refresh to load boards.
+          </span>
+        {% endif %}
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save jira
+        </button>
+        <a class="btn btn-secondary" href="{{ url_for('agents.jira_workspace') }}">
+          <i class="fa-solid fa-arrow-right"></i>
+          open jira
+        </a>
       </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Confluence</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Configure the single Confluence space used by the in-app workspace.
+        </p>
+      </div>
+      <span class="status {% if confluence_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if confluence_connected %}connected{% else %}needs key{% endif %}
+      </span>
     </div>
+    <form method="post" action="{{ url_for('agents.update_confluence_settings') }}" class="form-grid">
+      <label class="label" style="grid-column: 1 / -1;">
+        Space key
+        <input
+          class="input"
+          type="text"
+          name="confluence_space"
+          value="{{ confluence_settings.get('space', '') }}"
+          placeholder="TEAM"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        <span class="muted" style="font-size: 12px;">
+          Confluence auth and site use the configured Confluence values, and fall back to Jira values when empty.
+        </span>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save confluence
+        </button>
+        <a class="btn btn-secondary" href="{{ url_for('agents.confluence_workspace') }}">
+          <i class="fa-solid fa-arrow-right"></i>
+          open confluence
+        </a>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">ChromaDB</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Host, port, and TLS settings for integrated MCP and Chroma collections views.
+        </p>
+      </div>
+      <span class="status {% if chroma_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if chroma_connected %}connected{% else %}needs host + port{% endif %}
+      </span>
+    </div>
+    {% if chroma_settings.get("normalized_hint") %}
+      <div class="alert alert-info" style="margin-top: 16px;">
+        {{ chroma_settings.get("normalized_hint") }}
+      </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('agents.update_chroma_settings') }}" class="form-grid">
+      <label class="label">
+        Host
+        <input
+          class="input"
+          type="text"
+          name="chroma_host"
+          value="{{ chroma_settings.get('host', '') }}"
+          placeholder="llmctl-chromadb"
+        />
+      </label>
+      <label class="label">
+        Port
+        <input
+          class="input"
+          type="number"
+          min="1"
+          max="65535"
+          name="chroma_port"
+          value="{{ chroma_settings.get('port', '') }}"
+          placeholder="8000"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        TLS
+        {% set chroma_ssl = chroma_settings.get('ssl', 'false').strip().lower() %}
+        <select class="input" name="chroma_ssl">
+          <option value="false" {% if chroma_ssl != 'true' %}selected{% endif %}>disabled</option>
+          <option value="true" {% if chroma_ssl == 'true' %}selected{% endif %}>enabled</option>
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save chroma
+        </button>
+        {% if chroma_connected %}
+          <a class="btn btn-secondary" href="{{ url_for('agents.chroma_collections') }}">
+            <i class="fa-solid fa-arrow-right"></i>
+            open collections
+          </a>
+        {% endif %}
+      </div>
+    </form>
   </div>
 </section>
 

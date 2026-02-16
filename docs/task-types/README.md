@@ -4,13 +4,12 @@ This folder tracks how each task type is created and what payload is finally sen
 
 Task type docs:
 - quick.md
-- pipeline.md
 - github.md
 - autorun.md
 
 ## Execution Path (all tasks)
 
-- An `AgentTask` is created (quick, pipeline, github, or autorun loop).
+- An `AgentTask` is created (quick, github, or autorun loop).
 - `_execute_agent_task` in `app/llmctl-studio/src/services/tasks.py` formats the prompt, injects GitHub repo context when a repo is configured, injects integration settings, and builds the final payload.
 - If scripts are attached to the agent, they are staged into the task workspace and run per stage. Task-level scripts are not supported yet.
 - `codex exec` is launched with `--model` and any MCP overrides, and the payload is written to stdin.

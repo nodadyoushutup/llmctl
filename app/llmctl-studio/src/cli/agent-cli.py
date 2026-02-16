@@ -14,6 +14,7 @@ from sqlalchemy import select
 from core.config import Config
 from core.db import init_db, init_engine, session_scope
 from core.models import Agent, Role
+from core.prompt_envelope import build_prompt_envelope, serialize_prompt_envelope
 
 AGENT_BACKEND = os.getenv("AGENT_BACKEND", "codex")
 CODEX_CMD = os.getenv("CODEX_CMD", "codex")
@@ -21,9 +22,6 @@ CLAUDE_CMD = os.getenv("CLAUDE_CMD", "claude")
 OPENAI_CMD = os.getenv("OPENAI_CMD", "openai")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
 CODEX_MODEL = os.getenv("CODEX_MODEL", "")
-CODEX_SKIP_GIT_REPO_CHECK = (
-    os.getenv("CODEX_SKIP_GIT_REPO_CHECK", "false").lower() == "true"
-)
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "")
 AGENT_ID = os.getenv("AGENT_ID")
 AGENT_NAME = os.getenv("AGENT_NAME")
@@ -51,12 +49,19 @@ def _load_prompt_payload(prompt_json: str | None, prompt_text: str | None) -> ob
     return prompt_json
 
 
-def _format_payload(payload: object | None) -> str:
-    if payload is None:
-        return ""
-    if isinstance(payload, str):
-        return payload.strip()
-    return json.dumps(payload, indent=2, sort_keys=True)
+def _load_role_payload(role: Role) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "name": role.name,
+        "description": role.description or "",
+    }
+    if role.details_json:
+        try:
+            details_payload = json.loads(role.details_json)
+        except json.JSONDecodeError:
+            details_payload = None
+        if isinstance(details_payload, dict):
+            payload["details"] = details_payload
+    return payload
 
 
 def _load_role(role_name: str) -> Role | None:
@@ -115,27 +120,35 @@ def build_prompt(role: str, thread_file: str) -> str:
     if agent is None:
         agent = _load_agent_for_role(role_record.id)
 
-    role_payload = _load_prompt_payload(
-        role_record.prompt_json, role_record.prompt_text
-    )
-    if role_payload is None:
-        raise RuntimeError(f"Role prompt is empty in database: {role_record.name}")
-
     agent_payload = None
     if agent is not None:
         agent_payload = _load_prompt_payload(agent.prompt_json, agent.prompt_text)
 
     thread_text = read_thread(thread_file)
-    parts = [
-        f"Role: {role}",
-        "Role Prompt:\n" + _format_payload(role_payload),
-    ]
+    system_contract = {"role": _load_role_payload(role_record)}
+    agent_profile: dict[str, object] = {}
     if agent is not None:
-        parts.append(f"Agent: {agent.name}")
-    if agent_payload is not None:
-        parts.append("Agent Prompt:\n" + _format_payload(agent_payload))
-    parts.append("Conversation Thread:\n" + thread_text.strip())
-    return "\n\n".join(parts).strip() + "\n"
+        agent_profile = {
+            "id": agent.id,
+            "name": agent.name,
+            "description": agent.description or "",
+        }
+        if isinstance(agent_payload, dict):
+            agent_profile.update(agent_payload)
+        elif isinstance(agent_payload, str) and agent_payload.strip():
+            agent_profile["instructions"] = agent_payload.strip()
+    prompt_payload = build_prompt_envelope(
+        user_request=thread_text.strip(),
+        system_contract=system_contract,
+        agent_profile=agent_profile,
+        task_context={
+            "kind": "thread",
+            "role": role,
+            "thread_file": str(Path(thread_file).resolve()),
+        },
+        output_contract={"mode": "conversation"},
+    )
+    return serialize_prompt_envelope(prompt_payload)
 
 
 def main() -> int:
@@ -154,8 +167,7 @@ def main() -> int:
 
     if AGENT_BACKEND == "codex":
         cmd = [CODEX_CMD, "exec"] + build_model_args(CODEX_MODEL)
-        if CODEX_SKIP_GIT_REPO_CHECK:
-            cmd.append("--skip-git-repo-check")
+        cmd.append("--skip-git-repo-check")
         return subprocess.run(cmd, input=prompt, text=True).returncode
     if AGENT_BACKEND == "claude":
         cmd = [CLAUDE_CMD, "run", "--role", role] + build_model_args(CLAUDE_MODEL)

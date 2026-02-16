@@ -3,10 +3,10 @@
 {% block content %}
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">Create MCP Server</h2>
+    <h2 class="section-title">Create Custom MCP Server</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Define a server config and attach it to agents later.
+    Define a custom server config and attach it to agents later.
   </p>
   <form method="post" action="{{ url_for('agents.create_mcp') }}" class="form-grid">
     <label class="label">
@@ -33,7 +33,7 @@
       config toml
       <textarea
         name="config_json"
-        placeholder='[mcp_servers.github]&#10;command = "docker"&#10;args = ["exec", "-i", "github-mcp", "/server/github-mcp-server", "stdio"]'
+        placeholder='[mcp_servers.search_tools]&#10;command = "python3"&#10;args = ["app/search_tools/run.py"]'
         class="textarea"
       ></textarea>
       <span class="muted" style="font-size: 12px; margin-top: 6px;">

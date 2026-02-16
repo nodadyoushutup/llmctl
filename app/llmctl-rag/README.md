@@ -15,7 +15,7 @@ pip install -r app/llmctl-rag/requirements.txt
 2) Ensure Chroma is running (from repo root)
 
 ```
-docker compose -f docker/docker-compose.yml up -d chromadb
+docker compose -f docker/docker-compose.yml up -d llmctl-chromadb
 ```
 
 3) Index the repo (from repo root)
@@ -207,5 +207,5 @@ python3 app/llmctl-rag/ingest.py --reset
 
 - The ingester skips large/binary files and common build/cache directories.
 - Use --reset when you want a clean reindex.
-- If you run ingest inside Docker, set CHROMA_HOST=chromadb.
+- If you run ingest inside Docker, set CHROMA_HOST=llmctl-chromadb.
 - For watch mode in Docker, use the `llmctl-rag` service in docker-compose and mount the repo.

@@ -5,3 +5,6 @@ SQLAlchemy>=2.0.0
 celery>=5.3.6
 redis>=5.0.1
 setuptools>=69.0.0,<81
+mcp-atlassian>=0.13.0,<1
+chroma-mcp>=0.2.5,<0.2.6
+chromadb>=0.5.0

@@ -43,7 +43,7 @@
           <th>Agent</th>
           <th>Status</th>
           <th>Autorun ID</th>
-          <th>Autorun task</th>
+          <th>Autorun node</th>
           <th>Autorun mode</th>
           <th>Loops completed</th>
           <th>Remaining</th>
@@ -94,7 +94,7 @@
   </div>
   {% if run.run_end_requested %}
     <p class="muted" style="margin-top: 12px;">
-      End requested. This autorun will stop after the current task finishes.
+      End requested. This autorun will stop after the current node run finishes.
     </p>
   {% endif %}
   {% if run.status in ["running", "starting", "stopping"] %}
@@ -106,14 +106,14 @@
 
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">Tasks</h2>
+    <h2 class="section-title">Node Runs</h2>
   </div>
   {% if run_tasks %}
     <div style="margin-top: 20px; overflow-x: auto;">
       <table class="table">
         <thead>
           <tr>
-            <th>Task</th>
+            <th>Node</th>
             <th>Status</th>
             <th>Started</th>
             <th>Finished</th>
@@ -123,10 +123,10 @@
           {% for task in run_tasks %}
             <tr
               class="table-row-link"
-              data-href="{{ url_for('agents.view_task', task_id=task.id) }}"
+              data-href="{{ url_for('agents.view_node', task_id=task.id) }}"
             >
               <td>
-                <a href="{{ url_for('agents.view_task', task_id=task.id) }}">
+                <a href="{{ url_for('agents.view_node', task_id=task.id) }}">
                   {{ task.id }}
                 </a>
               </td>
@@ -153,7 +153,7 @@
       </table>
     </div>
   {% else %}
-    <p class="muted" style="margin-top: 12px;">No tasks recorded for this autorun yet.</p>
+    <p class="muted" style="margin-top: 12px;">No node runs recorded for this autorun yet.</p>
   {% endif %}
 </section>
 

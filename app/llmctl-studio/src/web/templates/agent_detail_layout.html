@@ -5,38 +5,6 @@
     <i class="fa-solid fa-arrow-left"></i>
     all agents
   </a>
-  {% set agent_nav = [
-    {
-      "id": "overview",
-      "label": "Overview",
-      "icon": "fa-solid fa-compass",
-      "url": url_for("agents.view_agent", agent_id=agent.id),
-    },
-    {
-      "id": "scripts",
-      "label": "Scripts",
-      "icon": "fa-solid fa-code",
-      "url": url_for("agents.view_agent_scripts", agent_id=agent.id),
-    },
-    {
-      "id": "mcp",
-      "label": "MCP",
-      "icon": "fa-solid fa-network-wired",
-      "url": url_for("agents.view_agent_mcp", agent_id=agent.id),
-    },
-  ] %}
-  <div class="settings-nav">
-    {% for item in agent_nav %}
-      {% set is_active = agent_section == item.id %}
-      <a
-        href="{{ item.url }}"
-        class="settings-link{% if is_active %} is-active{% endif %}"
-      >
-        <i class="{{ item.icon }}"></i>
-        {{ item.label }}
-      </a>
-    {% endfor %}
-  </div>
 {% endblock %}
 
 {% block content %}
@@ -101,24 +69,16 @@
       </dd>
     </div>
     <div class="meta-span">
-      <dt>Model</dt>
-      <dd>
-        {% if agent.model_id and agent.model %}
-          <a href="{{ url_for('agents.view_model', model_id=agent.model_id) }}">
-            {{ agent.model.name }}
-          </a>
-        {% else %}
-          -
-        {% endif %}
-      </dd>
+      <dt>Created</dt>
+      <dd>{{ human_time(agent.created_at) }}</dd>
     </div>
     <div class="meta-span">
-      <dt>Scripts</dt>
-      <dd>{{ agent.scripts|length }}</dd>
+      <dt>Updated</dt>
+      <dd>{{ human_time(agent.updated_at) }}</dd>
     </div>
     <div>
-      <dt>MCP servers</dt>
-      <dd>{{ agent.mcp_servers|length }}</dd>
+      <dt>Utility ownership</dt>
+      <dd>Task/Node-level</dd>
     </div>
   </dl>
 </section>

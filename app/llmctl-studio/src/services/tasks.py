@@ -8,7 +8,11 @@ import shlex
 import shutil
 import selectors
 import subprocess
+import tempfile
 import time
+from collections import deque
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,16 +33,41 @@ from services.integrations import (
     resolve_llm_provider,
 )
 from core.mcp_config import build_mcp_overrides, parse_mcp_config
+from core.prompt_envelope import (
+    build_prompt_envelope,
+    is_prompt_envelope,
+    parse_prompt_input,
+    serialize_prompt_envelope,
+)
+from core.task_integrations import (
+    is_task_integration_selected,
+    parse_task_integration_keys,
+    validate_task_integration_keys,
+)
 from core.models import (
     Agent,
     AgentTask,
     Attachment,
-    IntegrationSetting,
+    Flowchart,
+    FlowchartNode,
+    FlowchartRun,
+    FlowchartRunNode,
+    FLOWCHART_NODE_TYPE_DECISION,
+    FLOWCHART_NODE_TYPE_END,
+    FLOWCHART_NODE_TYPE_FLOWCHART,
+    FLOWCHART_NODE_TYPE_MEMORY,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_START,
+    FLOWCHART_NODE_TYPE_TASK,
     LLMModel,
     MCPServer,
-    Pipeline,
-    PipelineRun,
-    PipelineStep,
+    Memory,
+    Milestone,
+    MILESTONE_STATUS_DONE,
+    Plan,
+    PlanStage,
+    PlanTask,
     Run,
     Role,
     RUN_ACTIVE_STATUSES,
@@ -53,10 +82,18 @@ from core.models import (
 from storage.script_storage import ensure_script_file
 from core.task_stages import TASK_STAGE_LABELS, TASK_STAGE_ORDER
 from core.task_kinds import is_quick_task_kind
+from core.quick_node import (
+    build_quick_node_agent_profile,
+    build_quick_node_system_contract,
+)
 
 logger = logging.getLogger(__name__)
 
 OUTPUT_INSTRUCTIONS_ONE_OFF = "Do not ask follow-up questions. This is a one-off task."
+OUTPUT_INSTRUCTIONS_MARKDOWN = (
+    "If Markdown is used, ensure it is valid CommonMark "
+    "(for example: balanced code fences and valid link syntax)."
+)
 
 
 def _utcnow() -> datetime:
@@ -143,6 +180,23 @@ def _load_claude_auth_key() -> str:
     return (settings.get("claude_api_key") or "").strip()
 
 
+def _load_vllm_remote_auth_key() -> str:
+    settings = load_integration_settings("llm")
+    return (settings.get("vllm_remote_api_key") or "").strip() or Config.VLLM_REMOTE_API_KEY
+
+
+def _load_vllm_remote_base_url() -> str:
+    settings = load_integration_settings("llm")
+    return (settings.get("vllm_remote_base_url") or "").strip() or Config.VLLM_REMOTE_BASE_URL
+
+
+def _load_vllm_default_model(provider: str) -> str:
+    settings = load_integration_settings("llm")
+    key_name = "vllm_local_model" if provider == "vllm_local" else "vllm_remote_model"
+    fallback = Config.VLLM_LOCAL_FALLBACK_MODEL if provider == "vllm_local" else Config.VLLM_REMOTE_DEFAULT_MODEL
+    return (settings.get(key_name) or "").strip() or fallback
+
+
 def _load_legacy_codex_model_config() -> dict[str, Any]:
     settings = load_integration_settings("llm")
     ignore_excludes_raw = settings.get("codex_shell_env_ignore_default_excludes")
@@ -198,6 +252,10 @@ def _build_runtime_payload(
         model_name = str((model_config or {}).get("model") or "").strip()
         if not model_name:
             model_name = Config.CLAUDE_MODEL or ""
+    elif provider in {"vllm_local", "vllm_remote"}:
+        model_name = str((model_config or {}).get("model") or "").strip()
+        if not model_name:
+            model_name = _load_vllm_default_model(provider)
     payload: dict[str, object] = {"provider": provider}
     if model_name:
         payload["model"] = model_name
@@ -210,17 +268,15 @@ def _inject_runtime_metadata(
 ) -> str:
     if not runtime:
         return prompt
-    stripped = prompt.strip()
-    if not stripped.startswith("{"):
+    payload = _load_prompt_dict(prompt)
+    if payload is None:
         return prompt
-    try:
-        payload = json.loads(stripped)
-    except json.JSONDecodeError:
-        return prompt
-    if not isinstance(payload, dict):
-        return prompt
-    payload["runtime"] = runtime
-    return json.dumps(payload, indent=2, sort_keys=True)
+    if is_prompt_envelope(payload):
+        task_context = _ensure_task_context(payload)
+        task_context["runtime"] = runtime
+    else:
+        payload["runtime"] = runtime
+    return serialize_prompt_envelope(payload)
 
 
 def _as_optional_bool(value: Any) -> bool | None:
@@ -339,8 +395,7 @@ def _build_codex_cmd(
     selected_model = model or Config.CODEX_MODEL
     if selected_model:
         cmd.extend(["--model", selected_model])
-    if Config.CODEX_SKIP_GIT_REPO_CHECK:
-        cmd.append("--skip-git-repo-check")
+    cmd.append("--skip-git-repo-check")
     if codex_overrides:
         for override in codex_overrides:
             cmd.extend(["-c", override])
@@ -390,6 +445,325 @@ def _build_claude_mcp_config(
         return None
     payload = {"mcpServers": {key: configs[key] for key in sorted(configs)}}
     return json.dumps(payload, separators=(",", ":"))
+
+
+def _safe_float(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_vllm_base_url(base_url: str) -> str:
+    normalized = (base_url or "").strip().rstrip("/")
+    if not normalized:
+        return ""
+    if normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
+
+
+def _vllm_local_settings_from_model_config(config: dict[str, Any]) -> dict[str, Any]:
+    model = str(config.get("model") or "").strip() or _load_vllm_default_model("vllm_local")
+    return {
+        "model": model,
+        "temperature": _safe_float(config.get("temperature"), 0.2),
+        "max_tokens": _safe_int(config.get("max_tokens"), 2048),
+        "request_timeout_seconds": _safe_float(
+            config.get("request_timeout_seconds"),
+            180.0,
+        ),
+    }
+
+
+def _vllm_remote_settings_from_model_config(config: dict[str, Any]) -> dict[str, Any]:
+    base_url = _load_vllm_remote_base_url()
+    override = str(config.get("base_url_override") or config.get("base_url") or "").strip()
+    if override:
+        base_url = override
+    model = str(config.get("model") or "").strip() or _load_vllm_default_model("vllm_remote")
+    return {
+        "base_url": _normalize_vllm_base_url(base_url),
+        "model": model,
+        "api_key": _load_vllm_remote_auth_key(),
+        "temperature": _safe_float(config.get("temperature"), 0.2),
+        "max_tokens": _safe_int(config.get("max_tokens"), 4096),
+        "request_timeout_seconds": _safe_float(
+            config.get("request_timeout_seconds"),
+            240.0,
+        ),
+    }
+
+
+def _extract_vllm_message_content(payload: dict[str, Any]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        segments: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                segments.append(item)
+                continue
+            if isinstance(item, dict):
+                text_value = item.get("text")
+                if isinstance(text_value, str):
+                    segments.append(text_value)
+        return "\n".join(segment for segment in segments if segment)
+    return ""
+
+
+def _parse_cmd_with_fallback(raw: str, fallback: list[str]) -> list[str]:
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return fallback
+    try:
+        parsed = shlex.split(cleaned)
+    except ValueError:
+        return [cleaned]
+    return parsed or fallback
+
+
+def _run_vllm_local_cli_completion(
+    settings: dict[str, Any],
+    prompt: str | None,
+    on_update: Callable[[str, str], None] | None = None,
+    on_log: Callable[[str], None] | None = None,
+    cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    model = str(settings.get("model") or "").strip()
+    if not model:
+        raise ValueError("vLLM local model is not configured.")
+    temperature = settings.get("temperature")
+    max_tokens = settings.get("max_tokens")
+    timeout = max(1.0, _safe_float(settings.get("request_timeout_seconds"), 180.0))
+    request_payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt or ""}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    cmd_prefix = _parse_cmd_with_fallback(
+        Config.VLLM_LOCAL_CMD,
+        ["vllm"],
+    )
+    with tempfile.TemporaryDirectory(prefix="llmctl-vllm-local-") as tmp_dir:
+        input_path = Path(tmp_dir) / "batch-input.jsonl"
+        output_path = Path(tmp_dir) / "batch-output.jsonl"
+        input_line = {
+            "custom_id": "llmctl-vllm-local",
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": request_payload,
+        }
+        input_path.write_text(
+            json.dumps(input_line, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        cmd = list(cmd_prefix)
+        if "run-batch" not in cmd:
+            cmd.append("run-batch")
+        cmd.extend(
+            [
+                "-i",
+                str(input_path),
+                "-o",
+                str(output_path),
+                "--model",
+                model,
+            ]
+        )
+        if on_log:
+            on_log(f"Running vLLM Local CLI: {_format_cmd_for_log(cmd)}")
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                cwd=str(cwd) if cwd is not None else None,
+                env=env,
+                timeout=timeout,
+            )
+        except FileNotFoundError:
+            message = (
+                f"vLLM local command not found: {cmd_prefix[0]}. "
+                "Install vLLM in the Studio container or set VLLM_LOCAL_CMD."
+            )
+            if on_update:
+                on_update("", message)
+            return subprocess.CompletedProcess(cmd, 127, "", message)
+        except subprocess.TimeoutExpired:
+            message = f"Timed out after {int(timeout)}s waiting for vLLM local CLI."
+            if on_update:
+                on_update("", message)
+            return subprocess.CompletedProcess(cmd, 124, "", message)
+        if result.returncode != 0:
+            error_output = (
+                (result.stderr or "").strip()
+                or (result.stdout or "").strip()
+                or f"vLLM local CLI exited with code {result.returncode}."
+            )
+            if on_update:
+                on_update("", error_output)
+            return subprocess.CompletedProcess(
+                cmd,
+                result.returncode,
+                result.stdout or "",
+                result.stderr or error_output,
+            )
+        if not output_path.exists():
+            message = "vLLM local CLI did not produce a batch output file."
+            if on_update:
+                on_update("", message)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                result.stdout or "",
+                message,
+            )
+        lines = [
+            line.strip()
+            for line in output_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if not lines:
+            message = "vLLM local CLI returned an empty batch output file."
+            if on_update:
+                on_update("", message)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                result.stdout or "",
+                message,
+            )
+        try:
+            payload = json.loads(lines[0])
+        except json.JSONDecodeError as exc:
+            message = f"Failed to parse vLLM local output JSON: {exc}"
+            if on_update:
+                on_update("", message)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                result.stdout or "",
+                message,
+            )
+        if not isinstance(payload, dict):
+            message = "vLLM local output payload must be a JSON object."
+            if on_update:
+                on_update("", message)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                result.stdout or "",
+                message,
+            )
+        error_payload = payload.get("error")
+        if error_payload:
+            message = (
+                error_payload
+                if isinstance(error_payload, str)
+                else json.dumps(error_payload, ensure_ascii=False)
+            )
+            if on_update:
+                on_update("", message)
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                result.stdout or "",
+                message,
+            )
+        response_payload = payload.get("response")
+        content = ""
+        if isinstance(response_payload, dict):
+            content = _extract_vllm_message_content(response_payload)
+            if not content:
+                body_payload = response_payload.get("body")
+                if isinstance(body_payload, dict):
+                    content = _extract_vllm_message_content(body_payload)
+        if not content:
+            content = result.stdout or json.dumps(payload, ensure_ascii=False)
+        if on_update:
+            on_update(content, "")
+        return subprocess.CompletedProcess(cmd, 0, content, result.stderr or "")
+
+
+def _run_vllm_remote_chat_completion(
+    provider: str,
+    settings: dict[str, Any],
+    prompt: str | None,
+    on_update: Callable[[str, str], None] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    base_url = str(settings.get("base_url") or "").strip()
+    model = str(settings.get("model") or "").strip()
+    if not base_url:
+        raise ValueError(f"{provider} base URL is not configured.")
+    if not model:
+        raise ValueError(f"{provider} model is not configured.")
+    endpoint = f"{base_url}/chat/completions"
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt or "",
+            }
+        ],
+        "temperature": settings.get("temperature"),
+        "max_tokens": settings.get("max_tokens"),
+    }
+    data = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    api_key = str(settings.get("api_key") or "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request_obj = Request(endpoint, data=data, headers=headers, method="POST")
+    cmd = [provider, endpoint]
+    timeout = _safe_float(settings.get("request_timeout_seconds"), 180.0)
+    try:
+        with urlopen(request_obj, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+        try:
+            decoded = json.loads(body)
+        except json.JSONDecodeError:
+            decoded = {}
+        output = _extract_vllm_message_content(decoded) or body
+        if on_update:
+            on_update(output, "")
+        return subprocess.CompletedProcess(cmd, 0, output, "")
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        message = error_body or str(exc)
+        if on_update:
+            on_update("", message)
+        return subprocess.CompletedProcess(cmd, exc.code or 1, "", message)
+    except URLError as exc:
+        message = str(exc)
+        if on_update:
+            on_update("", message)
+        return subprocess.CompletedProcess(cmd, 1, "", message)
 
 
 def _extract_list_config(value: Any, label: str) -> list[str]:
@@ -601,6 +975,74 @@ def _ensure_gemini_mcp_servers(
 
 def _build_task_workspace(task_id: int) -> Path:
     return Path(Config.WORKSPACES_DIR) / f"task-{task_id}"
+
+
+def _codex_homes_root() -> Path:
+    return Path(Config.DATA_DIR) / "codex-homes"
+
+
+def _build_task_codex_home(task_id: int) -> Path:
+    return _codex_homes_root() / f"task-{task_id}"
+
+
+def _resolve_codex_home_from_env(env: dict[str, str]) -> Path:
+    configured = (env.get("CODEX_HOME") or "").strip()
+    if configured:
+        return Path(configured)
+    home = (env.get("HOME") or "").strip()
+    if home:
+        return Path(home) / ".codex"
+    return Path.home() / ".codex"
+
+
+def _cleanup_codex_home(task_id: int, codex_home: Path | None) -> None:
+    if codex_home is None:
+        return
+    root = _codex_homes_root()
+    try:
+        root_resolved = root.resolve()
+    except FileNotFoundError:
+        root_resolved = root
+    try:
+        codex_home_resolved = codex_home.resolve()
+    except FileNotFoundError:
+        codex_home_resolved = codex_home
+    if (
+        codex_home_resolved == root_resolved
+        or root_resolved not in codex_home_resolved.parents
+    ):
+        logger.warning(
+            "Skipping codex home cleanup for task %s; path outside codex home root: %s",
+            task_id,
+            codex_home,
+        )
+        return
+    try:
+        shutil.rmtree(codex_home)
+        logger.info("Removed codex home %s for task %s", codex_home, task_id)
+    except FileNotFoundError:
+        return
+    except Exception:
+        logger.exception("Failed to remove codex home %s for task %s", codex_home, task_id)
+
+
+def _prepare_task_codex_home(task_id: int, seed_home: Path | None = None) -> Path:
+    codex_home = _build_task_codex_home(task_id)
+    codex_home.parent.mkdir(parents=True, exist_ok=True)
+    _cleanup_codex_home(task_id, codex_home)
+    codex_home.mkdir(parents=True, exist_ok=True)
+    if seed_home is not None:
+        for file_name in ("auth.json", "config.toml", "config.toml.bak"):
+            source = seed_home / file_name
+            if not source.is_file():
+                continue
+            try:
+                shutil.copy2(source, codex_home / file_name)
+            except Exception:
+                logger.exception(
+                    "Failed to seed %s into codex home for task %s", file_name, task_id
+                )
+    return codex_home
 
 
 SCRIPTS_DIRNAME = "agent-scripts"
@@ -952,42 +1394,6 @@ def _build_role_payload(role: Role) -> dict[str, object]:
     }
 
 
-def _build_agent_scripts_payload(scripts: list[Script]) -> dict[str, object] | None:
-    if not scripts:
-        return None
-    grouped = {
-        "pre_init": [],
-        "init": [],
-        "post_init": [],
-        "post_run": [],
-        "skill": [],
-    }
-    for script in scripts:
-        path = script.file_path or script.file_name
-        entry = {
-            "description": script.description or "",
-            "path": path,
-        }
-        if script.script_type == SCRIPT_TYPE_PRE_INIT:
-            grouped["pre_init"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_INIT:
-            grouped["init"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_POST_INIT:
-            grouped["post_init"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_POST_RUN:
-            grouped["post_run"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_SKILL:
-            grouped["skill"].append(entry)
-    payload: dict[str, object] = {
-        "description": (
-            "Scripts attached to this agent. Skill scripts are available to the LLM as needed; "
-            "other scripts are for reference."
-        ),
-    }
-    payload.update(grouped)
-    return payload
-
-
 def _build_attachment_entries(
     attachments: list[Attachment],
 ) -> list[dict[str, object]]:
@@ -1064,15 +1470,24 @@ def _inject_attachments(
     attachments: list[dict[str, object]],
     replace_existing: bool = False,
 ) -> str:
-    stripped = prompt.strip()
-    payload: dict[str, object] | None = None
-    if stripped.startswith("{"):
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict):
-            payload = parsed
+    payload = _load_prompt_dict(prompt)
+    if payload is not None and is_prompt_envelope(payload):
+        task_context = _ensure_task_context(payload)
+        if not attachments:
+            if replace_existing:
+                task_context.pop("attachments", None)
+                return serialize_prompt_envelope(payload)
+            return prompt
+        existing = task_context.get("attachments")
+        if isinstance(existing, list):
+            task_context["attachments"] = (
+                attachments
+                if replace_existing
+                else _merge_attachment_entries(existing, attachments)
+            )
+        else:
+            task_context["attachments"] = attachments
+        return serialize_prompt_envelope(payload)
     if not attachments:
         if not replace_existing:
             return prompt
@@ -1109,12 +1524,13 @@ def _build_agent_payload(
     include_autoprompt: bool = True,
 ) -> dict[str, object]:
     description = agent.description or agent.name or ""
-    payload: dict[str, object] = {"description": description}
+    payload: dict[str, object] = {
+        "id": agent.id,
+        "name": agent.name,
+        "description": description,
+    }
     if include_autoprompt and agent.autonomous_prompt:
         payload["autoprompt"] = agent.autonomous_prompt
-    scripts_payload = _build_agent_scripts_payload(list(agent.scripts))
-    if scripts_payload:
-        payload["scripts"] = scripts_payload
     return payload
 
 
@@ -1132,27 +1548,53 @@ def _build_agent_prompt_payload(
     return agent_payload
 
 
-def _build_run_prompt_payload(agent: Agent) -> str:
-    payload: dict[str, object] = {
-        "prompt": agent.autonomous_prompt or "",
-        "output_instructions": OUTPUT_INSTRUCTIONS_ONE_OFF,
-        "agent": _build_agent_prompt_payload(agent, include_autoprompt=False),
+def _build_system_contract(agent: Agent | None) -> dict[str, object]:
+    if agent is None or not agent.role_id or agent.role is None:
+        return {}
+    return {"role": _build_role_payload(agent.role)}
+
+
+def build_one_off_output_contract() -> dict[str, object]:
+    return {
+        "mode": "one_off",
+        "no_followups": True,
+        "format": {
+            "name": "markdown",
+            "dialect": "commonmark",
+            "when": "if_needed_or_used",
+            "valid_syntax_required": True,
+        },
+        "instructions": [
+            OUTPUT_INSTRUCTIONS_ONE_OFF,
+            OUTPUT_INSTRUCTIONS_MARKDOWN,
+        ],
     }
-    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _build_output_contract() -> dict[str, object]:
+    return build_one_off_output_contract()
+
+
+def _build_run_prompt_payload(agent: Agent) -> str:
+    envelope = build_prompt_envelope(
+        user_request=agent.autonomous_prompt or "",
+        system_contract=_build_system_contract(agent),
+        agent_profile=_build_agent_payload(agent, include_autoprompt=False),
+        task_context={"kind": "autorun"},
+        output_contract=_build_output_contract(),
+    )
+    return serialize_prompt_envelope(envelope)
 
 
 def _render_prompt(agent: Agent) -> str:
-    if agent.autonomous_prompt:
-        return agent.autonomous_prompt
-    if agent.role_id:
-        role = agent.role
-        if role is not None:
-            combined = {
-                "role": _build_role_payload(role),
-                "agent": _build_agent_payload(agent),
-            }
-            return json.dumps(combined, indent=2, sort_keys=True)
-    return json.dumps(_build_agent_payload(agent), indent=2, sort_keys=True)
+    envelope = build_prompt_envelope(
+        user_request=agent.autonomous_prompt or "",
+        system_contract=_build_system_contract(agent),
+        agent_profile=_build_agent_payload(agent),
+        task_context={"kind": "task"},
+        output_contract=_build_output_contract(),
+    )
+    return serialize_prompt_envelope(envelope)
 
 
 def _format_repo_prompt(prompt: str, repo: str, workspace: str | None = None) -> str:
@@ -1197,7 +1639,27 @@ def _format_script_prompt(prompt: str, script_entries: list[dict[str, str]]) -> 
 
 
 def _should_use_prompt_payload(task_kind: str | None) -> bool:
-    return is_quick_task_kind(task_kind) or task_kind == "pipeline"
+    return is_quick_task_kind(task_kind)
+
+
+def _load_prompt_dict(prompt: str) -> dict[str, object] | None:
+    stripped = prompt.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _ensure_task_context(payload: dict[str, object]) -> dict[str, object]:
+    task_context = payload.get("task_context")
+    if isinstance(task_context, dict):
+        return task_context
+    task_context = {}
+    payload["task_context"] = task_context
+    return task_context
 
 
 def _inject_github_repo(
@@ -1206,6 +1668,34 @@ def _inject_github_repo(
     task_kind: str | None,
     workspace: Path | str | None = None,
 ) -> str:
+    payload = _load_prompt_dict(prompt)
+    if payload is not None and is_prompt_envelope(payload):
+        task_context = _ensure_task_context(payload)
+        task_context["kind"] = task_kind or task_context.get("kind") or "task"
+        integrations = task_context.get("integrations")
+        integrations_payload: dict[str, object]
+        if isinstance(integrations, dict):
+            integrations_payload = integrations
+        else:
+            integrations_payload = {}
+            task_context["integrations"] = integrations_payload
+        github_payload = integrations_payload.get("github")
+        if not isinstance(github_payload, dict):
+            github_payload = {}
+            integrations_payload["github"] = github_payload
+        github_payload["repo"] = repo
+        github_payload["note"] = (
+            "All instructions in the prompt relate to the GitHub repo and its local workspace. "
+            "Do not use any other repo or local workspace."
+        )
+        if workspace:
+            workspace_path = str(workspace)
+            github_payload["workspace"] = workspace_path
+            task_context["workspace"] = {
+                "path": workspace_path,
+                "note": "Workspace path is a local git clone of the configured GitHub repo.",
+            }
+        return serialize_prompt_envelope(payload)
     if _should_use_prompt_payload(task_kind):
         return prompt
     workspace_path = str(workspace) if workspace else None
@@ -1252,6 +1742,17 @@ def _inject_script_map(
 ) -> str:
     if not script_entries:
         return prompt
+    payload = _load_prompt_dict(prompt)
+    if payload is not None and is_prompt_envelope(payload):
+        task_context = _ensure_task_context(payload)
+        task_context["kind"] = task_kind or task_context.get("kind") or "task"
+        existing = task_context.get("skill_scripts")
+        if isinstance(existing, list):
+            merged = _merge_attachment_entries(existing, script_entries)
+            task_context["skill_scripts"] = merged
+        else:
+            task_context["skill_scripts"] = script_entries
+        return serialize_prompt_envelope(payload)
     stripped = prompt.strip()
     if stripped.startswith("{"):
         try:
@@ -1280,195 +1781,17 @@ def _inject_script_map(
     return _format_script_prompt(prompt, script_entries)
 
 
-def _inject_agent_payload(
-    prompt: str,
-    agent_payload: dict[str, object] | None,
-    task_kind: str | None,
-) -> str:
-    if task_kind != "pipeline" or not agent_payload:
-        return prompt
-    stripped = prompt.strip()
-    if not stripped.startswith("{"):
-        return prompt
-    try:
-        payload = json.loads(stripped)
-    except json.JSONDecodeError:
-        return prompt
-    if not isinstance(payload, dict) or "agent" in payload:
-        return prompt
-    payload["agent"] = agent_payload
-    return json.dumps(payload, indent=2, sort_keys=True)
-
-
-def _build_pipeline_prompt_payload(
-    session,
-    pipeline_id: int,
-    pipeline_run_id: int,
-    pipeline_step_id: int | None,
-) -> dict[str, object] | None:
-    pipeline = session.get(Pipeline, pipeline_id)
-    if pipeline is None:
-        return None
-    steps = (
-        session.execute(
-            select(PipelineStep, TaskTemplate)
-            .join(TaskTemplate, PipelineStep.task_template_id == TaskTemplate.id)
-            .where(PipelineStep.pipeline_id == pipeline_id)
-            .order_by(PipelineStep.step_order.asc(), PipelineStep.id.asc())
-            .options(
-                selectinload(PipelineStep.attachments),
-                selectinload(TaskTemplate.attachments),
-            )
-        )
-        .all()
-    )
-    if not steps:
-        return None
-    tasks = (
-        session.execute(
-            select(AgentTask)
-            .options(selectinload(AgentTask.attachments))
-            .where(
-                AgentTask.pipeline_run_id == pipeline_run_id,
-                AgentTask.pipeline_id == pipeline_id,
-                AgentTask.pipeline_step_id.is_not(None),
-            )
-            .order_by(AgentTask.created_at.asc(), AgentTask.id.asc())
-        )
-        .scalars()
-        .all()
-    )
-    latest_by_step: dict[int, AgentTask] = {}
-    attachments_by_step: dict[int, list[dict[str, object]]] = {}
-    for task in tasks:
-        if task.pipeline_step_id is None:
-            continue
-        latest_by_step[task.pipeline_step_id] = task
-        attachments_by_step[task.pipeline_step_id] = _build_attachment_entries(
-            list(task.attachments)
-        )
-    steps_payload: list[dict[str, object]] = []
-    current_step = None
-    pipeline_attachments: list[dict[str, object]] = []
-    for index, (step, template) in enumerate(steps, start=1):
-        task = latest_by_step.get(step.id)
-        combined_prompt = _combine_step_prompt(
-            template.prompt,
-            step.additional_prompt,
-        )
-        step_attachments = attachments_by_step.get(step.id, [])
-        step_attachments = _merge_attachment_entries(
-            step_attachments,
-            _build_attachment_entries(list(step.attachments)),
-        )
-        step_attachments = _merge_attachment_entries(
-            step_attachments,
-            _build_attachment_entries(list(template.attachments)),
-        )
-        if step_attachments:
-            pipeline_attachments = _merge_attachment_entries(
-                pipeline_attachments,
-                step_attachments,
-            )
-        step_payload: dict[str, object] = {
-            "step_id": step.id,
-            "step_order": step.step_order,
-            "task_template_id": template.id,
-            "prompt": combined_prompt,
-            "template_prompt": template.prompt,
-            "additional_prompt": step.additional_prompt,
-            "output": task.output if task is not None else None,
-            "status": task.status if task is not None else "pending",
-        }
-        if step_attachments:
-            step_payload["attachments"] = step_attachments
-        steps_payload.append(step_payload)
-        if step.id == pipeline_step_id:
-            current_step = {
-                "step_id": step.id,
-                "step_order": step.step_order,
-                "index": index,
-                "task_template_id": template.id,
-            }
-    payload: dict[str, object] = {
-        "id": pipeline.id,
-        "name": pipeline.name,
-        "run_id": pipeline_run_id,
-        "current_step": current_step,
-        "steps": steps_payload,
-        "note": (
-            "Pipeline steps are included for reference. Each step includes the "
-            "template prompt, any additional prompt, and the output from the task "
-            "run for that step."
-        ),
-    }
-    if pipeline_attachments:
-        payload["attachments"] = pipeline_attachments
-    if pipeline.description:
-        payload["description"] = pipeline.description
-    return payload
-
-
-def _inject_pipeline_payload(
-    prompt: str,
-    pipeline_payload: dict[str, object] | None,
-    task_kind: str | None,
-) -> str:
-    if task_kind != "pipeline" or not pipeline_payload:
-        return prompt
-    stripped = prompt.strip()
-    if not stripped.startswith("{"):
-        return prompt
-    try:
-        payload = json.loads(stripped)
-    except json.JSONDecodeError:
-        return prompt
-    if not isinstance(payload, dict) or "pipeline" in payload:
-        return prompt
-    payload["pipeline"] = pipeline_payload
-    return json.dumps(payload, indent=2, sort_keys=True)
-
-
-def _append_additional_prompt(prompt: str, additional_prompt: str) -> str:
-    addition = additional_prompt.strip()
-    if not addition:
-        return prompt
-    if not prompt:
-        return addition
-    if prompt.endswith((" ", "\n", "\t")):
-        return f"{prompt}{addition}"
-    return f"{prompt} {addition}"
-
-
-def _combine_step_prompt(template_prompt: str, additional_prompt: str | None) -> str:
-    if not additional_prompt or not additional_prompt.strip():
-        return template_prompt
-    stripped = template_prompt.strip()
-    if stripped.startswith("{"):
-        try:
-            payload = json.loads(stripped)
-        except json.JSONDecodeError:
-            payload = None
-        if isinstance(payload, dict):
-            prompt_value = payload.get("prompt")
-            if isinstance(prompt_value, str):
-                payload["prompt"] = _append_additional_prompt(
-                    prompt_value,
-                    additional_prompt,
-                )
-                return json.dumps(payload, indent=2, sort_keys=True)
-    return _append_additional_prompt(template_prompt, additional_prompt)
-
-
 def _build_integrations_payload(
     workspace: Path | str | None = None,
+    selected_keys: set[str] | None = None,
 ) -> dict[str, object] | None:
-    github_settings = load_integration_settings("github")
-    jira_settings = load_integration_settings("jira")
     integrations: dict[str, object] = {}
-    repo = (github_settings.get("repo") or "").strip()
-    if repo:
-        github_payload: dict[str, object] = {"repo": repo}
+    if is_task_integration_selected("github", selected_keys):
+        github_settings = load_integration_settings("github")
+        repo = (github_settings.get("repo") or "").strip()
+        github_payload: dict[str, object] = {"configured": bool(repo)}
+        if repo:
+            github_payload["repo"] = repo
         if workspace:
             github_payload["workspace"] = str(workspace)
         if workspace:
@@ -1483,12 +1806,16 @@ def _build_integrations_payload(
                 "Do not use any other repo or local workspace."
             )
         integrations["github"] = github_payload
-    email = (jira_settings.get("email") or "").strip()
-    site = (jira_settings.get("site") or "").strip()
-    board = (jira_settings.get("board") or "").strip()
-    project_key = (jira_settings.get("project_key") or "").strip()
-    if email or site or board or project_key:
-        jira_payload: dict[str, object] = {}
+
+    if is_task_integration_selected("jira", selected_keys):
+        jira_settings = load_integration_settings("jira")
+        email = (jira_settings.get("email") or "").strip()
+        site = (jira_settings.get("site") or "").strip()
+        board = (jira_settings.get("board") or "").strip()
+        project_key = (jira_settings.get("project_key") or "").strip()
+        jira_payload: dict[str, object] = {
+            "configured": bool(email or site or board or project_key)
+        }
         if email:
             jira_payload["email"] = email
         if site:
@@ -1503,6 +1830,44 @@ def _build_integrations_payload(
             "If a DNS lookup fails, retry until it succeeds."
         )
         integrations["jira"] = jira_payload
+
+    if is_task_integration_selected("confluence", selected_keys):
+        confluence_settings = load_integration_settings("confluence")
+        site = (confluence_settings.get("site") or "").strip()
+        space = (confluence_settings.get("space") or "").strip()
+        confluence_payload: dict[str, object] = {"configured": bool(site or space)}
+        if site:
+            confluence_payload["site"] = site
+        if space:
+            confluence_payload["space"] = space
+        confluence_payload["note"] = (
+            "Use configured Confluence settings for workspace documentation context."
+        )
+        integrations["confluence"] = confluence_payload
+
+    if is_task_integration_selected("chroma", selected_keys):
+        chroma_settings = load_integration_settings("chroma")
+        host = (chroma_settings.get("host") or "").strip() or (
+            Config.CHROMA_HOST or ""
+        ).strip()
+        port = (chroma_settings.get("port") or "").strip() or str(
+            Config.CHROMA_PORT or ""
+        ).strip()
+        ssl = (chroma_settings.get("ssl") or "").strip() or str(
+            Config.CHROMA_SSL or ""
+        ).strip()
+        chroma_payload: dict[str, object] = {"configured": bool(host and port)}
+        if host:
+            chroma_payload["host"] = host
+        if port:
+            chroma_payload["port"] = port
+        if ssl:
+            chroma_payload["ssl"] = ssl.strip().lower() == "true"
+        chroma_payload["note"] = (
+            "Use configured ChromaDB connection settings for vector memory lookups."
+        )
+        integrations["chroma"] = chroma_payload
+
     return integrations or None
 
 
@@ -1557,15 +1922,14 @@ def _inject_integrations(
     prompt: str,
     integrations: dict[str, object] | None,
 ) -> str:
-    stripped = prompt.strip()
-    payload: dict[str, object] | None = None
-    if stripped.startswith("{"):
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict):
-            payload = parsed
+    payload = _load_prompt_dict(prompt)
+    if payload is not None and is_prompt_envelope(payload):
+        task_context = _ensure_task_context(payload)
+        if integrations:
+            task_context["integrations"] = integrations
+        else:
+            task_context.pop("integrations", None)
+        return serialize_prompt_envelope(payload)
     if payload is None:
         if not integrations:
             return prompt
@@ -1578,34 +1942,71 @@ def _inject_integrations(
 
 
 def _build_task_payload(kind: str | None, prompt: str) -> str:
-    if _should_use_prompt_payload(kind):
-        stripped = prompt.strip()
-        if stripped.startswith("{"):
-            try:
-                payload = json.loads(stripped)
-            except json.JSONDecodeError:
-                payload = None
-            if (
-                isinstance(payload, dict)
-                and isinstance(payload.get("prompt"), str)
-            ):
-                if "output_instructions" not in payload:
-                    payload["output_instructions"] = OUTPUT_INSTRUCTIONS_ONE_OFF
-                    return json.dumps(payload, indent=2, sort_keys=True)
-                return stripped
-        return json.dumps(
-            {
-                "prompt": prompt,
-                "output_instructions": OUTPUT_INSTRUCTIONS_ONE_OFF,
-            },
-            indent=2,
-            sort_keys=True,
-        )
-    return prompt
+    user_request, source_payload = parse_prompt_input(prompt)
+    envelope = build_prompt_envelope(
+        user_request=user_request,
+        task_context={"kind": kind or "task"},
+        output_contract=_build_output_contract(),
+        source_payload=source_payload,
+    )
+    return serialize_prompt_envelope(envelope)
 
 
-def _build_agent_mcp_configs(agent: Agent) -> dict[str, dict[str, Any]]:
-    return _build_mcp_config_map(agent.mcp_servers)
+def _inject_envelope_core_sections(
+    prompt: str,
+    *,
+    system_contract: dict[str, object] | None = None,
+    agent_profile: dict[str, object] | None = None,
+    task_kind: str | None = None,
+) -> str:
+    payload = _load_prompt_dict(prompt)
+    if payload is None or not is_prompt_envelope(payload):
+        return prompt
+    if system_contract:
+        existing = payload.get("system_contract")
+        if isinstance(existing, dict):
+            existing.update(system_contract)
+        else:
+            payload["system_contract"] = system_contract
+    if agent_profile:
+        payload["agent_profile"] = agent_profile
+    task_context = _ensure_task_context(payload)
+    if task_kind:
+        task_context["kind"] = task_kind
+    return serialize_prompt_envelope(payload)
+
+
+def _build_task_mcp_configs(
+    task: AgentTask,
+    task_template: TaskTemplate | None,
+) -> dict[str, dict[str, Any]]:
+    task_servers = list(task.mcp_servers)
+    template_servers = list(task_template.mcp_servers) if task_template else []
+    selected_servers = task_servers if task_servers else template_servers
+    configs = _build_mcp_config_map(selected_servers)
+    configs["llmctl-mcp"] = _build_builtin_llmctl_mcp_config()
+    return configs
+
+
+def _first_available_model_id(session) -> int | None:
+    return session.execute(
+        select(LLMModel.id).order_by(LLMModel.created_at.desc()).limit(1)
+    ).scalar_one_or_none()
+
+
+def _builtin_llmctl_mcp_run_path() -> Path:
+    return Path(__file__).resolve().parents[4] / "app" / "llmctl-mcp" / "run.py"
+
+
+def _build_builtin_llmctl_mcp_config() -> dict[str, Any]:
+    run_path = _builtin_llmctl_mcp_run_path()
+    if not run_path.is_file():
+        raise ValueError(f"Required llmctl-mcp runner is missing: {run_path}")
+    return {
+        "command": "python3",
+        "args": [str(run_path)],
+        "env": {"LLMCTL_MCP_TRANSPORT": "stdio"},
+    }
 
 
 def _run_llm_process(
@@ -1710,6 +2111,7 @@ def _run_llm(
     if model_config is None and provider == "codex":
         model_config = _load_legacy_codex_model_config()
     provider_label = _provider_label(provider)
+    cmd: list[str] | None = None
     if provider == "codex":
         codex_settings = _codex_settings_from_model_config(model_config or {})
         mcp_overrides = _build_mcp_overrides_from_configs(mcp_configs)
@@ -1750,6 +2152,59 @@ def _run_llm(
         mcp_config = _build_claude_mcp_config(mcp_configs)
         model_name = str((model_config or {}).get("model") or "").strip()
         cmd = _build_claude_cmd(mcp_config, model=model_name)
+    elif provider == "vllm_local":
+        local_settings = _vllm_local_settings_from_model_config(model_config or {})
+        if mcp_configs and on_log:
+            on_log(
+                "vLLM providers currently run without MCP transport wiring; "
+                "MCP servers are ignored for this run."
+            )
+        logger.info(
+            "Running %s: CLI run-batch model=%s",
+            provider_label,
+            local_settings.get("model"),
+        )
+        return _run_vllm_local_cli_completion(
+            local_settings,
+            prompt,
+            on_update=on_update,
+            on_log=on_log,
+            cwd=cwd,
+            env=env,
+        )
+    elif provider == "vllm_remote":
+        remote_settings = _vllm_remote_settings_from_model_config(model_config or {})
+        if mcp_configs and on_log:
+            on_log(
+                "vLLM providers currently run without MCP transport wiring; "
+                "MCP servers are ignored for this run."
+            )
+        logger.info(
+            "Running %s: POST %s/chat/completions model=%s",
+            provider_label,
+            remote_settings.get("base_url"),
+            remote_settings.get("model"),
+        )
+        result = _run_vllm_remote_chat_completion(
+            provider,
+            remote_settings,
+            prompt,
+            on_update=on_update,
+        )
+        if result.returncode != 0 and (
+            result.returncode >= 500
+            or _is_upstream_500(result.stdout, result.stderr)
+        ):
+            if on_log:
+                on_log(f"{provider_label} returned upstream 500; retrying once.")
+            time.sleep(1.0)
+            result = _run_vllm_remote_chat_completion(
+                provider,
+                remote_settings,
+                prompt,
+                on_update=on_update,
+            )
+        return result
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
     logger.info("Running %s: %s", provider_label, " ".join(cmd))
@@ -1788,7 +2243,7 @@ def _run_llmctl_mcp_stdio_preflight(
         "--timeout",
         "8",
         "--tool-name",
-        "llmctl_get_pipeline",
+        "llmctl_get_flowchart",
         "--tool-args",
         tool_args,
         "--",
@@ -1982,7 +2437,8 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
     payload = ""
     task_kind: str | None = None
     github_repo = ""
-    agent_scripts: list[Script] = []
+    selected_integration_keys: set[str] | None = None
+    template_scripts: list[Script] = []
     task_scripts: list[Script] = []
     task_attachments: list[Attachment] = []
     with session_scope() as session:
@@ -1992,23 +2448,6 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             return
         if task.status not in {"queued", "running"}:
             return
-        if task.pipeline_run_id is not None:
-            pipeline_run = session.get(PipelineRun, task.pipeline_run_id)
-            if pipeline_run is None:
-                now = _utcnow()
-                task.status = "canceled"
-                task.error = "Pipeline run not found."
-                task.started_at = task.started_at or now
-                task.finished_at = now
-                return
-            if pipeline_run.status == "canceled":
-                now = _utcnow()
-                task.status = "canceled"
-                if not task.error:
-                    task.error = "Pipeline run canceled."
-                task.started_at = task.started_at or now
-                task.finished_at = now
-                return
         run: Run | None = None
         if task.run_id is not None:
             run = session.get(Run, task.run_id)
@@ -2019,7 +2458,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 task.started_at = now
                 task.finished_at = now
                 return
-            if run.status not in RUN_ACTIVE_STATUSES and task.pipeline_run_id is None:
+            if run.status not in RUN_ACTIVE_STATUSES:
                 now = _utcnow()
                 task.status = "canceled"
                 task.error = "Autorun is inactive."
@@ -2030,61 +2469,94 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         is_run_task = task.run_id is not None
         agent: Agent | None = None
         if task.agent_id is None:
-            now = _utcnow()
-            task.status = "failed"
-            task.error = "Agent required."
-            task.started_at = now
-            task.finished_at = now
-            return
-        agent = session.get(Agent, task.agent_id)
-        if agent is None:
-            now = _utcnow()
-            task.status = "failed"
-            task.error = "Agent not found."
-            task.started_at = now
-            task.finished_at = now
-            if run is not None:
-                run.last_run_at = now
-                run.last_error = "Agent not found."
-                run.status = "error"
-                run.task_id = None
-                run.last_stopped_at = now
-            return
+            if not is_quick_task_kind(task.kind):
+                now = _utcnow()
+                task.status = "failed"
+                task.error = "Agent required."
+                task.started_at = now
+                task.finished_at = now
+                return
+        else:
+            agent = session.get(Agent, task.agent_id)
+            if agent is None and not is_quick_task_kind(task.kind):
+                now = _utcnow()
+                task.status = "failed"
+                task.error = "Agent not found."
+                task.started_at = now
+                task.finished_at = now
+                if run is not None:
+                    run.last_run_at = now
+                    run.last_error = "Agent not found."
+                    run.status = "error"
+                    run.task_id = None
+                    run.last_stopped_at = now
+                return
+            if agent is None:
+                logger.warning(
+                    "Quick node %s references missing agent %s; using default quick profile.",
+                    task.id,
+                    task.agent_id,
+                )
+        task_template: TaskTemplate | None = None
+        if task.task_template_id is not None:
+            task_template = (
+                session.execute(
+                    select(TaskTemplate)
+                    .options(
+                        selectinload(TaskTemplate.mcp_servers),
+                        selectinload(TaskTemplate.scripts),
+                    )
+                    .where(TaskTemplate.id == task.task_template_id)
+                )
+                .scalars()
+                .first()
+            )
+            if task_template is None:
+                now = _utcnow()
+                task.status = "failed"
+                task.error = "Task template not found."
+                task.started_at = now
+                task.finished_at = now
+                if agent is not None:
+                    agent.last_run_at = now
+                    agent.last_error = task.error
+                    agent.task_id = None
+                    agent.last_stopped_at = now
+                if run is not None:
+                    run.last_run_at = now
+                    run.last_error = task.error
+                    run.status = "error"
+                    run.task_id = None
+                    run.last_stopped_at = now
+                return
+
         model: LLMModel | None = None
-        if agent.model_id is not None:
-            model = session.get(LLMModel, agent.model_id)
+        selected_model_id: int | None = None
+        if task.model_id is not None:
+            selected_model_id = task.model_id
+        elif task_template is not None and task_template.model_id is not None:
+            selected_model_id = task_template.model_id
+        elif default_model_id is not None:
+            selected_model_id = default_model_id
+        elif is_quick_task_kind(task.kind):
+            selected_model_id = _first_available_model_id(session)
+
+        if selected_model_id is not None:
+            model = session.get(LLMModel, selected_model_id)
             if model is None:
                 now = _utcnow()
                 task.status = "failed"
                 task.error = "Model not found."
                 task.started_at = now
                 task.finished_at = now
-                agent.last_run_at = now
-                agent.last_error = "Model not found."
-                agent.task_id = None
-                agent.last_stopped_at = now
+                if agent is not None:
+                    agent.last_run_at = now
+                    agent.last_error = task.error
+                    agent.task_id = None
+                    agent.last_stopped_at = now
                 if run is not None:
                     run.last_run_at = now
-                    run.last_error = "Model not found."
-                    run.status = "error"
-                    run.task_id = None
-                    run.last_stopped_at = now
-                return
-        elif default_model_id is not None:
-            model = session.get(LLMModel, default_model_id)
-            if model is None:
-                now = _utcnow()
-                task.status = "failed"
-                task.error = "Default model not found."
-                task.started_at = now
-                task.finished_at = now
-                agent.last_run_at = now
-                agent.last_error = "Default model not found."
-                agent.task_id = None
-                agent.last_stopped_at = now
-                if run is not None:
-                    run.last_run_at = now
-                    run.last_error = "Default model not found."
+                    run.last_error = task.error
                     run.status = "error"
                     run.task_id = None
                     run.last_stopped_at = now
@@ -2095,10 +2567,11 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             task.error = "Model required."
             task.started_at = now
             task.finished_at = now
-            agent.last_run_at = now
-            agent.last_error = task.error
-            agent.task_id = None
-            agent.last_stopped_at = now
+            if agent is not None:
+                agent.last_run_at = now
+                agent.last_error = task.error
+                agent.task_id = None
+                agent.last_stopped_at = now
             if run is not None:
                 run.last_run_at = now
                 run.last_error = task.error
@@ -2106,53 +2579,55 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 run.task_id = None
                 run.last_stopped_at = now
             return
-        if model is not None:
-            if model.provider not in LLM_PROVIDERS:
-                now = _utcnow()
-                task.status = "failed"
-                task.error = f"Unknown model provider: {model.provider}."
-                task.started_at = now
-                task.finished_at = now
+        if model.provider not in LLM_PROVIDERS:
+            now = _utcnow()
+            task.status = "failed"
+            task.error = f"Unknown model provider: {model.provider}."
+            task.started_at = now
+            task.finished_at = now
+            if agent is not None:
                 agent.last_run_at = now
                 agent.last_error = task.error
                 agent.task_id = None
                 agent.last_stopped_at = now
-                if run is not None:
-                    run.last_run_at = now
-                    run.last_error = task.error
-                    run.status = "error"
-                    run.task_id = None
-                    run.last_stopped_at = now
-                return
-            if model.provider not in enabled_providers:
-                now = _utcnow()
-                task.status = "failed"
-                task.error = f"Provider disabled: {model.provider}."
-                task.started_at = now
-                task.finished_at = now
+            if run is not None:
+                run.last_run_at = now
+                run.last_error = task.error
+                run.status = "error"
+                run.task_id = None
+                run.last_stopped_at = now
+            return
+        if model.provider not in enabled_providers:
+            now = _utcnow()
+            task.status = "failed"
+            task.error = f"Provider disabled: {model.provider}."
+            task.started_at = now
+            task.finished_at = now
+            if agent is not None:
                 agent.last_run_at = now
                 agent.last_error = task.error
                 agent.task_id = None
                 agent.last_stopped_at = now
-                if run is not None:
-                    run.last_run_at = now
-                    run.last_error = task.error
-                    run.status = "error"
-                    run.task_id = None
-                    run.last_stopped_at = now
-                return
-            provider = model.provider
-            model_config = _parse_model_config(model.config_json)
+            if run is not None:
+                run.last_run_at = now
+                run.last_error = task.error
+                run.status = "error"
+                run.task_id = None
+                run.last_stopped_at = now
+            return
+        provider = model.provider
+        model_config = _parse_model_config(model.config_json)
         if provider is None:
             now = _utcnow()
             task.status = "failed"
             task.error = "No default provider or model configured."
             task.started_at = now
             task.finished_at = now
-            agent.last_run_at = now
-            agent.last_error = task.error
-            agent.task_id = None
-            agent.last_stopped_at = now
+            if agent is not None:
+                agent.last_run_at = now
+                agent.last_error = task.error
+                agent.task_id = None
+                agent.last_stopped_at = now
             if run is not None:
                 run.last_run_at = now
                 run.last_error = task.error
@@ -2160,11 +2635,16 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 run.task_id = None
                 run.last_stopped_at = now
             return
-        agent_id = agent.id
-        agent_scripts = list(agent.scripts)
+        agent_id = agent.id if agent is not None else None
+        template_scripts = list(task_template.scripts) if task_template else []
         task_scripts = list(task.scripts)
         task_attachments = list(task.attachments)
-        for script in agent_scripts + task_scripts:
+        ordered_scripts: list[Script] = []
+        seen_script_ids: set[int] = set()
+        for script in template_scripts + task_scripts:
+            if script.id in seen_script_ids:
+                continue
+            seen_script_ids.add(script.id)
             path = ensure_script_file(
                 script.id,
                 script.file_name,
@@ -2173,9 +2653,13 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             )
             if script.file_path != str(path):
                 script.file_path = str(path)
+            ordered_scripts.append(script)
         task.celery_task_id = celery_task_id or task.celery_task_id
         task.status = "running"
         task.started_at = _utcnow()
+        selected_integration_keys = parse_task_integration_keys(
+            task.integration_keys_json
+        )
         prompt = task.prompt
         task_kind = task.kind
         if agent is not None and not prompt and not is_quick_task_kind(task.kind):
@@ -2183,76 +2667,64 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         if prompt is None:
             prompt = ""
         runtime_payload = _build_runtime_payload(provider, model_config)
-        repo_value = session.execute(
-            select(IntegrationSetting.value).where(
-                IntegrationSetting.provider == "github",
-                IntegrationSetting.key == "repo",
-            )
-        ).scalar_one_or_none()
-        github_repo = (repo_value or "").strip()
-        if github_repo and not is_run_task:
-            prompt = _inject_github_repo(prompt, github_repo, task_kind)
+        if is_task_integration_selected("github", selected_integration_keys):
+            github_settings = load_integration_settings("github")
+            github_repo = (github_settings.get("repo") or "").strip()
         payload = _build_task_payload(task.kind, prompt)
-        agent_payload = None
-        if task_kind == "pipeline" and agent is not None:
-            agent_payload = _build_agent_prompt_payload(
-                agent,
-                include_autoprompt=False,
-            )
-        payload = _inject_agent_payload(payload, agent_payload, task_kind)
-        pipeline_payload = None
+        system_contract = _build_system_contract(agent)
+        agent_profile = (
+            _build_agent_payload(agent, include_autoprompt=False)
+            if agent is not None
+            else None
+        )
+        if agent is None and is_quick_task_kind(task_kind):
+            system_contract = build_quick_node_system_contract()
+            agent_profile = build_quick_node_agent_profile()
+        payload = _inject_envelope_core_sections(
+            payload,
+            system_contract=system_contract,
+            agent_profile=agent_profile,
+            task_kind=task_kind,
+        )
         if (
-            task_kind == "pipeline"
-            and task.pipeline_id is not None
-            and task.pipeline_run_id is not None
+            is_task_integration_selected("github", selected_integration_keys)
+            and github_repo
+            and not is_run_task
         ):
-            pipeline_payload = _build_pipeline_prompt_payload(
-                session,
-                task.pipeline_id,
-                task.pipeline_run_id,
-                task.pipeline_step_id,
-            )
-        payload = _inject_pipeline_payload(payload, pipeline_payload, task_kind)
+            payload = _inject_github_repo(payload, github_repo, task_kind)
         payload = _inject_integrations(
             payload,
-            _build_integrations_payload(),
+            _build_integrations_payload(selected_keys=selected_integration_keys),
         )
         payload = _inject_runtime_metadata(payload, runtime_payload)
         attachment_entries = _build_attachment_entries(task_attachments)
-        if task_kind == "pipeline" and isinstance(pipeline_payload, dict):
-            pipeline_entries = pipeline_payload.get("attachments")
-            if isinstance(pipeline_entries, list):
-                attachment_entries = _merge_attachment_entries(
-                    attachment_entries,
-                    pipeline_entries,
-                )
         payload = _inject_attachments(
             payload,
             attachment_entries,
-            replace_existing=task_kind == "pipeline",
+            replace_existing=False,
         )
         task.prompt = payload
-        if agent is not None:
-            try:
-                mcp_configs = _build_agent_mcp_configs(agent)
-            except ValueError as exc:
-                now = _utcnow()
-                task.status = "failed"
-                task.error = str(exc)
-                task.finished_at = now
+        try:
+            mcp_configs = _build_task_mcp_configs(task, task_template)
+        except ValueError as exc:
+            now = _utcnow()
+            task.status = "failed"
+            task.error = str(exc)
+            task.finished_at = now
+            if agent is not None:
                 agent.last_run_at = now
                 agent.last_error = str(exc)
                 agent.task_id = None
                 agent.last_stopped_at = now
-                if run is not None:
-                    run.last_run_at = now
-                    run.last_error = str(exc)
-                    run.status = "error"
-                    run.task_id = None
-                    run.last_stopped_at = now
-                    run.run_end_requested = False
-                logger.error("Invalid MCP config for agent %s: %s", agent.id, exc)
-                return
+            if run is not None:
+                run.last_run_at = now
+                run.last_error = str(exc)
+                run.status = "error"
+                run.task_id = None
+                run.last_stopped_at = now
+                run.run_end_requested = False
+            logger.error("Invalid MCP config for task %s: %s", task.id, exc)
+            return
 
     provider_label = _provider_label(provider)
 
@@ -2288,29 +2760,14 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         return pre_init, init, post_init, post_run, skill, unknown
 
     (
-        task_pre_init,
-        task_init,
-        task_post_init,
-        task_post_run,
-        task_skill,
-        task_unknown,
-    ) = _split_scripts(task_scripts)
-    (
-        agent_pre_init,
-        agent_init,
-        agent_post_init,
-        agent_post_run,
-        agent_skill,
-        agent_unknown,
-    ) = _split_scripts(agent_scripts)
-
-    pre_init_scripts = task_pre_init + agent_pre_init
-    init_scripts = task_init + agent_init
-    post_init_scripts = task_post_init + agent_post_init
-    post_run_scripts = task_post_run + agent_post_run
-    skill_scripts = task_skill + agent_skill
-    unknown_scripts = task_unknown + agent_unknown
-    combined_scripts = task_scripts + agent_scripts
+        pre_init_scripts,
+        init_scripts,
+        post_init_scripts,
+        post_run_scripts,
+        skill_scripts,
+        unknown_scripts,
+    ) = _split_scripts(ordered_scripts)
+    combined_scripts = ordered_scripts
 
     log_prefix_chunks: list[str] = []
     last_output = ""
@@ -2378,6 +2835,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
 
     workspace: Path | None = None
     staging_dir: Path | None = None
+    codex_home: Path | None = None
     script_entries: list[dict[str, str]] = []
     llm_failed = False
     llm_message = ""
@@ -2416,14 +2874,15 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             _append_task_log(
                 f"Skipping {len(unknown_scripts)} script(s) with unknown type."
             )
-        try:
-            workspace = _maybe_checkout_repo(task_id, on_log=_append_task_log)
-        except Exception as exc:
-            _append_task_log(str(exc))
-            _finalize_failure(str(exc))
-            logger.exception("GitHub checkout failed for task %s", task_id)
-            _cleanup_workspace(task_id, _build_task_workspace(task_id))
-            return
+        if is_task_integration_selected("github", selected_integration_keys):
+            try:
+                workspace = _maybe_checkout_repo(task_id, on_log=_append_task_log)
+            except Exception as exc:
+                _append_task_log(str(exc))
+                _finalize_failure(str(exc))
+                logger.exception("GitHub checkout failed for task %s", task_id)
+                _cleanup_workspace(task_id, _build_task_workspace(task_id))
+                return
 
         if workspace is None:
             _append_task_log("No integration actions required.")
@@ -2484,7 +2943,11 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             )
 
             if workspace is not None:
-                if github_repo and not is_run_task:
+                if (
+                    is_task_integration_selected("github", selected_integration_keys)
+                    and github_repo
+                    and not is_run_task
+                ):
                     updated_payload = _inject_github_repo(
                         payload,
                         github_repo,
@@ -2522,7 +2985,10 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
 
             updated_payload = _inject_integrations(
                 payload,
-                _build_integrations_payload(workspace),
+                _build_integrations_payload(
+                    workspace,
+                    selected_keys=selected_integration_keys,
+                ),
             )
             if updated_payload != payload:
                 payload = updated_payload
@@ -2556,6 +3022,9 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 llm_env["WORKSPACE_PATH"] = str(workspace)
                 llm_env["LLMCTL_STUDIO_WORKSPACE"] = str(workspace)
             if provider == "codex":
+                seed_codex_home = _resolve_codex_home_from_env(llm_env)
+                codex_home = _prepare_task_codex_home(task_id, seed_home=seed_codex_home)
+                llm_env["CODEX_HOME"] = str(codex_home)
                 codex_api_key = _load_codex_auth_key()
                 if codex_api_key:
                     llm_env["OPENAI_API_KEY"] = codex_api_key
@@ -2664,16 +3133,6 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 task.current_stage = current_stage
                 task.stage_logs = _serialize_stage_logs()
                 return
-            if task.pipeline_run_id is not None:
-                pipeline_run = session.get(PipelineRun, task.pipeline_run_id)
-                if pipeline_run is not None and pipeline_run.status == "canceled":
-                    task.status = "canceled"
-                    task.finished_at = task.finished_at or now
-                    if not task.error:
-                        task.error = "Canceled by user."
-                    task.current_stage = current_stage
-                    task.stage_logs = _serialize_stage_logs()
-                    return
             task.status = "failed" if final_failed else "succeeded"
             task.finished_at = now
             task.error = "".join(log_prefix_chunks) + last_error
@@ -2694,268 +3153,2124 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     run.last_stopped_at = now
                     run.run_end_requested = False
     finally:
+        _cleanup_codex_home(task_id, codex_home)
         _cleanup_workspace(task_id, staging_dir, label="script staging")
         _cleanup_workspace(task_id, workspace)
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(_json_safe(value), sort_keys=True)
+
+
+def _parse_json_object(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _extract_path_value(payload: Any, path: str) -> Any:
+    cleaned_path = (path or "").strip()
+    if not cleaned_path:
+        return None
+    current = payload
+    for token in cleaned_path.split("."):
+        segment = token.strip()
+        if not segment:
+            continue
+        if isinstance(current, dict):
+            if segment not in current:
+                return None
+            current = current[segment]
+            continue
+        if isinstance(current, list):
+            if not segment.isdigit():
+                return None
+            index = int(segment)
+            if index < 0 or index >= len(current):
+                return None
+            current = current[index]
+            continue
+        return None
+    return current
+
+
+def _parse_optional_int(
+    value: Any,
+    *,
+    default: int = 0,
+    minimum: int | None = None,
+) -> int:
+    parsed = default
+    if isinstance(value, bool):
+        parsed = int(value)
+    elif isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        raw = value.strip()
+        if raw:
+            try:
+                parsed = int(raw)
+            except ValueError:
+                parsed = default
+    if minimum is not None and parsed < minimum:
+        return minimum
+    return parsed
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _split_scripts_by_stage(
+    scripts: list[Script],
+) -> tuple[
+    list[Script],
+    list[Script],
+    list[Script],
+    list[Script],
+    list[Script],
+    list[Script],
+]:
+    pre_init: list[Script] = []
+    init: list[Script] = []
+    post_init: list[Script] = []
+    post_run: list[Script] = []
+    skill: list[Script] = []
+    unknown: list[Script] = []
+    for script in scripts:
+        if script.script_type == SCRIPT_TYPE_PRE_INIT:
+            pre_init.append(script)
+        elif script.script_type == SCRIPT_TYPE_INIT:
+            init.append(script)
+        elif script.script_type == SCRIPT_TYPE_POST_INIT:
+            post_init.append(script)
+        elif script.script_type == SCRIPT_TYPE_POST_RUN:
+            post_run.append(script)
+        elif script.script_type == SCRIPT_TYPE_SKILL:
+            skill.append(script)
+        else:
+            unknown.append(script)
+    return pre_init, init, post_init, post_run, skill, unknown
+
+
+def _serialize_memory_for_node(memory: Memory) -> dict[str, Any]:
+    return {
+        "id": memory.id,
+        "description": memory.description,
+        "created_at": _json_safe(memory.created_at),
+        "updated_at": _json_safe(memory.updated_at),
+    }
+
+
+def _serialize_milestone_for_node(milestone: Milestone) -> dict[str, Any]:
+    return {
+        "id": milestone.id,
+        "name": milestone.name,
+        "description": milestone.description,
+        "status": milestone.status,
+        "priority": milestone.priority,
+        "owner": milestone.owner,
+        "completed": milestone.completed,
+        "start_date": _json_safe(milestone.start_date),
+        "due_date": _json_safe(milestone.due_date),
+        "progress_percent": milestone.progress_percent,
+        "health": milestone.health,
+        "success_criteria": milestone.success_criteria,
+        "dependencies": milestone.dependencies,
+        "links": milestone.links,
+        "latest_update": milestone.latest_update,
+        "created_at": _json_safe(milestone.created_at),
+        "updated_at": _json_safe(milestone.updated_at),
+    }
+
+
+def _serialize_plan_for_node(plan: Plan) -> dict[str, Any]:
+    stages = sorted(
+        list(plan.stages or []),
+        key=lambda item: (item.position, item.id),
+    )
+    return {
+        "id": plan.id,
+        "name": plan.name,
+        "description": plan.description,
+        "completed_at": _json_safe(plan.completed_at),
+        "created_at": _json_safe(plan.created_at),
+        "updated_at": _json_safe(plan.updated_at),
+        "stages": [
+            {
+                "id": stage.id,
+                "plan_id": stage.plan_id,
+                "name": stage.name,
+                "description": stage.description,
+                "position": stage.position,
+                "completed_at": _json_safe(stage.completed_at),
+                "created_at": _json_safe(stage.created_at),
+                "updated_at": _json_safe(stage.updated_at),
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "plan_stage_id": task.plan_stage_id,
+                        "name": task.name,
+                        "description": task.description,
+                        "position": task.position,
+                        "completed_at": _json_safe(task.completed_at),
+                        "created_at": _json_safe(task.created_at),
+                        "updated_at": _json_safe(task.updated_at),
+                    }
+                    for task in sorted(
+                        list(stage.tasks or []),
+                        key=lambda item: (item.position, item.id),
+                    )
+                ],
+            }
+            for stage in stages
+        ],
+    }
+
+
+def _parse_structured_output(raw_output: str) -> Any:
+    cleaned = (raw_output or "").strip()
+    if not cleaned:
+        return {}
+    if cleaned.startswith("{") or cleaned.startswith("["):
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+    fenced_match = re.search(
+        r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```",
+        cleaned,
+        flags=re.DOTALL,
+    )
+    if fenced_match:
+        try:
+            return json.loads(fenced_match.group(1))
+        except json.JSONDecodeError:
+            pass
+    return {"text": cleaned}
+
+
+def _build_flowchart_input_context(
+    *,
+    flowchart_id: int,
+    run_id: int,
+    node_id: int,
+    node_type: str,
+    execution_index: int,
+    total_execution_count: int,
+    incoming_edges: list[dict[str, Any]] | None = None,
+    latest_results: dict[int, dict[str, Any]] | None = None,
+    upstream_results: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    upstream_nodes: list[dict[str, Any]] = []
+    latest_upstream: dict[str, Any] | None = None
+    if upstream_results is not None:
+        for upstream in upstream_results:
+            source_node_id_raw = _parse_optional_int(
+                upstream.get("source_node_id"),
+                default=0,
+                minimum=0,
+            )
+            source_node_id = source_node_id_raw if source_node_id_raw > 0 else None
+            entry = {
+                "node_id": source_node_id,
+                "node_type": upstream.get("node_type"),
+                "condition_key": upstream.get("condition_key"),
+                "execution_index": upstream.get("execution_index"),
+                "output_state": upstream.get("output_state") or {},
+                "routing_state": upstream.get("routing_state") or {},
+                "sequence": upstream.get("sequence"),
+            }
+            upstream_nodes.append(entry)
+            if latest_upstream is None or (
+                _parse_optional_int(entry.get("sequence"), default=0)
+                > _parse_optional_int(latest_upstream.get("sequence"), default=0)
+            ):
+                latest_upstream = entry
+    else:
+        for edge in incoming_edges or []:
+            source_node_id = int(edge["source_node_id"])
+            previous = (latest_results or {}).get(source_node_id)
+            if previous is None:
+                continue
+            entry = {
+                "node_id": source_node_id,
+                "node_type": previous.get("node_type"),
+                "condition_key": edge.get("condition_key"),
+                "execution_index": previous.get("execution_index"),
+                "output_state": previous.get("output_state") or {},
+                "routing_state": previous.get("routing_state") or {},
+                "sequence": previous.get("sequence"),
+            }
+            upstream_nodes.append(entry)
+            if latest_upstream is None or (
+                _parse_optional_int(entry.get("sequence"), default=0)
+                > _parse_optional_int(latest_upstream.get("sequence"), default=0)
+            ):
+                latest_upstream = entry
+    return {
+        "flowchart": {
+            "id": flowchart_id,
+            "run_id": run_id,
+            "total_execution_count": total_execution_count,
+        },
+        "node": {
+            "id": node_id,
+            "type": node_type,
+            "execution_index": execution_index,
+        },
+        "upstream_nodes": upstream_nodes,
+        "latest_upstream": latest_upstream,
+    }
+
+
+def _flowchart_node_task_kind(node_type: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "_", (node_type or "").strip().lower()).strip("_")
+    if not cleaned:
+        cleaned = "node"
+    return f"flowchart_{cleaned}"
+
+
+def _flowchart_node_task_prompt(
+    *,
+    flowchart_id: int,
+    run_id: int,
+    node_id: int,
+    node_type: str,
+    execution_index: int,
+    input_context: dict[str, Any],
+) -> str:
+    return _json_dumps(
+        {
+            "kind": "flowchart_node_activity",
+            "flowchart_id": flowchart_id,
+            "flowchart_run_id": run_id,
+            "flowchart_node_id": node_id,
+            "flowchart_node_type": node_type,
+            "execution_index": execution_index,
+            "input_context": input_context,
+        }
+    )
+
+
+def _create_flowchart_node_task(
+    session,
+    *,
+    flowchart_id: int,
+    run_id: int,
+    node_id: int,
+    node_type: str,
+    node_ref_id: int | None,
+    agent_id: int | None = None,
+    execution_index: int,
+    input_context: dict[str, Any],
+    status: str,
+    started_at: datetime | None,
+    finished_at: datetime | None = None,
+    output_state: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> AgentTask:
+    parsed_ref_id = _parse_optional_int(node_ref_id, default=0, minimum=0)
+    task_template_id: int | None = None
+    if node_type == FLOWCHART_NODE_TYPE_TASK and parsed_ref_id > 0:
+        task_template_id = parsed_ref_id
+    return AgentTask.create(
+        session,
+        agent_id=agent_id,
+        task_template_id=task_template_id,
+        flowchart_id=flowchart_id,
+        flowchart_run_id=run_id,
+        flowchart_node_id=node_id,
+        status=status,
+        kind=_flowchart_node_task_kind(node_type),
+        prompt=_flowchart_node_task_prompt(
+            flowchart_id=flowchart_id,
+            run_id=run_id,
+            node_id=node_id,
+            node_type=node_type,
+            execution_index=execution_index,
+            input_context=input_context,
+        ),
+        output=_json_dumps(output_state) if output_state is not None else None,
+        error=error,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+
+def _update_flowchart_node_task(
+    session,
+    *,
+    node_run: FlowchartRunNode | None,
+    status: str,
+    output_state: dict[str, Any] | None = None,
+    error: str | None = None,
+    finished_at: datetime | None = None,
+) -> None:
+    if node_run is None or node_run.agent_task_id is None:
+        return
+    task = session.get(AgentTask, node_run.agent_task_id)
+    if task is None:
+        return
+    task.status = status
+    if task.started_at is None and node_run.started_at is not None:
+        task.started_at = node_run.started_at
+    if output_state is not None:
+        task.output = _flowchart_task_output_display(output_state)
+        output_agent_id = _parse_optional_int(
+            output_state.get("agent_id"),
+            default=0,
+            minimum=0,
+        )
+        if output_agent_id > 0:
+            task.agent_id = output_agent_id
+        stage_raw = output_state.get("task_current_stage")
+        if isinstance(stage_raw, str) and stage_raw.strip():
+            task.current_stage = stage_raw.strip()
+        logs_raw = output_state.get("task_stage_logs")
+        if isinstance(logs_raw, dict):
+            task.stage_logs = json.dumps(
+                {
+                    str(stage_key): str(stage_logs)
+                    for stage_key, stage_logs in logs_raw.items()
+                },
+                sort_keys=True,
+            )
+    if error is not None:
+        task.error = error
+    elif status == "succeeded":
+        task.error = None
+    if finished_at is not None:
+        task.finished_at = finished_at
+
+
+def _flowchart_task_output_display(output_state: dict[str, Any]) -> str:
+    node_type = str(output_state.get("node_type") or "").strip()
+    if node_type != FLOWCHART_NODE_TYPE_TASK:
+        if node_type == FLOWCHART_NODE_TYPE_FLOWCHART:
+            run_id = _parse_optional_int(
+                output_state.get("triggered_flowchart_run_id"),
+                default=0,
+                minimum=0,
+            )
+            target_id = _parse_optional_int(
+                output_state.get("triggered_flowchart_id"),
+                default=0,
+                minimum=0,
+            )
+            if run_id > 0 and target_id > 0:
+                return f"Queued flowchart {target_id} run {run_id}."
+        return _json_dumps(output_state)
+
+    raw_output = output_state.get("raw_output")
+    if isinstance(raw_output, str) and raw_output.strip():
+        return raw_output
+
+    structured_output = output_state.get("structured_output")
+    if isinstance(structured_output, str) and structured_output.strip():
+        return structured_output
+    if isinstance(structured_output, dict):
+        text_value = structured_output.get("text")
+        if isinstance(text_value, str) and text_value.strip():
+            return text_value
+
+    return _json_dumps(output_state)
+
+
+def _resolve_flowchart_outgoing_edges(
+    *,
+    node_type: str,
+    node_config: dict[str, Any],
+    outgoing_edges: list[dict[str, Any]],
+    routing_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not outgoing_edges:
+        return []
+
+    route_key_raw = routing_state.get("route_key")
+    route_key = str(route_key_raw).strip() if route_key_raw is not None else ""
+
+    if node_type == FLOWCHART_NODE_TYPE_DECISION:
+        if not route_key:
+            raise ValueError("Decision node did not produce a route_key.")
+        for edge in outgoing_edges:
+            condition_key = str(edge.get("condition_key") or "").strip()
+            if condition_key == route_key:
+                return [edge]
+        fallback_key = str(node_config.get("fallback_condition_key") or "").strip()
+        if fallback_key:
+            for edge in outgoing_edges:
+                condition_key = str(edge.get("condition_key") or "").strip()
+                if condition_key == fallback_key:
+                    return [edge]
+        default_edges = [
+            edge
+            for edge in outgoing_edges
+            if not str(edge.get("condition_key") or "").strip()
+        ]
+        if len(default_edges) == 1:
+            return default_edges
+        raise ValueError(
+            f"Decision route '{route_key}' has no matching outgoing edge and no fallback."
+        )
+
+    if route_key:
+        for edge in outgoing_edges:
+            condition_key = str(edge.get("condition_key") or "").strip()
+            if condition_key == route_key:
+                return [edge]
+    return list(outgoing_edges)
+
+
+def _record_flowchart_guardrail_failure(
+    *,
+    flowchart_id: int,
+    run_id: int,
+    node_id: int,
+    node_type: str,
+    node_ref_id: int | None = None,
+    execution_index: int,
+    total_execution_count: int,
+    incoming_edges: list[dict[str, Any]],
+    latest_results: dict[int, dict[str, Any]],
+    upstream_results: list[dict[str, Any]],
+    message: str,
+) -> None:
+    input_context = _build_flowchart_input_context(
+        flowchart_id=flowchart_id,
+        run_id=run_id,
+        node_id=node_id,
+        node_type=node_type,
+        execution_index=execution_index,
+        total_execution_count=total_execution_count,
+        incoming_edges=incoming_edges,
+        latest_results=latest_results,
+        upstream_results=upstream_results,
+    )
+    now = _utcnow()
+    with session_scope() as session:
+        node_task = _create_flowchart_node_task(
+            session,
+            flowchart_id=flowchart_id,
+            run_id=run_id,
+            node_id=node_id,
+            node_type=node_type,
+            node_ref_id=node_ref_id,
+            execution_index=execution_index,
+            input_context=input_context,
+            status="failed",
+            started_at=now,
+            finished_at=now,
+            error=message,
+        )
+        FlowchartRunNode.create(
+            session,
+            flowchart_run_id=run_id,
+            flowchart_node_id=node_id,
+            execution_index=execution_index,
+            agent_task_id=node_task.id,
+            status="failed",
+            input_context_json=_json_dumps(input_context),
+            error=message,
+            started_at=now,
+            finished_at=now,
+        )
+
+
+def _resolve_node_model(
+    session,
+    *,
+    node: FlowchartNode,
+    template: TaskTemplate | None = None,
+    default_model_id: int | None = None,
+) -> LLMModel:
+    model_id: int | None = node.model_id
+    if model_id is None and template is not None:
+        model_id = template.model_id
+    if model_id is None:
+        model_id = default_model_id
+    if model_id is None:
+        raise ValueError("No model configured for flowchart task node.")
+    model = session.get(LLMModel, model_id)
+    if model is None:
+        raise ValueError(f"Model {model_id} was not found.")
+    return model
+
+
+def _execute_optional_llm_transform(
+    *,
+    prompt: str,
+    model: LLMModel,
+    enabled_providers: set[str],
+    mcp_configs: dict[str, dict[str, Any]],
+) -> Any:
+    provider = model.provider
+    if provider not in LLM_PROVIDERS:
+        raise ValueError(f"Unknown model provider: {provider}.")
+    if provider not in enabled_providers:
+        raise ValueError(f"Provider disabled: {provider}.")
+    model_config = _parse_model_config(model.config_json)
+    result = _run_llm(
+        provider,
+        prompt,
+        mcp_configs=mcp_configs,
+        model_config=model_config,
+        on_update=None,
+        on_log=None,
+        cwd=None,
+        env=os.environ.copy(),
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or f"LLM transform failed with code {result.returncode}."
+        raise RuntimeError(message)
+    return _parse_structured_output(result.stdout)
+
+
+def _execute_flowchart_task_node(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    execution_id: int,
+    execution_task_id: int | None,
+    enabled_providers: set[str],
+    default_model_id: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    selected_agent_id: int | None = None
+    selected_agent_name: str | None = None
+    selected_agent_profile: dict[str, object] | None = None
+    selected_system_contract: dict[str, object] | None = None
+    selected_agent_source: str | None = None
+    with session_scope() as session:
+        node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.scripts),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if node is None:
+            raise ValueError(f"Flowchart node {node_id} was not found.")
+        task_template: TaskTemplate | None = None
+        if node_ref_id is not None:
+            task_template = (
+                session.execute(
+                    select(TaskTemplate)
+                    .options(
+                        selectinload(TaskTemplate.attachments),
+                        selectinload(TaskTemplate.scripts),
+                    )
+                    .where(TaskTemplate.id == node_ref_id)
+                )
+                .scalars()
+                .first()
+            )
+            if task_template is None:
+                raise ValueError(f"Task template {node_ref_id} was not found.")
+        model = _resolve_node_model(
+            session,
+            node=node,
+            template=task_template,
+            default_model_id=default_model_id,
+        )
+        configured_agent_id = _parse_optional_int(
+            node_config.get("agent_id"),
+            default=0,
+            minimum=0,
+        )
+        if configured_agent_id > 0:
+            selected_agent_id = configured_agent_id
+            selected_agent_source = "config"
+        elif task_template is not None and task_template.agent_id is not None:
+            selected_agent_id = int(task_template.agent_id)
+            selected_agent_source = "template"
+        if selected_agent_id is not None:
+            selected_agent = session.get(Agent, selected_agent_id)
+            if selected_agent is None:
+                raise ValueError(f"Agent {selected_agent_id} was not found.")
+            selected_agent_name = selected_agent.name
+            selected_agent_profile = _build_agent_payload(
+                selected_agent,
+                include_autoprompt=False,
+            )
+            selected_system_contract = _build_system_contract(selected_agent)
+        mcp_servers = list(node.mcp_servers)
+        template_scripts = list(task_template.scripts) if task_template is not None else []
+        node_scripts = list(node.scripts)
+        attachments = list(task_template.attachments) if task_template is not None else []
+
+    provider = model.provider
+    if provider not in LLM_PROVIDERS:
+        raise ValueError(f"Unknown model provider: {provider}.")
+    if provider not in enabled_providers:
+        raise ValueError(f"Provider disabled: {provider}.")
+    model_config = _parse_model_config(model.config_json)
+    mcp_configs = _build_mcp_config_map(mcp_servers)
+    mcp_configs["llmctl-mcp"] = _build_builtin_llmctl_mcp_config()
+
+    ordered_scripts: list[Script] = []
+    seen_script_ids: set[int] = set()
+    for script in template_scripts + node_scripts:
+        if script.id in seen_script_ids:
+            continue
+        seen_script_ids.add(script.id)
+        path = ensure_script_file(
+            script.id,
+            script.file_name,
+            script.content,
+            script.file_path,
+        )
+        script.file_path = str(path)
+        ordered_scripts.append(script)
+
+    (
+        pre_init_scripts,
+        init_scripts,
+        post_init_scripts,
+        post_run_scripts,
+        _skill_scripts,
+        unknown_scripts,
+    ) = _split_scripts_by_stage(ordered_scripts)
+
+    script_logs: list[str] = []
+    stage_log_chunks: dict[str, list[str]] = {}
+    current_stage: str | None = None
+    last_llm_error = ""
+    last_llm_output = ""
+    progress_flush_interval = 0.4
+    last_progress_flush = 0.0
+    progress_dirty = False
+    stage_index = {
+        stage_key: index + 1 for index, (stage_key, _) in enumerate(TASK_STAGE_ORDER)
+    }
+    total_stages = len(TASK_STAGE_ORDER)
+
+    def _serialize_stage_logs() -> dict[str, str]:
+        return {
+            stage_key: "".join(chunks)
+            for stage_key, chunks in stage_log_chunks.items()
+            if chunks
+        }
+
+    def _persist_progress(force: bool = False) -> None:
+        nonlocal last_progress_flush, progress_dirty
+        if execution_task_id is None:
+            return
+        if not force and not progress_dirty:
+            return
+        now = time.monotonic()
+        if not force and now - last_progress_flush < progress_flush_interval:
+            return
+        stage_logs_payload = _serialize_stage_logs()
+        with session_scope() as session:
+            task = session.get(AgentTask, execution_task_id)
+            if task is None:
+                return
+            if task.status in {"queued", "pending"}:
+                task.status = "running"
+            task.current_stage = current_stage
+            task.stage_logs = (
+                json.dumps(stage_logs_payload, sort_keys=True)
+                if stage_logs_payload
+                else None
+            )
+            if last_llm_output:
+                task.output = last_llm_output
+        last_progress_flush = now
+        progress_dirty = False
+
+    def _append_script_log(message: str) -> None:
+        nonlocal progress_dirty
+        script_logs.append(message)
+        if current_stage:
+            line = message.rstrip("\n") + "\n"
+            stage_log_chunks.setdefault(current_stage, []).append(line)
+            progress_dirty = True
+            _persist_progress()
+
+    def _capture_llm_updates(output: str, error: str) -> None:
+        nonlocal last_llm_error, last_llm_output, progress_dirty
+        if current_stage != "llm_query":
+            return
+        output_delta = ""
+        if output.startswith(last_llm_output):
+            output_delta = output[len(last_llm_output):]
+        else:
+            output_delta = output
+        if output_delta:
+            stage_log_chunks.setdefault(current_stage, []).append(output_delta)
+            last_llm_output = output
+            progress_dirty = True
+        if error.startswith(last_llm_error):
+            delta = error[len(last_llm_error):]
+        else:
+            delta = error
+        if delta:
+            stage_log_chunks.setdefault(current_stage, []).append(delta)
+            last_llm_error = error
+            progress_dirty = True
+        if progress_dirty:
+            _persist_progress()
+
+    def _set_stage(stage_key: str) -> None:
+        nonlocal current_stage, last_llm_error
+        current_stage = stage_key
+        last_llm_error = ""
+        stage_log_chunks.setdefault(stage_key, [])
+        label = TASK_STAGE_LABELS.get(stage_key, stage_key)
+        index = stage_index.get(stage_key, 0)
+        _append_script_log(f"Stage {index}/{total_stages}: {label}")
+
+    inline_task_name = str(node_config.get("task_name") or "").strip() or None
+    inline_task_prompt_raw = node_config.get("task_prompt")
+    inline_task_prompt = (
+        str(inline_task_prompt_raw)
+        if isinstance(inline_task_prompt_raw, str)
+        else ""
+    )
+    if inline_task_prompt.strip():
+        base_prompt = inline_task_prompt
+        prompt_source = "config"
+    elif task_template is not None:
+        base_prompt = task_template.prompt or ""
+        prompt_source = "template"
+    else:
+        raise ValueError(
+            "Task node requires either config.task_prompt or ref_id to a task template."
+        )
+    if not base_prompt.strip():
+        raise ValueError(
+            "Task node prompt is empty. Provide config.task_prompt or select a template with a prompt."
+        )
+
+    resolved_task_name = (
+        inline_task_name
+        or (task_template.name if task_template is not None else None)
+        or f"Flowchart task node {node_id}"
+    )
+    selected_integration_keys: set[str] | None = None
+    raw_integration_keys = node_config.get("integration_keys")
+    if raw_integration_keys is not None:
+        if not isinstance(raw_integration_keys, list):
+            raise ValueError("Task node config.integration_keys must be an array.")
+        valid_integration_keys, invalid_integration_keys = validate_task_integration_keys(
+            raw_integration_keys
+        )
+        if invalid_integration_keys:
+            raise ValueError(
+                "Task node config.integration_keys contains invalid key(s): "
+                + ", ".join(invalid_integration_keys)
+                + "."
+            )
+        selected_integration_keys = set(valid_integration_keys)
+    task_template_id = task_template.id if task_template is not None else None
+    task_template_name = task_template.name if task_template is not None else None
+
+    payload = _build_task_payload("flowchart", base_prompt)
+    payload_dict = _load_prompt_dict(payload)
+    if payload_dict is not None and is_prompt_envelope(payload_dict):
+        task_context = _ensure_task_context(payload_dict)
+        task_context["kind"] = "flowchart"
+        flowchart_context: dict[str, Any] = {
+            "node_id": node_id,
+            "input_context": input_context,
+        }
+        if task_template_id is not None:
+            flowchart_context["task_template_id"] = task_template_id
+        flowchart_context["task_name"] = resolved_task_name
+        flowchart_context["task_prompt_source"] = prompt_source
+        if selected_agent_id is not None:
+            flowchart_context["agent_id"] = selected_agent_id
+            flowchart_context["agent_name"] = selected_agent_name
+            if selected_agent_source is not None:
+                flowchart_context["agent_source"] = selected_agent_source
+        task_context["flowchart"] = flowchart_context
+        payload = serialize_prompt_envelope(payload_dict)
+    else:
+        payload = (
+            f"{base_prompt}\n\nFlowchart input context:\n"
+            + json.dumps(_json_safe(input_context), indent=2, sort_keys=True)
+        )
+    if selected_agent_profile is not None:
+        payload = _inject_envelope_core_sections(
+            payload,
+            system_contract=selected_system_contract,
+            agent_profile=selected_agent_profile,
+            task_kind="flowchart",
+        )
+    payload = _inject_attachments(payload, _build_attachment_entries(attachments))
+    payload = _inject_runtime_metadata(payload, _build_runtime_payload(provider, model_config))
+
+    workspace: Path | None = None
+    staging_dir: Path | None = None
+    codex_home: Path | None = None
+    script_entries: list[dict[str, str]] = []
+    llm_result: subprocess.CompletedProcess[str] | None = None
+
+    try:
+        _set_stage("integration")
+        if selected_integration_keys is None:
+            _append_script_log("Using default integration context (all integrations).")
+        elif selected_integration_keys:
+            _append_script_log(
+                "Using selected integrations: "
+                + ", ".join(sorted(selected_integration_keys))
+                + "."
+            )
+        else:
+            _append_script_log("No integrations selected for this task node.")
+        if unknown_scripts:
+            _append_script_log(
+                f"Skipping {len(unknown_scripts)} script(s) with unknown type."
+            )
+
+        _set_stage("pre_init")
+        if pre_init_scripts:
+            staging_dir = _build_script_staging_dir(execution_id)
+            pre_init_entries = _materialize_scripts(
+                pre_init_scripts,
+                staging_dir,
+                on_log=_append_script_log,
+            )
+            _run_stage_scripts(
+                "pre-init",
+                pre_init_scripts,
+                pre_init_entries,
+                _append_script_log,
+            )
+        else:
+            _append_script_log("No pre-init scripts configured.")
+
+        _set_stage("init")
+        if ordered_scripts:
+            workspace = _build_task_workspace(execution_id)
+            workspace.mkdir(parents=True, exist_ok=True)
+            scripts_dir = workspace / SCRIPTS_DIRNAME
+            script_entries = _materialize_scripts(
+                ordered_scripts,
+                scripts_dir,
+                on_log=_append_script_log,
+            )
+
+        _run_stage_scripts(
+            "init",
+            init_scripts,
+            script_entries,
+            _append_script_log,
+        )
+
+        _set_stage("post_init")
+        _run_stage_scripts(
+            "post-init",
+            post_init_scripts,
+            script_entries,
+            _append_script_log,
+        )
+
+        payload = _inject_integrations(
+            payload,
+            _build_integrations_payload(
+                workspace,
+                selected_keys=selected_integration_keys,
+            ),
+        )
+
+        llm_env = os.environ.copy()
+        if workspace is not None:
+            llm_env["WORKSPACE_PATH"] = str(workspace)
+            llm_env["LLMCTL_STUDIO_WORKSPACE"] = str(workspace)
+        if provider == "codex":
+            seed_codex_home = _resolve_codex_home_from_env(llm_env)
+            codex_home = _prepare_task_codex_home(execution_id, seed_home=seed_codex_home)
+            llm_env["CODEX_HOME"] = str(codex_home)
+            codex_api_key = _load_codex_auth_key()
+            if codex_api_key:
+                llm_env["OPENAI_API_KEY"] = codex_api_key
+                llm_env["CODEX_API_KEY"] = codex_api_key
+        elif provider == "gemini":
+            gemini_api_key = _load_gemini_auth_key()
+            if gemini_api_key:
+                llm_env["GEMINI_API_KEY"] = gemini_api_key
+                llm_env["GOOGLE_API_KEY"] = gemini_api_key
+        elif provider == "claude":
+            claude_api_key = _load_claude_auth_key()
+            if claude_api_key:
+                llm_env["ANTHROPIC_API_KEY"] = claude_api_key
+
+        _set_stage("llm_query")
+        _append_script_log(f"Launching {_provider_label(provider)}...")
+        llm_result = _run_llm(
+            provider,
+            payload,
+            mcp_configs=mcp_configs,
+            model_config=model_config,
+            on_update=_capture_llm_updates,
+            on_log=_append_script_log,
+            cwd=workspace,
+            env=llm_env,
+        )
+
+        _set_stage("post_run")
+        _run_stage_scripts(
+            "post-run",
+            post_run_scripts,
+            script_entries,
+            _append_script_log,
+        )
+    finally:
+        _cleanup_codex_home(execution_id, codex_home)
+        _cleanup_workspace(execution_id, staging_dir, label="script staging")
+        _cleanup_workspace(execution_id, workspace)
+        _persist_progress(force=True)
+
+    if llm_result is None:
+        raise RuntimeError("Task node did not execute an LLM query.")
+    if llm_result.returncode != 0:
+        message = llm_result.stderr.strip() or f"LLM exited with code {llm_result.returncode}."
+        raise RuntimeError(message)
+
+    structured_output = _parse_structured_output(llm_result.stdout)
+    route_key = _extract_path_value(structured_output, "route_key")
+
+    stage_logs = _serialize_stage_logs()
+    output_state = {
+        "node_type": FLOWCHART_NODE_TYPE_TASK,
+        "task_name": resolved_task_name,
+        "task_prompt_source": prompt_source,
+        "task_template_id": task_template_id,
+        "task_template_name": task_template_name,
+        "agent_id": selected_agent_id,
+        "agent_name": selected_agent_name,
+        "agent_source": selected_agent_source,
+        "provider": provider,
+        "model_id": model.id,
+        "model_name": model.name,
+        "mcp_server_keys": [server.server_key for server in mcp_servers],
+        "integration_keys": (
+            sorted(selected_integration_keys)
+            if selected_integration_keys is not None
+            else None
+        ),
+        "script_ids": [script.id for script in ordered_scripts],
+        "structured_output": structured_output,
+        "raw_output": llm_result.stdout,
+        "raw_error": "",
+        "script_logs": script_logs,
+        "task_current_stage": current_stage,
+        "task_stage_logs": stage_logs,
+    }
+    routing_state: dict[str, Any] = {}
+    if route_key is not None and str(route_key).strip():
+        routing_state["route_key"] = str(route_key).strip()
+    return output_state, routing_state
+
+
+def _execute_flowchart_decision_node(
+    *,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    mcp_server_keys: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    route_field_path = str(node_config.get("route_field_path") or "").strip()
+    if not route_field_path:
+        route_field_path = "latest_upstream.output_state.structured_output.route_key"
+    route_value = _extract_path_value(input_context, route_field_path)
+    if route_value is None:
+        route_value = _extract_path_value(input_context, "latest_upstream.routing_state.route_key")
+    if route_value is None or not str(route_value).strip():
+        raise ValueError(
+            f"Decision node could not resolve route key from '{route_field_path}'."
+        )
+    route_key = str(route_value).strip()
+    output_state = {
+        "node_type": FLOWCHART_NODE_TYPE_DECISION,
+        "resolved_route_path": route_field_path,
+        "resolved_route_key": route_key,
+        "mcp_server_keys": list(mcp_server_keys),
+    }
+    return output_state, {"route_key": route_key}
+
+
+def _apply_plan_completion_patch(
+    *,
+    plan: Plan,
+    patch: dict[str, Any],
+    action_results: list[str],
+    now: datetime,
+) -> None:
+    if _coerce_bool(patch.get("mark_plan_complete")):
+        plan.completed_at = now
+        action_results.append("Marked plan as completed.")
+
+    stage_ids_raw = patch.get("complete_stage_ids") or patch.get("stage_ids") or []
+    stage_ids = {
+        _parse_optional_int(value, default=0, minimum=1) for value in stage_ids_raw
+    }
+    stages_by_id = {stage.id: stage for stage in list(plan.stages or [])}
+    for stage_id in sorted(stage_ids):
+        stage = stages_by_id.get(stage_id)
+        if stage is None:
+            continue
+        stage.completed_at = now
+        action_results.append(f"Marked stage {stage_id} as completed.")
+
+    task_ids_raw = patch.get("complete_task_ids") or patch.get("task_ids") or []
+    task_ids = {_parse_optional_int(value, default=0, minimum=1) for value in task_ids_raw}
+    tasks_by_id: dict[int, PlanTask] = {}
+    for stage in list(plan.stages or []):
+        for task in list(stage.tasks or []):
+            tasks_by_id[task.id] = task
+    for task_id in sorted(task_ids):
+        task = tasks_by_id.get(task_id)
+        if task is None:
+            continue
+        task.completed_at = now
+        action_results.append(f"Marked task {task_id} as completed.")
+
+
+def _execute_flowchart_plan_node(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    enabled_providers: set[str],
+    default_model_id: int | None,
+    mcp_server_keys: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    with session_scope() as session:
+        node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.model),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if node is None:
+            raise ValueError(f"Flowchart node {node_id} was not found.")
+        plan = (
+            session.execute(
+                select(Plan)
+                .options(selectinload(Plan.stages).selectinload(PlanStage.tasks))
+                .where(Plan.id == node_ref_id)
+            )
+            .scalars()
+            .first()
+        )
+        if plan is None:
+            raise ValueError(f"Plan {node_ref_id} was not found.")
+
+        action = str(node_config.get("action") or "read").strip().lower()
+        now = _utcnow()
+        action_results: list[str] = []
+        if action in {"update", "update_completion", "complete"}:
+            direct_patch = node_config.get("patch")
+            if isinstance(direct_patch, dict):
+                _apply_plan_completion_patch(
+                    plan=plan,
+                    patch=direct_patch,
+                    action_results=action_results,
+                    now=now,
+                )
+            completion_source_path = str(
+                node_config.get("completion_source_path") or ""
+            ).strip()
+            if completion_source_path:
+                completion_patch = _extract_path_value(input_context, completion_source_path)
+                if isinstance(completion_patch, dict):
+                    _apply_plan_completion_patch(
+                        plan=plan,
+                        patch=completion_patch,
+                        action_results=action_results,
+                        now=now,
+                    )
+                else:
+                    action_results.append(
+                        f"No completion patch found at '{completion_source_path}'."
+                    )
+
+        if _coerce_bool(node_config.get("transform_with_llm")):
+            transform_prompt = str(node_config.get("transform_prompt") or "").strip()
+            if transform_prompt:
+                model = _resolve_node_model(
+                    session,
+                    node=node,
+                    template=None,
+                    default_model_id=default_model_id,
+                )
+                llm_patch = _execute_optional_llm_transform(
+                    prompt=transform_prompt,
+                    model=model,
+                    enabled_providers=enabled_providers,
+                    mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
+                )
+                if isinstance(llm_patch, dict):
+                    _apply_plan_completion_patch(
+                        plan=plan,
+                        patch=llm_patch,
+                        action_results=action_results,
+                        now=now,
+                    )
+                    action_results.append("Applied LLM transform patch to plan.")
+
+        output_state = {
+            "node_type": FLOWCHART_NODE_TYPE_PLAN,
+            "action": action,
+            "action_results": action_results,
+            "mcp_server_keys": list(mcp_server_keys),
+            "plan": _serialize_plan_for_node(plan),
+        }
+
+    route_key = str(node_config.get("route_key") or "").strip()
+    route_key_on_complete = str(node_config.get("route_key_on_complete") or "").strip()
+    if route_key_on_complete and output_state["plan"].get("completed_at"):
+        route_key = route_key_on_complete
+    routing_state: dict[str, Any] = {}
+    if route_key:
+        routing_state["route_key"] = route_key
+    return output_state, routing_state
+
+
+def _execute_flowchart_milestone_node(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    execution_index: int,
+    enabled_providers: set[str],
+    default_model_id: int | None,
+    mcp_server_keys: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    with session_scope() as session:
+        node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.model),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if node is None:
+            raise ValueError(f"Flowchart node {node_id} was not found.")
+        milestone = session.get(Milestone, node_ref_id)
+        if milestone is None:
+            raise ValueError(f"Milestone {node_ref_id} was not found.")
+
+        action = str(node_config.get("action") or "read").strip().lower()
+        now = _utcnow()
+        action_results: list[str] = []
+
+        if action in {"update", "checkpoint", "complete"}:
+            patch = node_config.get("patch")
+            if isinstance(patch, dict):
+                if "name" in patch:
+                    milestone.name = str(patch.get("name") or "").strip() or milestone.name
+                if "description" in patch:
+                    milestone.description = str(patch.get("description") or "")
+                if "status" in patch:
+                    milestone.status = str(patch.get("status") or milestone.status)
+                if "priority" in patch:
+                    milestone.priority = str(patch.get("priority") or milestone.priority)
+                if "owner" in patch:
+                    milestone.owner = str(patch.get("owner") or "").strip() or None
+                if "progress_percent" in patch:
+                    milestone.progress_percent = _parse_optional_int(
+                        patch.get("progress_percent"),
+                        default=milestone.progress_percent,
+                        minimum=0,
+                    )
+                    if milestone.progress_percent > 100:
+                        milestone.progress_percent = 100
+                if "health" in patch:
+                    milestone.health = str(patch.get("health") or milestone.health)
+                if "latest_update" in patch:
+                    milestone.latest_update = str(patch.get("latest_update") or "")
+                action_results.append("Applied milestone patch.")
+
+            completion_source_path = str(
+                node_config.get("completion_source_path") or ""
+            ).strip()
+            if completion_source_path:
+                completion_patch = _extract_path_value(input_context, completion_source_path)
+                if isinstance(completion_patch, dict):
+                    if "status" in completion_patch:
+                        milestone.status = str(completion_patch.get("status") or milestone.status)
+                    if "progress_percent" in completion_patch:
+                        progress = _parse_optional_int(
+                            completion_patch.get("progress_percent"),
+                            default=milestone.progress_percent,
+                            minimum=0,
+                        )
+                        milestone.progress_percent = min(progress, 100)
+                    if _coerce_bool(completion_patch.get("completed")):
+                        milestone.completed = True
+                    action_results.append("Applied upstream completion patch.")
+
+            if _coerce_bool(node_config.get("mark_complete")):
+                milestone.completed = True
+                milestone.status = MILESTONE_STATUS_DONE
+                milestone.progress_percent = 100
+                action_results.append("Marked milestone complete.")
+
+        if _coerce_bool(node_config.get("transform_with_llm")):
+            transform_prompt = str(node_config.get("transform_prompt") or "").strip()
+            if transform_prompt:
+                model = _resolve_node_model(
+                    session,
+                    node=node,
+                    template=None,
+                    default_model_id=default_model_id,
+                )
+                llm_patch = _execute_optional_llm_transform(
+                    prompt=transform_prompt,
+                    model=model,
+                    enabled_providers=enabled_providers,
+                    mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
+                )
+                if isinstance(llm_patch, dict):
+                    if "latest_update" in llm_patch:
+                        milestone.latest_update = str(llm_patch.get("latest_update") or "")
+                    if "health" in llm_patch:
+                        milestone.health = str(llm_patch.get("health") or milestone.health)
+                    action_results.append("Applied LLM semantic patch.")
+
+        if milestone.status == MILESTONE_STATUS_DONE:
+            milestone.completed = True
+            milestone.progress_percent = max(milestone.progress_percent, 100)
+
+        checkpoint_every = _parse_optional_int(
+            node_config.get("loop_checkpoint_every"),
+            default=0,
+            minimum=0,
+        )
+        checkpoint_hit = checkpoint_every > 0 and execution_index % checkpoint_every == 0
+        if checkpoint_hit:
+            action_results.append(
+                f"Checkpoint reached at execution #{execution_index} (every {checkpoint_every})."
+            )
+
+        output_state = {
+            "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
+            "action": action,
+            "execution_index": execution_index,
+            "checkpoint_hit": checkpoint_hit,
+            "action_results": action_results,
+            "mcp_server_keys": list(mcp_server_keys),
+            "milestone": _serialize_milestone_for_node(milestone),
+        }
+
+    terminate_run = _coerce_bool(node_config.get("terminate_always"))
+    if _coerce_bool(node_config.get("terminate_on_complete")) and output_state["milestone"].get(
+        "completed"
+    ):
+        terminate_run = True
+    if checkpoint_hit and _coerce_bool(node_config.get("terminate_on_checkpoint")):
+        terminate_run = True
+    loop_exit_after_runs = _parse_optional_int(
+        node_config.get("loop_exit_after_runs"),
+        default=0,
+        minimum=0,
+    )
+    if loop_exit_after_runs > 0 and execution_index >= loop_exit_after_runs:
+        terminate_run = True
+
+    route_key = str(node_config.get("route_key") or "").strip()
+    if terminate_run:
+        route_key = str(node_config.get("route_key_on_terminate") or route_key).strip()
+    routing_state: dict[str, Any] = {}
+    if route_key:
+        routing_state["route_key"] = route_key
+    if terminate_run:
+        routing_state["terminate_run"] = True
+    return output_state, routing_state
+
+
+def _execute_flowchart_memory_node(
+    *,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    mcp_server_keys: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    action = str(node_config.get("action") or "fetch").strip().lower()
+    limit = _parse_optional_int(node_config.get("limit"), default=10, minimum=1)
+    retrieved: list[dict[str, Any]] = []
+    stored_memory: dict[str, Any] | None = None
+    action_results: list[str] = []
+
+    with session_scope() as session:
+        if action == "fetch":
+            if node_ref_id is not None:
+                memory = session.get(Memory, node_ref_id)
+                if memory is None:
+                    raise ValueError(f"Memory {node_ref_id} was not found.")
+                retrieved = [_serialize_memory_for_node(memory)]
+                action_results.append(f"Fetched memory {node_ref_id}.")
+            else:
+                query_text = str(node_config.get("query") or "").strip()
+                query_path = str(node_config.get("query_source_path") or "").strip()
+                if query_path:
+                    query_value = _extract_path_value(input_context, query_path)
+                    if isinstance(query_value, str) and query_value.strip():
+                        query_text = query_value.strip()
+                stmt = select(Memory).order_by(Memory.updated_at.desc(), Memory.id.desc())
+                if query_text:
+                    stmt = stmt.where(Memory.description.ilike(f"%{query_text}%"))
+                items = session.execute(stmt.limit(limit)).scalars().all()
+                retrieved = [_serialize_memory_for_node(item) for item in items]
+                action_results.append(f"Fetched {len(retrieved)} memory item(s).")
+        elif action in {"store", "upsert", "append"}:
+            text = str(node_config.get("text") or "").strip()
+            source_path = str(node_config.get("text_source_path") or "").strip()
+            if source_path:
+                source_value = _extract_path_value(input_context, source_path)
+                if source_value is not None:
+                    if isinstance(source_value, str):
+                        text = source_value.strip()
+                    else:
+                        text = json.dumps(_json_safe(source_value), sort_keys=True)
+            if not text:
+                raise ValueError("Memory store action requires text or text_source_path.")
+            if node_ref_id is not None:
+                memory = session.get(Memory, node_ref_id)
+                if memory is None:
+                    raise ValueError(f"Memory {node_ref_id} was not found.")
+                store_mode = str(node_config.get("store_mode") or "replace").strip().lower()
+                if store_mode == "append":
+                    prefix = memory.description.rstrip()
+                    memory.description = f"{prefix}\n\n{text}" if prefix else text
+                else:
+                    memory.description = text
+                stored_memory = _serialize_memory_for_node(memory)
+                action_results.append(f"Updated memory {node_ref_id}.")
+            else:
+                created = Memory.create(session, description=text)
+                stored_memory = _serialize_memory_for_node(created)
+                action_results.append(f"Created memory {created.id}.")
+        else:
+            raise ValueError(f"Unsupported memory node action '{action}'.")
+
+    output_state = {
+        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+        "action": action,
+        "action_results": action_results,
+        "mcp_server_keys": list(mcp_server_keys),
+        "retrieved_memories": retrieved,
+        "stored_memory": stored_memory,
+    }
+    route_key = str(node_config.get("route_key") or "").strip()
+    routing_state: dict[str, Any] = {}
+    if route_key:
+        routing_state["route_key"] = route_key
+    return output_state, routing_state
+
+
+def _execute_flowchart_flowchart_node(
+    *,
+    node_ref_id: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    target_flowchart_id = _parse_optional_int(node_ref_id, default=0, minimum=0)
+    if target_flowchart_id <= 0:
+        raise ValueError("Flowchart node requires ref_id.")
+
+    target_flowchart_name = f"Flowchart {target_flowchart_id}"
+    queued_run_id: int | None = None
+    with session_scope() as session:
+        target_flowchart = session.get(Flowchart, target_flowchart_id)
+        if target_flowchart is None:
+            raise ValueError(f"Flowchart {target_flowchart_id} was not found.")
+        target_flowchart_name = target_flowchart.name or target_flowchart_name
+        queued_run = FlowchartRun.create(
+            session,
+            flowchart_id=target_flowchart_id,
+            status="queued",
+        )
+        queued_run_id = queued_run.id
+
+    try:
+        async_result = run_flowchart.delay(target_flowchart_id, int(queued_run_id))
+    except Exception as exc:
+        logger.exception(
+            "Failed to queue flowchart %s from flowchart node",
+            target_flowchart_id,
+        )
+        with session_scope() as session:
+            queued_run = session.get(FlowchartRun, queued_run_id)
+            if queued_run is not None:
+                queued_run.status = "failed"
+                queued_run.finished_at = _utcnow()
+        raise ValueError(
+            f"Failed to queue flowchart {target_flowchart_id}: {exc}"
+        ) from exc
+
+    with session_scope() as session:
+        queued_run = session.get(FlowchartRun, queued_run_id)
+        if queued_run is not None:
+            queued_run.celery_task_id = async_result.id
+
+    return (
+        {
+            "node_type": FLOWCHART_NODE_TYPE_FLOWCHART,
+            "triggered_flowchart_id": target_flowchart_id,
+            "triggered_flowchart_name": target_flowchart_name,
+            "triggered_flowchart_run_id": queued_run_id,
+            "triggered_flowchart_celery_task_id": async_result.id,
+            "message": f"Queued flowchart {target_flowchart_id}.",
+        },
+        {},
+    )
+
+
+def _execute_flowchart_node(
+    *,
+    node_id: int,
+    node_type: str,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    execution_id: int,
+    execution_task_id: int | None,
+    execution_index: int,
+    enabled_providers: set[str],
+    default_model_id: int | None,
+    mcp_server_keys: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    # Node config contract is documented in docs/flowchart-node-config.md.
+    if node_type == FLOWCHART_NODE_TYPE_START:
+        return (
+            {
+                "node_type": FLOWCHART_NODE_TYPE_START,
+                "message": "Start node executed.",
+            },
+            {},
+        )
+    if node_type == FLOWCHART_NODE_TYPE_END:
+        return (
+            {
+                "node_type": FLOWCHART_NODE_TYPE_END,
+                "message": "End node reached. Flowchart run completed.",
+            },
+            {"terminate_run": True},
+        )
+    if node_type == FLOWCHART_NODE_TYPE_FLOWCHART:
+        return _execute_flowchart_flowchart_node(
+            node_ref_id=node_ref_id,
+        )
+    if node_type == FLOWCHART_NODE_TYPE_TASK:
+        return _execute_flowchart_task_node(
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            execution_id=execution_id,
+            execution_task_id=execution_task_id,
+            enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+        )
+    if node_type == FLOWCHART_NODE_TYPE_DECISION:
+        return _execute_flowchart_decision_node(
+            node_config=node_config,
+            input_context=input_context,
+            mcp_server_keys=mcp_server_keys,
+        )
+    if node_type == FLOWCHART_NODE_TYPE_PLAN:
+        return _execute_flowchart_plan_node(
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+            mcp_server_keys=mcp_server_keys,
+        )
+    if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+        return _execute_flowchart_milestone_node(
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            execution_index=execution_index,
+            enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+            mcp_server_keys=mcp_server_keys,
+        )
+    if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+        return _execute_flowchart_memory_node(
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            mcp_server_keys=mcp_server_keys,
+        )
+    raise ValueError(f"Unsupported flowchart node type '{node_type}'.")
+
+
+def _queue_followup_flowchart_run(
+    *,
+    flowchart_id: int,
+    source_run_id: int,
+) -> tuple[int | None, bool]:
+    skipped_for_stop = False
+    with session_scope() as session:
+        source_run = session.get(FlowchartRun, source_run_id)
+        if source_run is not None and source_run.status in {"stopping", "stopped", "canceled"}:
+            skipped_for_stop = True
+            return None, skipped_for_stop
+        next_run = FlowchartRun.create(
+            session,
+            flowchart_id=flowchart_id,
+            status="queued",
+        )
+        next_run_id = next_run.id
+    try:
+        run_flowchart.delay(flowchart_id, next_run_id)
+    except Exception:
+        logger.exception(
+            "Flowchart run %s failed queuing follow-up run for flowchart %s",
+            source_run_id,
+            flowchart_id,
+        )
+        with session_scope() as session:
+            queued_run = session.get(FlowchartRun, next_run_id)
+            if queued_run is not None and queued_run.status == "queued":
+                queued_run.status = "failed"
+                queued_run.finished_at = _utcnow()
+        return None, skipped_for_stop
+    return next_run_id, skipped_for_stop
+
+
 @celery_app.task(bind=True)
-def run_pipeline(self, pipeline_id: int, run_id: int | None = None) -> None:
+def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     init_engine(Config.SQLALCHEMY_DATABASE_URI)
     init_db()
 
-    tasks_by_step_id: dict[int, int] = {}
-
-    def _cancel_pipeline_tasks(session, run_id: int, now: datetime) -> None:
-        tasks = (
-            session.execute(
-                select(AgentTask).where(AgentTask.pipeline_run_id == run_id)
-            )
-            .scalars()
-            .all()
-        )
-        for task in tasks:
-            if task.status in {"pending", "queued", "running"}:
-                task.status = "canceled"
-                if not task.error:
-                    task.error = "Canceled by user."
-                task.finished_at = now
-
     with session_scope() as session:
-        pipeline = session.get(Pipeline, pipeline_id)
-        if pipeline is None:
-            logger.warning("Pipeline %s not found", pipeline_id)
-            if run_id is not None:
-                run = session.get(PipelineRun, run_id)
-                if run is not None:
-                    run.status = "failed"
-                    run.finished_at = _utcnow()
+        run = session.get(FlowchartRun, run_id)
+        if run is None:
+            logger.warning("Flowchart run %s not found", run_id)
             return
-        steps = (
+        if run.flowchart_id != flowchart_id:
+            logger.warning(
+                "Flowchart run %s does not belong to flowchart %s",
+                run_id,
+                flowchart_id,
+            )
+            run.status = "failed"
+            run.finished_at = _utcnow()
+            return
+        if run.status == "canceled":
+            run.finished_at = run.finished_at or _utcnow()
+            return
+        if run.status == "stopped":
+            run.finished_at = run.finished_at or _utcnow()
+            return
+        if run.status == "stopping":
+            run.status = "stopped"
+            run.finished_at = run.finished_at or _utcnow()
+            return
+        flowchart = (
             session.execute(
-                select(PipelineStep)
-                .options(selectinload(PipelineStep.attachments))
-                .where(PipelineStep.pipeline_id == pipeline_id)
-                .order_by(PipelineStep.step_order.asc(), PipelineStep.id.asc())
+                select(Flowchart)
+                .options(
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                    selectinload(Flowchart.edges),
+                )
+                .where(Flowchart.id == flowchart_id)
             )
             .scalars()
-            .all()
+            .first()
         )
-        if not steps:
-            logger.warning("Pipeline %s has no steps", pipeline_id)
-            if run_id is not None:
-                run = session.get(PipelineRun, run_id)
-                if run is not None:
-                    run.status = "failed"
-                    run.finished_at = _utcnow()
+        if flowchart is None:
+            run.status = "failed"
+            run.finished_at = _utcnow()
             return
-        if run_id is None:
-            run = PipelineRun.create(
-                session,
-                pipeline_id=pipeline_id,
-                celery_task_id=self.request.id,
-                status="running",
-                started_at=_utcnow(),
-            )
-            run_id = run.id
-        else:
-            run = session.get(PipelineRun, run_id)
-            if run is not None:
-                if run.status == "canceled":
-                    run.finished_at = run.finished_at or _utcnow()
-                    return
-                run.celery_task_id = self.request.id
-                run.status = "running"
-                run.started_at = _utcnow()
-        step_ids = [step.id for step in steps]
-        if step_ids:
-            existing_tasks = (
-                session.execute(
-                    select(AgentTask).where(
-                        AgentTask.pipeline_run_id == run_id,
-                        AgentTask.pipeline_step_id.in_(step_ids),
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        else:
-            existing_tasks = []
-        for task in existing_tasks:
-            if task.pipeline_step_id is None:
-                continue
-            tasks_by_step_id[task.pipeline_step_id] = task.id
-            if task.run_task_id is None:
-                task.run_task_id = self.request.id
-        for step in steps:
-            if step.id in tasks_by_step_id:
-                continue
-            template = session.get(TaskTemplate, step.task_template_id)
-            prompt = None
-            agent_id = None
-            if template is not None:
-                prompt = _combine_step_prompt(
-                    template.prompt,
-                    step.additional_prompt,
-                )
-                agent_id = template.agent_id
-            task = AgentTask.create(
-                session,
-                agent_id=agent_id,
-                run_task_id=self.request.id,
-                pipeline_id=pipeline_id,
-                pipeline_run_id=run_id,
-                pipeline_step_id=step.id,
-                task_template_id=step.task_template_id,
-                status="pending",
-                prompt=prompt,
-                kind="pipeline",
-            )
-            if template is not None:
-                _attach_task_attachments(
-                    task,
-                    list(step.attachments) + list(template.attachments),
-                )
-            tasks_by_step_id[step.id] = task.id
+        run.celery_task_id = self.request.id
+        run.status = "running"
+        run.started_at = run.started_at or _utcnow()
 
-    for step in steps:
-        task_id = tasks_by_step_id.get(step.id)
+        node_specs: dict[int, dict[str, Any]] = {}
+        for node in list(flowchart.nodes):
+            node_specs[node.id] = {
+                "id": node.id,
+                "node_type": node.node_type,
+                "ref_id": node.ref_id,
+                "config": _parse_json_object(node.config_json),
+                "mcp_server_keys": [server.server_key for server in list(node.mcp_servers)],
+            }
+
+        outgoing_by_source: dict[int, list[dict[str, Any]]] = {}
+        incoming_by_target: dict[int, list[dict[str, Any]]] = {}
+        for edge in sorted(list(flowchart.edges), key=lambda item: item.id):
+            outgoing_by_source.setdefault(edge.source_node_id, []).append(
+                {
+                    "id": edge.id,
+                    "source_node_id": edge.source_node_id,
+                    "target_node_id": edge.target_node_id,
+                    "condition_key": edge.condition_key,
+                }
+            )
+            incoming_by_target.setdefault(edge.target_node_id, []).append(
+                {
+                    "id": edge.id,
+                    "source_node_id": edge.source_node_id,
+                    "target_node_id": edge.target_node_id,
+                    "condition_key": edge.condition_key,
+                }
+            )
+
+        start_nodes = [
+            node_id
+            for node_id, spec in node_specs.items()
+            if spec["node_type"] == FLOWCHART_NODE_TYPE_START
+        ]
+        if len(start_nodes) != 1:
+            run.status = "failed"
+            run.finished_at = _utcnow()
+            return
+        start_node_id = start_nodes[0]
+        max_node_executions = flowchart.max_node_executions
+        max_runtime_minutes = flowchart.max_runtime_minutes
+        max_parallel_nodes = _parse_optional_int(
+            flowchart.max_parallel_nodes,
+            default=1,
+            minimum=1,
+        )
+
+    llm_settings = load_integration_settings("llm")
+    enabled_providers = resolve_enabled_llm_providers(llm_settings)
+    default_model_id = resolve_default_model_id(llm_settings)
+
+    node_execution_counts: dict[int, int] = {}
+    latest_results: dict[int, dict[str, Any]] = {}
+    total_execution_count = 0
+    incoming_parent_ids: dict[int, list[int]] = {}
+    parent_tokens_by_target: dict[int, dict[int, deque[dict[str, Any]]]] = {}
+    for node_id in node_specs:
+        parent_ids = sorted(
+            {
+                int(edge["source_node_id"])
+                for edge in incoming_by_target.get(node_id, [])
+            }
+        )
+        incoming_parent_ids[node_id] = parent_ids
+        parent_tokens_by_target[node_id] = {
+            parent_id: deque() for parent_id in parent_ids
+        }
+    ready_queue: deque[dict[str, Any]] = deque(
+        [{"node_id": start_node_id, "upstream_results": []}]
+    )
+    started_monotonic = time.monotonic()
+    final_status = "completed"
+    failure_message: str | None = None
+    terminate_run = False
+
+    while ready_queue:
         with session_scope() as session:
-            run = session.get(PipelineRun, run_id)
+            run = session.get(FlowchartRun, run_id)
             if run is None:
                 return
             if run.status == "canceled":
-                now = _utcnow()
-                _cancel_pipeline_tasks(session, run_id, now)
-                run.finished_at = run.finished_at or now
-                return
-            template = session.get(TaskTemplate, step.task_template_id)
-            if template is None:
-                now = _utcnow()
-                run = session.get(PipelineRun, run_id)
-                if run is not None:
-                    run.status = "failed"
-                    run.finished_at = now
-                if task_id is not None:
-                    task = session.get(AgentTask, task_id)
-                    if task is not None:
-                        task.status = "failed"
-                        task.error = "Task template not found."
-                        task.started_at = now
-                        task.finished_at = now
-                return
-            if template.agent_id is None:
-                now = _utcnow()
-                run = session.get(PipelineRun, run_id)
-                if run is not None:
-                    run.status = "failed"
-                    run.finished_at = now
-                if task_id is not None:
-                    task = session.get(AgentTask, task_id)
-                    if task is not None:
-                        task.status = "failed"
-                        task.error = "Task template missing agent."
-                        task.started_at = now
-                        task.finished_at = now
-                logger.warning(
-                    "Task template %s missing agent for pipeline %s step %s",
-                    template.id,
-                    pipeline_id,
-                    step.id,
-                )
-                return
-            step_agent = session.get(Agent, template.agent_id)
-            if step_agent is None:
-                now = _utcnow()
-                run = session.get(PipelineRun, run_id)
-                if run is not None:
-                    run.status = "failed"
-                    run.finished_at = now
-                if task_id is not None:
-                    task = session.get(AgentTask, task_id)
-                    if task is not None:
-                        task.status = "failed"
-                        task.error = "Agent not found."
-                        task.started_at = now
-                        task.finished_at = now
-                logger.warning(
-                    "Agent %s not found for pipeline %s step %s",
-                    template.agent_id,
-                    pipeline_id,
-                    step.id,
-                )
-                return
-            task = session.get(AgentTask, task_id) if task_id is not None else None
-            if task is None:
-                task = AgentTask.create(
-                    session,
-                    agent_id=template.agent_id,
-                    run_task_id=self.request.id,
-                    pipeline_id=pipeline_id,
-                    pipeline_run_id=run_id,
-                    pipeline_step_id=step.id,
-                    task_template_id=template.id,
-                    status="queued",
-                    prompt=_combine_step_prompt(
-                        template.prompt,
-                        step.additional_prompt,
-                    ),
-                    kind="pipeline",
-                )
-            else:
-                if task.agent_id is None:
-                    task.agent_id = template.agent_id
-                if task.task_template_id is None:
-                    task.task_template_id = template.id
-                if task.prompt is None:
-                    task.prompt = _combine_step_prompt(
-                        template.prompt,
-                        step.additional_prompt,
-                    )
-                if task.run_task_id is None:
-                    task.run_task_id = self.request.id
-                if task.status == "pending":
-                    task.status = "queued"
-            _attach_task_attachments(
-                task,
-                list(step.attachments) + list(template.attachments),
-            )
-            task_id = task.id
-
-        _execute_agent_task(task_id)
-
-        with session_scope() as session:
-            task = session.get(AgentTask, task_id)
-            run = session.get(PipelineRun, run_id)
-            if task is None or run is None:
-                return
-            if run.status == "canceled":
-                now = _utcnow()
-                _cancel_pipeline_tasks(session, run_id, now)
-                run.finished_at = run.finished_at or now
-                return
-            if task.status == "failed":
-                run.status = "failed"
-                run.finished_at = _utcnow()
-                return
-
-    should_loop = False
-    with session_scope() as session:
-        run = session.get(PipelineRun, run_id)
-        if run is not None:
-            if run.status == "canceled":
                 run.finished_at = run.finished_at or _utcnow()
                 return
-            run.status = "succeeded"
-            run.finished_at = _utcnow()
-        pipeline = session.get(Pipeline, pipeline_id)
-        should_loop = bool(pipeline.loop_enabled) if pipeline is not None else False
+            if run.status == "stopping":
+                final_status = "stopped"
+                break
 
-    if should_loop:
-        with session_scope() as session:
-            next_run = PipelineRun.create(
-                session,
-                pipeline_id=pipeline_id,
-                status="queued",
+        if max_runtime_minutes is not None:
+            elapsed_minutes = (time.monotonic() - started_monotonic) / 60.0
+            if elapsed_minutes > float(max_runtime_minutes):
+                next_activation = ready_queue[0]
+                next_node_id_raw = _parse_optional_int(
+                    next_activation.get("node_id"),
+                    default=0,
+                    minimum=0,
+                )
+                next_node_id = next_node_id_raw if next_node_id_raw > 0 else None
+                next_node_spec = node_specs.get(next_node_id)
+                if next_node_spec is not None:
+                    execution_index = node_execution_counts.get(next_node_id, 0) + 1
+                    failure_message = (
+                        f"Flowchart exceeded max_runtime_minutes ({max_runtime_minutes})."
+                    )
+                    _record_flowchart_guardrail_failure(
+                        flowchart_id=flowchart_id,
+                        run_id=run_id,
+                        node_id=next_node_id,
+                        node_type=str(next_node_spec["node_type"]),
+                        node_ref_id=_parse_optional_int(
+                            next_node_spec.get("ref_id"), default=0, minimum=0
+                        )
+                        or None,
+                        execution_index=execution_index,
+                        total_execution_count=total_execution_count,
+                        incoming_edges=incoming_by_target.get(next_node_id, []),
+                        latest_results=latest_results,
+                        upstream_results=list(next_activation.get("upstream_results") or []),
+                        message=failure_message,
+                    )
+                final_status = "failed"
+                break
+
+        batch_size = min(max_parallel_nodes, len(ready_queue))
+        batch: list[dict[str, Any]] = [
+            ready_queue.popleft() for _ in range(batch_size)
+        ]
+
+        for activation in batch:
+            with session_scope() as session:
+                run = session.get(FlowchartRun, run_id)
+                if run is None:
+                    return
+                if run.status == "canceled":
+                    run.finished_at = run.finished_at or _utcnow()
+                    return
+                if run.status == "stopping":
+                    final_status = "stopped"
+                    break
+
+            node_id = _parse_optional_int(
+                activation.get("node_id"),
+                default=0,
+                minimum=0,
             )
-            next_run_id = next_run.id
-        run_pipeline.delay(pipeline_id, next_run_id)
+            if node_id <= 0:
+                failure_message = "Flowchart activation referenced an invalid node id."
+                final_status = "failed"
+                break
+            node_spec = node_specs.get(node_id)
+            if node_spec is None:
+                failure_message = f"Flowchart referenced missing node id {node_id}."
+                final_status = "failed"
+                break
+
+            execution_index = node_execution_counts.get(node_id, 0) + 1
+            if max_node_executions is not None and total_execution_count >= max_node_executions:
+                failure_message = (
+                    f"Flowchart exceeded max_node_executions ({max_node_executions})."
+                )
+                _record_flowchart_guardrail_failure(
+                    flowchart_id=flowchart_id,
+                    run_id=run_id,
+                    node_id=node_id,
+                    node_type=str(node_spec["node_type"]),
+                    node_ref_id=_parse_optional_int(
+                        node_spec.get("ref_id"), default=0, minimum=0
+                    )
+                    or None,
+                    execution_index=execution_index,
+                    total_execution_count=total_execution_count,
+                    incoming_edges=incoming_by_target.get(node_id, []),
+                    latest_results=latest_results,
+                    upstream_results=list(activation.get("upstream_results") or []),
+                    message=failure_message,
+                )
+                final_status = "failed"
+                break
+            if total_execution_count >= 10000:
+                failure_message = "Flowchart exceeded hard safety limit (10000 node executions)."
+                _record_flowchart_guardrail_failure(
+                    flowchart_id=flowchart_id,
+                    run_id=run_id,
+                    node_id=node_id,
+                    node_type=str(node_spec["node_type"]),
+                    node_ref_id=_parse_optional_int(
+                        node_spec.get("ref_id"), default=0, minimum=0
+                    )
+                    or None,
+                    execution_index=execution_index,
+                    total_execution_count=total_execution_count,
+                    incoming_edges=incoming_by_target.get(node_id, []),
+                    latest_results=latest_results,
+                    upstream_results=list(activation.get("upstream_results") or []),
+                    message=failure_message,
+                )
+                final_status = "failed"
+                break
+
+            total_execution_count += 1
+            node_execution_counts[node_id] = execution_index
+
+            input_context = _build_flowchart_input_context(
+                flowchart_id=flowchart_id,
+                run_id=run_id,
+                node_id=node_id,
+                node_type=str(node_spec["node_type"]),
+                execution_index=execution_index,
+                total_execution_count=total_execution_count,
+                incoming_edges=incoming_by_target.get(node_id, []),
+                latest_results=latest_results,
+                upstream_results=list(activation.get("upstream_results") or []),
+            )
+            node_config = node_spec.get("config") or {}
+            node_agent_id: int | None = None
+            if str(node_spec["node_type"]) == FLOWCHART_NODE_TYPE_TASK:
+                parsed_agent_id = _parse_optional_int(
+                    node_config.get("agent_id"),
+                    default=0,
+                    minimum=0,
+                )
+                if parsed_agent_id > 0:
+                    node_agent_id = parsed_agent_id
+
+            with session_scope() as session:
+                node_run_started_at = _utcnow()
+                node_task = _create_flowchart_node_task(
+                    session,
+                    flowchart_id=flowchart_id,
+                    run_id=run_id,
+                    node_id=node_id,
+                    node_type=str(node_spec["node_type"]),
+                    node_ref_id=_parse_optional_int(
+                        node_spec.get("ref_id"), default=0, minimum=0
+                    )
+                    or None,
+                    agent_id=node_agent_id,
+                    execution_index=execution_index,
+                    input_context=input_context,
+                    status="running",
+                    started_at=node_run_started_at,
+                )
+                node_run = FlowchartRunNode.create(
+                    session,
+                    flowchart_run_id=run_id,
+                    flowchart_node_id=node_id,
+                    execution_index=execution_index,
+                    agent_task_id=node_task.id,
+                    status="running",
+                    input_context_json=_json_dumps(input_context),
+                    started_at=node_run_started_at,
+                )
+                node_run_id = node_run.id
+
+            try:
+                output_state, routing_state = _execute_flowchart_node(
+                    node_id=node_id,
+                    node_type=str(node_spec["node_type"]),
+                    node_ref_id=node_spec.get("ref_id"),
+                    node_config=node_config,
+                    input_context=input_context,
+                    execution_id=node_run_id,
+                    execution_task_id=node_task.id,
+                    execution_index=execution_index,
+                    enabled_providers=enabled_providers,
+                    default_model_id=default_model_id,
+                    mcp_server_keys=list(node_spec.get("mcp_server_keys") or []),
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Flowchart run %s failed in node %s (%s)",
+                    run_id,
+                    node_id,
+                    node_spec.get("node_type"),
+                )
+                with session_scope() as session:
+                    finished_at = _utcnow()
+                    failed_node_run = session.get(FlowchartRunNode, node_run_id)
+                    if failed_node_run is not None:
+                        failed_node_run.status = "failed"
+                        failed_node_run.error = str(exc)
+                        failed_node_run.finished_at = finished_at
+                    _update_flowchart_node_task(
+                        session,
+                        node_run=failed_node_run,
+                        status="failed",
+                        error=str(exc),
+                        finished_at=finished_at,
+                    )
+                    run = session.get(FlowchartRun, run_id)
+                    if run is not None and run.status != "canceled":
+                        run.status = "failed"
+                        run.finished_at = _utcnow()
+                return
+
+            latest_results[node_id] = {
+                "node_type": node_spec.get("node_type"),
+                "execution_index": execution_index,
+                "sequence": total_execution_count,
+                "output_state": output_state,
+                "routing_state": routing_state,
+            }
+
+            with session_scope() as session:
+                finished_at = _utcnow()
+                succeeded_node_run = session.get(FlowchartRunNode, node_run_id)
+                if succeeded_node_run is not None:
+                    succeeded_node_run.status = "succeeded"
+                    succeeded_node_run.output_state_json = _json_dumps(output_state)
+                    succeeded_node_run.routing_state_json = _json_dumps(routing_state)
+                    succeeded_node_run.finished_at = finished_at
+                _update_flowchart_node_task(
+                    session,
+                    node_run=succeeded_node_run,
+                    status="succeeded",
+                    output_state=output_state,
+                    finished_at=finished_at,
+                )
+
+            if _coerce_bool(routing_state.get("terminate_run")):
+                terminate_run = True
+                break
+
+            try:
+                selected_edges = _resolve_flowchart_outgoing_edges(
+                    node_type=str(node_spec["node_type"]),
+                    node_config=node_spec.get("config") or {},
+                    outgoing_edges=outgoing_by_source.get(node_id, []),
+                    routing_state=routing_state,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Flowchart route resolution failed for run %s node %s",
+                    run_id,
+                    node_id,
+                )
+                with session_scope() as session:
+                    run = session.get(FlowchartRun, run_id)
+                    if run is not None and run.status != "canceled":
+                        run.status = "failed"
+                        run.finished_at = _utcnow()
+                    failed_node_run = (
+                        session.execute(
+                            select(FlowchartRunNode)
+                            .where(
+                                FlowchartRunNode.flowchart_run_id == run_id,
+                                FlowchartRunNode.flowchart_node_id == node_id,
+                            )
+                            .order_by(FlowchartRunNode.id.desc())
+                        )
+                        .scalars()
+                        .first()
+                    )
+                    if failed_node_run is not None:
+                        failed_node_run.error = str(exc)
+                    _update_flowchart_node_task(
+                        session,
+                        node_run=failed_node_run,
+                        status=failed_node_run.status if failed_node_run is not None else "failed",
+                        error=str(exc),
+                        finished_at=failed_node_run.finished_at if failed_node_run is not None else None,
+                    )
+                return
+
+            emitted = {
+                "source_node_id": node_id,
+                "node_type": node_spec.get("node_type"),
+                "execution_index": execution_index,
+                "sequence": total_execution_count,
+                "output_state": output_state,
+                "routing_state": routing_state,
+            }
+            for edge in selected_edges:
+                target_node_id = int(edge["target_node_id"])
+                if target_node_id == start_node_id:
+                    next_run_id, skipped_followup = _queue_followup_flowchart_run(
+                        flowchart_id=flowchart_id,
+                        source_run_id=run_id,
+                    )
+                    if skipped_followup:
+                        logger.info(
+                            "Flowchart run %s reached Start with stop requested; skipped follow-up run.",
+                            run_id,
+                        )
+                        terminate_run = True
+                    elif next_run_id is None:
+                        failure_message = (
+                            "Flowchart reached Start node but failed to queue a follow-up run."
+                        )
+                        final_status = "failed"
+                    else:
+                        logger.info(
+                            "Flowchart run %s reached Start; queued follow-up run %s.",
+                            run_id,
+                            next_run_id,
+                        )
+                        terminate_run = True
+                    break
+                parent_ids = incoming_parent_ids.get(target_node_id, [])
+                token = {
+                    **emitted,
+                    "condition_key": edge.get("condition_key"),
+                }
+                if not parent_ids:
+                    ready_queue.append(
+                        {
+                            "node_id": target_node_id,
+                            "upstream_results": [token],
+                        }
+                    )
+                    continue
+                parent_tokens = parent_tokens_by_target.setdefault(target_node_id, {})
+                for parent_id in parent_ids:
+                    parent_tokens.setdefault(parent_id, deque())
+                parent_tokens.setdefault(node_id, deque()).append(token)
+                while all(len(parent_tokens[parent_id]) > 0 for parent_id in parent_ids):
+                    upstream_results = [
+                        parent_tokens[parent_id].popleft() for parent_id in parent_ids
+                    ]
+                    ready_queue.append(
+                        {
+                            "node_id": target_node_id,
+                            "upstream_results": upstream_results,
+                        }
+                    )
+            if final_status == "failed" or terminate_run:
+                break
+
+        if final_status in {"failed", "stopped"}:
+            break
+        if terminate_run:
+            final_status = "completed"
+            break
+
+    with session_scope() as session:
+        run = session.get(FlowchartRun, run_id)
+        if run is None:
+            return
+        if run.status == "canceled":
+            run.finished_at = run.finished_at or _utcnow()
+            return
+        if run.status == "stopping" and final_status == "completed":
+            final_status = "stopped"
+        if final_status == "failed" and failure_message:
+            logger.error(
+                "Flowchart run %s failed: %s",
+                run_id,
+                failure_message,
+            )
+        run.status = final_status
+        run.finished_at = _utcnow()

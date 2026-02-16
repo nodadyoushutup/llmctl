@@ -166,6 +166,111 @@
     </div>
   </form>
 </section>
+<section class="card" style="margin-top: 24px;">
+  <div class="card-header">
+    <h2 class="section-title">vLLM Local Provider</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Configure in-container vLLM CLI usage and discovered local default model.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_vllm_local_settings') }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
+    <label class="label" style="grid-column: 1 / -1;">
+      Local CLI command
+      <p class="muted" style="margin-top: 8px; font-size: 12px;">
+        {{ vllm_local_settings.command }} run-batch
+      </p>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      Local default model
+      <select class="input" name="vllm_local_model">
+        {% for option in vllm_local_settings.models %}
+          <option value="{{ option.value }}" {% if option.value == vllm_local_settings.model %}selected{% endif %}>
+            {{ option.label }} ({{ option.source }})
+          </option>
+        {% endfor %}
+      </select>
+      <p class="muted" style="margin-top: 6px; font-size: 12px;">
+        custom dir: {{ vllm_local_settings.custom_dir }}
+      </p>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save vllm local settings
+      </button>
+    </div>
+  </form>
+</section>
+<section class="card" style="margin-top: 24px;">
+  <div class="card-header">
+    <h2 class="section-title">vLLM Remote Provider</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Configure remote vLLM endpoint/auth and default remote model options.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_vllm_remote_settings') }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
+    <label class="label">
+      Remote base URL
+      <input
+        class="input"
+        type="text"
+        name="vllm_remote_base_url"
+        value="{{ vllm_remote_settings.base_url }}"
+        placeholder="https://vllm.example.com/v1"
+      />
+    </label>
+    <label class="label">
+      Remote API key (optional)
+      <input
+        class="input"
+        type="password"
+        name="vllm_remote_api_key"
+        value="{{ vllm_remote_settings.api_key }}"
+        placeholder="optional"
+      />
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      Remote default model
+      <input
+        class="input"
+        type="text"
+        name="vllm_remote_model"
+        value="{{ vllm_remote_settings.model }}"
+        list="vllm-remote-default-model-options"
+        placeholder="GLM-4.7-Flash"
+      />
+      <datalist id="vllm-remote-default-model-options">
+        {% for option in vllm_remote_settings.models %}
+          <option value="{{ option }}"></option>
+        {% endfor %}
+      </datalist>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      Remote model options (comma or newline separated)
+      <textarea
+        class="textarea"
+        name="vllm_remote_models"
+        placeholder="GLM-4.7-Flash"
+      >{{ vllm_remote_settings.models | join('\n') }}</textarea>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save vllm remote settings
+      </button>
+    </div>
+  </form>
+</section>
 
 <script>
   const defaultProviderToggles = document.querySelectorAll(".default-provider-toggle");

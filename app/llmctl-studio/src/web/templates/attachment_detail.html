@@ -38,7 +38,6 @@
         <p class="muted">Path: {{ attachment.file_path or "-" }}</p>
         <p class="muted">Linked tasks: {{ tasks | length }}</p>
         <p class="muted">Linked templates: {{ templates | length }}</p>
-        <p class="muted">Linked pipeline steps: {{ pipeline_steps | length }}</p>
         <p class="muted">Created: {{ human_time(attachment.created_at) }}</p>
         <p class="muted">Updated: {{ human_time(attachment.updated_at) }}</p>
       </div>
@@ -75,7 +74,6 @@
             <th>ID</th>
             <th>Status</th>
             <th>Agent</th>
-            <th>Pipeline</th>
             <th>Template</th>
             <th>Created</th>
           </tr>
@@ -84,10 +82,10 @@
           {% for task in tasks %}
             <tr
               class="table-row-link"
-              data-href="{{ url_for('agents.view_task', task_id=task.id) }}"
+              data-href="{{ url_for('agents.view_node', task_id=task.id) }}"
             >
               <td>
-                <a href="{{ url_for('agents.view_task', task_id=task.id) }}">{{ task.id }}</a>
+                <a href="{{ url_for('agents.view_node', task_id=task.id) }}">{{ task.id }}</a>
               </td>
               <td>
                 {% if task.status == "running" %}
@@ -107,13 +105,6 @@
               <td class="muted">
                 {% if task.agent_id is not none %}
                   {{ agents_by_id.get(task.agent_id, "Agent " ~ task.agent_id) }}
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-              <td class="muted">
-                {% if task.pipeline_id %}
-                  {{ pipelines_by_id.get(task.pipeline_id, "Pipeline " ~ task.pipeline_id) }}
                 {% else %}
                   -
                 {% endif %}
@@ -176,53 +167,6 @@
     </div>
   {% else %}
     <p class="muted" style="margin-top: 16px;">No templates attached yet.</p>
-  {% endif %}
-</section>
-
-<section class="card">
-  <div class="card-header">
-    <h2 class="section-title">Attached Pipeline Steps</h2>
-  </div>
-  {% if pipeline_steps %}
-    <div style="margin-top: 20px; overflow-x: auto;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Pipeline</th>
-            <th>Template</th>
-            <th>Order</th>
-            <th>Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for step in pipeline_steps %}
-            <tr
-              class="table-row-link"
-              data-href="{{ url_for('agents.view_pipeline', pipeline_id=step.pipeline_id) }}"
-            >
-              <td>
-                <a href="{{ url_for('agents.view_pipeline', pipeline_id=step.pipeline_id) }}">
-                  {{ pipelines_by_id.get(step.pipeline_id, "Pipeline " ~ step.pipeline_id) }}
-                </a>
-              </td>
-              <td class="muted">
-                {% if step.task_template_id %}
-                  <a href="{{ url_for('agents.view_task_template', template_id=step.task_template_id) }}">
-                    {{ templates_by_id.get(step.task_template_id, "Template " ~ step.task_template_id) }}
-                  </a>
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-              <td class="muted">{{ step.step_order }}</td>
-              <td class="muted">{{ human_time(step.created_at) }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
-    <p class="muted" style="margin-top: 16px;">No pipeline steps attached yet.</p>
   {% endif %}
 </section>
 

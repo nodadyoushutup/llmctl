@@ -2,9 +2,9 @@
 
 {% block action_header %}
   <div class="action-header-actions">
-    <a class="btn btn-primary" href="{{ url_for('agents.new_mcp') }}">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_mcp') }}" aria-label="Create custom MCP server">
       <i class="fa-solid fa-plus"></i>
-      create server
+      create custom
     </a>
   </div>
 {% endblock %}
@@ -12,12 +12,12 @@
 {% block content %}
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">MCP Servers</h2>
+    <h2 class="section-title">Integrated MCP Servers</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Manage tool servers and attach them to agents.
+    System-managed servers provisioned from Integration settings.
   </p>
-  {% if mcp_servers %}
+  {% if integrated_mcp_servers %}
     <div style="margin-top: 20px; overflow-x: auto;">
       <table class="table">
         <thead>
@@ -25,12 +25,11 @@
             <th>Name</th>
             <th>Key</th>
             <th>Description</th>
-            <th>Agents</th>
-            <th>Delete</th>
+            <th>Bindings</th>
           </tr>
         </thead>
         <tbody>
-          {% for mcp in mcp_servers %}
+          {% for mcp in integrated_mcp_servers %}
             <tr
               class="table-row-link"
               data-href="{{ url_for('agents.view_mcp', mcp_id=mcp.id) }}"
@@ -42,15 +41,58 @@
               </td>
               <td class="muted">{{ mcp.server_key }}</td>
               <td class="muted">{{ mcp.description or "-" }}</td>
-              <td>{{ mcp.agents | length }}</td>
+              <td>{{ (mcp.task_templates | length) + (mcp.flowchart_nodes | length) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No integrated MCP servers available.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Custom MCP Servers</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    User-managed servers that can be attached to task templates and flowchart nodes.
+  </p>
+  {% if custom_mcp_servers %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Key</th>
+            <th>Description</th>
+            <th>Bindings</th>
+            <th class="table-actions-cell"><i class="fa-solid fa-trash" aria-hidden="true"></i></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for mcp in custom_mcp_servers %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_mcp', mcp_id=mcp.id) }}"
+            >
               <td>
+                <a href="{{ url_for('agents.view_mcp', mcp_id=mcp.id) }}">
+                  <p>{{ mcp.name }}</p>
+                </a>
+              </td>
+              <td class="muted">{{ mcp.server_key }}</td>
+              <td class="muted">{{ mcp.description or "-" }}</td>
+              <td>{{ (mcp.task_templates | length) + (mcp.flowchart_nodes | length) }}</td>
+              <td class="table-actions-cell">
                 <form
                   method="post"
                   action="{{ url_for('agents.delete_mcp', mcp_id=mcp.id) }}"
                   onsubmit="return confirm('Delete this MCP server?');"
                 >
                   <input type="hidden" name="next" value="{{ request.path }}" />
-                  <button type="submit" class="btn btn-danger" aria-label="Delete">
+                  <button type="submit" class="btn btn-danger" aria-label="Delete MCP server">
                     <i class="fa-solid fa-trash"></i>
                   </button>
                 </form>
@@ -61,7 +103,7 @@
       </table>
     </div>
   {% else %}
-    <p class="muted" style="margin-top: 16px;">No MCP servers created yet.</p>
+    <p class="muted" style="margin-top: 16px;">No custom MCP servers created yet.</p>
   {% endif %}
 </section>
 

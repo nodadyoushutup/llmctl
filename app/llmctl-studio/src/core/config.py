@@ -83,5 +83,23 @@ class Config:
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
     CLAUDE_CMD = os.getenv("CLAUDE_CMD", "claude")
     CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "")
+    VLLM_LOCAL_CMD = os.getenv("VLLM_LOCAL_CMD", "vllm")
+    VLLM_REMOTE_BASE_URL = os.getenv("VLLM_REMOTE_BASE_URL", "")
+    VLLM_REMOTE_API_KEY = os.getenv("VLLM_REMOTE_API_KEY", "")
+    _VLLM_LOCAL_CUSTOM_MODELS_DIR_ENV = os.getenv(
+        "LLMCTL_STUDIO_VLLM_LOCAL_CUSTOM_MODELS_DIR"
+    )
+    if _VLLM_LOCAL_CUSTOM_MODELS_DIR_ENV:
+        VLLM_LOCAL_CUSTOM_MODELS_DIR = str(Path(_VLLM_LOCAL_CUSTOM_MODELS_DIR_ENV))
+    else:
+        VLLM_LOCAL_CUSTOM_MODELS_DIR = str(_ensure_dir(REPO_ROOT / "models"))
+    VLLM_LOCAL_FALLBACK_MODEL = os.getenv(
+        "VLLM_LOCAL_FALLBACK_MODEL", "/app/models/custom/qwen2.5-0.5b-instruct"
+    )
+    VLLM_REMOTE_DEFAULT_MODEL = os.getenv("VLLM_REMOTE_DEFAULT_MODEL", "GLM-4.7-Flash")
+
+    CHROMA_HOST = os.getenv("CHROMA_HOST", "")
+    CHROMA_PORT = os.getenv("CHROMA_PORT", "")
+    CHROMA_SSL = os.getenv("CHROMA_SSL", "false")
 
     GITHUB_MCP_URL = os.getenv("GITHUB_MCP_URL", "")

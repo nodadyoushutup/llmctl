@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -16,13 +17,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.db import Base, BaseModel, utcnow
-
-agent_mcp_servers = Table(
-    "agent_mcp_servers",
-    Base.metadata,
-    Column("agent_id", ForeignKey("agents.id"), primary_key=True),
-    Column("mcp_server_id", ForeignKey("mcp_servers.id"), primary_key=True),
-)
 
 SCRIPT_TYPE_PRE_INIT = "pre_init"
 SCRIPT_TYPE_INIT = "init"
@@ -42,12 +36,77 @@ SCRIPT_TYPE_LABELS = dict(SCRIPT_TYPE_CHOICES)
 
 RUN_ACTIVE_STATUSES = ("starting", "running", "stopping")
 
-agent_scripts = Table(
-    "agent_scripts",
-    Base.metadata,
-    Column("agent_id", ForeignKey("agents.id"), primary_key=True),
-    Column("script_id", ForeignKey("scripts.id"), primary_key=True),
-    Column("position", Integer, nullable=True),
+SKILL_STATUS_DRAFT = "draft"
+SKILL_STATUS_ACTIVE = "active"
+SKILL_STATUS_ARCHIVED = "archived"
+SKILL_STATUS_CHOICES = (
+    SKILL_STATUS_DRAFT,
+    SKILL_STATUS_ACTIVE,
+    SKILL_STATUS_ARCHIVED,
+)
+
+FLOWCHART_NODE_TYPE_START = "start"
+FLOWCHART_NODE_TYPE_END = "end"
+FLOWCHART_NODE_TYPE_FLOWCHART = "flowchart"
+FLOWCHART_NODE_TYPE_TASK = "task"
+FLOWCHART_NODE_TYPE_PLAN = "plan"
+FLOWCHART_NODE_TYPE_MILESTONE = "milestone"
+FLOWCHART_NODE_TYPE_MEMORY = "memory"
+FLOWCHART_NODE_TYPE_DECISION = "decision"
+FLOWCHART_NODE_TYPE_CHOICES = (
+    FLOWCHART_NODE_TYPE_START,
+    FLOWCHART_NODE_TYPE_END,
+    FLOWCHART_NODE_TYPE_FLOWCHART,
+    FLOWCHART_NODE_TYPE_TASK,
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_MEMORY,
+    FLOWCHART_NODE_TYPE_DECISION,
+)
+
+MCP_SERVER_TYPE_CUSTOM = "custom"
+MCP_SERVER_TYPE_INTEGRATED = "integrated"
+MCP_SERVER_TYPE_CHOICES = (
+    MCP_SERVER_TYPE_CUSTOM,
+    MCP_SERVER_TYPE_INTEGRATED,
+)
+INTEGRATED_MCP_SERVER_KEYS = frozenset(
+    {"llmctl-mcp", "github", "atlassian", "chroma"}
+)
+LEGACY_INTEGRATED_MCP_SERVER_KEYS = frozenset({"jira"})
+SYSTEM_MANAGED_MCP_SERVER_KEYS = frozenset(
+    set(INTEGRATED_MCP_SERVER_KEYS) | set(LEGACY_INTEGRATED_MCP_SERVER_KEYS)
+)
+
+MILESTONE_STATUS_PLANNED = "planned"
+MILESTONE_STATUS_IN_PROGRESS = "in_progress"
+MILESTONE_STATUS_AT_RISK = "at_risk"
+MILESTONE_STATUS_DONE = "done"
+MILESTONE_STATUS_ARCHIVED = "archived"
+MILESTONE_STATUS_CHOICES = (
+    MILESTONE_STATUS_PLANNED,
+    MILESTONE_STATUS_IN_PROGRESS,
+    MILESTONE_STATUS_AT_RISK,
+    MILESTONE_STATUS_DONE,
+    MILESTONE_STATUS_ARCHIVED,
+)
+
+MILESTONE_PRIORITY_LOW = "low"
+MILESTONE_PRIORITY_MEDIUM = "medium"
+MILESTONE_PRIORITY_HIGH = "high"
+MILESTONE_PRIORITY_CHOICES = (
+    MILESTONE_PRIORITY_LOW,
+    MILESTONE_PRIORITY_MEDIUM,
+    MILESTONE_PRIORITY_HIGH,
+)
+
+MILESTONE_HEALTH_GREEN = "green"
+MILESTONE_HEALTH_YELLOW = "yellow"
+MILESTONE_HEALTH_RED = "red"
+MILESTONE_HEALTH_CHOICES = (
+    MILESTONE_HEALTH_GREEN,
+    MILESTONE_HEALTH_YELLOW,
+    MILESTONE_HEALTH_RED,
 )
 
 agent_task_scripts = Table(
@@ -72,12 +131,143 @@ task_template_attachments = Table(
     Column("attachment_id", ForeignKey("attachments.id"), primary_key=True),
 )
 
-pipeline_step_attachments = Table(
-    "pipeline_step_attachments",
+task_template_mcp_servers = Table(
+    "task_template_mcp_servers",
     Base.metadata,
-    Column("pipeline_step_id", ForeignKey("pipeline_steps.id"), primary_key=True),
-    Column("attachment_id", ForeignKey("attachments.id"), primary_key=True),
+    Column("task_template_id", ForeignKey("task_templates.id"), primary_key=True),
+    Column("mcp_server_id", ForeignKey("mcp_servers.id"), primary_key=True),
 )
+
+agent_task_mcp_servers = Table(
+    "agent_task_mcp_servers",
+    Base.metadata,
+    Column("agent_task_id", ForeignKey("agent_tasks.id"), primary_key=True),
+    Column("mcp_server_id", ForeignKey("mcp_servers.id"), primary_key=True),
+)
+
+task_template_scripts = Table(
+    "task_template_scripts",
+    Base.metadata,
+    Column("task_template_id", ForeignKey("task_templates.id"), primary_key=True),
+    Column("script_id", ForeignKey("scripts.id"), primary_key=True),
+    Column("position", Integer, nullable=True),
+)
+
+flowchart_node_mcp_servers = Table(
+    "flowchart_node_mcp_servers",
+    Base.metadata,
+    Column("flowchart_node_id", ForeignKey("flowchart_nodes.id"), primary_key=True),
+    Column("mcp_server_id", ForeignKey("mcp_servers.id"), primary_key=True),
+)
+
+flowchart_node_scripts = Table(
+    "flowchart_node_scripts",
+    Base.metadata,
+    Column("flowchart_node_id", ForeignKey("flowchart_nodes.id"), primary_key=True),
+    Column("script_id", ForeignKey("scripts.id"), primary_key=True),
+    Column("position", Integer, nullable=True),
+)
+
+flowchart_node_skills = Table(
+    "flowchart_node_skills",
+    Base.metadata,
+    Column("flowchart_node_id", ForeignKey("flowchart_nodes.id"), primary_key=True),
+    Column("skill_id", ForeignKey("skills.id"), primary_key=True),
+    Column("position", Integer, nullable=True),
+)
+
+
+class Skill(BaseModel):
+    __tablename__ = "skills"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=SKILL_STATUS_DRAFT, index=True
+    )
+    source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    versions: Mapped[list["SkillVersion"]] = relationship(
+        "SkillVersion",
+        back_populates="skill",
+        cascade="all, delete-orphan",
+        order_by="SkillVersion.id.asc()",
+    )
+    flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
+        "FlowchartNode",
+        secondary=flowchart_node_skills,
+        back_populates="skills",
+        order_by=flowchart_node_skills.c.position.asc(),
+    )
+
+
+class SkillVersion(BaseModel):
+    __tablename__ = "skill_versions"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "version", name="uq_skill_versions_skill_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    skill_id: Mapped[int] = mapped_column(
+        ForeignKey("skills.id"), nullable=False, index=True
+    )
+    version: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manifest_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    skill: Mapped["Skill"] = relationship("Skill", back_populates="versions")
+    files: Mapped[list["SkillFile"]] = relationship(
+        "SkillFile",
+        back_populates="skill_version",
+        cascade="all, delete-orphan",
+        order_by="SkillFile.path.asc()",
+    )
+
+
+class SkillFile(BaseModel):
+    __tablename__ = "skill_files"
+    __table_args__ = (
+        UniqueConstraint("skill_version_id", "path", name="uq_skill_files_version_path"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    skill_version_id: Mapped[int] = mapped_column(
+        ForeignKey("skill_versions.id"), nullable=False, index=True
+    )
+    path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    skill_version: Mapped["SkillVersion"] = relationship(
+        "SkillVersion", back_populates="files"
+    )
 
 
 class MCPServer(BaseModel):
@@ -88,6 +278,9 @@ class MCPServer(BaseModel):
     server_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
     config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    server_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=MCP_SERVER_TYPE_CUSTOM
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -96,9 +289,25 @@ class MCPServer(BaseModel):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    agents: Mapped[list["Agent"]] = relationship(
-        "Agent", secondary=agent_mcp_servers, back_populates="mcp_servers"
+    task_templates: Mapped[list["TaskTemplate"]] = relationship(
+        "TaskTemplate",
+        secondary=task_template_mcp_servers,
+        back_populates="mcp_servers",
     )
+    flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
+        "FlowchartNode",
+        secondary=flowchart_node_mcp_servers,
+        back_populates="mcp_servers",
+    )
+    tasks: Mapped[list["AgentTask"]] = relationship(
+        "AgentTask",
+        secondary=agent_task_mcp_servers,
+        back_populates="mcp_servers",
+    )
+
+    @property
+    def is_integrated(self) -> bool:
+        return (self.server_type or MCP_SERVER_TYPE_CUSTOM) == MCP_SERVER_TYPE_INTEGRATED
 
 
 class Script(BaseModel):
@@ -118,11 +327,18 @@ class Script(BaseModel):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    agents: Mapped[list["Agent"]] = relationship(
-        "Agent", secondary=agent_scripts, back_populates="scripts"
-    )
     tasks: Mapped[list["AgentTask"]] = relationship(
         "AgentTask", secondary=agent_task_scripts, back_populates="scripts"
+    )
+    task_templates: Mapped[list["TaskTemplate"]] = relationship(
+        "TaskTemplate",
+        secondary=task_template_scripts,
+        back_populates="scripts",
+    )
+    flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
+        "FlowchartNode",
+        secondary=flowchart_node_scripts,
+        back_populates="scripts",
     )
 
 
@@ -150,13 +366,6 @@ class Attachment(BaseModel):
         secondary=task_template_attachments,
         back_populates="attachments",
     )
-    pipeline_steps: Mapped[list["PipelineStep"]] = relationship(
-        "PipelineStep",
-        secondary=pipeline_step_attachments,
-        back_populates="attachments",
-    )
-
-
 class Memory(BaseModel):
     __tablename__ = "memories"
 
@@ -206,6 +415,16 @@ class LLMModel(BaseModel):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
+    task_templates: Mapped[list["TaskTemplate"]] = relationship(
+        "TaskTemplate", back_populates="model"
+    )
+    tasks: Mapped[list["AgentTask"]] = relationship(
+        "AgentTask", back_populates="model"
+    )
+    flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
+        "FlowchartNode", back_populates="model"
+    )
+
 
 class Agent(BaseModel):
     __tablename__ = "agents"
@@ -216,30 +435,16 @@ class Agent(BaseModel):
     role_id: Mapped[int | None] = mapped_column(
         ForeignKey("roles.id"), nullable=True, index=True
     )
-    model_id: Mapped[int | None] = mapped_column(
-        ForeignKey("llm_models.id"), nullable=True, index=True
-    )
     prompt_json: Mapped[str] = mapped_column(Text, nullable=False)
     prompt_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     autonomous_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     role: Mapped["Role | None"] = relationship(
         "Role", back_populates="agents", lazy="joined"
     )
-    model: Mapped["LLMModel | None"] = relationship("LLMModel", lazy="joined")
     runs: Mapped[list["Run"]] = relationship(
         "Run",
         back_populates="agent",
     )
-    mcp_servers: Mapped[list["MCPServer"]] = relationship(
-        "MCPServer", secondary=agent_mcp_servers, back_populates="agents"
-    )
-    scripts: Mapped[list["Script"]] = relationship(
-        "Script",
-        secondary=agent_scripts,
-        back_populates="agents",
-        order_by=agent_scripts.c.position.asc(),
-    )
-
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_run_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -336,20 +541,24 @@ class AgentTask(BaseModel):
     )
     run_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    pipeline_id: Mapped[int | None] = mapped_column(
-        ForeignKey("pipelines.id"), nullable=True, index=True
-    )
-    pipeline_run_id: Mapped[int | None] = mapped_column(
-        ForeignKey("pipeline_runs.id"), nullable=True, index=True
-    )
-    pipeline_step_id: Mapped[int | None] = mapped_column(
-        ForeignKey("pipeline_steps.id"), nullable=True, index=True
-    )
     task_template_id: Mapped[int | None] = mapped_column(
         ForeignKey("task_templates.id"), nullable=True, index=True
     )
+    model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_models.id"), nullable=True, index=True
+    )
+    flowchart_id: Mapped[int | None] = mapped_column(
+        ForeignKey("flowcharts.id"), nullable=True, index=True
+    )
+    flowchart_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("flowchart_runs.id"), nullable=True, index=True
+    )
+    flowchart_node_id: Mapped[int | None] = mapped_column(
+        ForeignKey("flowchart_nodes.id"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
     kind: Mapped[str | None] = mapped_column(String(32), default="task", nullable=True)
+    integration_keys_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -376,6 +585,14 @@ class AgentTask(BaseModel):
         back_populates="tasks",
         order_by=agent_task_scripts.c.position.asc(),
     )
+    model: Mapped["LLMModel | None"] = relationship(
+        "LLMModel", back_populates="tasks", lazy="joined"
+    )
+    mcp_servers: Mapped[list["MCPServer"]] = relationship(
+        "MCPServer",
+        secondary=agent_task_mcp_servers,
+        back_populates="tasks",
+    )
     attachments: Mapped[list["Attachment"]] = relationship(
         "Attachment",
         secondary=agent_task_attachments,
@@ -389,6 +606,9 @@ class TaskTemplate(BaseModel):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     agent_id: Mapped[int | None] = mapped_column(
         ForeignKey("agents.id"), nullable=True, index=True
+    )
+    model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_models.id"), nullable=True, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -405,16 +625,73 @@ class TaskTemplate(BaseModel):
         secondary=task_template_attachments,
         back_populates="templates",
     )
+    model: Mapped["LLMModel | None"] = relationship(
+        "LLMModel", back_populates="task_templates", lazy="joined"
+    )
+    mcp_servers: Mapped[list["MCPServer"]] = relationship(
+        "MCPServer",
+        secondary=task_template_mcp_servers,
+        back_populates="task_templates",
+    )
+    scripts: Mapped[list["Script"]] = relationship(
+        "Script",
+        secondary=task_template_scripts,
+        back_populates="task_templates",
+        order_by=task_template_scripts.c.position.asc(),
+    )
 
 
-class Pipeline(BaseModel):
-    __tablename__ = "pipelines"
+class Flowchart(BaseModel):
+    __tablename__ = "flowcharts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    loop_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
+    max_node_executions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_runtime_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_parallel_nodes: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+    nodes: Mapped[list["FlowchartNode"]] = relationship(
+        "FlowchartNode",
+        back_populates="flowchart",
+        cascade="all, delete-orphan",
+        order_by="FlowchartNode.id.asc()",
+    )
+    edges: Mapped[list["FlowchartEdge"]] = relationship(
+        "FlowchartEdge",
+        back_populates="flowchart",
+        cascade="all, delete-orphan",
+        order_by="FlowchartEdge.id.asc()",
+    )
+    runs: Mapped[list["FlowchartRun"]] = relationship(
+        "FlowchartRun",
+        back_populates="flowchart",
+        cascade="all, delete-orphan",
+        order_by="FlowchartRun.created_at.desc()",
+    )
+
+
+class FlowchartNode(BaseModel):
+    __tablename__ = "flowchart_nodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    flowchart_id: Mapped[int] = mapped_column(
+        ForeignKey("flowcharts.id"), nullable=False, index=True
+    )
+    node_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    ref_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_models.id"), nullable=True, index=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -423,25 +700,62 @@ class Pipeline(BaseModel):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
-    steps: Mapped[list["PipelineStep"]] = relationship(
-        "PipelineStep",
-        back_populates="pipeline",
-        order_by="PipelineStep.step_order.asc()",
+    flowchart: Mapped["Flowchart"] = relationship("Flowchart", back_populates="nodes")
+    model: Mapped["LLMModel | None"] = relationship(
+        "LLMModel", back_populates="flowchart_nodes", lazy="joined"
+    )
+    mcp_servers: Mapped[list["MCPServer"]] = relationship(
+        "MCPServer",
+        secondary=flowchart_node_mcp_servers,
+        back_populates="flowchart_nodes",
+    )
+    scripts: Mapped[list["Script"]] = relationship(
+        "Script",
+        secondary=flowchart_node_scripts,
+        back_populates="flowchart_nodes",
+        order_by=flowchart_node_scripts.c.position.asc(),
+    )
+    skills: Mapped[list["Skill"]] = relationship(
+        "Skill",
+        secondary=flowchart_node_skills,
+        back_populates="flowchart_nodes",
+        order_by=flowchart_node_skills.c.position.asc(),
+    )
+    outgoing_edges: Mapped[list["FlowchartEdge"]] = relationship(
+        "FlowchartEdge",
+        back_populates="source_node",
+        foreign_keys="FlowchartEdge.source_node_id",
+    )
+    incoming_edges: Mapped[list["FlowchartEdge"]] = relationship(
+        "FlowchartEdge",
+        back_populates="target_node",
+        foreign_keys="FlowchartEdge.target_node_id",
+    )
+    node_runs: Mapped[list["FlowchartRunNode"]] = relationship(
+        "FlowchartRunNode",
+        back_populates="flowchart_node",
+        cascade="all, delete-orphan",
+        order_by="FlowchartRunNode.id.asc()",
     )
 
 
-class PipelineStep(BaseModel):
-    __tablename__ = "pipeline_steps"
+class FlowchartEdge(BaseModel):
+    __tablename__ = "flowchart_edges"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pipeline_id: Mapped[int] = mapped_column(
-        ForeignKey("pipelines.id"), nullable=False, index=True
+    flowchart_id: Mapped[int] = mapped_column(
+        ForeignKey("flowcharts.id"), nullable=False, index=True
     )
-    task_template_id: Mapped[int] = mapped_column(
-        ForeignKey("task_templates.id"), nullable=False, index=True
+    source_node_id: Mapped[int] = mapped_column(
+        ForeignKey("flowchart_nodes.id"), nullable=False, index=True
     )
-    step_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    additional_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_node_id: Mapped[int] = mapped_column(
+        ForeignKey("flowchart_nodes.id"), nullable=False, index=True
+    )
+    source_handle_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target_handle_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    condition_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -449,23 +763,25 @@ class PipelineStep(BaseModel):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
-    pipeline: Mapped["Pipeline"] = relationship(
-        "Pipeline",
-        back_populates="steps",
+    flowchart: Mapped["Flowchart"] = relationship("Flowchart", back_populates="edges")
+    source_node: Mapped["FlowchartNode"] = relationship(
+        "FlowchartNode",
+        back_populates="outgoing_edges",
+        foreign_keys=[source_node_id],
     )
-    attachments: Mapped[list["Attachment"]] = relationship(
-        "Attachment",
-        secondary=pipeline_step_attachments,
-        back_populates="pipeline_steps",
+    target_node: Mapped["FlowchartNode"] = relationship(
+        "FlowchartNode",
+        back_populates="incoming_edges",
+        foreign_keys=[target_node_id],
     )
 
 
-class PipelineRun(BaseModel):
-    __tablename__ = "pipeline_runs"
+class FlowchartRun(BaseModel):
+    __tablename__ = "flowchart_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pipeline_id: Mapped[int] = mapped_column(
-        ForeignKey("pipelines.id"), nullable=False, index=True
+    flowchart_id: Mapped[int] = mapped_column(
+        ForeignKey("flowcharts.id"), nullable=False, index=True
     )
     celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
@@ -481,16 +797,68 @@ class PipelineRun(BaseModel):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+    flowchart: Mapped["Flowchart"] = relationship("Flowchart", back_populates="runs")
+    node_runs: Mapped[list["FlowchartRunNode"]] = relationship(
+        "FlowchartRunNode",
+        back_populates="flowchart_run",
+        cascade="all, delete-orphan",
+        order_by="FlowchartRunNode.id.asc()",
+    )
 
 
-class Milestone(BaseModel):
-    __tablename__ = "milestones"
+class FlowchartRunNode(BaseModel):
+    __tablename__ = "flowchart_run_nodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    flowchart_run_id: Mapped[int] = mapped_column(
+        ForeignKey("flowchart_runs.id"), nullable=False, index=True
+    )
+    flowchart_node_id: Mapped[int] = mapped_column(
+        ForeignKey("flowchart_nodes.id"), nullable=False, index=True
+    )
+    execution_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    agent_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_tasks.id"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
+    input_context_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    routing_state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_skill_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_skill_versions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_skill_manifest_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
+    skill_adapter_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    flowchart_run: Mapped["FlowchartRun"] = relationship(
+        "FlowchartRun", back_populates="node_runs"
+    )
+    flowchart_node: Mapped["FlowchartNode"] = relationship(
+        "FlowchartNode", back_populates="node_runs"
+    )
+
+
+class Plan(BaseModel):
+    __tablename__ = "plans"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    due_date: Mapped[datetime | None] = mapped_column(
+    completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
@@ -501,9 +869,106 @@ class Milestone(BaseModel):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
+    stages: Mapped[list["PlanStage"]] = relationship(
+        "PlanStage",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        order_by="PlanStage.position.asc(), PlanStage.id.asc()",
+    )
+
+
+class PlanStage(BaseModel):
+    __tablename__ = "plan_stages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("plans.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+
+    plan: Mapped["Plan"] = relationship("Plan", back_populates="stages")
+    tasks: Mapped[list["PlanTask"]] = relationship(
+        "PlanTask",
+        back_populates="stage",
+        cascade="all, delete-orphan",
+        order_by="PlanTask.position.asc(), PlanTask.id.asc()",
+    )
+
+
+class PlanTask(BaseModel):
+    __tablename__ = "plan_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_stage_id: Mapped[int] = mapped_column(
+        ForeignKey("plan_stages.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    stage: Mapped["PlanStage"] = relationship("PlanStage", back_populates="tasks")
+
+
+class Milestone(BaseModel):
+    __tablename__ = "milestones"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), default=MILESTONE_STATUS_PLANNED, nullable=False
+    )
+    priority: Mapped[str] = mapped_column(
+        String(16), default=MILESTONE_PRIORITY_MEDIUM, nullable=False
+    )
+    owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    start_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    due_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    progress_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    health: Mapped[str] = mapped_column(
+        String(16), default=MILESTONE_HEALTH_GREEN, nullable=False
+    )
+    success_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dependencies: Mapped[str | None] = mapped_column(Text, nullable=True)
+    links: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latest_update: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+# Canonical workflow naming going forward.
+# Keep legacy class aliases for compatibility while remaining codepaths migrate.
+Task = TaskTemplate
+NodeRun = AgentTask

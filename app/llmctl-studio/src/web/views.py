@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from pathlib import Path
 from datetime import datetime, timezone
+from html import unescape
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -19,7 +21,7 @@ from flask import (
     send_file,
     url_for,
 )
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from services.celery_app import celery_app
@@ -47,21 +49,44 @@ from core.models import (
     Agent,
     AgentTask,
     Attachment,
+    FLOWCHART_NODE_TYPE_CHOICES,
+    FLOWCHART_NODE_TYPE_DECISION,
+    FLOWCHART_NODE_TYPE_END,
+    FLOWCHART_NODE_TYPE_FLOWCHART,
+    FLOWCHART_NODE_TYPE_MEMORY,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_START,
+    FLOWCHART_NODE_TYPE_TASK,
+    Flowchart,
+    FlowchartEdge,
+    FlowchartNode,
+    FlowchartRun,
+    FlowchartRunNode,
     LLMModel,
     Memory,
+    MCP_SERVER_TYPE_CUSTOM,
+    MCP_SERVER_TYPE_INTEGRATED,
     MCPServer,
     Milestone,
-    Pipeline,
-    PipelineRun,
-    PipelineStep,
+    MILESTONE_HEALTH_CHOICES,
+    MILESTONE_HEALTH_GREEN,
+    MILESTONE_PRIORITY_CHOICES,
+    MILESTONE_PRIORITY_MEDIUM,
+    MILESTONE_STATUS_CHOICES,
+    MILESTONE_STATUS_DONE,
+    MILESTONE_STATUS_PLANNED,
+    Plan,
+    PlanStage,
+    PlanTask,
     Run,
     Role,
     RUN_ACTIVE_STATUSES,
     Script,
-    agent_scripts,
     agent_task_attachments,
     agent_task_scripts,
-    pipeline_step_attachments,
+    flowchart_node_mcp_servers,
+    flowchart_node_scripts,
     task_template_attachments,
     SCRIPT_TYPE_CHOICES,
     SCRIPT_TYPE_LABELS,
@@ -70,18 +95,38 @@ from core.models import (
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
     SCRIPT_TYPE_SKILL,
+    SYSTEM_MANAGED_MCP_SERVER_KEYS,
     TaskTemplate,
 )
 from core.mcp_config import format_mcp_config, validate_server_key
+from core.integrated_mcp import sync_integrated_mcp_servers
+from core.prompt_envelope import (
+    build_prompt_envelope,
+    parse_prompt_input,
+    serialize_prompt_envelope,
+)
+from core.task_integrations import (
+    TASK_INTEGRATION_KEYS,
+    TASK_INTEGRATION_LABELS,
+    TASK_INTEGRATION_OPTIONS,
+    parse_task_integration_keys,
+    serialize_task_integration_keys,
+    validate_task_integration_keys,
+)
+from core.quick_node import (
+    build_quick_node_agent_profile,
+    build_quick_node_system_contract,
+)
+from core.vllm_models import discover_vllm_local_models
 from storage.script_storage import read_script_file, remove_script_file, write_script_file
 from storage.attachment_storage import remove_attachment_file, write_attachment_file
 from core.task_stages import TASK_STAGE_ORDER
 from core.task_kinds import QUICK_TASK_KIND, is_quick_task_kind, task_kind_label
 from services.tasks import (
-    OUTPUT_INSTRUCTIONS_ONE_OFF,
+    build_one_off_output_contract,
     run_agent,
     run_agent_task,
-    run_pipeline,
+    run_flowchart,
 )
 
 bp = Blueprint("agents", __name__, template_folder="templates")
@@ -91,8 +136,12 @@ DEFAULT_TASKS_PER_PAGE = 10
 TASKS_PER_PAGE_OPTIONS = (10, 25, 50, 100)
 DEFAULT_RUNS_PER_PAGE = DEFAULT_TASKS_PER_PAGE
 RUNS_PER_PAGE_OPTIONS = TASKS_PER_PAGE_OPTIONS
+FLOWCHART_NODE_TYPE_SET = set(FLOWCHART_NODE_TYPE_CHOICES)
+DOCKER_CHROMA_HOST_ALIASES = {"llmctl-chromadb", "chromadb"}
 CODEX_MODEL_PREFERENCE = (
     "gpt-5.2-codex",
+    "gpt-5.3-codex",
+    "gpt-5.3-codex-spark",
     "gpt-5.2",
     "gpt-5.1-codex-max",
     "gpt-5.1-codex-mini",
@@ -124,7 +173,74 @@ SCRIPT_TYPE_FIELDS = {
     SCRIPT_TYPE_POST_RUN: "post_run_script_ids",
     SCRIPT_TYPE_SKILL: "skill_script_ids",
 }
-QUICK_AGENT_NAME = "Quick"
+
+MILESTONE_STATUS_LABELS = {
+    "planned": "planned",
+    "in_progress": "in progress",
+    "at_risk": "at risk",
+    "done": "done",
+    "archived": "archived",
+}
+MILESTONE_STATUS_CLASSES = {
+    "planned": "status-idle",
+    "in_progress": "status-running",
+    "at_risk": "status-warning",
+    "done": "status-success",
+    "archived": "status-idle",
+}
+MILESTONE_PRIORITY_LABELS = {
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+}
+MILESTONE_HEALTH_LABELS = {
+    "green": "green",
+    "yellow": "yellow",
+    "red": "red",
+}
+MILESTONE_HEALTH_CLASSES = {
+    "green": "status-success",
+    "yellow": "status-warning",
+    "red": "status-failed",
+}
+MILESTONE_STATUS_OPTIONS = tuple(
+    (value, MILESTONE_STATUS_LABELS.get(value, value)) for value in MILESTONE_STATUS_CHOICES
+)
+MILESTONE_PRIORITY_OPTIONS = tuple(
+    (value, MILESTONE_PRIORITY_LABELS.get(value, value))
+    for value in MILESTONE_PRIORITY_CHOICES
+)
+MILESTONE_HEALTH_OPTIONS = tuple(
+    (value, MILESTONE_HEALTH_LABELS.get(value, value)) for value in MILESTONE_HEALTH_CHOICES
+)
+
+FLOWCHART_NODE_TYPE_WITH_REF = {
+    FLOWCHART_NODE_TYPE_FLOWCHART,
+    FLOWCHART_NODE_TYPE_TASK,
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_MEMORY,
+}
+FLOWCHART_NODE_TYPE_REQUIRES_REF = {
+    FLOWCHART_NODE_TYPE_FLOWCHART,
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+}
+FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
+    FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False},
+    FLOWCHART_NODE_TYPE_END: {"model": False, "mcp": False, "scripts": False},
+    FLOWCHART_NODE_TYPE_FLOWCHART: {"model": False, "mcp": False, "scripts": False},
+    FLOWCHART_NODE_TYPE_TASK: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True},
+}
+FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES = 1
+FLOWCHART_DECISION_MAX_OUTGOING_EDGES = 3
+FLOWCHART_END_MAX_OUTGOING_EDGES = 0
+FLOWCHART_DEFAULT_START_X = 280.0
+FLOWCHART_DEFAULT_START_Y = 170.0
 
 
 def _parse_agent_payload(raw_json: str) -> tuple[str, str | None, str | None]:
@@ -153,22 +269,13 @@ def _parse_agent_payload(raw_json: str) -> tuple[str, str | None, str | None]:
 def _parse_task_prompt(raw_prompt: str | None) -> tuple[str | None, str | None]:
     if not raw_prompt:
         return None, None
-    stripped = raw_prompt.strip()
-    if not stripped:
+    if not raw_prompt.strip():
         return raw_prompt, None
-    try:
-        payload = json.loads(raw_prompt)
-    except (json.JSONDecodeError, TypeError):
+    prompt_text, payload = parse_prompt_input(raw_prompt)
+    if payload is None:
         return raw_prompt, None
     formatted = json.dumps(payload, indent=2, sort_keys=True)
-    prompt_text = None
-    if isinstance(payload, dict):
-        prompt_value = payload.get("prompt")
-        if isinstance(prompt_value, str):
-            prompt_text = prompt_value
-    elif isinstance(payload, str):
-        prompt_text = payload
-    return prompt_text, formatted
+    return prompt_text or None, formatted
 
 
 def _parse_role_details(raw_json: str) -> str:
@@ -231,12 +338,7 @@ def _attachment_in_use(session, attachment_id: int) -> bool:
     ).scalar_one()
     if template_refs:
         return True
-    step_refs = session.execute(
-        select(func.count())
-        .select_from(pipeline_step_attachments)
-        .where(pipeline_step_attachments.c.attachment_id == attachment_id)
-    ).scalar_one()
-    return bool(step_refs)
+    return False
 
 
 def _unlink_attachment(session, attachment_id: int) -> None:
@@ -248,11 +350,6 @@ def _unlink_attachment(session, attachment_id: int) -> None:
     session.execute(
         delete(task_template_attachments).where(
             task_template_attachments.c.attachment_id == attachment_id
-        )
-    )
-    session.execute(
-        delete(pipeline_step_attachments).where(
-            pipeline_step_attachments.c.attachment_id == attachment_id
         )
     )
 
@@ -301,53 +398,18 @@ def _build_role_payload(role: Role) -> dict[str, object]:
     }
 
 
-def _build_agent_scripts_payload(scripts: list[Script]) -> dict[str, object] | None:
-    if not scripts:
-        return None
-    grouped = {
-        "pre_init": [],
-        "init": [],
-        "post_init": [],
-        "post_run": [],
-        "skill": [],
-    }
-    for script in scripts:
-        path = script.file_path or script.file_name
-        entry = {
-            "description": script.description or "",
-            "path": path,
-        }
-        if script.script_type == SCRIPT_TYPE_PRE_INIT:
-            grouped["pre_init"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_INIT:
-            grouped["init"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_POST_INIT:
-            grouped["post_init"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_POST_RUN:
-            grouped["post_run"].append(entry)
-        elif script.script_type == SCRIPT_TYPE_SKILL:
-            grouped["skill"].append(entry)
-    payload: dict[str, object] = {
-        "description": (
-            "Scripts attached to this agent. Skill scripts are available to the LLM as needed; "
-            "other scripts are for reference."
-        ),
-    }
-    payload.update(grouped)
-    return payload
-
-
 def _build_agent_payload(
     agent: Agent,
     include_autoprompt: bool = True,
 ) -> dict[str, object]:
     description = agent.description or agent.name or ""
-    payload: dict[str, object] = {"description": description}
+    payload: dict[str, object] = {
+        "id": agent.id,
+        "name": agent.name,
+        "description": description,
+    }
     if include_autoprompt and agent.autonomous_prompt:
         payload["autoprompt"] = agent.autonomous_prompt
-    scripts_payload = _build_agent_scripts_payload(list(agent.scripts))
-    if scripts_payload:
-        payload["scripts"] = scripts_payload
     return payload
 
 
@@ -409,6 +471,38 @@ def _parse_script_selection() -> tuple[dict[str, list[int]], list[int], str | No
     return script_ids_by_type, legacy_ids, None
 
 
+def _parse_node_integration_selection() -> tuple[list[str], str | None]:
+    raw_values = [value.strip() for value in request.form.getlist("integration_keys")]
+    selected_keys, invalid_keys = validate_task_integration_keys(raw_values)
+    if invalid_keys:
+        return [], "Integration selection is invalid."
+    return selected_keys, None
+
+
+def _build_node_integration_options() -> list[dict[str, object]]:
+    overview = _integration_overview()
+    options: list[dict[str, object]] = []
+    for option in TASK_INTEGRATION_OPTIONS:
+        key = str(option.get("key") or "").strip().lower()
+        if key not in TASK_INTEGRATION_KEYS:
+            continue
+        label = str(option.get("label") or key)
+        description = str(option.get("description") or "")
+        provider_overview = overview.get(key)
+        connected = False
+        if isinstance(provider_overview, dict):
+            connected = bool(provider_overview.get("connected"))
+        options.append(
+            {
+                "key": key,
+                "label": label,
+                "description": description,
+                "connected": connected,
+            }
+        )
+    return options
+
+
 def _resolve_script_selection(
     session,
     script_ids_by_type: dict[str, list[int]],
@@ -453,28 +547,6 @@ def _resolve_script_selection(
     return script_ids_by_type, None
 
 
-def _set_agent_scripts(
-    session,
-    agent_id: int,
-    script_ids_by_type: dict[str, list[int]],
-) -> None:
-    session.execute(
-        delete(agent_scripts).where(agent_scripts.c.agent_id == agent_id)
-    )
-    rows: list[dict[str, int]] = []
-    for ids in script_ids_by_type.values():
-        for position, script_id in enumerate(ids, start=1):
-            rows.append(
-                {
-                    "agent_id": agent_id,
-                    "script_id": script_id,
-                    "position": position,
-                }
-            )
-    if rows:
-        session.execute(agent_scripts.insert(), rows)
-
-
 def _set_task_scripts(
     session,
     task_id: int,
@@ -497,6 +569,27 @@ def _set_task_scripts(
             )
     if rows:
         session.execute(agent_task_scripts.insert(), rows)
+
+
+def _set_flowchart_node_scripts(
+    session,
+    node_id: int,
+    script_ids: list[int],
+) -> None:
+    session.execute(
+        delete(flowchart_node_scripts).where(flowchart_node_scripts.c.flowchart_node_id == node_id)
+    )
+    if not script_ids:
+        return
+    rows = [
+        {
+            "flowchart_node_id": node_id,
+            "script_id": script_id,
+            "position": position,
+        }
+        for position, script_id in enumerate(script_ids, start=1)
+    ]
+    session.execute(flowchart_node_scripts.insert(), rows)
 
 
 def _read_script_content(script: Script) -> str:
@@ -532,6 +625,90 @@ def _parse_milestone_due_date(value: str | None) -> datetime | None:
     return parsed
 
 
+def _parse_completed_at(value: str | None) -> datetime | None:
+    return _parse_milestone_due_date(value)
+
+
+def _normalize_milestone_choice(
+    value: str | None,
+    *,
+    choices: tuple[str, ...],
+    fallback: str,
+) -> str:
+    cleaned = (value or "").strip().lower()
+    if cleaned in choices:
+        return cleaned
+    return fallback
+
+
+def _parse_milestone_progress(value: str | None) -> int | None:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return 0
+    try:
+        parsed = int(cleaned)
+    except ValueError:
+        return None
+    if parsed < 0 or parsed > 100:
+        return None
+    return parsed
+
+
+def _milestone_status_value(milestone: Milestone) -> str:
+    status = _normalize_milestone_choice(
+        milestone.status,
+        choices=MILESTONE_STATUS_CHOICES,
+        fallback=MILESTONE_STATUS_PLANNED,
+    )
+    if milestone.completed:
+        return MILESTONE_STATUS_DONE
+    return status
+
+
+def _milestone_priority_value(milestone: Milestone) -> str:
+    return _normalize_milestone_choice(
+        milestone.priority,
+        choices=MILESTONE_PRIORITY_CHOICES,
+        fallback=MILESTONE_PRIORITY_MEDIUM,
+    )
+
+
+def _milestone_health_value(milestone: Milestone) -> str:
+    return _normalize_milestone_choice(
+        milestone.health,
+        choices=MILESTONE_HEALTH_CHOICES,
+        fallback=MILESTONE_HEALTH_GREEN,
+    )
+
+
+def _milestone_progress_value(milestone: Milestone) -> int:
+    progress = milestone.progress_percent
+    if progress is None:
+        return 0
+    if progress < 0:
+        return 0
+    if progress > 100:
+        return 100
+    return progress
+
+
+def _milestone_template_context() -> dict[str, object]:
+    return {
+        "milestone_status_options": MILESTONE_STATUS_OPTIONS,
+        "milestone_priority_options": MILESTONE_PRIORITY_OPTIONS,
+        "milestone_health_options": MILESTONE_HEALTH_OPTIONS,
+        "milestone_status_labels": MILESTONE_STATUS_LABELS,
+        "milestone_status_classes": MILESTONE_STATUS_CLASSES,
+        "milestone_priority_labels": MILESTONE_PRIORITY_LABELS,
+        "milestone_health_labels": MILESTONE_HEALTH_LABELS,
+        "milestone_health_classes": MILESTONE_HEALTH_CLASSES,
+        "milestone_status_value": _milestone_status_value,
+        "milestone_priority_value": _milestone_priority_value,
+        "milestone_health_value": _milestone_health_value,
+        "milestone_progress_value": _milestone_progress_value,
+    }
+
+
 def _format_bytes(value: int | None) -> str:
     if value is None:
         return "-"
@@ -564,6 +741,36 @@ def _parse_stage_logs(raw: str | None) -> dict[str, str]:
     if not isinstance(payload, dict):
         return {}
     return {str(key): str(value) for key, value in payload.items() if value is not None}
+
+
+def _task_output_for_display(raw: str | None) -> str:
+    if not raw:
+        return ""
+    stripped = raw.strip()
+    if not stripped.startswith("{"):
+        return raw
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    if str(payload.get("node_type") or "").strip() != FLOWCHART_NODE_TYPE_TASK:
+        return raw
+
+    raw_output = payload.get("raw_output")
+    if isinstance(raw_output, str) and raw_output.strip():
+        return raw_output
+
+    structured_output = payload.get("structured_output")
+    if isinstance(structured_output, str) and structured_output.strip():
+        return structured_output
+    if isinstance(structured_output, dict):
+        text_value = structured_output.get("text")
+        if isinstance(text_value, str) and text_value.strip():
+            return text_value
+
+    return raw
 
 
 def _build_stage_status_map(
@@ -668,6 +875,110 @@ def _parse_run_settings(run_mode: str, run_max_loops_raw: str) -> tuple[int | No
     return run_max_loops, None
 
 
+def _parse_chroma_port(value: str | None) -> int | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return None
+    if parsed < 1 or parsed > 65535:
+        return None
+    return parsed
+
+
+def _normalize_chroma_target(host: str, port: int) -> tuple[str, int, str | None]:
+    host_value = (host or "").strip()
+    if host_value.lower() in DOCKER_CHROMA_HOST_ALIASES and port != 8000:
+        return (
+            "llmctl-chromadb",
+            8000,
+            "Using llmctl-chromadb:8000 inside Docker. Host-mapped ports (for example 18000) "
+            "are only for access from your machine.",
+        )
+    if host_value.lower() in DOCKER_CHROMA_HOST_ALIASES:
+        return "llmctl-chromadb", port, None
+    return host_value, port, None
+
+
+def _resolved_chroma_settings(
+    settings: dict[str, str] | None = None,
+) -> dict[str, str]:
+    settings = settings or _load_integration_settings("chroma")
+    host = (settings.get("host") or "").strip() or (Config.CHROMA_HOST or "").strip()
+    port_raw = (settings.get("port") or "").strip() or (Config.CHROMA_PORT or "").strip()
+    parsed_port = _parse_chroma_port(port_raw)
+    normalized_hint = ""
+    if host and parsed_port is not None:
+        host, parsed_port, hint = _normalize_chroma_target(host, parsed_port)
+        normalized_hint = hint or ""
+        port = str(parsed_port)
+    else:
+        port = str(parsed_port) if parsed_port is not None else ""
+    ssl_raw = (settings.get("ssl") or "").strip().lower()
+    if not ssl_raw:
+        ssl_raw = (Config.CHROMA_SSL or "").strip().lower()
+    return {
+        "host": host,
+        "port": port,
+        "ssl": "true" if ssl_raw == "true" else "false",
+        "normalized_hint": normalized_hint,
+    }
+
+
+def _chroma_connected(settings: dict[str, str]) -> bool:
+    return bool(
+        (settings.get("host") or "").strip()
+        and _parse_chroma_port(settings.get("port")) is not None
+    )
+
+
+def _chroma_endpoint_label(host: str, port: int | None) -> str:
+    host_label = host or "not set"
+    port_label = str(port) if port is not None else "not set"
+    return f"{host_label}:{port_label}"
+
+
+def _chroma_http_client(
+    settings: dict[str, str],
+) -> tuple[object | None, str, int | None, str | None, str | None]:
+    host = (settings.get("host") or "").strip()
+    port = _parse_chroma_port(settings.get("port"))
+    if not host or port is None:
+        return None, host, port, None, "Chroma host and port are required."
+    host, port, normalized_hint = _normalize_chroma_target(host, port)
+    ssl = _as_bool(settings.get("ssl"))
+    try:
+        import chromadb  # type: ignore[import-not-found]
+    except ModuleNotFoundError:
+        return None, host, port, normalized_hint, "Python package 'chromadb' is not installed."
+    try:
+        client = chromadb.HttpClient(host=host, port=port, ssl=ssl)
+    except TypeError:
+        client = chromadb.HttpClient(host=host, port=port)
+    except Exception as exc:
+        return None, host, port, normalized_hint, str(exc)
+    return client, host, port, normalized_hint, None
+
+
+def _list_collection_names(collections: object) -> list[str]:
+    names: set[str] = set()
+    if collections is None:
+        return []
+    try:
+        for item in collections:
+            if isinstance(item, str):
+                candidate = item.strip()
+            else:
+                candidate = str(getattr(item, "name", "") or "").strip()
+            if candidate:
+                names.add(candidate)
+    except TypeError:
+        return []
+    return sorted(names, key=str.lower)
+
+
 @bp.app_context_processor
 def _inject_template_helpers() -> dict[str, object]:
     return {
@@ -683,7 +994,6 @@ def _load_agents() -> list[Agent]:
         agents = (
             session.execute(
                 select(Agent)
-                .options(selectinload(Agent.mcp_servers))
                 .order_by(Agent.created_at.desc())
             )
             .scalars()
@@ -692,11 +1002,14 @@ def _load_agents() -> list[Agent]:
     return agents
 
 
-def _load_quick_agent_id(agents: list[Agent]) -> int | None:
-    for agent in agents:
-        if agent.name == QUICK_AGENT_NAME:
-            return agent.id
-    return None
+def _quick_node_default_model_id(models: list[LLMModel]) -> int | None:
+    if not models:
+        return None
+    configured_default = resolve_default_model_id(_load_integration_settings("llm"))
+    model_ids = {model.id for model in models}
+    if configured_default in model_ids:
+        return configured_default
+    return models[0].id
 
 
 def _load_runs(limit: int | None = None) -> list[Run]:
@@ -824,6 +1137,10 @@ def _provider_command(provider: str | None) -> str:
         return Config.GEMINI_CMD
     if provider == "claude":
         return f"{Config.CLAUDE_CMD} --print"
+    if provider == "vllm_local":
+        return f"{Config.VLLM_LOCAL_CMD} run-batch"
+    if provider == "vllm_remote":
+        return "HTTP /v1/chat/completions"
     return "-"
 
 
@@ -836,6 +1153,14 @@ def _provider_model(provider: str | None, settings: dict[str, str] | None = None
         return Config.GEMINI_MODEL or "default"
     if provider == "claude":
         return Config.CLAUDE_MODEL or "default"
+    if provider == "vllm_local":
+        settings = settings or _load_integration_settings("llm")
+        model = (settings.get("vllm_local_model") or "").strip()
+        return model or _vllm_local_default_model()
+    if provider == "vllm_remote":
+        settings = settings or _load_integration_settings("llm")
+        model = (settings.get("vllm_remote_model") or "").strip()
+        return model or _vllm_remote_default_model()
     return "default"
 
 
@@ -980,6 +1305,76 @@ def _simple_model_config_defaults(config: dict[str, object]) -> dict[str, object
     return {"model": config.get("model") or ""}
 
 
+def _vllm_local_default_model(models: list[dict[str, str]] | None = None) -> str:
+    entries = models or discover_vllm_local_models()
+    if entries:
+        return entries[0]["value"]
+    return Config.VLLM_LOCAL_FALLBACK_MODEL or ""
+
+
+def _vllm_remote_default_model() -> str:
+    return Config.VLLM_REMOTE_DEFAULT_MODEL or "GLM-4.7-Flash"
+
+
+def _vllm_number_defaults(
+    config: dict[str, object],
+    *,
+    temperature_default: str = "0.2",
+    max_tokens_default: str = "2048",
+    timeout_default: str = "180",
+) -> dict[str, str]:
+    def _pick(key: str, fallback: str) -> str:
+        value = config.get(key)
+        if value is None:
+            return fallback
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or fallback
+        return str(value)
+
+    return {
+        "temperature": _pick("temperature", temperature_default),
+        "max_tokens": _pick("max_tokens", max_tokens_default),
+        "request_timeout_seconds": _pick("request_timeout_seconds", timeout_default),
+    }
+
+
+def _vllm_local_model_config_defaults(
+    config: dict[str, object],
+    *,
+    default_model: str,
+) -> dict[str, object]:
+    numbers = _vllm_number_defaults(config)
+    return {
+        "model": str(config.get("model") or default_model),
+        "temperature": numbers["temperature"],
+        "max_tokens": numbers["max_tokens"],
+        "request_timeout_seconds": numbers["request_timeout_seconds"],
+    }
+
+
+def _vllm_remote_model_config_defaults(
+    config: dict[str, object],
+    *,
+    default_model: str,
+) -> dict[str, object]:
+    numbers = _vllm_number_defaults(
+        config,
+        temperature_default="0.2",
+        max_tokens_default="4096",
+        timeout_default="240",
+    )
+    return {
+        "model": str(config.get("model") or default_model),
+        "base_url_override": str(
+            config.get("base_url_override") or config.get("base_url") or ""
+        ),
+        "temperature": numbers["temperature"],
+        "max_tokens": numbers["max_tokens"],
+        "request_timeout_seconds": numbers["request_timeout_seconds"],
+    }
+
+
 def _parse_model_list(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -1024,13 +1419,24 @@ def _ordered_gemini_models(options: set[str]) -> list[str]:
     return ordered
 
 
-def _provider_default_model(provider: str) -> str:
+def _provider_default_model(
+    provider: str,
+    settings: dict[str, str] | None = None,
+) -> str:
     if provider == "codex":
         return Config.CODEX_MODEL or _codex_default_model()
     if provider == "gemini":
         return Config.GEMINI_MODEL or ""
     if provider == "claude":
         return Config.CLAUDE_MODEL or ""
+    if provider == "vllm_local":
+        settings = settings or _load_integration_settings("llm")
+        configured = (settings.get("vllm_local_model") or "").strip()
+        return configured or _vllm_local_default_model()
+    if provider == "vllm_remote":
+        settings = settings or _load_integration_settings("llm")
+        configured = (settings.get("vllm_remote_model") or "").strip()
+        return configured or _vllm_remote_default_model()
     return ""
 
 
@@ -1040,11 +1446,16 @@ def _provider_model_options(
 ) -> dict[str, list[str]]:
     settings = settings or _load_integration_settings("llm")
     models = models or _load_llm_models()
+    local_vllm_models = discover_vllm_local_models()
     options: dict[str, set[str]] = {provider: set() for provider in LLM_PROVIDERS}
     if "codex" in options:
         options["codex"].update(CODEX_MODEL_PREFERENCE)
     if "gemini" in options:
         options["gemini"].update(GEMINI_MODEL_OPTIONS)
+    if "vllm_local" in options:
+        options["vllm_local"].update(item["value"] for item in local_vllm_models)
+    if "vllm_remote" in options:
+        options["vllm_remote"].add(_vllm_remote_default_model())
     for provider in LLM_PROVIDERS:
         options[provider].update(
             _parse_model_list(settings.get(f"{provider}_models"))
@@ -1052,7 +1463,7 @@ def _provider_model_options(
         settings_model = (settings.get(f"{provider}_model") or "").strip()
         if settings_model:
             options[provider].add(settings_model)
-        default_model = _provider_default_model(provider)
+        default_model = _provider_default_model(provider, settings=settings)
         if default_model:
             options[provider].add(default_model.strip())
     for model in models:
@@ -1120,6 +1531,25 @@ def _model_config_payload(provider: str, form: dict[str, str]) -> dict[str, obje
         }
     if provider == "claude":
         return {"model": form.get("claude_model", "").strip()}
+    if provider == "vllm_local":
+        return {
+            "model": form.get("vllm_local_model", "").strip(),
+            "temperature": form.get("vllm_local_temperature", "").strip(),
+            "max_tokens": form.get("vllm_local_max_tokens", "").strip(),
+            "request_timeout_seconds": form.get(
+                "vllm_local_request_timeout_seconds", ""
+            ).strip(),
+        }
+    if provider == "vllm_remote":
+        return {
+            "model": form.get("vllm_remote_model", "").strip(),
+            "base_url_override": form.get("vllm_remote_base_url_override", "").strip(),
+            "temperature": form.get("vllm_remote_temperature", "").strip(),
+            "max_tokens": form.get("vllm_remote_max_tokens", "").strip(),
+            "request_timeout_seconds": form.get(
+                "vllm_remote_request_timeout_seconds", ""
+            ).strip(),
+        }
     return {}
 
 
@@ -1135,6 +1565,10 @@ def _load_llm_models() -> list[LLMModel]:
 def _model_display_name(model: LLMModel) -> str:
     config = _decode_model_config(model.config_json)
     model_name = str(config.get("model") or "").strip()
+    if model.provider == "vllm_local" and model_name:
+        for item in discover_vllm_local_models():
+            if item["value"] == model_name:
+                return item["label"]
     return model_name or "default"
 
 
@@ -1153,6 +1587,36 @@ def _gemini_settings_payload(settings: dict[str, str]) -> dict[str, object]:
 def _claude_settings_payload(settings: dict[str, str]) -> dict[str, object]:
     return {
         "api_key": settings.get("claude_api_key") or "",
+    }
+
+
+def _vllm_local_settings_payload(settings: dict[str, str]) -> dict[str, object]:
+    local_models = discover_vllm_local_models()
+    local_default = (
+        (settings.get("vllm_local_model") or "").strip()
+        or _vllm_local_default_model(local_models)
+    )
+    return {
+        "command": Config.VLLM_LOCAL_CMD,
+        "models": local_models,
+        "model": local_default,
+        "custom_dir": Config.VLLM_LOCAL_CUSTOM_MODELS_DIR,
+    }
+
+
+def _vllm_remote_settings_payload(settings: dict[str, str]) -> dict[str, object]:
+    remote_default = (
+        (settings.get("vllm_remote_model") or "").strip() or _vllm_remote_default_model()
+    )
+    remote_models = _parse_model_list(settings.get("vllm_remote_models"))
+    if remote_default and remote_default not in remote_models:
+        remote_models.insert(0, remote_default)
+    return {
+        "base_url": (settings.get("vllm_remote_base_url") or "").strip()
+        or Config.VLLM_REMOTE_BASE_URL,
+        "api_key": (settings.get("vllm_remote_api_key") or "").strip(),
+        "model": remote_default,
+        "models": remote_models,
     }
 
 
@@ -1396,6 +1860,111 @@ def _normalize_atlassian_site(site: str) -> str:
     if not cleaned.startswith(("http://", "https://")):
         cleaned = f"https://{cleaned}"
     return cleaned.rstrip("/")
+
+
+def _normalize_confluence_site(site: str) -> str:
+    base = _normalize_atlassian_site(site)
+    if not base:
+        return ""
+    if not base.endswith("/wiki"):
+        return f"{base}/wiki"
+    return base
+
+
+def _parse_option_entries(raw: str | None) -> list[dict[str, str]]:
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return []
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in payload:
+        value = ""
+        label = ""
+        if isinstance(item, dict):
+            value = (item.get("value") or "").strip()
+            label = (item.get("label") or "").strip()
+        elif isinstance(item, str):
+            value = item.strip()
+        if not value or value in seen:
+            continue
+        options.append({"value": value, "label": label or value})
+        seen.add(value)
+    options.sort(key=lambda option: option["label"].lower())
+    return options
+
+
+def _serialize_option_entries(options: list[dict[str, str]]) -> str:
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in options:
+        if not isinstance(item, dict):
+            continue
+        value = (item.get("value") or "").strip()
+        label = (item.get("label") or "").strip()
+        if not value or value in seen:
+            continue
+        normalized.append({"value": value, "label": label or value})
+        seen.add(value)
+    if not normalized:
+        return ""
+    return json.dumps(normalized, separators=(",", ":"))
+
+
+def _merge_selected_option(
+    options: list[dict[str, str]], selected: str | None
+) -> list[dict[str, str]]:
+    merged = list(options)
+    cleaned_selected = (selected or "").strip()
+    if not cleaned_selected:
+        return merged
+    if all(option.get("value") != cleaned_selected for option in merged):
+        merged.insert(0, {"value": cleaned_selected, "label": cleaned_selected})
+    return merged
+
+
+def _confluence_space_options(settings: dict[str, str]) -> list[dict[str, str]]:
+    return _merge_selected_option(
+        _parse_option_entries(settings.get("space_options")),
+        settings.get("space"),
+    )
+
+
+def _strip_confluence_html(value: str | None) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", value)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(
+        r"(?i)</(p|div|h1|h2|h3|h4|h5|h6|li|tr|blockquote|pre)>",
+        "\n",
+        text,
+    )
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = unescape(text)
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    compact = "\n".join(line for line in lines if line)
+    return compact.strip()
+
+
+def _sanitize_confluence_html(value: str | None) -> str:
+    if not isinstance(value, str):
+        return ""
+    cleaned = re.sub(
+        r"(?is)<(script|style|iframe|object|embed)[^>]*>.*?</\1>",
+        "",
+        value,
+    )
+    cleaned = re.sub(r'(?i)\son[a-z]+\s*=\s*"[^"]*"', "", cleaned)
+    cleaned = re.sub(r"(?i)\son[a-z]+\s*=\s*'[^']*'", "", cleaned)
+    cleaned = re.sub(r"(?i)\son[a-z]+\s*=\s*[^ >]+", "", cleaned)
+    cleaned = re.sub(r"(?i)javascript:", "", cleaned)
+    return cleaned.strip()
 
 
 def _safe_site_label(site: str) -> str:
@@ -2154,11 +2723,9 @@ def _fetch_confluence_spaces(api_key: str, site: str) -> list[dict[str, str]]:
     spaces: list[dict[str, str]] = []
     if not api_key or not site:
         return spaces
-    base = _normalize_atlassian_site(site)
+    base = _normalize_confluence_site(site)
     if not base:
         return spaces
-    if not base.endswith("/wiki"):
-        base = f"{base}/wiki"
     auth_mode = "basic" if ":" in api_key else "bearer"
     logger.info(
         "Confluence refresh: requesting spaces auth=%s site=%s",
@@ -2248,6 +2815,244 @@ def _fetch_confluence_spaces(api_key: str, site: str) -> list[dict[str, str]]:
     logger.info("Confluence refresh: loaded %s spaces", len(spaces))
     spaces.sort(key=lambda item: item["label"].lower())
     return spaces
+
+
+def _confluence_page_link(base: str, page: dict[str, object]) -> str:
+    links = page.get("_links")
+    if not isinstance(links, dict):
+        return ""
+    webui = links.get("webui")
+    if not isinstance(webui, str) or not webui:
+        return ""
+    if webui.startswith("http://") or webui.startswith("https://"):
+        return webui
+    return f"{base}{webui}" if webui.startswith("/") else f"{base}/{webui}"
+
+
+def _build_confluence_page_tree(
+    pages: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    if not pages:
+        return []
+    page_map: dict[str, dict[str, object]] = {}
+    children_by_parent: dict[str, list[str]] = {}
+    roots: list[str] = []
+    for item in pages:
+        page_id = str(item.get("id") or "").strip()
+        if not page_id:
+            continue
+        page_map[page_id] = dict(item)
+    for page_id, item in page_map.items():
+        parent_id = str(item.get("parent_id") or "").strip()
+        if parent_id and parent_id in page_map:
+            children_by_parent.setdefault(parent_id, []).append(page_id)
+            continue
+        roots.append(page_id)
+    for child_ids in children_by_parent.values():
+        child_ids.sort(
+            key=lambda child_id: str(
+                page_map.get(child_id, {}).get("title") or ""
+            ).lower()
+        )
+    roots.sort(
+        key=lambda root_id: str(page_map.get(root_id, {}).get("title") or "").lower()
+    )
+    ordered: list[dict[str, object]] = []
+    stack: list[tuple[str, int]] = [(root_id, 0) for root_id in reversed(roots)]
+    seen: set[str] = set()
+    while stack:
+        current_id, depth = stack.pop()
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        item = dict(page_map.get(current_id) or {})
+        if not item:
+            continue
+        item["depth"] = depth
+        ordered.append(item)
+        for child_id in reversed(children_by_parent.get(current_id, [])):
+            stack.append((child_id, depth + 1))
+    return ordered
+
+
+def _fetch_confluence_pages(
+    api_key: str, site: str, space_key: str
+) -> list[dict[str, object]]:
+    pages: list[dict[str, object]] = []
+    if not api_key or not site or not space_key:
+        return pages
+    base = _normalize_confluence_site(site)
+    if not base:
+        return pages
+    headers = _build_atlassian_headers(api_key)
+    start = 0
+    limit = 50
+    seen: set[str] = set()
+    while True:
+        query = urlencode(
+            {
+                "spaceKey": space_key,
+                "type": "page",
+                "status": "current",
+                "start": start,
+                "limit": limit,
+                "expand": "history.lastUpdated,version,ancestors",
+            }
+        )
+        url = f"{base}/rest/api/content?{query}"
+        request = Request(url, headers=headers)
+        try:
+            with urlopen(request, timeout=15) as response:
+                payload = json.load(response)
+        except HTTPError as exc:
+            body_snippet = _error_body_snippet(exc)
+            logger.warning(
+                "Confluence pages: HTTP error code=%s url=%s body=%s",
+                exc.code,
+                url,
+                body_snippet,
+            )
+            if exc.code in {401, 403}:
+                raise ValueError(
+                    "Confluence API key is invalid or lacks page access."
+                ) from exc
+            if exc.code == 404:
+                raise ValueError("Confluence space not found.") from exc
+            raise ValueError("Confluence API error while fetching pages.") from exc
+        except URLError as exc:
+            logger.warning("Confluence pages: network error url=%s", url)
+            raise ValueError("Unable to reach Confluence API.") from exc
+        if not isinstance(payload, dict):
+            break
+        results = payload.get("results")
+        if isinstance(results, list):
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                page_id = str(item.get("id") or "").strip()
+                if not page_id or page_id in seen:
+                    continue
+                history = item.get("history")
+                if not isinstance(history, dict):
+                    history = {}
+                last_updated = history.get("lastUpdated")
+                if not isinstance(last_updated, dict):
+                    last_updated = {}
+                author = last_updated.get("by")
+                if not isinstance(author, dict):
+                    author = {}
+                ancestors = item.get("ancestors")
+                if not isinstance(ancestors, list):
+                    ancestors = []
+                parent_id = ""
+                if ancestors:
+                    parent_candidate = ancestors[-1]
+                    if isinstance(parent_candidate, dict):
+                        parent_id = str(parent_candidate.get("id") or "").strip()
+                pages.append(
+                    {
+                        "id": page_id,
+                        "title": str(item.get("title") or "Untitled page"),
+                        "status": str(item.get("status") or "current"),
+                        "updated_at": _format_jira_timestamp(
+                            last_updated.get("when")
+                            if isinstance(last_updated.get("when"), str)
+                            else None
+                        ),
+                        "updated_by": str(author.get("displayName") or ""),
+                        "url": _confluence_page_link(base, item),
+                        "parent_id": parent_id,
+                    }
+                )
+                seen.add(page_id)
+        size = payload.get("size")
+        if not isinstance(size, int) or size < limit:
+            break
+        start += limit
+    return _build_confluence_page_tree(pages)
+
+
+def _fetch_confluence_page(
+    api_key: str, site: str, page_id: str
+) -> dict[str, object]:
+    if not api_key or not site or not page_id:
+        return {}
+    base = _normalize_confluence_site(site)
+    if not base:
+        return {}
+    headers = _build_atlassian_headers(api_key)
+    query = urlencode(
+        {
+            "expand": "space,history.lastUpdated,version,body.view",
+        }
+    )
+    url = f"{base}/rest/api/content/{quote(page_id)}?{query}"
+    request = Request(url, headers=headers)
+    try:
+        with urlopen(request, timeout=15) as response:
+            payload = json.load(response)
+    except HTTPError as exc:
+        body_snippet = _error_body_snippet(exc)
+        logger.warning(
+            "Confluence page: HTTP error code=%s url=%s body=%s",
+            exc.code,
+            url,
+            body_snippet,
+        )
+        if exc.code in {401, 403}:
+            raise ValueError(
+                "Confluence API key is invalid or lacks page access."
+            ) from exc
+        if exc.code == 404:
+            raise ValueError("Confluence page not found.") from exc
+        raise ValueError("Confluence API error while fetching page.") from exc
+    except URLError as exc:
+        logger.warning("Confluence page: network error url=%s", url)
+        raise ValueError("Unable to reach Confluence API.") from exc
+    if not isinstance(payload, dict):
+        return {}
+    history = payload.get("history")
+    if not isinstance(history, dict):
+        history = {}
+    last_updated = history.get("lastUpdated")
+    if not isinstance(last_updated, dict):
+        last_updated = {}
+    author = last_updated.get("by")
+    if not isinstance(author, dict):
+        author = {}
+    space = payload.get("space")
+    if not isinstance(space, dict):
+        space = {}
+    body = payload.get("body")
+    if not isinstance(body, dict):
+        body = {}
+    view = body.get("view")
+    if not isinstance(view, dict):
+        view = {}
+    version = payload.get("version")
+    if not isinstance(version, dict):
+        version = {}
+    raw_body_html = view.get("value")
+    body_html = _sanitize_confluence_html(raw_body_html if isinstance(raw_body_html, str) else "")
+    body_text = _strip_confluence_html(raw_body_html if isinstance(raw_body_html, str) else "")
+    if len(body_text) > 6000:
+        body_text = f"{body_text[:6000].rstrip()}..."
+    return {
+        "id": str(payload.get("id") or page_id),
+        "title": str(payload.get("title") or "Untitled page"),
+        "status": str(payload.get("status") or "current"),
+        "space": str(space.get("key") or ""),
+        "updated_at": _format_jira_timestamp(
+            last_updated.get("when")
+            if isinstance(last_updated.get("when"), str)
+            else None
+        ),
+        "updated_by": str(author.get("displayName") or ""),
+        "version": str(version.get("number") or ""),
+        "body_html": body_html,
+        "body_text": body_text,
+        "url": _confluence_page_link(base, payload),
+    }
 
 
 def _fetch_github_pull_requests(
@@ -2740,15 +3545,23 @@ def _load_tasks_page(
     per_page: int,
     *,
     agent_id: int | None = None,
-    kind: str | None = None,
+    node_type: str | None = None,
     status: str | None = None,
 ) -> tuple[list[AgentTask], int, int, int]:
     with session_scope() as session:
         filters = []
         if agent_id is not None:
             filters.append(AgentTask.agent_id == agent_id)
-        if kind:
-            filters.append(AgentTask.kind == kind)
+        if node_type:
+            flowchart_kind = f"flowchart_{node_type}"
+            filters.append(
+                or_(
+                    AgentTask.flowchart_node_id.in_(
+                        select(FlowchartNode.id).where(FlowchartNode.node_type == node_type)
+                    ),
+                    AgentTask.kind == flowchart_kind,
+                )
+            )
         if status:
             filters.append(AgentTask.status == status)
 
@@ -2772,6 +3585,20 @@ def _load_tasks_page(
                 stmt = stmt.where(*filters)
             tasks = session.execute(stmt).scalars().all()
         return tasks, total_tasks, page, total_pages
+
+
+def _normalize_flowchart_node_type(value: str | None) -> str | None:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return None
+    return cleaned if cleaned in FLOWCHART_NODE_TYPE_SET else None
+
+
+def _flowchart_node_type_from_task_kind(kind: str | None) -> str | None:
+    cleaned = str(kind or "").strip().lower()
+    if not cleaned or not cleaned.startswith("flowchart_"):
+        return None
+    return _normalize_flowchart_node_type(cleaned.removeprefix("flowchart_"))
 
 
 def _build_pagination_items(
@@ -2813,16 +3640,6 @@ def _load_task_templates() -> list[TaskTemplate]:
             .all()
         )
 
-
-def _load_pipelines() -> list[Pipeline]:
-    with session_scope() as session:
-        return (
-            session.execute(select(Pipeline).order_by(Pipeline.created_at.desc()))
-            .scalars()
-            .all()
-        )
-
-
 def _load_roles() -> list[Role]:
     with session_scope() as session:
         return (
@@ -2835,6 +3652,7 @@ def _load_roles() -> list[Role]:
 PAGINATION_PAGE_SIZES = (10, 25, 50, 100)
 PAGINATION_DEFAULT_SIZE = 10
 PAGINATION_WINDOW = 2
+WORKFLOW_LIST_PER_PAGE = 10
 
 
 def _parse_page(value: str | None) -> int:
@@ -2928,12 +3746,32 @@ def _load_mcp_servers() -> list[MCPServer]:
         return (
             session.execute(
                 select(MCPServer)
-                .options(selectinload(MCPServer.agents))
+                .options(
+                    selectinload(MCPServer.task_templates),
+                    selectinload(MCPServer.flowchart_nodes),
+                    selectinload(MCPServer.tasks),
+                )
                 .order_by(MCPServer.created_at.desc())
             )
             .scalars()
             .all()
         )
+
+
+def _split_mcp_servers_by_type(
+    mcp_servers: list[MCPServer],
+) -> tuple[list[MCPServer], list[MCPServer]]:
+    integrated = [
+        mcp
+        for mcp in mcp_servers
+        if (mcp.server_type or MCP_SERVER_TYPE_CUSTOM) == MCP_SERVER_TYPE_INTEGRATED
+    ]
+    custom = [
+        mcp
+        for mcp in mcp_servers
+        if (mcp.server_type or MCP_SERVER_TYPE_CUSTOM) != MCP_SERVER_TYPE_INTEGRATED
+    ]
+    return integrated, custom
 
 
 def _load_scripts() -> list[Script]:
@@ -2962,7 +3800,6 @@ def _load_attachments() -> list[Attachment]:
                 .options(
                     selectinload(Attachment.tasks),
                     selectinload(Attachment.templates),
-                    selectinload(Attachment.pipeline_steps),
                 )
                 .order_by(Attachment.created_at.desc())
             )
@@ -2975,37 +3812,658 @@ def _load_milestones() -> list[Milestone]:
     with session_scope() as session:
         return (
             session.execute(
-                select(Milestone).order_by(Milestone.created_at.desc())
+                select(Milestone).order_by(
+                    Milestone.completed.asc(),
+                    Milestone.due_date.is_(None),
+                    Milestone.due_date.asc(),
+                    Milestone.created_at.desc(),
+                )
             )
             .scalars()
             .all()
         )
 
 
-def _load_pipeline_steps(pipeline_ids: list[int]) -> list[PipelineStep]:
-    if not pipeline_ids:
-        return []
-    with session_scope() as session:
-        return (
-            session.execute(
-                select(PipelineStep)
-                .where(PipelineStep.pipeline_id.in_(pipeline_ids))
-                .order_by(PipelineStep.pipeline_id.asc(), PipelineStep.step_order.asc())
-            )
-            .scalars()
-            .all()
-        )
+def _parse_json_dict(raw: str | None) -> dict[str, object]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
-def _load_pipeline_runs(limit: int = 10) -> list[PipelineRun]:
-    with session_scope() as session:
-        return (
-            session.execute(
-                select(PipelineRun).order_by(PipelineRun.created_at.desc()).limit(limit)
+def _flowchart_request_payload() -> dict[str, object]:
+    payload = request.get_json(silent=True)
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
+def _flowchart_as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _flowchart_wants_json() -> bool:
+    if (request.args.get("format") or "").strip().lower() == "json":
+        return True
+    accepted = request.accept_mimetypes
+    return (
+        accepted["application/json"] > 0
+        and accepted["application/json"] >= accepted["text/html"]
+    )
+
+
+def _coerce_optional_int(
+    value: object,
+    *,
+    field_name: str,
+    minimum: int | None = None,
+) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        value = cleaned
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer.") from exc
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{field_name} must be >= {minimum}.")
+    return parsed
+
+
+def _coerce_float(value: object, *, field_name: str, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return default
+        value = cleaned
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number.") from exc
+
+
+def _coerce_optional_handle_id(value: object, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip().lower()
+    if not cleaned:
+        return None
+    if not re.fullmatch(r"[a-z][0-9]+", cleaned):
+        raise ValueError(f"{field_name} is invalid.")
+    return cleaned
+
+
+def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
+    return FLOWCHART_NODE_UTILITY_COMPATIBILITY.get(
+        node_type,
+        {"model": False, "mcp": False, "scripts": False},
+    )
+
+
+def _validate_flowchart_utility_compatibility(
+    node_type: str,
+    *,
+    model_id: int | None,
+    mcp_server_ids: list[int] | None = None,
+    script_ids: list[int] | None = None,
+) -> list[str]:
+    compatibility = _flowchart_node_compatibility(node_type)
+    errors: list[str] = []
+    if model_id is not None and not compatibility["model"]:
+        errors.append(f"Node type '{node_type}' does not support models.")
+    if mcp_server_ids and not compatibility["mcp"]:
+        errors.append(f"Node type '{node_type}' does not support MCP servers.")
+    if script_ids and not compatibility["scripts"]:
+        errors.append(f"Node type '{node_type}' does not support scripts.")
+    return errors
+
+
+def _serialize_flowchart(flowchart: Flowchart) -> dict[str, object]:
+    return {
+        "id": flowchart.id,
+        "name": flowchart.name,
+        "description": flowchart.description,
+        "max_node_executions": flowchart.max_node_executions,
+        "max_runtime_minutes": flowchart.max_runtime_minutes,
+        "max_parallel_nodes": flowchart.max_parallel_nodes,
+        "created_at": _human_time(flowchart.created_at),
+        "updated_at": _human_time(flowchart.updated_at),
+    }
+
+
+def _serialize_flowchart_node(node: FlowchartNode) -> dict[str, object]:
+    return {
+        "id": node.id,
+        "flowchart_id": node.flowchart_id,
+        "node_type": node.node_type,
+        "title": node.title,
+        "ref_id": node.ref_id,
+        "x": node.x,
+        "y": node.y,
+        "config": _parse_json_dict(node.config_json),
+        "model_id": node.model_id,
+        "mcp_server_ids": [server.id for server in node.mcp_servers],
+        "script_ids": [script.id for script in node.scripts],
+        "compatibility": _flowchart_node_compatibility(node.node_type),
+        "created_at": _human_time(node.created_at),
+        "updated_at": _human_time(node.updated_at),
+    }
+
+
+def _serialize_flowchart_edge(edge: FlowchartEdge) -> dict[str, object]:
+    return {
+        "id": edge.id,
+        "flowchart_id": edge.flowchart_id,
+        "source_node_id": edge.source_node_id,
+        "target_node_id": edge.target_node_id,
+        "source_handle_id": edge.source_handle_id,
+        "target_handle_id": edge.target_handle_id,
+        "condition_key": edge.condition_key,
+        "label": edge.label,
+        "created_at": _human_time(edge.created_at),
+        "updated_at": _human_time(edge.updated_at),
+    }
+
+
+def _ensure_flowchart_start_node(
+    session,
+    *,
+    flowchart_id: int,
+) -> FlowchartNode:
+    start_node = (
+        session.execute(
+            select(FlowchartNode)
+            .where(
+                FlowchartNode.flowchart_id == flowchart_id,
+                FlowchartNode.node_type == FLOWCHART_NODE_TYPE_START,
             )
-            .scalars()
-            .all()
+            .order_by(FlowchartNode.id.asc())
         )
+        .scalars()
+        .first()
+    )
+    if start_node is not None:
+        return start_node
+    return FlowchartNode.create(
+        session,
+        flowchart_id=flowchart_id,
+        node_type=FLOWCHART_NODE_TYPE_START,
+        title="Start",
+        x=FLOWCHART_DEFAULT_START_X,
+        y=FLOWCHART_DEFAULT_START_Y,
+        config_json=json.dumps({}, sort_keys=True),
+    )
+
+
+def _serialize_flowchart_run(run: FlowchartRun) -> dict[str, object]:
+    return {
+        "id": run.id,
+        "flowchart_id": run.flowchart_id,
+        "status": run.status,
+        "celery_task_id": run.celery_task_id,
+        "created_at": _human_time(run.created_at),
+        "started_at": _human_time(run.started_at),
+        "finished_at": _human_time(run.finished_at),
+        "updated_at": _human_time(run.updated_at),
+    }
+
+
+def _serialize_flowchart_run_node(node_run: FlowchartRunNode) -> dict[str, object]:
+    return {
+        "id": node_run.id,
+        "flowchart_run_id": node_run.flowchart_run_id,
+        "flowchart_node_id": node_run.flowchart_node_id,
+        "execution_index": node_run.execution_index,
+        "agent_task_id": node_run.agent_task_id,
+        "status": node_run.status,
+        "input_context": _parse_json_dict(node_run.input_context_json),
+        "output_state": _parse_json_dict(node_run.output_state_json),
+        "routing_state": _parse_json_dict(node_run.routing_state_json),
+        "error": node_run.error,
+        "created_at": _human_time(node_run.created_at),
+        "started_at": _human_time(node_run.started_at),
+        "finished_at": _human_time(node_run.finished_at),
+        "updated_at": _human_time(node_run.updated_at),
+    }
+
+
+def _flowchart_node_task_kind(node_type: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "_", (node_type or "").strip().lower()).strip("_")
+    if not cleaned:
+        cleaned = "node"
+    return f"flowchart_{cleaned}"
+
+
+def _flowchart_node_task_prompt(
+    *,
+    flowchart_id: int,
+    run_id: int,
+    node_run: FlowchartRunNode,
+    node_type: str,
+) -> str:
+    payload = {
+        "kind": "flowchart_node_activity",
+        "flowchart_id": flowchart_id,
+        "flowchart_run_id": run_id,
+        "flowchart_node_id": node_run.flowchart_node_id,
+        "flowchart_node_run_id": node_run.id,
+        "flowchart_node_type": node_type,
+        "execution_index": node_run.execution_index,
+        "input_context": _parse_json_dict(node_run.input_context_json),
+    }
+    return json.dumps(payload, sort_keys=True)
+
+
+def _backfill_flowchart_node_activity_tasks(
+    session,
+    *,
+    flowchart_id: int,
+    run_id: int,
+) -> int:
+    rows = (
+        session.execute(
+            select(FlowchartRunNode, FlowchartNode)
+            .join(FlowchartNode, FlowchartNode.id == FlowchartRunNode.flowchart_node_id)
+            .where(
+                FlowchartRunNode.flowchart_run_id == run_id,
+                FlowchartNode.flowchart_id == flowchart_id,
+                FlowchartRunNode.agent_task_id.is_(None),
+            )
+            .order_by(FlowchartRunNode.created_at.asc(), FlowchartRunNode.id.asc())
+        )
+        .all()
+    )
+    created_count = 0
+    for node_run, node in rows:
+        template_id = node.ref_id if node.node_type == FLOWCHART_NODE_TYPE_TASK else None
+        output = (node_run.output_state_json or "").strip() or None
+        task = AgentTask.create(
+            session,
+            task_template_id=template_id,
+            flowchart_id=flowchart_id,
+            flowchart_run_id=run_id,
+            flowchart_node_id=node_run.flowchart_node_id,
+            status=node_run.status or "queued",
+            kind=_flowchart_node_task_kind(node.node_type),
+            prompt=_flowchart_node_task_prompt(
+                flowchart_id=flowchart_id,
+                run_id=run_id,
+                node_run=node_run,
+                node_type=node.node_type,
+            ),
+            output=output,
+            error=node_run.error,
+            started_at=node_run.started_at,
+            finished_at=node_run.finished_at,
+        )
+        node_run.agent_task_id = task.id
+        created_count += 1
+    return created_count
+
+
+def _flowchart_status_class(status: str | None) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"running"}:
+        return "status-running"
+    if normalized in {"stopping"}:
+        return "status-warning"
+    if normalized in {"queued", "pending"}:
+        return "status-queued"
+    if normalized in {"completed", "succeeded"}:
+        return "status-success"
+    if normalized in {"failed", "error"}:
+        return "status-failed"
+    if normalized in {"canceled", "cancelled", "stopped"}:
+        return "status-canceled"
+    return "status-idle"
+
+
+def _flowchart_catalog(session) -> dict[str, list[dict[str, object]]]:
+    integration_overview = _integration_overview()
+    agents = (
+        session.execute(select(Agent).order_by(Agent.created_at.desc())).scalars().all()
+    )
+    models = (
+        session.execute(select(LLMModel).order_by(LLMModel.created_at.desc()))
+        .scalars()
+        .all()
+    )
+    mcp_servers = (
+        session.execute(select(MCPServer).order_by(MCPServer.created_at.desc()))
+        .scalars()
+        .all()
+    )
+    scripts = (
+        session.execute(select(Script).order_by(Script.created_at.desc())).scalars().all()
+    )
+    task_templates = (
+        session.execute(
+            select(TaskTemplate)
+            .options(
+                selectinload(TaskTemplate.mcp_servers),
+                selectinload(TaskTemplate.scripts),
+            )
+            .order_by(TaskTemplate.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    plans = session.execute(select(Plan).order_by(Plan.created_at.desc())).scalars().all()
+    flowcharts = (
+        session.execute(select(Flowchart).order_by(Flowchart.created_at.desc()))
+        .scalars()
+        .all()
+    )
+    milestones = (
+        session.execute(select(Milestone).order_by(Milestone.created_at.desc()))
+        .scalars()
+        .all()
+    )
+    memories = (
+        session.execute(select(Memory).order_by(Memory.created_at.desc())).scalars().all()
+    )
+    return {
+        "agents": [
+            {
+                "id": agent.id,
+                "name": agent.name,
+            }
+            for agent in agents
+        ],
+        "models": [
+            {
+                "id": model.id,
+                "name": model.name,
+                "provider": model.provider,
+                "model_name": _model_display_name(model),
+            }
+            for model in models
+        ],
+        "mcp_servers": [
+            {
+                "id": server.id,
+                "name": server.name,
+                "server_key": server.server_key,
+                "server_type": server.server_type,
+            }
+            for server in mcp_servers
+        ],
+        "scripts": [
+            {"id": script.id, "file_name": script.file_name, "script_type": script.script_type}
+            for script in scripts
+        ],
+        "task_integrations": [
+            {
+                "key": str(option["key"]).strip().lower(),
+                "label": str(option.get("label") or option["key"]),
+                "description": str(option.get("description") or ""),
+                "connected": bool(
+                    integration_overview.get(str(option["key"]).strip().lower(), {}).get(
+                        "connected"
+                    )
+                ),
+            }
+            for option in TASK_INTEGRATION_OPTIONS
+            if option.get("key")
+        ],
+        "tasks": [
+            {
+                "id": task.id,
+                "name": task.name,
+                "prompt": task.prompt,
+                "model_id": task.model_id,
+                "mcp_server_ids": [server.id for server in task.mcp_servers],
+                "script_ids": [script.id for script in task.scripts],
+            }
+            for task in task_templates
+        ],
+        "flowcharts": [
+            {"id": flowchart.id, "name": flowchart.name} for flowchart in flowcharts
+        ],
+        "plans": [{"id": plan.id, "name": plan.name} for plan in plans],
+        "milestones": [
+            {"id": milestone.id, "name": milestone.name} for milestone in milestones
+        ],
+        "memories": [{"id": memory.id, "title": memory.title} for memory in memories],
+    }
+
+
+def _flowchart_ref_exists(
+    session,
+    *,
+    node_type: str,
+    ref_id: int | None,
+) -> bool:
+    if ref_id is None:
+        return False
+    if node_type == FLOWCHART_NODE_TYPE_FLOWCHART:
+        return session.get(Flowchart, ref_id) is not None
+    if node_type == FLOWCHART_NODE_TYPE_TASK:
+        return session.get(TaskTemplate, ref_id) is not None
+    if node_type == FLOWCHART_NODE_TYPE_PLAN:
+        return session.get(Plan, ref_id) is not None
+    if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+        return session.get(Milestone, ref_id) is not None
+    if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+        return session.get(Memory, ref_id) is not None
+    return True
+
+
+def _task_node_has_prompt(config: object) -> bool:
+    if not isinstance(config, dict):
+        return False
+    prompt = config.get("task_prompt")
+    return isinstance(prompt, str) and bool(prompt.strip())
+
+
+def _validate_flowchart_graph_snapshot(
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, object]],
+) -> list[str]:
+    errors: list[str] = []
+    node_ids: set[int] = set()
+    node_type_by_id: dict[int, str] = {}
+    incoming: dict[int, int] = {}
+    outgoing: dict[int, int] = {}
+
+    for node in nodes:
+        node_id = int(node["id"])
+        node_ids.add(node_id)
+        node_type = str(node.get("node_type") or "")
+        config_payload = node.get("config") if isinstance(node.get("config"), dict) else {}
+        node_type_by_id[node_id] = node_type
+        incoming.setdefault(node_id, 0)
+        outgoing.setdefault(node_id, 0)
+        if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
+            errors.append(f"Node {node_id} has unknown node_type '{node_type}'.")
+            continue
+        ref_id = node.get("ref_id")
+        if node_type in FLOWCHART_NODE_TYPE_REQUIRES_REF and ref_id is None:
+            errors.append(f"Node {node_id} ({node_type}) requires ref_id.")
+        if node_type not in FLOWCHART_NODE_TYPE_WITH_REF and ref_id is not None:
+            errors.append(f"Node {node_id} ({node_type}) does not allow ref_id.")
+        if (
+            node_type == FLOWCHART_NODE_TYPE_TASK
+            and ref_id is None
+            and not _task_node_has_prompt(config_payload)
+        ):
+            errors.append(
+                f"Node {node_id} ({node_type}) requires ref_id or config.task_prompt."
+            )
+        if node_type == FLOWCHART_NODE_TYPE_TASK and "integration_keys" in config_payload:
+            raw_integration_keys = config_payload.get("integration_keys")
+            if raw_integration_keys is not None and not isinstance(
+                raw_integration_keys, list
+            ):
+                errors.append(
+                    f"Node {node_id} ({node_type}) config.integration_keys must be an array."
+                )
+            elif isinstance(raw_integration_keys, list):
+                _, invalid_integration_keys = validate_task_integration_keys(
+                    raw_integration_keys
+                )
+                if invalid_integration_keys:
+                    errors.append(
+                        f"Node {node_id} ({node_type}) config.integration_keys contains invalid keys: "
+                        + ", ".join(invalid_integration_keys)
+                        + "."
+                    )
+
+        compatibility = _flowchart_node_compatibility(node_type)
+        if node.get("model_id") is not None and not compatibility["model"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support models.")
+        mcp_server_ids = node.get("mcp_server_ids") or []
+        if mcp_server_ids and not compatibility["mcp"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support MCP servers.")
+        script_ids = node.get("script_ids") or []
+        if script_ids and not compatibility["scripts"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support scripts.")
+
+    start_nodes = [node for node in nodes if node.get("node_type") == FLOWCHART_NODE_TYPE_START]
+    if len(start_nodes) != 1:
+        errors.append(
+            f"Flowchart must contain exactly one start node; found {len(start_nodes)}."
+        )
+
+    decision_outgoing_keys: dict[int, list[str]] = {}
+    for edge in edges:
+        source_node_id = int(edge["source_node_id"])
+        target_node_id = int(edge["target_node_id"])
+        if source_node_id not in node_ids:
+            errors.append(f"Edge source node {source_node_id} does not exist.")
+            continue
+        if target_node_id not in node_ids:
+            errors.append(f"Edge target node {target_node_id} does not exist.")
+            continue
+        outgoing[source_node_id] = outgoing.get(source_node_id, 0) + 1
+        incoming[target_node_id] = incoming.get(target_node_id, 0) + 1
+        node_type = node_type_by_id.get(source_node_id)
+        condition_key = (str(edge.get("condition_key") or "")).strip()
+        if node_type == FLOWCHART_NODE_TYPE_DECISION:
+            if not condition_key:
+                errors.append(
+                    f"Decision node {source_node_id} requires condition_key on each outgoing edge."
+                )
+            decision_outgoing_keys.setdefault(source_node_id, []).append(condition_key)
+        elif condition_key:
+            errors.append(
+                f"Only decision nodes may define condition_key (source node {source_node_id})."
+            )
+
+    for node in nodes:
+        node_id = int(node["id"])
+        node_type = str(node.get("node_type") or "")
+        if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
+            continue
+        outgoing_count = outgoing.get(node_id, 0)
+        if node_type == FLOWCHART_NODE_TYPE_END:
+            if outgoing_count > FLOWCHART_END_MAX_OUTGOING_EDGES:
+                errors.append(f"End node {node_id} cannot have outgoing edges.")
+        elif node_type == FLOWCHART_NODE_TYPE_DECISION:
+            if outgoing_count > FLOWCHART_DECISION_MAX_OUTGOING_EDGES:
+                errors.append(
+                    f"Decision node {node_id} supports at most {FLOWCHART_DECISION_MAX_OUTGOING_EDGES} outgoing edges."
+                )
+        elif outgoing_count > FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES:
+            errors.append(
+                f"Node {node_id} ({node_type}) supports at most {FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES} outgoing edge."
+            )
+        if node.get("node_type") != FLOWCHART_NODE_TYPE_DECISION:
+            continue
+        if outgoing_count == 0:
+            errors.append(f"Decision node {node_id} must have at least one outgoing edge.")
+        keys = [key for key in decision_outgoing_keys.get(node_id, []) if key]
+        if len(keys) != len(set(keys)):
+            errors.append(
+                f"Decision node {node_id} has duplicate condition_key values."
+            )
+
+    if len(start_nodes) == 1:
+        start_id = int(start_nodes[0]["id"])
+        visited: set[int] = set()
+        frontier = [start_id]
+        adjacency: dict[int, list[int]] = {}
+        for edge in edges:
+            source_node_id = int(edge["source_node_id"])
+            target_node_id = int(edge["target_node_id"])
+            adjacency.setdefault(source_node_id, []).append(target_node_id)
+        while frontier:
+            current = frontier.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            for target_id in adjacency.get(current, []):
+                if target_id not in visited:
+                    frontier.append(target_id)
+        disconnected = sorted(node_ids.difference(visited))
+        if disconnected:
+            errors.append(
+                "Disconnected required nodes found: "
+                + ", ".join(str(node_id) for node_id in disconnected)
+            )
+
+    seen_errors: set[str] = set()
+    deduped_errors: list[str] = []
+    for error in errors:
+        if error in seen_errors:
+            continue
+        seen_errors.add(error)
+        deduped_errors.append(error)
+    return deduped_errors
+
+
+def _flowchart_graph_state(
+    flowchart_nodes: list[FlowchartNode],
+    flowchart_edges: list[FlowchartEdge],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    nodes = [
+        {
+            "id": node.id,
+            "node_type": node.node_type,
+            "ref_id": node.ref_id,
+            "config": _parse_json_dict(node.config_json),
+            "model_id": node.model_id,
+            "mcp_server_ids": [server.id for server in node.mcp_servers],
+            "script_ids": [script.id for script in node.scripts],
+        }
+        for node in flowchart_nodes
+    ]
+    edges = [
+        {
+            "id": edge.id,
+            "source_node_id": edge.source_node_id,
+            "target_node_id": edge.target_node_id,
+            "source_handle_id": edge.source_handle_id,
+            "target_handle_id": edge.target_handle_id,
+            "condition_key": edge.condition_key,
+            "label": edge.label,
+        }
+        for edge in flowchart_edges
+    ]
+    return nodes, edges
+
+
+def _validate_flowchart_graph(
+    flowchart_nodes: list[FlowchartNode],
+    flowchart_edges: list[FlowchartEdge],
+) -> list[str]:
+    nodes, edges = _flowchart_graph_state(flowchart_nodes, flowchart_edges)
+    return _validate_flowchart_graph_snapshot(nodes, edges)
 
 
 @bp.get("/")
@@ -3059,18 +4517,9 @@ def list_agents():
 @bp.get("/agents/new")
 def new_agent():
     roles = _load_roles()
-    models = _load_llm_models()
-    scripts = _load_scripts()
-    scripts_by_type = _group_scripts_by_type(scripts)
-    selected_scripts_by_type = {script_type: [] for script_type in SCRIPT_TYPE_FIELDS}
     return render_template(
         "agent_new.html",
         roles=roles,
-        models=models,
-        scripts_by_type=scripts_by_type,
-        selected_scripts_by_type=selected_scripts_by_type,
-        script_type_fields=SCRIPT_TYPE_FIELDS,
-        script_type_choices=SCRIPT_TYPE_CHOICES,
         page_title="Create Agent",
         active_page="agents",
     )
@@ -3082,14 +4531,9 @@ def create_agent():
     description = request.form.get("description", "").strip()
     autonomous_prompt = request.form.get("autonomous_prompt", "").strip()
     role_raw = request.form.get("role_id", "").strip()
-    model_raw = request.form.get("model_id", "").strip()
-    script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
 
     if not description:
         flash("Agent description is required.", "error")
-        return redirect(url_for("agents.new_agent"))
-    if script_error:
-        flash(script_error, "error")
         return redirect(url_for("agents.new_agent"))
 
     if not name:
@@ -3102,32 +4546,12 @@ def create_agent():
         except ValueError:
             flash("Role must be a number.", "error")
             return redirect(url_for("agents.new_agent"))
-    model_id = None
-    if model_raw:
-        try:
-            model_id = int(model_raw)
-        except ValueError:
-            flash("Model must be a number.", "error")
-            return redirect(url_for("agents.new_agent"))
     with session_scope() as session:
         if role_id is not None:
             role = session.get(Role, role_id)
             if role is None:
                 flash("Role not found.", "error")
                 return redirect(url_for("agents.new_agent"))
-        if model_id is not None:
-            model = session.get(LLMModel, model_id)
-            if model is None:
-                flash("Model not found.", "error")
-                return redirect(url_for("agents.new_agent"))
-        script_ids_by_type, script_error = _resolve_script_selection(
-            session,
-            script_ids_by_type,
-            legacy_ids,
-        )
-        if script_error:
-            flash(script_error, "error")
-            return redirect(url_for("agents.new_agent"))
         prompt_payload = {"description": description}
         if autonomous_prompt:
             prompt_payload["autoprompt"] = autonomous_prompt
@@ -3136,14 +4560,12 @@ def create_agent():
             session,
             name=name,
             role_id=role_id,
-            model_id=model_id,
             description=description,
             prompt_json=prompt_json,
             prompt_text=None,
             autonomous_prompt=autonomous_prompt or None,
             is_system=False,
         )
-        _set_agent_scripts(session, agent.id, script_ids_by_type)
         agent_id = agent.id
 
     flash(f"Agent {agent_id} created.", "success")
@@ -3158,10 +4580,6 @@ def view_agent(agent_id: int):
         agent = (
             session.execute(
                 select(Agent)
-                .options(
-                    selectinload(Agent.scripts),
-                    selectinload(Agent.mcp_servers),
-                )
                 .where(Agent.id == agent_id)
             )
             .scalars()
@@ -3183,106 +4601,17 @@ def view_agent(agent_id: int):
     )
 
 
-@bp.get("/agents/<int:agent_id>/scripts")
-def view_agent_scripts(agent_id: int):
-    roles = _load_roles()
-    roles_by_id = {role.id: role.name for role in roles}
-    with session_scope() as session:
-        agent = (
-            session.execute(
-                select(Agent)
-                .options(
-                    selectinload(Agent.scripts),
-                    selectinload(Agent.mcp_servers),
-                )
-                .where(Agent.id == agent_id)
-            )
-            .scalars()
-            .one_or_none()
-        )
-        if agent is None:
-            abort(404)
-    agent_status_by_id = _agent_status_by_id([agent.id])
-    agent_status = agent_status_by_id.get(agent.id, "stopped")
-    return render_template(
-        "agent_scripts.html",
-        agent=agent,
-        agent_status=agent_status,
-        roles_by_id=roles_by_id,
-        human_time=_human_time,
-        page_title=f"Agent - {agent.name} - Scripts",
-        active_page="agents",
-        agent_section="scripts",
-    )
-
-
-@bp.get("/agents/<int:agent_id>/mcp")
-def view_agent_mcp(agent_id: int):
-    roles = _load_roles()
-    roles_by_id = {role.id: role.name for role in roles}
-    mcp_servers = _load_mcp_servers()
-    with session_scope() as session:
-        agent = (
-            session.execute(
-                select(Agent)
-                .options(
-                    selectinload(Agent.scripts),
-                    selectinload(Agent.mcp_servers),
-                )
-                .where(Agent.id == agent_id)
-            )
-            .scalars()
-            .one_or_none()
-        )
-        if agent is None:
-            abort(404)
-        agent_mcp_ids = {mcp.id for mcp in agent.mcp_servers}
-    agent_status_by_id = _agent_status_by_id([agent.id])
-    agent_status = agent_status_by_id.get(agent.id, "stopped")
-    available_mcp_servers = [
-        mcp for mcp in mcp_servers if mcp.id not in agent_mcp_ids
-    ]
-    return render_template(
-        "agent_mcp.html",
-        agent=agent,
-        agent_status=agent_status,
-        roles_by_id=roles_by_id,
-        available_mcp_servers=available_mcp_servers,
-        human_time=_human_time,
-        page_title=f"Agent - {agent.name} - MCP",
-        active_page="agents",
-        agent_section="mcp",
-    )
-
-
 @bp.get("/agents/<int:agent_id>/edit")
 def edit_agent(agent_id: int):
     roles = _load_roles()
-    models = _load_llm_models()
-    scripts = _load_scripts()
-    scripts_by_type = _group_scripts_by_type(scripts)
     with session_scope() as session:
-        agent = (
-            session.execute(
-                select(Agent)
-                .options(selectinload(Agent.mcp_servers), selectinload(Agent.scripts))
-                .where(Agent.id == agent_id)
-            )
-            .scalars()
-            .one_or_none()
-        )
+        agent = session.get(Agent, agent_id)
         if agent is None:
             abort(404)
-        selected_scripts_by_type = _group_selected_scripts_by_type(list(agent.scripts))
     return render_template(
         "agent_edit.html",
         agent=agent,
         roles=roles,
-        models=models,
-        scripts_by_type=scripts_by_type,
-        selected_scripts_by_type=selected_scripts_by_type,
-        script_type_fields=SCRIPT_TYPE_FIELDS,
-        script_type_choices=SCRIPT_TYPE_CHOICES,
         page_title=f"Edit Agent - {agent.name}",
         active_page="agents",
     )
@@ -3294,14 +4623,9 @@ def update_agent(agent_id: int):
     description = request.form.get("description", "").strip()
     autonomous_prompt = request.form.get("autonomous_prompt", "").strip()
     role_raw = request.form.get("role_id", "").strip()
-    model_raw = request.form.get("model_id", "").strip()
-    script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
 
     if not description:
         flash("Agent description is required.", "error")
-        return redirect(url_for("agents.edit_agent", agent_id=agent_id))
-    if script_error:
-        flash(script_error, "error")
         return redirect(url_for("agents.edit_agent", agent_id=agent_id))
 
     role_id = None
@@ -3310,13 +4634,6 @@ def update_agent(agent_id: int):
             role_id = int(role_raw)
         except ValueError:
             flash("Role must be a number.", "error")
-            return redirect(url_for("agents.edit_agent", agent_id=agent_id))
-    model_id = None
-    if model_raw:
-        try:
-            model_id = int(model_raw)
-        except ValueError:
-            flash("Model must be a number.", "error")
             return redirect(url_for("agents.edit_agent", agent_id=agent_id))
 
     with session_scope() as session:
@@ -3328,19 +4645,6 @@ def update_agent(agent_id: int):
             if role is None:
                 flash("Role not found.", "error")
                 return redirect(url_for("agents.edit_agent", agent_id=agent_id))
-        if model_id is not None:
-            model = session.get(LLMModel, model_id)
-            if model is None:
-                flash("Model not found.", "error")
-                return redirect(url_for("agents.edit_agent", agent_id=agent_id))
-        script_ids_by_type, script_error = _resolve_script_selection(
-            session,
-            script_ids_by_type,
-            legacy_ids,
-        )
-        if script_error:
-            flash(script_error, "error")
-            return redirect(url_for("agents.edit_agent", agent_id=agent_id))
         if not name:
             name = agent.name or "Untitled Agent"
         prompt_payload = {"description": description}
@@ -3353,58 +4657,9 @@ def update_agent(agent_id: int):
         agent.prompt_text = None
         agent.autonomous_prompt = autonomous_prompt or None
         agent.role_id = role_id
-        agent.model_id = model_id
-        _set_agent_scripts(session, agent.id, script_ids_by_type)
 
     flash("Agent updated.", "success")
     return redirect(url_for("agents.view_agent", agent_id=agent_id))
-
-
-@bp.post("/agents/<int:agent_id>/mcp-servers")
-def add_agent_mcp_server(agent_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.view_agent", agent_id=agent_id)
-    )
-    mcp_raw = request.form.get("mcp_server_id", "").strip()
-    if not mcp_raw.isdigit():
-        flash("Select a valid MCP server.", "error")
-        return redirect(redirect_target)
-    mcp_id = int(mcp_raw)
-    with session_scope() as session:
-        agent = session.get(Agent, agent_id)
-        if agent is None:
-            abort(404)
-        mcp_server = session.get(MCPServer, mcp_id)
-        if mcp_server is None:
-            flash("MCP server not found.", "error")
-            return redirect(redirect_target)
-        if mcp_server in agent.mcp_servers:
-            flash("MCP server already attached.", "info")
-            return redirect(redirect_target)
-        agent.mcp_servers.append(mcp_server)
-    flash("MCP server attached.", "success")
-    return redirect(redirect_target)
-
-
-@bp.post("/agents/<int:agent_id>/mcp-servers/<int:mcp_id>/delete")
-def remove_agent_mcp_server(agent_id: int, mcp_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.view_agent", agent_id=agent_id)
-    )
-    with session_scope() as session:
-        agent = session.get(Agent, agent_id)
-        if agent is None:
-            abort(404)
-        mcp_server = session.get(MCPServer, mcp_id)
-        if mcp_server is None:
-            flash("MCP server not found.", "error")
-            return redirect(redirect_target)
-        if mcp_server not in agent.mcp_servers:
-            flash("MCP server is not attached.", "info")
-            return redirect(redirect_target)
-        agent.mcp_servers.remove(mcp_server)
-    flash("MCP server removed.", "success")
-    return redirect(redirect_target)
 
 
 @bp.post("/roles")
@@ -3564,8 +4819,6 @@ def delete_agent(agent_id: int):
         if active_run_id:
             flash("Disable autorun before deleting.", "error")
             return redirect(next_url)
-        agent.mcp_servers = []
-        agent.scripts = []
         runs = (
             session.execute(select(Run).where(Run.agent_id == agent_id))
             .scalars()
@@ -3687,7 +4940,6 @@ def view_run(run_id: int):
                 .where(
                     AgentTask.run_id == run_id,
                     AgentTask.run_task_id.isnot(None),
-                    AgentTask.pipeline_run_id.is_(None),
                 )
                 .order_by(AgentTask.created_at.desc())
                 .limit(1)
@@ -3810,15 +5062,28 @@ def runs():
 
 @bp.get("/quick")
 def quick_task():
+    sync_integrated_mcp_servers()
     agents = _load_agents()
+    models = _load_llm_models()
+    mcp_servers = _load_mcp_servers()
+    integration_options = _build_node_integration_options()
+    default_selected_integration_keys = [
+        str(option["key"])
+        for option in integration_options
+        if bool(option.get("connected"))
+    ]
     _, summary = _agent_rollup(agents)
-    default_agent_id = _load_quick_agent_id(agents)
+    default_model_id = _quick_node_default_model_id(models)
     return render_template(
         "quick_task.html",
         agents=agents,
-        default_agent_id=default_agent_id,
+        models=models,
+        mcp_servers=mcp_servers,
+        integration_options=integration_options,
+        selected_integration_keys=default_selected_integration_keys,
+        default_model_id=default_model_id,
         summary=summary,
-        page_title="Quick Task",
+        page_title="Quick Node",
         active_page="quick",
     )
 
@@ -3831,52 +5096,128 @@ def legacy_chat_redirect():
 @bp.post("/quick")
 def create_quick_task():
     agent_id_raw = request.form.get("agent_id", "").strip()
+    model_id_raw = request.form.get("model_id", "").strip()
+    mcp_server_ids_raw = [
+        value.strip() for value in request.form.getlist("mcp_server_ids")
+    ]
+    selected_integration_keys, integration_error = _parse_node_integration_selection()
     prompt = request.form.get("prompt", "").strip()
     uploads = request.files.getlist("attachments")
-    if not agent_id_raw:
-        flash("Agent is required.", "error")
-        return redirect(url_for("agents.quick_task"))
     if not prompt:
         flash("Prompt is required.", "error")
+        return redirect(url_for("agents.quick_task"))
+    if integration_error:
+        flash(integration_error, "error")
         return redirect(url_for("agents.quick_task"))
 
     try:
         with session_scope() as session:
-            agent_id: int | None = None
-            agent_payload: object | None = None
-            try:
-                agent_id = int(agent_id_raw)
-            except ValueError:
-                flash("Select a valid agent.", "error")
-                return redirect(url_for("agents.quick_task"))
-            agent = session.get(Agent, agent_id)
-            if agent is None:
-                flash("Agent not found.", "error")
-                return redirect(url_for("agents.quick_task"))
-            agent_payload = _build_agent_prompt_payload(
-                agent,
-                include_autoprompt=False,
+            models = (
+                session.execute(select(LLMModel).order_by(LLMModel.created_at.desc()))
+                .scalars()
+                .all()
             )
-
-            payload: dict[str, object] = {
-                "prompt": prompt,
-                "output_instructions": OUTPUT_INSTRUCTIONS_ONE_OFF,
-            }
-            if agent_payload is not None:
-                payload["agent"] = agent_payload
-            prompt_payload = json.dumps(payload, indent=2, sort_keys=True)
+            if not models:
+                flash("Create at least one model before sending a quick node.", "error")
+                return redirect(url_for("agents.quick_task"))
+            model_ids = {model.id for model in models}
+            selected_model_id = _coerce_optional_int(
+                model_id_raw,
+                field_name="model_id",
+                minimum=1,
+            )
+            if selected_model_id is None:
+                selected_model_id = _quick_node_default_model_id(models)
+            if selected_model_id is None:
+                flash("Model is required.", "error")
+                return redirect(url_for("agents.quick_task"))
+            if selected_model_id not in model_ids:
+                flash("Select a valid model.", "error")
+                return redirect(url_for("agents.quick_task"))
+            agent_id: int | None = None
+            agent: Agent | None = None
+            if agent_id_raw:
+                agent_id = _coerce_optional_int(
+                    agent_id_raw,
+                    field_name="agent_id",
+                    minimum=1,
+                )
+                if agent_id is None:
+                    flash("Select a valid agent.", "error")
+                    return redirect(url_for("agents.quick_task"))
+                agent = session.get(Agent, agent_id)
+                if agent is None:
+                    flash("Agent not found.", "error")
+                    return redirect(url_for("agents.quick_task"))
+            selected_mcp_ids: list[int] = []
+            for raw_id in mcp_server_ids_raw:
+                if not raw_id:
+                    continue
+                parsed_id = _coerce_optional_int(
+                    raw_id,
+                    field_name="mcp_server_id",
+                    minimum=1,
+                )
+                if parsed_id is None:
+                    flash("Invalid MCP server selection.", "error")
+                    return redirect(url_for("agents.quick_task"))
+                if parsed_id not in selected_mcp_ids:
+                    selected_mcp_ids.append(parsed_id)
+            selected_mcp_servers: list[MCPServer] = []
+            if selected_mcp_ids:
+                selected_mcp_servers = (
+                    session.execute(
+                        select(MCPServer).where(MCPServer.id.in_(selected_mcp_ids))
+                    )
+                    .scalars()
+                    .all()
+                )
+                if len(selected_mcp_servers) != len(selected_mcp_ids):
+                    flash("One or more MCP servers were not found.", "error")
+                    return redirect(url_for("agents.quick_task"))
+                mcp_by_id = {server.id: server for server in selected_mcp_servers}
+                selected_mcp_servers = [
+                    mcp_by_id[mcp_id] for mcp_id in selected_mcp_ids
+                ]
+            system_contract = build_quick_node_system_contract()
+            agent_profile = build_quick_node_agent_profile()
+            if agent is not None:
+                system_contract = {}
+                if agent.role_id and agent.role is not None:
+                    system_contract["role"] = _build_role_payload(agent.role)
+                agent_profile = _build_agent_payload(
+                    agent,
+                    include_autoprompt=False,
+                )
+            prompt_payload = serialize_prompt_envelope(
+                build_prompt_envelope(
+                    user_request=prompt,
+                    system_contract=system_contract,
+                    agent_profile=agent_profile,
+                    task_context={"kind": QUICK_TASK_KIND},
+                    output_contract=build_one_off_output_contract(),
+                )
+            )
             task = AgentTask.create(
                 session,
                 agent_id=agent_id,
+                model_id=selected_model_id,
                 status="queued",
                 prompt=prompt_payload,
                 kind=QUICK_TASK_KIND,
+                integration_keys_json=serialize_task_integration_keys(
+                    selected_integration_keys
+                ),
             )
+            task.mcp_servers = selected_mcp_servers
             attachments = _save_uploaded_attachments(session, uploads)
             _attach_attachments(task, attachments)
             task_id = task.id
-    except (OSError, ValueError) as exc:
-        logger.exception("Failed to save quick task attachments")
+    except ValueError as exc:
+        flash(str(exc) or "Invalid quick node configuration.", "error")
+        return redirect(url_for("agents.quick_task"))
+    except OSError as exc:
+        logger.exception("Failed to save quick node attachments")
         flash(str(exc) or "Failed to save attachments.", "error")
         return redirect(url_for("agents.quick_task"))
 
@@ -3887,8 +5228,8 @@ def create_quick_task():
         if task is not None:
             task.celery_task_id = celery_task.id
 
-    flash(f"Quick Task {task_id} queued.", "success")
-    return redirect(url_for("agents.view_task", task_id=task_id))
+    flash(f"Quick node {task_id} queued.", "success")
+    return redirect(url_for("agents.view_node", task_id=task_id))
 
 
 @bp.post("/chat")
@@ -3896,8 +5237,8 @@ def legacy_chat_create():
     return create_quick_task()
 
 
-@bp.get("/tasks")
-def list_tasks():
+@bp.get("/nodes", endpoint="list_nodes")
+def list_nodes():
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
     page = _parse_positive_int(request.args.get("page"), 1)
@@ -3913,13 +5254,6 @@ def list_tasks():
     agent_filter_options.sort(key=lambda item: item["label"].lower())
 
     with session_scope() as session:
-        kind_values = {
-            value
-            for value in session.execute(select(AgentTask.kind).distinct())
-            .scalars()
-            .all()
-            if value
-        }
         status_values = {
             value
             for value in session.execute(select(AgentTask.status).distinct())
@@ -3927,9 +5261,40 @@ def list_tasks():
             .all()
             if value
         }
+        node_type_values = {
+            normalized
+            for normalized in (
+                _normalize_flowchart_node_type(value)
+                for value in session.execute(
+                    select(FlowchartNode.node_type)
+                    .join(AgentTask, AgentTask.flowchart_node_id == FlowchartNode.id)
+                    .distinct()
+                )
+                .scalars()
+                .all()
+            )
+            if normalized
+        }
+        for kind_value in (
+            value
+            for value in session.execute(select(AgentTask.kind).distinct())
+            .scalars()
+            .all()
+            if value
+        ):
+            normalized = _flowchart_node_type_from_task_kind(kind_value)
+            if normalized:
+                node_type_values.add(normalized)
 
-    kind_filter_raw = (request.args.get("kind") or "").strip()
-    kind_filter = kind_filter_raw if kind_filter_raw in kind_values else None
+    node_type_filter_raw = (
+        request.args.get("node_type") or request.args.get("kind") or ""
+    ).strip()
+    normalized_node_type_filter = _normalize_flowchart_node_type(node_type_filter_raw)
+    node_type_filter = (
+        normalized_node_type_filter
+        if normalized_node_type_filter in node_type_values
+        else None
+    )
     status_filter_raw = (request.args.get("status") or "").strip()
     status_filter = status_filter_raw if status_filter_raw in status_values else None
     agent_filter = None
@@ -3947,9 +5312,9 @@ def list_tasks():
         "failed": 4,
         "canceled": 5,
     }
-    task_kind_options = [
-        {"value": kind, "label": task_kind_label(kind)}
-        for kind in sorted(kind_values, key=lambda value: value.lower())
+    node_type_options = [
+        {"value": node_type, "label": node_type.replace("_", " ")}
+        for node_type in sorted(node_type_values)
     ]
     task_status_options = [
         {"value": status, "label": status.replace("_", " ")}
@@ -3962,7 +5327,7 @@ def list_tasks():
         page,
         per_page,
         agent_id=agent_filter,
-        kind=kind_filter,
+        node_type=node_type_filter,
         status=status_filter,
     )
     pagination_items = _build_pagination_items(page, total_pages)
@@ -3974,24 +5339,79 @@ def list_tasks():
                 select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
             ).all()
         agents_by_id = {row[0]: row[1] for row in rows}
-    pipeline_ids = {task.pipeline_id for task in tasks if task.pipeline_id}
-    template_ids = {task.task_template_id for task in tasks if task.task_template_id}
-    pipelines_by_id = {}
-    templates_by_id = {}
-    if pipeline_ids:
+    flowchart_node_ids = {
+        task.flowchart_node_id
+        for task in tasks
+        if task.flowchart_node_id is not None
+    }
+    flowchart_node_types_by_id: dict[int, str] = {}
+    flowchart_node_names_by_id: dict[int, str] = {}
+    if flowchart_node_ids:
         with session_scope() as session:
             rows = session.execute(
-                select(Pipeline.id, Pipeline.name).where(Pipeline.id.in_(pipeline_ids))
-            ).all()
-        pipelines_by_id = {row[0]: row[1] for row in rows}
-    if template_ids:
-        with session_scope() as session:
-            rows = session.execute(
-                select(TaskTemplate.id, TaskTemplate.name).where(
-                    TaskTemplate.id.in_(template_ids)
+                select(
+                    FlowchartNode.id,
+                    FlowchartNode.node_type,
+                    FlowchartNode.title,
+                    FlowchartNode.config_json,
+                    FlowchartNode.ref_id,
+                ).where(
+                    FlowchartNode.id.in_(flowchart_node_ids)
                 )
             ).all()
-        templates_by_id = {row[0]: row[1] for row in rows}
+            template_ids = {
+                int(row[4])
+                for row in rows
+                if row[4] is not None
+                and str(row[1] or "").strip().lower() == FLOWCHART_NODE_TYPE_TASK
+            }
+            template_name_by_id: dict[int, str] = {}
+            if template_ids:
+                template_name_by_id = {
+                    int(row[0]): str(row[1])
+                    for row in session.execute(
+                        select(TaskTemplate.id, TaskTemplate.name).where(
+                            TaskTemplate.id.in_(template_ids)
+                        )
+                    ).all()
+                }
+        for row in rows:
+            node_id = int(row[0])
+            node_type = str(row[1] or "").strip().lower()
+            title = str(row[2] or "").strip()
+            config = _parse_json_dict(row[3])
+            inline_name = config.get("task_name")
+            task_name = str(inline_name).strip() if isinstance(inline_name, str) else ""
+            if not task_name:
+                task_name = title
+            if not task_name and row[4] is not None and node_type == FLOWCHART_NODE_TYPE_TASK:
+                task_name = template_name_by_id.get(int(row[4]), "")
+            if not task_name:
+                type_label = (node_type or "node").replace("_", " ")
+                task_name = f"{type_label} node"
+            flowchart_node_types_by_id[node_id] = node_type
+            flowchart_node_names_by_id[node_id] = task_name
+    task_node_types: dict[int, str | None] = {}
+    task_node_names: dict[int, str] = {}
+    for task in tasks:
+        flowchart_node_type = (
+            _normalize_flowchart_node_type(
+                flowchart_node_types_by_id.get(task.flowchart_node_id)
+            )
+            if task.flowchart_node_id is not None
+            else None
+        )
+        task_node_types[task.id] = flowchart_node_type or _flowchart_node_type_from_task_kind(
+            task.kind
+        )
+        if task.flowchart_node_id is not None:
+            task_node_names[task.id] = flowchart_node_names_by_id.get(
+                task.flowchart_node_id, f"Node {task.flowchart_node_id}"
+            )
+        elif is_quick_task_kind(task.kind):
+            task_node_names[task.id] = "Quick node"
+        else:
+            task_node_names[task.id] = "-"
     current_url = request.full_path
     if current_url.endswith("?"):
         current_url = current_url[:-1]
@@ -3999,8 +5419,8 @@ def list_tasks():
         "tasks.html",
         tasks=tasks,
         agents_by_id=agents_by_id,
-        pipelines_by_id=pipelines_by_id,
-        templates_by_id=templates_by_id,
+        task_node_types=task_node_types,
+        task_node_names=task_node_names,
         page=page,
         per_page=per_page,
         total_pages=total_pages,
@@ -4008,23 +5428,25 @@ def list_tasks():
         per_page_options=TASKS_PER_PAGE_OPTIONS,
         pagination_items=pagination_items,
         agent_filter_options=agent_filter_options,
-        task_kind_options=task_kind_options,
+        node_type_options=node_type_options,
         task_status_options=task_status_options,
         agent_filter=agent_filter,
-        kind_filter=kind_filter,
+        node_type_filter=node_type_filter,
         status_filter=status_filter,
         current_url=current_url,
         summary=summary,
         human_time=_human_time,
-        page_title="Tasks",
-        active_page="tasks",
+        page_title="Nodes",
+        active_page="nodes",
     )
 
 
-@bp.get("/tasks/<int:task_id>")
-def view_task(task_id: int):
+@bp.get("/nodes/<int:task_id>", endpoint="view_node")
+def view_node(task_id: int):
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
+    selected_integration_labels: list[str] = []
+    task_integrations_legacy_default = False
     with session_scope() as session:
         task = (
             session.execute(
@@ -4032,6 +5454,7 @@ def view_task(task_id: int):
                 .options(
                     selectinload(AgentTask.scripts),
                     selectinload(AgentTask.attachments),
+                    selectinload(AgentTask.mcp_servers),
                 )
                 .where(AgentTask.id == task_id)
             )
@@ -4045,13 +5468,11 @@ def view_task(task_id: int):
             agent = (
                 session.execute(
                     select(Agent)
-                    .options(selectinload(Agent.scripts))
                     .where(Agent.id == task.agent_id)
                 )
                 .scalars()
                 .first()
             )
-        pipeline = session.get(Pipeline, task.pipeline_id) if task.pipeline_id else None
         template = (
             session.get(TaskTemplate, task.task_template_id)
             if task.task_template_id
@@ -4059,26 +5480,45 @@ def view_task(task_id: int):
         )
         stage_entries = _build_stage_entries(task)
         prompt_text, prompt_json = _parse_task_prompt(task.prompt)
+        task_output = _task_output_for_display(task.output)
+        selected_integration_keys = parse_task_integration_keys(task.integration_keys_json)
+        if selected_integration_keys is None:
+            task_integrations_legacy_default = True
+            selected_integration_labels = [
+                TASK_INTEGRATION_LABELS[key]
+                for key in sorted(TASK_INTEGRATION_KEYS)
+            ]
+        else:
+            selected_integration_labels = [
+                TASK_INTEGRATION_LABELS[key]
+                for key in sorted(selected_integration_keys)
+                if key in TASK_INTEGRATION_LABELS
+            ]
     return render_template(
         "task_detail.html",
         task=task,
+        task_output=task_output,
         is_quick_task=is_quick_task_kind(task.kind),
         agent=agent,
-        pipeline=pipeline,
         template=template,
         stage_entries=stage_entries,
         prompt_text=prompt_text,
         prompt_json=prompt_json,
+        selected_integration_labels=selected_integration_labels,
+        task_integrations_legacy_default=task_integrations_legacy_default,
         summary=summary,
-        page_title=f"Task {task_id}",
-        active_page="tasks",
+        page_title=f"Node {task_id}",
+        active_page="nodes",
     )
 
 
-@bp.post("/tasks/<int:task_id>/attachments/<int:attachment_id>/remove")
-def remove_task_attachment(task_id: int, attachment_id: int):
+@bp.post(
+    "/nodes/<int:task_id>/attachments/<int:attachment_id>/remove",
+    endpoint="remove_node_attachment",
+)
+def remove_node_attachment(task_id: int, attachment_id: int):
     redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.view_task", task_id=task_id)
+        request.form.get("next"), url_for("agents.view_node", task_id=task_id)
     )
     removed_path: str | None = None
     with session_scope() as session:
@@ -4097,7 +5537,7 @@ def remove_task_attachment(task_id: int, attachment_id: int):
             (item for item in task.attachments if item.id == attachment_id), None
         )
         if attachment is None:
-            flash("Attachment not found on this task.", "error")
+            flash("Attachment not found on this node.", "error")
             return redirect(redirect_target)
         task.attachments.remove(attachment)
         session.flush()
@@ -4108,8 +5548,8 @@ def remove_task_attachment(task_id: int, attachment_id: int):
     return redirect(redirect_target)
 
 
-@bp.get("/tasks/<int:task_id>/status")
-def task_status(task_id: int):
+@bp.get("/nodes/<int:task_id>/status", endpoint="node_status")
+def node_status(task_id: int):
     with session_scope() as session:
         task = session.get(AgentTask, task_id)
         if task is None:
@@ -4119,9 +5559,8 @@ def task_status(task_id: int):
             "status": task.status,
             "run_task_id": task.run_task_id,
             "celery_task_id": task.celery_task_id,
-            "pipeline_run_id": task.pipeline_run_id,
             "prompt_length": len(task.prompt) if task.prompt else 0,
-            "output": task.output or "",
+            "output": _task_output_for_display(task.output),
             "error": task.error or "",
             "current_stage": task.current_stage or "",
             "stage_logs": _parse_stage_logs(task.stage_logs),
@@ -4132,17 +5571,17 @@ def task_status(task_id: int):
         }
 
 
-@bp.post("/tasks/<int:task_id>/cancel")
-def cancel_task(task_id: int):
+@bp.post("/nodes/<int:task_id>/cancel", endpoint="cancel_node")
+def cancel_node(task_id: int):
     redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.list_tasks")
+        request.form.get("next"), url_for("agents.list_nodes")
     )
     with session_scope() as session:
         task = session.get(AgentTask, task_id)
         if task is None:
             abort(404)
         if task.status not in {"queued", "running"}:
-            flash("Task is not running.", "info")
+            flash("Node is not running.", "info")
             return redirect(redirect_target)
         if task.celery_task_id and Config.CELERY_REVOKE_ON_STOP:
             celery_app.control.revoke(
@@ -4151,14 +5590,14 @@ def cancel_task(task_id: int):
         task.status = "canceled"
         task.error = "Canceled by user."
         task.finished_at = utcnow()
-    flash("Task cancel requested.", "success")
+    flash("Node cancel requested.", "success")
     return redirect(redirect_target)
 
 
-@bp.post("/tasks/<int:task_id>/delete")
-def delete_task(task_id: int):
+@bp.post("/nodes/<int:task_id>/delete", endpoint="delete_node")
+def delete_node(task_id: int):
     next_url = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.list_tasks")
+        request.form.get("next"), url_for("agents.list_nodes")
     )
     with session_scope() as session:
         task = session.get(AgentTask, task_id)
@@ -4170,17 +5609,23 @@ def delete_task(task_id: int):
                     task.celery_task_id, terminate=True, signal="SIGTERM"
                 )
         session.delete(task)
-    flash("Task deleted.", "success")
+    flash("Node deleted.", "success")
     return redirect(next_url)
 
 
-@bp.get("/tasks/new")
-def new_task():
+@bp.get("/nodes/new", endpoint="new_node")
+def new_node():
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
     scripts = _load_scripts()
     scripts_by_type = _group_scripts_by_type(scripts)
     selected_scripts_by_type = {script_type: [] for script_type in SCRIPT_TYPE_FIELDS}
+    integration_options = _build_node_integration_options()
+    default_selected_integration_keys = [
+        str(option["key"])
+        for option in integration_options
+        if bool(option.get("connected"))
+    ]
     return render_template(
         "new_task.html",
         agents=agents,
@@ -4188,39 +5633,45 @@ def new_task():
         selected_scripts_by_type=selected_scripts_by_type,
         script_type_fields=SCRIPT_TYPE_FIELDS,
         script_type_choices=SCRIPT_TYPE_CHOICES,
+        integration_options=integration_options,
+        selected_integration_keys=default_selected_integration_keys,
         summary=summary,
-        page_title="New Task",
-        active_page="tasks",
+        page_title="New Node",
+        active_page="nodes",
     )
 
 
-@bp.post("/tasks/new")
-def create_task():
+@bp.post("/nodes/new", endpoint="create_node")
+def create_node():
     agent_id_raw = request.form.get("agent_id", "").strip()
     prompt = request.form.get("prompt", "").strip()
     uploads = request.files.getlist("attachments")
     script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
+    selected_integration_keys, integration_error = _parse_node_integration_selection()
     if not agent_id_raw:
         flash("Select an agent.", "error")
-        return redirect(url_for("agents.new_task"))
+        return redirect(url_for("agents.new_node"))
     try:
         agent_id = int(agent_id_raw)
     except ValueError:
         flash("Select a valid agent.", "error")
-        return redirect(url_for("agents.new_task"))
+        return redirect(url_for("agents.new_node"))
     if not prompt:
         flash("Prompt is required.", "error")
-        return redirect(url_for("agents.new_task"))
+        return redirect(url_for("agents.new_node"))
     if script_error:
         flash(script_error, "error")
-        return redirect(url_for("agents.new_task"))
+        return redirect(url_for("agents.new_node"))
+    if integration_error:
+        flash(integration_error, "error")
+        return redirect(url_for("agents.new_node"))
 
     try:
         with session_scope() as session:
             agent = session.get(Agent, agent_id)
             if agent is None:
                 flash("Agent not found.", "error")
-                return redirect(url_for("agents.new_task"))
+                return redirect(url_for("agents.new_node"))
             script_ids_by_type, script_error = _resolve_script_selection(
                 session,
                 script_ids_by_type,
@@ -4228,12 +5679,15 @@ def create_task():
             )
             if script_error:
                 flash(script_error, "error")
-                return redirect(url_for("agents.new_task"))
+                return redirect(url_for("agents.new_node"))
             task = AgentTask.create(
                 session,
                 agent_id=agent_id,
                 status="queued",
                 prompt=prompt,
+                integration_keys_json=serialize_task_integration_keys(
+                    selected_integration_keys
+                ),
             )
             _set_task_scripts(session, task.id, script_ids_by_type)
             attachments = _save_uploaded_attachments(session, uploads)
@@ -4242,7 +5696,7 @@ def create_task():
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save task attachments")
         flash(str(exc) or "Failed to save attachments.", "error")
-        return redirect(url_for("agents.new_task"))
+        return redirect(url_for("agents.new_node"))
 
     celery_task = run_agent_task.delay(task_id)
 
@@ -4251,17 +5705,411 @@ def create_task():
         if task is not None:
             task.celery_task_id = celery_task.id
 
-    flash(f"Task {task_id} queued.", "success")
-    return redirect(url_for("agents.list_tasks"))
+    flash(f"Node {task_id} queued.", "success")
+    return redirect(url_for("agents.list_nodes"))
+
+
+@bp.get("/plans")
+def list_plans():
+    page = _parse_page(request.args.get("page"))
+    per_page = WORKFLOW_LIST_PER_PAGE
+    with session_scope() as session:
+        total_count = session.execute(select(func.count(Plan.id))).scalar_one()
+        pagination = _build_pagination(request.path, page, per_page, total_count)
+        offset = (pagination["page"] - 1) * per_page
+        rows = session.execute(
+            select(
+                Plan,
+                func.count(func.distinct(PlanStage.id)),
+                func.count(PlanTask.id),
+            )
+            .outerjoin(PlanStage, PlanStage.plan_id == Plan.id)
+            .outerjoin(PlanTask, PlanTask.plan_stage_id == PlanStage.id)
+            .group_by(Plan.id)
+            .order_by(Plan.created_at.desc())
+            .limit(per_page)
+            .offset(offset)
+        ).all()
+    plans = [
+        {
+            "plan": plan,
+            "stage_count": int(stage_count or 0),
+            "task_count": int(task_count or 0),
+        }
+        for plan, stage_count, task_count in rows
+    ]
+    return render_template(
+        "plans.html",
+        plans=plans,
+        pagination=pagination,
+        human_time=_human_time,
+        fixed_list_page=True,
+        page_title="Plans",
+        active_page="plans",
+    )
+
+
+@bp.get("/plans/new")
+def new_plan():
+    flash("Create plans by adding Plan nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
+
+
+@bp.post("/plans")
+def create_plan():
+    flash("Create plans by adding Plan nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
+
+
+@bp.get("/plans/<int:plan_id>")
+def view_plan(plan_id: int):
+    with session_scope() as session:
+        plan = (
+            session.execute(
+                select(Plan)
+                .options(selectinload(Plan.stages).selectinload(PlanStage.tasks))
+                .where(Plan.id == plan_id)
+            )
+            .scalars()
+            .first()
+        )
+        if plan is None:
+            abort(404)
+    stage_count = len(plan.stages)
+    task_count = sum(len(stage.tasks) for stage in plan.stages)
+    return render_template(
+        "plan_detail.html",
+        plan=plan,
+        stage_count=stage_count,
+        task_count=task_count,
+        human_time=_human_time,
+        page_title=f"Plan - {plan.name}",
+        active_page="plans",
+    )
+
+
+@bp.get("/plans/<int:plan_id>/edit")
+def edit_plan(plan_id: int):
+    with session_scope() as session:
+        plan = session.get(Plan, plan_id)
+        if plan is None:
+            abort(404)
+    return render_template(
+        "plan_edit.html",
+        plan=plan,
+        page_title="Edit Plan",
+        active_page="plans",
+    )
+
+
+@bp.post("/plans/<int:plan_id>")
+def update_plan(plan_id: int):
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Plan name is required.", "error")
+        return redirect(url_for("agents.edit_plan", plan_id=plan_id))
+    description = request.form.get("description", "").strip() or None
+    completed_at_raw = request.form.get("completed_at", "").strip()
+    completed_at = _parse_completed_at(completed_at_raw)
+    if completed_at_raw and completed_at is None:
+        flash("Completed at must be a valid date/time.", "error")
+        return redirect(url_for("agents.edit_plan", plan_id=plan_id))
+
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
+    )
+    with session_scope() as session:
+        plan = session.get(Plan, plan_id)
+        if plan is None:
+            abort(404)
+        plan.name = name
+        plan.description = description
+        plan.completed_at = completed_at
+
+    flash("Plan updated.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/plans/<int:plan_id>/delete")
+def delete_plan(plan_id: int):
+    next_url = _safe_redirect_target(request.form.get("next"), url_for("agents.list_plans"))
+    with session_scope() as session:
+        plan = session.get(Plan, plan_id)
+        if plan is None:
+            abort(404)
+        stage_ids = (
+            session.execute(select(PlanStage.id).where(PlanStage.plan_id == plan_id))
+            .scalars()
+            .all()
+        )
+        if stage_ids:
+            session.execute(
+                delete(PlanTask).where(PlanTask.plan_stage_id.in_(stage_ids))
+            )
+        session.execute(delete(PlanStage).where(PlanStage.plan_id == plan_id))
+        session.delete(plan)
+    flash("Plan deleted.", "success")
+    return redirect(next_url)
+
+
+@bp.post("/plans/<int:plan_id>/stages")
+def create_plan_stage(plan_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
+    )
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Stage name is required.", "error")
+        return redirect(redirect_target)
+    description = request.form.get("description", "").strip() or None
+    completed_at_raw = request.form.get("completed_at", "").strip()
+    completed_at = _parse_completed_at(completed_at_raw)
+    if completed_at_raw and completed_at is None:
+        flash("Stage completed at must be a valid date/time.", "error")
+        return redirect(redirect_target)
+
+    with session_scope() as session:
+        plan = session.get(Plan, plan_id)
+        if plan is None:
+            abort(404)
+        max_position = session.execute(
+            select(func.max(PlanStage.position)).where(PlanStage.plan_id == plan_id)
+        ).scalar_one()
+        PlanStage.create(
+            session,
+            plan_id=plan_id,
+            name=name,
+            description=description,
+            position=(max_position or 0) + 1,
+            completed_at=completed_at,
+        )
+
+    flash("Plan stage added.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/plans/<int:plan_id>/stages/<int:stage_id>")
+def update_plan_stage(plan_id: int, stage_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
+    )
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Stage name is required.", "error")
+        return redirect(redirect_target)
+    description = request.form.get("description", "").strip() or None
+    completed_at_raw = request.form.get("completed_at", "").strip()
+    completed_at = _parse_completed_at(completed_at_raw)
+    if completed_at_raw and completed_at is None:
+        flash("Stage completed at must be a valid date/time.", "error")
+        return redirect(redirect_target)
+
+    with session_scope() as session:
+        stage = session.get(PlanStage, stage_id)
+        if stage is None or stage.plan_id != plan_id:
+            abort(404)
+        stage.name = name
+        stage.description = description
+        stage.completed_at = completed_at
+
+    flash("Plan stage updated.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/delete")
+def delete_plan_stage(plan_id: int, stage_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
+    )
+    with session_scope() as session:
+        stage = session.get(PlanStage, stage_id)
+        if stage is None or stage.plan_id != plan_id:
+            abort(404)
+        session.execute(delete(PlanTask).where(PlanTask.plan_stage_id == stage_id))
+        session.delete(stage)
+    flash("Plan stage deleted.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/tasks")
+def create_plan_task(plan_id: int, stage_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
+    )
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Task name is required.", "error")
+        return redirect(redirect_target)
+    description = request.form.get("description", "").strip() or None
+    completed_at_raw = request.form.get("completed_at", "").strip()
+    completed_at = _parse_completed_at(completed_at_raw)
+    if completed_at_raw and completed_at is None:
+        flash("Task completed at must be a valid date/time.", "error")
+        return redirect(redirect_target)
+
+    with session_scope() as session:
+        stage = session.get(PlanStage, stage_id)
+        if stage is None or stage.plan_id != plan_id:
+            abort(404)
+        max_position = session.execute(
+            select(func.max(PlanTask.position)).where(PlanTask.plan_stage_id == stage_id)
+        ).scalar_one()
+        PlanTask.create(
+            session,
+            plan_stage_id=stage_id,
+            name=name,
+            description=description,
+            position=(max_position or 0) + 1,
+            completed_at=completed_at,
+        )
+
+    flash("Plan task added.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/tasks/<int:task_id>")
+def update_plan_task(plan_id: int, stage_id: int, task_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
+    )
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Task name is required.", "error")
+        return redirect(redirect_target)
+    description = request.form.get("description", "").strip() or None
+    completed_at_raw = request.form.get("completed_at", "").strip()
+    completed_at = _parse_completed_at(completed_at_raw)
+    if completed_at_raw and completed_at is None:
+        flash("Task completed at must be a valid date/time.", "error")
+        return redirect(redirect_target)
+
+    with session_scope() as session:
+        stage = session.get(PlanStage, stage_id)
+        task = session.get(PlanTask, task_id)
+        if (
+            stage is None
+            or stage.plan_id != plan_id
+            or task is None
+            or task.plan_stage_id != stage_id
+        ):
+            abort(404)
+        task.name = name
+        task.description = description
+        task.completed_at = completed_at
+
+    flash("Plan task updated.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/tasks/<int:task_id>/delete")
+def delete_plan_task(plan_id: int, stage_id: int, task_id: int):
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
+    )
+    with session_scope() as session:
+        stage = session.get(PlanStage, stage_id)
+        task = session.get(PlanTask, task_id)
+        if (
+            stage is None
+            or stage.plan_id != plan_id
+            or task is None
+            or task.plan_stage_id != stage_id
+        ):
+            abort(404)
+        session.delete(task)
+    flash("Plan task deleted.", "success")
+    return redirect(redirect_target)
+
+
+def _read_milestone_form() -> tuple[dict[str, object] | None, str | None]:
+    name = request.form.get("name", "").strip()
+    if not name:
+        return None, "Name is required."
+
+    status = _normalize_milestone_choice(
+        request.form.get("status"),
+        choices=MILESTONE_STATUS_CHOICES,
+        fallback=MILESTONE_STATUS_PLANNED,
+    )
+    priority = _normalize_milestone_choice(
+        request.form.get("priority"),
+        choices=MILESTONE_PRIORITY_CHOICES,
+        fallback=MILESTONE_PRIORITY_MEDIUM,
+    )
+    health = _normalize_milestone_choice(
+        request.form.get("health"),
+        choices=MILESTONE_HEALTH_CHOICES,
+        fallback=MILESTONE_HEALTH_GREEN,
+    )
+
+    start_date_raw = request.form.get("start_date", "").strip()
+    start_date = _parse_milestone_due_date(start_date_raw)
+    if start_date_raw and start_date is None:
+        return None, "Start date must be a valid date."
+
+    due_date_raw = request.form.get("due_date", "").strip()
+    due_date = _parse_milestone_due_date(due_date_raw)
+    if due_date_raw and due_date is None:
+        return None, "Due date must be a valid date."
+    if start_date and due_date and due_date < start_date:
+        return None, "Due date must be on or after the start date."
+
+    progress = _parse_milestone_progress(request.form.get("progress_percent"))
+    if progress is None:
+        return None, "Progress must be a whole number between 0 and 100."
+
+    payload: dict[str, object] = {
+        "name": name,
+        "description": request.form.get("description", "").strip() or None,
+        "status": status,
+        "priority": priority,
+        "owner": request.form.get("owner", "").strip() or None,
+        "start_date": start_date,
+        "due_date": due_date,
+        "progress_percent": progress,
+        "health": health,
+        "success_criteria": request.form.get("success_criteria", "").strip() or None,
+        "dependencies": request.form.get("dependencies", "").strip() or None,
+        "links": request.form.get("links", "").strip() or None,
+        "latest_update": request.form.get("latest_update", "").strip() or None,
+    }
+    completed = status == MILESTONE_STATUS_DONE
+    payload["completed"] = completed
+    if completed:
+        payload["progress_percent"] = max(progress, 100)
+    return payload, None
 
 
 @bp.get("/milestones")
 def list_milestones():
-    milestones = _load_milestones()
+    page = _parse_page(request.args.get("page"))
+    per_page = WORKFLOW_LIST_PER_PAGE
+    with session_scope() as session:
+        total_count = session.execute(select(func.count(Milestone.id))).scalar_one()
+        pagination = _build_pagination(request.path, page, per_page, total_count)
+        offset = (pagination["page"] - 1) * per_page
+        milestones = (
+            session.execute(
+                select(Milestone)
+                .order_by(
+                    Milestone.completed.asc(),
+                    Milestone.due_date.is_(None),
+                    Milestone.due_date.asc(),
+                    Milestone.created_at.desc(),
+                )
+                .limit(per_page)
+                .offset(offset)
+            )
+            .scalars()
+            .all()
+        )
     return render_template(
         "milestones.html",
         milestones=milestones,
+        pagination=pagination,
         human_time=_human_time,
+        **_milestone_template_context(),
+        fixed_list_page=True,
         page_title="Milestones",
         active_page="milestones",
     )
@@ -4269,40 +6117,14 @@ def list_milestones():
 
 @bp.get("/milestones/new")
 def new_milestone():
-    return render_template(
-        "milestone_new.html",
-        page_title="Create Milestone",
-        active_page="milestones",
-    )
+    flash("Create milestones by adding Milestone nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.post("/milestones")
 def create_milestone():
-    name = request.form.get("name", "").strip()
-    if not name:
-        flash("Name is required.", "error")
-        return redirect(url_for("agents.new_milestone"))
-
-    description = request.form.get("description", "").strip() or None
-    due_date_raw = request.form.get("due_date", "").strip()
-    due_date = _parse_milestone_due_date(due_date_raw)
-    if due_date_raw and due_date is None:
-        flash("Due date must be a valid date.", "error")
-        return redirect(url_for("agents.new_milestone"))
-
-    completed = bool(request.form.get("completed"))
-
-    with session_scope() as session:
-        milestone = Milestone.create(
-            session,
-            name=name,
-            description=description,
-            due_date=due_date,
-            completed=completed,
-        )
-
-    flash(f"Milestone {milestone.id} created.", "success")
-    return redirect(url_for("agents.view_milestone", milestone_id=milestone.id))
+    flash("Create milestones by adding Milestone nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.get("/milestones/<int:milestone_id>")
@@ -4315,9 +6137,41 @@ def view_milestone(milestone_id: int):
         "milestone_detail.html",
         milestone=milestone,
         human_time=_human_time,
+        **_milestone_template_context(),
         page_title=f"Milestone - {milestone.name}",
         active_page="milestones",
     )
+
+
+@bp.get("/milestones/<int:milestone_id>/edit")
+def edit_milestone(milestone_id: int):
+    with session_scope() as session:
+        milestone = session.get(Milestone, milestone_id)
+        if milestone is None:
+            abort(404)
+    return render_template(
+        "milestone_edit.html",
+        milestone=milestone,
+        **_milestone_template_context(),
+        page_title=f"Edit Milestone - {milestone.name}",
+        active_page="milestones",
+    )
+
+
+@bp.post("/milestones/<int:milestone_id>")
+def update_milestone(milestone_id: int):
+    payload, error = _read_milestone_form()
+    if error or payload is None:
+        flash(error or "Invalid milestone payload.", "error")
+        return redirect(url_for("agents.edit_milestone", milestone_id=milestone_id))
+    with session_scope() as session:
+        milestone = session.get(Milestone, milestone_id)
+        if milestone is None:
+            abort(404)
+        for field, value in payload.items():
+            setattr(milestone, field, value)
+    flash("Milestone updated.", "success")
+    return redirect(url_for("agents.view_milestone", milestone_id=milestone_id))
 
 
 @bp.post("/milestones/<int:milestone_id>/delete")
@@ -4338,30 +6192,92 @@ def delete_milestone(milestone_id: int):
 def list_task_templates():
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
-    templates = _load_task_templates()
-    agents_by_id = {agent.id: agent.name for agent in agents}
+    page = _parse_page(request.args.get("page"))
+    per_page = WORKFLOW_LIST_PER_PAGE
+    with session_scope() as session:
+        total_count = session.execute(
+            select(func.count(FlowchartNode.id)).where(
+                FlowchartNode.node_type == FLOWCHART_NODE_TYPE_TASK
+            )
+        ).scalar_one()
+        pagination = _build_pagination(request.path, page, per_page, total_count)
+        offset = (pagination["page"] - 1) * per_page
+        task_rows = (
+            session.execute(
+                select(FlowchartNode, Flowchart)
+                .join(Flowchart, Flowchart.id == FlowchartNode.flowchart_id)
+                .where(FlowchartNode.node_type == FLOWCHART_NODE_TYPE_TASK)
+                .order_by(FlowchartNode.updated_at.desc(), FlowchartNode.id.desc())
+                .limit(per_page)
+                .offset(offset)
+            )
+            .all()
+        )
+        template_name_by_id: dict[int, str] = {}
+        template_ids = {
+            int(node.ref_id)
+            for node, _flowchart in task_rows
+            if node.ref_id is not None and int(node.ref_id) > 0
+        }
+        if template_ids:
+            template_name_by_id = {
+                int(row[0]): str(row[1])
+                for row in session.execute(
+                    select(TaskTemplate.id, TaskTemplate.name).where(
+                        TaskTemplate.id.in_(template_ids)
+                    )
+                ).all()
+            }
+
+    task_nodes: list[dict[str, object]] = []
+    for node, flowchart in task_rows:
+        config = _parse_json_dict(node.config_json)
+        inline_name = config.get("task_name")
+        inline_prompt = config.get("task_prompt")
+        task_name = str(inline_name).strip() if isinstance(inline_name, str) else ""
+        if not task_name:
+            task_name = str(node.title or "").strip()
+        if not task_name and node.ref_id is not None:
+            task_name = template_name_by_id.get(int(node.ref_id), "")
+        if not task_name:
+            task_name = f"Task node {node.id}"
+
+        prompt_text = str(inline_prompt).strip() if isinstance(inline_prompt, str) else ""
+        if not prompt_text and node.ref_id is not None:
+            legacy_name = template_name_by_id.get(int(node.ref_id), "")
+            if legacy_name:
+                prompt_text = f"Legacy template reference: {legacy_name}"
+            else:
+                prompt_text = "Legacy template reference."
+        prompt_preview = " ".join(prompt_text.split())
+        if len(prompt_preview) > 180:
+            prompt_preview = f"{prompt_preview[:177]}..."
+        task_nodes.append(
+            {
+                "node_id": node.id,
+                "task_name": task_name,
+                "prompt_preview": prompt_preview or "-",
+                "flowchart_id": flowchart.id,
+                "flowchart_name": flowchart.name,
+            }
+        )
+
     return render_template(
         "task_templates.html",
-        templates=templates,
-        agents_by_id=agents_by_id,
+        task_nodes=task_nodes,
+        pagination=pagination,
         summary=summary,
         human_time=_human_time,
-        page_title="Templates",
+        fixed_list_page=True,
+        page_title="Tasks",
         active_page="templates",
     )
 
 
 @bp.get("/task-templates/new")
 def new_task_template():
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    return render_template(
-        "task_template_new.html",
-        agents=agents,
-        summary=summary,
-        page_title="Create Template",
-        active_page="templates",
-    )
+    flash("Create tasks by adding Task nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.get("/task-templates/<int:template_id>")
@@ -4381,11 +6297,6 @@ def view_task_template(template_id: int):
         )
         if template is None:
             abort(404)
-        pipeline_step_count = session.execute(
-            select(func.count(PipelineStep.id)).where(
-                PipelineStep.task_template_id == template_id
-            )
-        ).scalar_one()
         task_count = session.execute(
             select(func.count(AgentTask.id)).where(
                 AgentTask.task_template_id == template_id
@@ -4395,11 +6306,10 @@ def view_task_template(template_id: int):
         "task_template_detail.html",
         template=template,
         agents_by_id=agents_by_id,
-        pipeline_step_count=pipeline_step_count,
         task_count=task_count,
         summary=summary,
         human_time=_human_time,
-        page_title=f"Template - {template.name}",
+        page_title=f"Task - {template.name}",
         active_page="templates",
     )
 
@@ -4425,297 +6335,1526 @@ def edit_task_template(template_id: int):
         template=template,
         agents=agents,
         summary=summary,
-        page_title=f"Edit Template - {template.name}",
+        page_title=f"Edit Task - {template.name}",
         active_page="templates",
     )
 
 
-@bp.get("/pipelines/new")
-def new_pipeline():
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    return render_template(
-        "pipeline_new.html",
-        summary=summary,
-        page_title="Create Pipeline",
-        active_page="pipelines",
-    )
-
-
-@bp.get("/pipelines")
-def list_pipelines():
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    pipelines = _load_pipelines()
-    pipeline_ids = [pipeline.id for pipeline in pipelines]
-    steps = _load_pipeline_steps(pipeline_ids)
-    step_counts: dict[int, int] = {}
-    for step in steps:
-        step_counts[step.pipeline_id] = step_counts.get(step.pipeline_id, 0) + 1
-    return render_template(
-        "pipelines.html",
-        pipelines=pipelines,
-        step_counts=step_counts,
-        summary=summary,
-        human_time=_human_time,
-        page_title="Pipelines",
-        active_page="pipelines",
-    )
-
-
-@bp.get("/pipelines/<int:pipeline_id>")
-def view_pipeline(pipeline_id: int):
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    templates = _load_task_templates()
-    agents_by_id = {agent.id: agent.name for agent in agents}
-    templates_by_id = {template.id: template for template in templates}
+@bp.get("/flowcharts")
+def list_flowcharts():
     with session_scope() as session:
-        pipeline = session.get(Pipeline, pipeline_id)
-        if pipeline is None:
-            abort(404)
-        steps = (
-            session.execute(
-                select(PipelineStep)
-                .options(selectinload(PipelineStep.attachments))
-                .where(PipelineStep.pipeline_id == pipeline_id)
-                .order_by(PipelineStep.step_order.asc())
+        rows = session.execute(
+            select(
+                Flowchart,
+                func.count(func.distinct(FlowchartNode.id)),
+                func.count(func.distinct(FlowchartEdge.id)),
+                func.count(func.distinct(FlowchartRun.id)),
             )
-            .scalars()
-            .all()
-        )
-    return render_template(
-        "pipeline_detail.html",
-        pipeline=pipeline,
-        steps=steps,
-        templates=templates,
-        templates_by_id=templates_by_id,
-        agents_by_id=agents_by_id,
-        summary=summary,
-        human_time=_human_time,
-        page_title=f"Pipeline - {pipeline.name}",
-        active_page="pipelines",
-    )
-
-
-@bp.get("/pipelines/<int:pipeline_id>/edit")
-def edit_pipeline(pipeline_id: int):
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    with session_scope() as session:
-        pipeline = session.get(Pipeline, pipeline_id)
-        if pipeline is None:
-            abort(404)
-    return render_template(
-        "pipeline_edit.html",
-        pipeline=pipeline,
-        summary=summary,
-        page_title=f"Edit Pipeline - {pipeline.name}",
-        active_page="pipelines",
-    )
-
-
-@bp.get("/pipelines/runs/<int:run_id>")
-def view_pipeline_run(run_id: int):
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    with session_scope() as session:
-        run = session.get(PipelineRun, run_id)
-        if run is None:
-            abort(404)
-        pipeline = (
-            session.get(Pipeline, run.pipeline_id) if run.pipeline_id else None
-        )
-        tasks = (
-            session.execute(
-                select(AgentTask)
-                .where(AgentTask.pipeline_run_id == run_id)
-                .order_by(AgentTask.created_at.asc(), AgentTask.id.asc())
-            )
-            .scalars()
-            .all()
-        )
-        agent_ids = {task.agent_id for task in tasks if task.agent_id is not None}
-        template_ids = {
-            task.task_template_id for task in tasks if task.task_template_id
+            .outerjoin(FlowchartNode, FlowchartNode.flowchart_id == Flowchart.id)
+            .outerjoin(FlowchartEdge, FlowchartEdge.flowchart_id == Flowchart.id)
+            .outerjoin(FlowchartRun, FlowchartRun.flowchart_id == Flowchart.id)
+            .group_by(Flowchart.id)
+            .order_by(Flowchart.created_at.desc())
+        ).all()
+    flowcharts = [
+        {
+            **_serialize_flowchart(flowchart),
+            "node_count": int(node_count or 0),
+            "edge_count": int(edge_count or 0),
+            "run_count": int(run_count or 0),
         }
-        step_ids = {task.pipeline_step_id for task in tasks if task.pipeline_step_id}
-        agents_by_id: dict[int, str] = {}
-        templates_by_id: dict[int, str] = {}
-        steps_by_id: dict[int, PipelineStep] = {}
-        if agent_ids:
-            rows = session.execute(
-                select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
-            ).all()
-            agents_by_id = {row[0]: row[1] for row in rows}
-        if template_ids:
-            rows = session.execute(
-                select(TaskTemplate.id, TaskTemplate.name).where(
-                    TaskTemplate.id.in_(template_ids)
-                )
-            ).all()
-            templates_by_id = {row[0]: row[1] for row in rows}
-        if step_ids:
-            steps = (
-                session.execute(
-                    select(PipelineStep).where(PipelineStep.id.in_(step_ids))
-                )
-                .scalars()
-                .all()
-            )
-            steps_by_id = {step.id: step for step in steps}
+        for flowchart, node_count, edge_count, run_count in rows
+    ]
+    if _flowchart_wants_json():
+        return {"flowcharts": flowcharts}
     return render_template(
-        "pipeline_run_detail.html",
-        pipeline_run=run,
-        pipeline=pipeline,
-        tasks=tasks,
-        agents_by_id=agents_by_id,
-        templates_by_id=templates_by_id,
-        steps_by_id=steps_by_id,
-        summary=summary,
-        human_time=_human_time,
-        page_title=f"Pipeline Run {run.id}",
-        active_page="pipelines",
+        "flowcharts.html",
+        flowcharts=flowcharts,
+        page_title="Flowcharts",
+        active_page="flowcharts",
     )
 
 
-@bp.get("/pipelines/runs/<int:run_id>/status")
-def pipeline_run_status(run_id: int):
+@bp.get("/flowcharts/new")
+def new_flowchart():
     with session_scope() as session:
-        run = session.get(PipelineRun, run_id)
-        if run is None:
-            abort(404)
-        tasks = (
-            session.execute(
-                select(AgentTask)
-                .where(AgentTask.pipeline_run_id == run_id)
-                .order_by(AgentTask.created_at.asc(), AgentTask.id.asc())
-            )
-            .scalars()
-            .all()
-        )
-        agent_ids = {task.agent_id for task in tasks if task.agent_id is not None}
-        template_ids = {
-            task.task_template_id for task in tasks if task.task_template_id
-        }
-        step_ids = {task.pipeline_step_id for task in tasks if task.pipeline_step_id}
-        agents_by_id: dict[int, str] = {}
-        templates_by_id: dict[int, str] = {}
-        steps_by_id: dict[int, PipelineStep] = {}
-        if agent_ids:
-            rows = session.execute(
-                select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
-            ).all()
-            agents_by_id = {row[0]: row[1] for row in rows}
-        if template_ids:
-            rows = session.execute(
-                select(TaskTemplate.id, TaskTemplate.name).where(
-                    TaskTemplate.id.in_(template_ids)
-                )
-            ).all()
-            templates_by_id = {row[0]: row[1] for row in rows}
-        if step_ids:
-            steps = (
-                session.execute(
-                    select(PipelineStep).where(PipelineStep.id.in_(step_ids))
-                )
-                .scalars()
-                .all()
-            )
-            steps_by_id = {step.id: step for step in steps}
-    tasks_html = render_template(
-        "partials/pipeline_run_tasks.html",
-        tasks=tasks,
-        agents_by_id=agents_by_id,
-        templates_by_id=templates_by_id,
-        steps_by_id=steps_by_id,
-        human_time=_human_time,
-    )
-    return {
-        "id": run.id,
-        "status": run.status,
-        "celery_task_id": run.celery_task_id,
-        "created_at": _human_time(run.created_at),
-        "started_at": _human_time(run.started_at),
-        "finished_at": _human_time(run.finished_at),
-        "tasks_html": tasks_html,
+        catalog = _flowchart_catalog(session)
+    defaults = {
+        "max_node_executions": None,
+        "max_runtime_minutes": None,
+        "max_parallel_nodes": 1,
+        "node_types": list(FLOWCHART_NODE_TYPE_CHOICES),
     }
-
-
-@bp.post("/pipelines/runs/<int:run_id>/cancel")
-def cancel_pipeline_run(run_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.view_pipeline_run", run_id=run_id)
+    if _flowchart_wants_json():
+        return {"defaults": defaults, "catalog": catalog}
+    return render_template(
+        "flowchart_new.html",
+        defaults=defaults,
+        catalog=catalog,
+        page_title="Create Flowchart",
+        active_page="flowcharts",
     )
-    revoke_ids: list[str] = []
-    run_task_id = None
+
+
+@bp.post("/flowcharts")
+def create_flowchart():
+    payload = _flowchart_request_payload()
+    is_api_request = request.is_json or bool(payload) or _flowchart_wants_json()
+    name = str((payload.get("name") if payload else request.form.get("name")) or "").strip()
+    description = str(
+        (payload.get("description") if payload else request.form.get("description")) or ""
+    ).strip()
+    max_node_executions_raw = (
+        payload.get("max_node_executions")
+        if payload
+        else request.form.get("max_node_executions")
+    )
+    max_runtime_minutes_raw = (
+        payload.get("max_runtime_minutes")
+        if payload
+        else request.form.get("max_runtime_minutes")
+    )
+    max_parallel_nodes_raw = (
+        payload.get("max_parallel_nodes")
+        if payload
+        else request.form.get("max_parallel_nodes")
+    )
+    if not name:
+        if is_api_request:
+            return {"error": "Flowchart name is required."}, 400
+        flash("Flowchart name is required.", "error")
+        return redirect(url_for("agents.new_flowchart"))
+    try:
+        max_node_executions = _coerce_optional_int(
+            max_node_executions_raw,
+            field_name="max_node_executions",
+            minimum=1,
+        )
+        max_runtime_minutes = _coerce_optional_int(
+            max_runtime_minutes_raw,
+            field_name="max_runtime_minutes",
+            minimum=1,
+        )
+        max_parallel_nodes = _coerce_optional_int(
+            max_parallel_nodes_raw,
+            field_name="max_parallel_nodes",
+            minimum=1,
+        )
+    except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
+        flash(str(exc), "error")
+        return redirect(url_for("agents.new_flowchart"))
+    if max_parallel_nodes is None:
+        max_parallel_nodes = 1
+
     with session_scope() as session:
-        run = session.get(PipelineRun, run_id)
-        if run is None:
+        flowchart = Flowchart.create(
+            session,
+            name=name,
+            description=description or None,
+            max_node_executions=max_node_executions,
+            max_runtime_minutes=max_runtime_minutes,
+            max_parallel_nodes=max_parallel_nodes,
+        )
+        _ensure_flowchart_start_node(session, flowchart_id=flowchart.id)
+    flowchart_payload = _serialize_flowchart(flowchart)
+    if is_api_request:
+        return {"flowchart": flowchart_payload}, 201
+    flash("Flowchart created.", "success")
+    return redirect(url_for("agents.view_flowchart", flowchart_id=int(flowchart_payload["id"])))
+
+
+@bp.get("/flowcharts/<int:flowchart_id>")
+def view_flowchart(flowchart_id: int):
+    wants_json = _flowchart_wants_json()
+    selected_node_raw = (request.args.get("node") or "").strip()
+    selected_node_id: int | None = None
+    active_run_id: int | None = None
+    if selected_node_raw:
+        try:
+            parsed_selected_node_id = int(selected_node_raw)
+        except ValueError:
+            parsed_selected_node_id = 0
+        if parsed_selected_node_id > 0:
+            selected_node_id = parsed_selected_node_id
+    with session_scope() as session:
+        existing_flowchart = session.get(Flowchart, flowchart_id)
+        if existing_flowchart is None:
             abort(404)
-        if run.status not in {"queued", "running"}:
-            flash("Pipeline run is already stopped.", "info")
-            return redirect(redirect_target)
-        now = utcnow()
-        run.status = "canceled"
-        run.finished_at = now
-        run_task_id = run.celery_task_id
-        tasks = (
+        _ensure_flowchart_start_node(session, flowchart_id=flowchart_id)
+        flowchart = (
             session.execute(
-                select(AgentTask).where(AgentTask.pipeline_run_id == run_id)
+                select(Flowchart)
+                .options(
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.edges),
+                )
+                .where(Flowchart.id == flowchart_id)
             )
             .scalars()
+            .first()
+        )
+        runs: list[FlowchartRun] = []
+        if wants_json:
+            runs = (
+                session.execute(
+                    select(FlowchartRun)
+                    .where(FlowchartRun.flowchart_id == flowchart_id)
+                    .order_by(FlowchartRun.created_at.desc())
+                    .limit(25)
+                )
+                .scalars()
+                .all()
+            )
+        catalog = _flowchart_catalog(session)
+        validation_errors = _validate_flowchart_graph(flowchart.nodes, flowchart.edges)
+        for node in flowchart.nodes:
+            if (
+                node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                and node.ref_id is not None
+                and not _flowchart_ref_exists(
+                    session,
+                    node_type=node.node_type,
+                    ref_id=node.ref_id,
+                )
+            ):
+                validation_errors.append(
+                    f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                )
+        if selected_node_id is not None and all(
+            node.id != selected_node_id for node in flowchart.nodes
+        ):
+            selected_node_id = None
+        active_run_id = (
+            session.execute(
+                select(FlowchartRun.id)
+                .where(
+                    FlowchartRun.flowchart_id == flowchart_id,
+                    FlowchartRun.status.in_(["queued", "running", "stopping"]),
+                )
+                .order_by(FlowchartRun.created_at.desc(), FlowchartRun.id.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+    flowchart_payload = _serialize_flowchart(flowchart)
+    graph_payload = {
+        "nodes": [_serialize_flowchart_node(node) for node in flowchart.nodes],
+        "edges": [_serialize_flowchart_edge(edge) for edge in flowchart.edges],
+    }
+    runs_payload = [_serialize_flowchart_run(run) for run in runs]
+    validation_payload = {
+        "valid": len(validation_errors) == 0,
+        "errors": validation_errors,
+    }
+    if wants_json:
+        return {
+            "flowchart": flowchart_payload,
+            "graph": graph_payload,
+            "runs": runs_payload,
+            "validation": validation_payload,
+        }
+    return render_template(
+        "flowchart_detail.html",
+        flowchart=flowchart_payload,
+        graph=graph_payload,
+        validation=validation_payload,
+        catalog=catalog,
+        node_types=list(FLOWCHART_NODE_TYPE_CHOICES),
+        selected_node_id=selected_node_id,
+        active_run_id=active_run_id,
+        page_title=f"Flowchart - {flowchart_payload['name']}",
+        active_page="flowcharts",
+    )
+
+
+@bp.get("/flowcharts/<int:flowchart_id>/history")
+def view_flowchart_history(flowchart_id: int):
+    with session_scope() as session:
+        flowchart = session.get(Flowchart, flowchart_id)
+        if flowchart is None:
+            abort(404)
+        start_node_id = (
+            session.execute(
+                select(FlowchartNode.id)
+                .where(
+                    FlowchartNode.flowchart_id == flowchart_id,
+                    FlowchartNode.node_type == FLOWCHART_NODE_TYPE_START,
+                )
+                .order_by(FlowchartNode.id.asc())
+            )
+            .scalars()
+            .first()
+        )
+        run_rows = (
+            session.execute(
+                select(FlowchartRun, func.count(FlowchartRunNode.id))
+                .outerjoin(
+                    FlowchartRunNode,
+                    FlowchartRunNode.flowchart_run_id == FlowchartRun.id,
+                )
+                .where(FlowchartRun.flowchart_id == flowchart_id)
+                .group_by(FlowchartRun.id)
+                .order_by(FlowchartRun.created_at.desc())
+            )
             .all()
         )
-        for task in tasks:
-            if task.status in {"pending", "queued", "running"}:
-                task.status = "canceled"
-                if not task.error:
-                    task.error = "Canceled by user."
-                task.finished_at = now
-            if task.celery_task_id:
-                revoke_ids.append(task.celery_task_id)
 
-    if run_task_id:
-        revoke_ids.append(run_task_id)
-    for task_id in revoke_ids:
-        try:
-            celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
-        except Exception as exc:
-            logger.warning("Failed to revoke pipeline task %s: %s", task_id, exc)
+        run_ids = [run.id for run, _ in run_rows]
+        start_counts: dict[int, int] = {}
+        if start_node_id is not None and run_ids:
+            start_count_rows = (
+                session.execute(
+                    select(
+                        FlowchartRunNode.flowchart_run_id,
+                        func.count(FlowchartRunNode.id),
+                    )
+                    .where(
+                        FlowchartRunNode.flowchart_run_id.in_(run_ids),
+                        FlowchartRunNode.flowchart_node_id == start_node_id,
+                    )
+                    .group_by(FlowchartRunNode.flowchart_run_id)
+                )
+                .all()
+            )
+            start_counts = {
+                int(run_id): int(count or 0) for run_id, count in start_count_rows
+            }
 
-    flash("Pipeline run canceled.", "success")
+    flowchart_payload = _serialize_flowchart(flowchart)
+    runs_payload: list[dict[str, object]] = []
+    for run, node_run_count in run_rows:
+        node_count = int(node_run_count or 0)
+        cycle_count = start_counts.get(run.id, 1 if node_count > 0 else 0)
+        runs_payload.append(
+            {
+                **_serialize_flowchart_run(run),
+                "node_run_count": node_count,
+                "cycle_count": int(cycle_count),
+            }
+        )
+
+    if _flowchart_wants_json():
+        return {
+            "flowchart": flowchart_payload,
+            "runs": runs_payload,
+        }
+    return render_template(
+        "flowchart_history.html",
+        flowchart=flowchart_payload,
+        runs=runs_payload,
+        status_class=_flowchart_status_class,
+        page_title=f"Flowchart History - {flowchart_payload['name']}",
+        active_page="flowcharts",
+    )
+
+
+@bp.get("/flowcharts/<int:flowchart_id>/history/<int:run_id>")
+def view_flowchart_history_run(flowchart_id: int, run_id: int):
+    with session_scope() as session:
+        flowchart = session.get(Flowchart, flowchart_id)
+        if flowchart is None:
+            abort(404)
+        flowchart_run = session.get(FlowchartRun, run_id)
+        if flowchart_run is None or flowchart_run.flowchart_id != flowchart_id:
+            abort(404)
+        _backfill_flowchart_node_activity_tasks(
+            session,
+            flowchart_id=flowchart_id,
+            run_id=run_id,
+        )
+
+        start_node_id = (
+            session.execute(
+                select(FlowchartNode.id)
+                .where(
+                    FlowchartNode.flowchart_id == flowchart_id,
+                    FlowchartNode.node_type == FLOWCHART_NODE_TYPE_START,
+                )
+                .order_by(FlowchartNode.id.asc())
+            )
+            .scalars()
+            .first()
+        )
+
+        node_run_rows = (
+            session.execute(
+                select(FlowchartRunNode, FlowchartNode)
+                .join(FlowchartNode, FlowchartNode.id == FlowchartRunNode.flowchart_node_id)
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .order_by(FlowchartRunNode.created_at.asc(), FlowchartRunNode.id.asc())
+            )
+            .all()
+        )
+
+    flowchart_payload = _serialize_flowchart(flowchart)
+    run_payload = _serialize_flowchart_run(flowchart_run)
+
+    node_runs_payload: list[dict[str, object]] = []
+    cycle_index = 0
+    for node_run, node in node_run_rows:
+        if start_node_id is not None and node_run.flowchart_node_id == start_node_id:
+            cycle_index += 1
+        if cycle_index == 0:
+            cycle_index = 1
+        node_runs_payload.append(
+            {
+                **_serialize_flowchart_run_node(node_run),
+                "node_title": node.title or f"{node.node_type} node",
+                "node_type": node.node_type,
+                "cycle_index": cycle_index,
+            }
+        )
+    cycle_count = cycle_index if cycle_index > 0 else (1 if node_runs_payload else 0)
+    run_payload["node_run_count"] = len(node_runs_payload)
+    run_payload["cycle_count"] = int(cycle_count)
+
+    if _flowchart_wants_json():
+        return {
+            "flowchart": flowchart_payload,
+            "flowchart_run": run_payload,
+            "node_runs": node_runs_payload,
+        }
+    return render_template(
+        "flowchart_history_run_detail.html",
+        flowchart=flowchart_payload,
+        flowchart_run=run_payload,
+        node_runs=node_runs_payload,
+        status_class=_flowchart_status_class,
+        page_title=f"Flowchart Run {run_id} - {flowchart_payload['name']}",
+        active_page="flowcharts",
+    )
+
+
+@bp.get("/flowcharts/<int:flowchart_id>/edit")
+def edit_flowchart(flowchart_id: int):
+    with session_scope() as session:
+        flowchart = session.get(Flowchart, flowchart_id)
+        if flowchart is None:
+            abort(404)
+        catalog = _flowchart_catalog(session)
+    flowchart_payload = _serialize_flowchart(flowchart)
+    if _flowchart_wants_json():
+        return {
+            "flowchart": flowchart_payload,
+            "catalog": catalog,
+        }
+    return render_template(
+        "flowchart_edit.html",
+        flowchart=flowchart_payload,
+        catalog=catalog,
+        page_title="Edit Flowchart",
+        active_page="flowcharts",
+    )
+
+
+@bp.post("/flowcharts/<int:flowchart_id>")
+def update_flowchart(flowchart_id: int):
+    payload = _flowchart_request_payload()
+    is_api_request = request.is_json or bool(payload) or _flowchart_wants_json()
+    name = str((payload.get("name") if payload else request.form.get("name")) or "").strip()
+    description = str(
+        (payload.get("description") if payload else request.form.get("description")) or ""
+    ).strip()
+    max_node_executions_raw = (
+        payload.get("max_node_executions")
+        if payload
+        else request.form.get("max_node_executions")
+    )
+    max_runtime_minutes_raw = (
+        payload.get("max_runtime_minutes")
+        if payload
+        else request.form.get("max_runtime_minutes")
+    )
+    max_parallel_nodes_raw = (
+        payload.get("max_parallel_nodes")
+        if payload
+        else request.form.get("max_parallel_nodes")
+    )
+    if not name:
+        if is_api_request:
+            return {"error": "Flowchart name is required."}, 400
+        flash("Flowchart name is required.", "error")
+        return redirect(url_for("agents.edit_flowchart", flowchart_id=flowchart_id))
+    try:
+        max_node_executions = _coerce_optional_int(
+            max_node_executions_raw,
+            field_name="max_node_executions",
+            minimum=1,
+        )
+        max_runtime_minutes = _coerce_optional_int(
+            max_runtime_minutes_raw,
+            field_name="max_runtime_minutes",
+            minimum=1,
+        )
+        max_parallel_nodes = _coerce_optional_int(
+            max_parallel_nodes_raw,
+            field_name="max_parallel_nodes",
+            minimum=1,
+        )
+    except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
+        flash(str(exc), "error")
+        return redirect(url_for("agents.edit_flowchart", flowchart_id=flowchart_id))
+    if max_parallel_nodes is None:
+        max_parallel_nodes = 1
+
+    redirect_target = _safe_redirect_target(
+        request.form.get("next"), url_for("agents.view_flowchart", flowchart_id=flowchart_id)
+    )
+    with session_scope() as session:
+        flowchart = session.get(Flowchart, flowchart_id)
+        if flowchart is None:
+            abort(404)
+        flowchart.name = name
+        flowchart.description = description or None
+        flowchart.max_node_executions = max_node_executions
+        flowchart.max_runtime_minutes = max_runtime_minutes
+        flowchart.max_parallel_nodes = max_parallel_nodes
+    flowchart_payload = _serialize_flowchart(flowchart)
+    if is_api_request:
+        return {"flowchart": flowchart_payload}
+    flash("Flowchart updated.", "success")
     return redirect(redirect_target)
 
 
-@bp.get("/pipelines/history")
-def pipeline_history():
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    pipelines = _load_pipelines()
-    history_limit = 50
-    runs = _load_pipeline_runs(limit=history_limit)
-    pipelines_by_id = {pipeline.id: pipeline.name for pipeline in pipelines}
-    return render_template(
-        "pipeline_history.html",
-        pipeline_runs=runs,
-        history_limit=history_limit,
-        pipelines_by_id=pipelines_by_id,
-        summary=summary,
-        human_time=_human_time,
-        page_title="Pipeline History",
-        active_page="pipelines",
+@bp.post("/flowcharts/<int:flowchart_id>/delete")
+def delete_flowchart(flowchart_id: int):
+    is_api_request = request.is_json or _flowchart_wants_json()
+    next_url = _safe_redirect_target(request.form.get("next"), url_for("agents.list_flowcharts"))
+    with session_scope() as session:
+        flowchart = session.get(Flowchart, flowchart_id)
+        if flowchart is None:
+            abort(404)
+
+        node_ids = (
+            session.execute(
+                select(FlowchartNode.id).where(FlowchartNode.flowchart_id == flowchart_id)
+            )
+            .scalars()
+            .all()
+        )
+        run_ids = (
+            session.execute(
+                select(FlowchartRun.id).where(FlowchartRun.flowchart_id == flowchart_id)
+            )
+            .scalars()
+            .all()
+        )
+
+        task_ids = set(
+            session.execute(
+                select(AgentTask.id).where(AgentTask.flowchart_id == flowchart_id)
+            )
+            .scalars()
+            .all()
+        )
+        if run_ids:
+            task_ids.update(
+                session.execute(
+                    select(AgentTask.id).where(AgentTask.flowchart_run_id.in_(run_ids))
+                )
+                .scalars()
+                .all()
+            )
+            session.execute(
+                delete(FlowchartRunNode).where(FlowchartRunNode.flowchart_run_id.in_(run_ids))
+            )
+        if node_ids:
+            task_ids.update(
+                session.execute(
+                    select(AgentTask.id).where(AgentTask.flowchart_node_id.in_(node_ids))
+                )
+                .scalars()
+                .all()
+            )
+            session.execute(
+                delete(flowchart_node_mcp_servers).where(
+                    flowchart_node_mcp_servers.c.flowchart_node_id.in_(node_ids)
+                )
+            )
+            session.execute(
+                delete(flowchart_node_scripts).where(
+                    flowchart_node_scripts.c.flowchart_node_id.in_(node_ids)
+                )
+            )
+
+        session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
+        if node_ids:
+            session.execute(delete(FlowchartNode).where(FlowchartNode.id.in_(node_ids)))
+        if run_ids:
+            session.execute(delete(FlowchartRun).where(FlowchartRun.id.in_(run_ids)))
+        if task_ids:
+            tasks = (
+                session.execute(select(AgentTask).where(AgentTask.id.in_(task_ids)))
+                .scalars()
+                .all()
+            )
+            for task in tasks:
+                session.delete(task)
+
+        session.delete(flowchart)
+    if is_api_request:
+        return {"deleted": True, "flowchart_id": flowchart_id}
+    flash("Flowchart deleted.", "success")
+    return redirect(next_url)
+
+
+@bp.get("/flowcharts/<int:flowchart_id>/graph")
+def get_flowchart_graph(flowchart_id: int):
+    with session_scope() as session:
+        existing_flowchart = session.get(Flowchart, flowchart_id)
+        if existing_flowchart is None:
+            abort(404)
+        _ensure_flowchart_start_node(session, flowchart_id=flowchart_id)
+        flowchart = (
+            session.execute(
+                select(Flowchart)
+                .options(
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.edges),
+                )
+                .where(Flowchart.id == flowchart_id)
+            )
+            .scalars()
+            .first()
+        )
+        errors = _validate_flowchart_graph(flowchart.nodes, flowchart.edges)
+        for node in flowchart.nodes:
+            if (
+                node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                and node.ref_id is not None
+                and not _flowchart_ref_exists(
+                    session,
+                    node_type=node.node_type,
+                    ref_id=node.ref_id,
+                )
+            ):
+                errors.append(
+                    f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                )
+    return {
+        "flowchart_id": flowchart_id,
+        "nodes": [_serialize_flowchart_node(node) for node in flowchart.nodes],
+        "edges": [_serialize_flowchart_edge(edge) for edge in flowchart.edges],
+        "validation": {"valid": len(errors) == 0, "errors": errors},
+    }
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/graph")
+def upsert_flowchart_graph(flowchart_id: int):
+    payload = _flowchart_request_payload()
+    if not payload:
+        graph_json = request.form.get("graph_json", "").strip()
+        if graph_json:
+            try:
+                parsed = json.loads(graph_json)
+            except json.JSONDecodeError:
+                return {"error": "graph_json must be valid JSON."}, 400
+            if isinstance(parsed, dict):
+                payload = parsed
+
+    raw_nodes = payload.get("nodes")
+    raw_edges = payload.get("edges")
+    if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
+        return {"error": "Graph payload must contain nodes[] and edges[] arrays."}, 400
+
+    validation_errors: list[str] = []
+    try:
+        with session_scope() as session:
+            flowchart = session.get(Flowchart, flowchart_id)
+            if flowchart is None:
+                abort(404)
+
+            existing_nodes = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.mcp_servers),
+                        selectinload(FlowchartNode.scripts),
+                    )
+                    .where(FlowchartNode.flowchart_id == flowchart_id)
+                )
+                .scalars()
+                .all()
+            )
+            existing_nodes_by_id = {node.id: node for node in existing_nodes}
+            keep_node_ids: set[int] = set()
+            token_to_node_id: dict[str, int] = {}
+
+            for index, raw_node in enumerate(raw_nodes):
+                if not isinstance(raw_node, dict):
+                    raise ValueError(f"nodes[{index}] must be an object.")
+                node_type = str(raw_node.get("node_type") or "").strip().lower()
+                if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
+                    raise ValueError(f"nodes[{index}] has invalid node_type '{node_type}'.")
+                node_id_raw = raw_node.get("id")
+                node_id = _coerce_optional_int(node_id_raw, field_name=f"nodes[{index}].id")
+                ref_id = _coerce_optional_int(
+                    raw_node.get("ref_id"), field_name=f"nodes[{index}].ref_id"
+                )
+                model_field_present = "model_id" in raw_node
+                model_id = _coerce_optional_int(
+                    raw_node.get("model_id"), field_name=f"nodes[{index}].model_id"
+                )
+                x = _coerce_float(raw_node.get("x"), field_name=f"nodes[{index}].x")
+                y = _coerce_float(raw_node.get("y"), field_name=f"nodes[{index}].y")
+                title = str(raw_node.get("title") or "").strip() or None
+                config = raw_node.get("config")
+                if config is None and "config_json" in raw_node:
+                    config = raw_node.get("config_json")
+                if config is None:
+                    config_payload: dict[str, object] = {}
+                elif isinstance(config, dict):
+                    config_payload = config
+                else:
+                    raise ValueError(f"nodes[{index}].config must be an object.")
+                if node_type == FLOWCHART_NODE_TYPE_TASK:
+                    raw_integration_keys = config_payload.get("integration_keys")
+                    if raw_integration_keys is not None:
+                        if not isinstance(raw_integration_keys, list):
+                            raise ValueError(
+                                f"nodes[{index}].config.integration_keys must be an array."
+                            )
+                        (
+                            selected_integration_keys,
+                            invalid_integration_keys,
+                        ) = validate_task_integration_keys(raw_integration_keys)
+                        if invalid_integration_keys:
+                            raise ValueError(
+                                f"nodes[{index}].config.integration_keys contains invalid key(s): "
+                                + ", ".join(invalid_integration_keys)
+                                + "."
+                            )
+                        config_payload["integration_keys"] = selected_integration_keys
+                    config_payload.pop("route_key_path", None)
+                else:
+                    config_payload.pop("integration_keys", None)
+
+                if node_type in FLOWCHART_NODE_TYPE_REQUIRES_REF and ref_id is None:
+                    raise ValueError(f"nodes[{index}] requires ref_id for node_type '{node_type}'.")
+                if node_type not in FLOWCHART_NODE_TYPE_WITH_REF and ref_id is not None:
+                    raise ValueError(
+                        f"nodes[{index}] node_type '{node_type}' does not allow ref_id."
+                    )
+                if (
+                    node_type == FLOWCHART_NODE_TYPE_TASK
+                    and ref_id is None
+                    and not _task_node_has_prompt(config_payload)
+                ):
+                    raise ValueError(
+                        f"nodes[{index}] task node requires ref_id or config.task_prompt."
+                    )
+                compatibility_errors = _validate_flowchart_utility_compatibility(
+                    node_type,
+                    model_id=model_id if model_field_present else None,
+                )
+                if compatibility_errors:
+                    raise ValueError(compatibility_errors[0])
+
+                flowchart_node = (
+                    existing_nodes_by_id.get(node_id) if node_id is not None else None
+                )
+                if flowchart_node is None:
+                    flowchart_node = FlowchartNode.create(
+                        session,
+                        flowchart_id=flowchart_id,
+                        node_type=node_type,
+                        ref_id=ref_id,
+                        title=title,
+                        x=x,
+                        y=y,
+                        config_json=json.dumps(config_payload, sort_keys=True),
+                    )
+                else:
+                    flowchart_node.node_type = node_type
+                    flowchart_node.ref_id = ref_id
+                    flowchart_node.title = title
+                    flowchart_node.x = x
+                    flowchart_node.y = y
+                    flowchart_node.config_json = json.dumps(config_payload, sort_keys=True)
+                if model_field_present:
+                    if model_id is not None and session.get(LLMModel, model_id) is None:
+                        raise ValueError(f"nodes[{index}].model_id {model_id} was not found.")
+                    flowchart_node.model_id = model_id
+
+                if (
+                    node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                    and flowchart_node.ref_id is not None
+                    and not _flowchart_ref_exists(
+                        session,
+                        node_type=node_type,
+                        ref_id=flowchart_node.ref_id,
+                    )
+                ):
+                    raise ValueError(
+                        f"nodes[{index}] references missing ref_id {flowchart_node.ref_id}."
+                    )
+
+                if "mcp_server_ids" in raw_node:
+                    mcp_server_ids_raw = raw_node.get("mcp_server_ids")
+                    if not isinstance(mcp_server_ids_raw, list):
+                        raise ValueError(f"nodes[{index}].mcp_server_ids must be an array.")
+                    mcp_server_ids: list[int] = []
+                    for mcp_index, mcp_id_raw in enumerate(mcp_server_ids_raw):
+                        mcp_id = _coerce_optional_int(
+                            mcp_id_raw,
+                            field_name=f"nodes[{index}].mcp_server_ids[{mcp_index}]",
+                            minimum=1,
+                        )
+                        if mcp_id is None:
+                            raise ValueError(
+                                f"nodes[{index}].mcp_server_ids[{mcp_index}] is invalid."
+                            )
+                        mcp_server_ids.append(mcp_id)
+                    compatibility_errors = _validate_flowchart_utility_compatibility(
+                        node_type,
+                        model_id=None,
+                        mcp_server_ids=mcp_server_ids,
+                    )
+                    if compatibility_errors:
+                        raise ValueError(compatibility_errors[0])
+                    selected_servers = (
+                        session.execute(select(MCPServer).where(MCPServer.id.in_(mcp_server_ids)))
+                        .scalars()
+                        .all()
+                    )
+                    if len(selected_servers) != len(set(mcp_server_ids)):
+                        raise ValueError(f"nodes[{index}] contains unknown MCP server IDs.")
+                    flowchart_node.mcp_servers = selected_servers
+
+                if "script_ids" in raw_node:
+                    script_ids_raw = raw_node.get("script_ids")
+                    if not isinstance(script_ids_raw, list):
+                        raise ValueError(f"nodes[{index}].script_ids must be an array.")
+                    script_ids: list[int] = []
+                    for script_index, script_id_raw in enumerate(script_ids_raw):
+                        script_id = _coerce_optional_int(
+                            script_id_raw,
+                            field_name=f"nodes[{index}].script_ids[{script_index}]",
+                            minimum=1,
+                        )
+                        if script_id is None:
+                            raise ValueError(
+                                f"nodes[{index}].script_ids[{script_index}] is invalid."
+                            )
+                        script_ids.append(script_id)
+                    compatibility_errors = _validate_flowchart_utility_compatibility(
+                        node_type,
+                        model_id=None,
+                        script_ids=script_ids,
+                    )
+                    if compatibility_errors:
+                        raise ValueError(compatibility_errors[0])
+                    selected_scripts = (
+                        session.execute(select(Script.id).where(Script.id.in_(script_ids)))
+                        .scalars()
+                        .all()
+                    )
+                    if len(selected_scripts) != len(set(script_ids)):
+                        raise ValueError(f"nodes[{index}] contains unknown script IDs.")
+                    _set_flowchart_node_scripts(session, flowchart_node.id, script_ids)
+
+                keep_node_ids.add(flowchart_node.id)
+                if node_id_raw is not None:
+                    token_to_node_id[str(node_id_raw)] = flowchart_node.id
+                if raw_node.get("client_id") is not None:
+                    token_to_node_id[str(raw_node["client_id"])] = flowchart_node.id
+                token_to_node_id[str(flowchart_node.id)] = flowchart_node.id
+
+            session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
+
+            for index, raw_edge in enumerate(raw_edges):
+                if not isinstance(raw_edge, dict):
+                    raise ValueError(f"edges[{index}] must be an object.")
+                source_raw = raw_edge.get("source_node_id")
+                target_raw = raw_edge.get("target_node_id")
+                if source_raw is None and "source" in raw_edge:
+                    source_raw = raw_edge.get("source")
+                if target_raw is None and "target" in raw_edge:
+                    target_raw = raw_edge.get("target")
+                source_node_id = token_to_node_id.get(str(source_raw))
+                target_node_id = token_to_node_id.get(str(target_raw))
+                if source_node_id is None:
+                    raise ValueError(f"edges[{index}].source_node_id is invalid.")
+                if target_node_id is None:
+                    raise ValueError(f"edges[{index}].target_node_id is invalid.")
+                source_handle_id = _coerce_optional_handle_id(
+                    raw_edge.get("source_handle_id"),
+                    field_name=f"edges[{index}].source_handle_id",
+                )
+                target_handle_id = _coerce_optional_handle_id(
+                    raw_edge.get("target_handle_id"),
+                    field_name=f"edges[{index}].target_handle_id",
+                )
+                condition_key = str(raw_edge.get("condition_key") or "").strip() or None
+                label = str(raw_edge.get("label") or "").strip() or None
+                FlowchartEdge.create(
+                    session,
+                    flowchart_id=flowchart_id,
+                    source_node_id=source_node_id,
+                    target_node_id=target_node_id,
+                    source_handle_id=source_handle_id,
+                    target_handle_id=target_handle_id,
+                    condition_key=condition_key,
+                    label=label,
+                )
+
+            removed_node_ids = set(existing_nodes_by_id).difference(keep_node_ids)
+            if removed_node_ids:
+                session.execute(
+                    delete(flowchart_node_mcp_servers).where(
+                        flowchart_node_mcp_servers.c.flowchart_node_id.in_(removed_node_ids)
+                    )
+                )
+                session.execute(
+                    delete(flowchart_node_scripts).where(
+                        flowchart_node_scripts.c.flowchart_node_id.in_(removed_node_ids)
+                    )
+                )
+                session.execute(
+                    delete(FlowchartNode).where(FlowchartNode.id.in_(removed_node_ids))
+                )
+
+            updated_nodes = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.mcp_servers),
+                        selectinload(FlowchartNode.scripts),
+                    )
+                    .where(FlowchartNode.flowchart_id == flowchart_id)
+                    .order_by(FlowchartNode.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            updated_edges = (
+                session.execute(
+                    select(FlowchartEdge)
+                    .where(FlowchartEdge.flowchart_id == flowchart_id)
+                    .order_by(FlowchartEdge.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            validation_errors = _validate_flowchart_graph(updated_nodes, updated_edges)
+            for node in updated_nodes:
+                if (
+                    node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                    and node.ref_id is not None
+                    and not _flowchart_ref_exists(
+                        session,
+                        node_type=node.node_type,
+                        ref_id=node.ref_id,
+                    )
+                ):
+                    validation_errors.append(
+                        f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                    )
+            if validation_errors:
+                raise ValueError("Flowchart graph validation failed.")
+    except ValueError as exc:
+        if validation_errors:
+            return {
+                "error": str(exc),
+                "validation": {"valid": False, "errors": validation_errors},
+            }, 400
+        return {"error": str(exc)}, 400
+
+    return get_flowchart_graph(flowchart_id)
+
+
+@bp.get("/flowcharts/<int:flowchart_id>/validate")
+def validate_flowchart(flowchart_id: int):
+    with session_scope() as session:
+        flowchart = (
+            session.execute(
+                select(Flowchart)
+                .options(
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.edges),
+                )
+                .where(Flowchart.id == flowchart_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart is None:
+            abort(404)
+        errors = _validate_flowchart_graph(flowchart.nodes, flowchart.edges)
+        for node in flowchart.nodes:
+            if (
+                node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                and node.ref_id is not None
+                and not _flowchart_ref_exists(
+                    session,
+                    node_type=node.node_type,
+                    ref_id=node.ref_id,
+                )
+            ):
+                errors.append(
+                    f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                )
+    return {
+        "flowchart_id": flowchart_id,
+        "valid": len(errors) == 0,
+        "errors": errors,
+    }
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/run")
+def run_flowchart_route(flowchart_id: int):
+    validation_errors: list[str] = []
+    with session_scope() as session:
+        flowchart = (
+            session.execute(
+                select(Flowchart)
+                .options(
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                    selectinload(Flowchart.edges),
+                )
+                .where(Flowchart.id == flowchart_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart is None:
+            abort(404)
+        validation_errors = _validate_flowchart_graph(flowchart.nodes, flowchart.edges)
+        for node in flowchart.nodes:
+            if (
+                node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                and node.ref_id is not None
+                and not _flowchart_ref_exists(
+                    session,
+                    node_type=node.node_type,
+                    ref_id=node.ref_id,
+                )
+            ):
+                validation_errors.append(
+                    f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                )
+        if validation_errors:
+            return {
+                "error": "Flowchart graph validation failed.",
+                "validation": {"valid": False, "errors": validation_errors},
+            }, 400
+        flowchart_run = FlowchartRun.create(
+            session,
+            flowchart_id=flowchart_id,
+            status="queued",
+        )
+        run_id = flowchart_run.id
+
+    async_result = run_flowchart.delay(flowchart_id, run_id)
+    flowchart_run_payload: dict[str, object]
+    with session_scope() as session:
+        flowchart_run = session.get(FlowchartRun, run_id)
+        if flowchart_run is None:
+            abort(404)
+        flowchart_run.celery_task_id = async_result.id
+        flowchart_run_payload = _serialize_flowchart_run(flowchart_run)
+    return {
+        "flowchart_run": {
+            **flowchart_run_payload,
+            "validation": {"valid": True, "errors": []},
+        }
+    }, 202
+
+
+@bp.get("/flowcharts/runs/<int:run_id>")
+def view_flowchart_run(run_id: int):
+    with session_scope() as session:
+        flowchart_run = session.get(FlowchartRun, run_id)
+        if flowchart_run is None:
+            abort(404)
+        flowchart = session.get(Flowchart, flowchart_run.flowchart_id)
+        node_runs = (
+            session.execute(
+                select(FlowchartRunNode)
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .order_by(
+                    FlowchartRunNode.execution_index.asc(),
+                    FlowchartRunNode.created_at.asc(),
+                    FlowchartRunNode.id.asc(),
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "flowchart_run": _serialize_flowchart_run(flowchart_run),
+        "flowchart": _serialize_flowchart(flowchart) if flowchart is not None else None,
+        "node_runs": [_serialize_flowchart_run_node(node_run) for node_run in node_runs],
+    }
+
+
+@bp.get("/flowcharts/runs/<int:run_id>/status")
+def flowchart_run_status(run_id: int):
+    with session_scope() as session:
+        flowchart_run = session.get(FlowchartRun, run_id)
+        if flowchart_run is None:
+            abort(404)
+        rows = session.execute(
+            select(FlowchartRunNode.status, func.count(FlowchartRunNode.id))
+            .where(FlowchartRunNode.flowchart_run_id == run_id)
+            .group_by(FlowchartRunNode.status)
+        ).all()
+    counts = {str(status): int(count or 0) for status, count in rows}
+    return {
+        "id": flowchart_run.id,
+        "status": flowchart_run.status,
+        "created_at": _human_time(flowchart_run.created_at),
+        "started_at": _human_time(flowchart_run.started_at),
+        "finished_at": _human_time(flowchart_run.finished_at),
+        "counts": counts,
+    }
+
+
+@bp.get("/flowcharts/<int:flowchart_id>/runtime")
+def flowchart_runtime_status(flowchart_id: int):
+    active_run_id: int | None = None
+    active_run_status: str | None = None
+    running_node_ids: list[int] = []
+    with session_scope() as session:
+        flowchart = session.get(Flowchart, flowchart_id)
+        if flowchart is None:
+            abort(404)
+        active_run = (
+            session.execute(
+                select(FlowchartRun)
+                .where(
+                    FlowchartRun.flowchart_id == flowchart_id,
+                    FlowchartRun.status.in_(["queued", "running", "stopping"]),
+                )
+                .order_by(FlowchartRun.created_at.desc(), FlowchartRun.id.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if active_run is None:
+            return {
+                "flowchart_id": flowchart_id,
+                "active_run_id": None,
+                "active_run_status": None,
+                "running_node_ids": [],
+            }
+        active_run_id = int(active_run.id)
+        active_run_status = str(active_run.status or "")
+        running_node_ids = [
+            int(node_id)
+            for node_id in session.execute(
+                select(FlowchartRunNode.flowchart_node_id)
+                .where(
+                    FlowchartRunNode.flowchart_run_id == active_run_id,
+                    FlowchartRunNode.status == "running",
+                )
+                .order_by(
+                    FlowchartRunNode.execution_index.asc(),
+                    FlowchartRunNode.created_at.asc(),
+                    FlowchartRunNode.id.asc(),
+                )
+            )
+            .scalars()
+            .all()
+            if isinstance(node_id, int) and node_id > 0
+        ]
+    return {
+        "flowchart_id": flowchart_id,
+        "active_run_id": active_run_id,
+        "active_run_status": active_run_status,
+        "running_node_ids": running_node_ids,
+    }
+
+
+@bp.post("/flowcharts/runs/<int:run_id>/cancel")
+def cancel_flowchart_run(run_id: int):
+    payload = _flowchart_request_payload()
+    wants_json = request.is_json or bool(payload) or _flowchart_wants_json()
+    force_value = payload.get("force")
+    if force_value is None:
+        force_value = request.form.get("force")
+    if force_value is None:
+        force_value = request.args.get("force")
+    force = _flowchart_as_bool(force_value)
+
+    revoke_actions: list[tuple[str, bool]] = []
+    action = "none"
+    updated = False
+    flowchart_id: int | None = None
+    with session_scope() as session:
+        flowchart_run = session.get(FlowchartRun, run_id)
+        if flowchart_run is None:
+            abort(404)
+        flowchart_id = flowchart_run.flowchart_id
+        now = utcnow()
+        current_status = str(flowchart_run.status or "").strip().lower()
+
+        if force:
+            if current_status in {"queued", "running", "stopping"}:
+                action = "canceled"
+                updated = True
+                flowchart_run.status = "canceled"
+                flowchart_run.finished_at = now
+                if flowchart_run.celery_task_id:
+                    revoke_actions.append((flowchart_run.celery_task_id, True))
+
+                node_runs = (
+                    session.execute(
+                        select(FlowchartRunNode).where(FlowchartRunNode.flowchart_run_id == run_id)
+                    )
+                    .scalars()
+                    .all()
+                )
+                for node_run in node_runs:
+                    if node_run.status in {"queued", "running", "pending"}:
+                        node_run.status = "canceled"
+                        node_run.finished_at = now
+
+                tasks = (
+                    session.execute(select(AgentTask).where(AgentTask.flowchart_run_id == run_id))
+                    .scalars()
+                    .all()
+                )
+                for task in tasks:
+                    if task.status in {"pending", "queued", "running"}:
+                        task.status = "canceled"
+                        task.finished_at = now
+                        if not task.error:
+                            task.error = "Canceled by user."
+                    if task.celery_task_id:
+                        revoke_actions.append((task.celery_task_id, True))
+        else:
+            if current_status == "queued":
+                action = "stopped"
+                updated = True
+                flowchart_run.status = "stopped"
+                flowchart_run.finished_at = now
+                if flowchart_run.celery_task_id:
+                    revoke_actions.append((flowchart_run.celery_task_id, False))
+            elif current_status == "running":
+                action = "stopping"
+                updated = True
+                flowchart_run.status = "stopping"
+            elif current_status == "stopping":
+                action = "stopping"
+
+        response_payload = {
+            "flowchart_run": _serialize_flowchart_run(flowchart_run),
+            "force": force,
+            "updated": updated,
+            "action": action,
+            "canceled": action == "canceled",
+            "stop_requested": action in {"stopping", "stopped"},
+        }
+
+    for task_id, terminate in revoke_actions:
+        try:
+            if terminate:
+                celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            else:
+                celery_app.control.revoke(task_id)
+        except Exception as exc:
+            logger.warning("Failed to revoke flowchart task %s: %s", task_id, exc)
+
+    if wants_json:
+        return response_payload
+
+    default_next = (
+        url_for("agents.view_flowchart_history_run", flowchart_id=flowchart_id, run_id=run_id)
+        if flowchart_id is not None
+        else url_for("agents.list_flowcharts")
     )
+    redirect_target = _safe_redirect_target(request.form.get("next"), default_next)
+    if response_payload["action"] == "canceled":
+        flash("Flowchart force stop requested.", "success")
+    elif response_payload["action"] == "stopped":
+        flash("Flowchart stopped.", "success")
+    elif response_payload["action"] == "stopping":
+        flash("Flowchart stop requested. It will stop after the current node finishes.", "success")
+    else:
+        flash("Flowchart run is not active.", "info")
+    return redirect(redirect_target)
+
+
+@bp.get("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/utilities")
+def get_flowchart_node_utilities(flowchart_id: int, node_id: int):
+    with session_scope() as session:
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.scripts),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        compatibility_errors = _validate_flowchart_utility_compatibility(
+            flowchart_node.node_type,
+            model_id=flowchart_node.model_id,
+            mcp_server_ids=[server.id for server in flowchart_node.mcp_servers],
+            script_ids=[script.id for script in flowchart_node.scripts],
+        )
+        return {
+            "node": _serialize_flowchart_node(flowchart_node),
+            "catalog": _flowchart_catalog(session),
+            "validation": {
+                "valid": len(compatibility_errors) == 0,
+                "errors": compatibility_errors,
+            },
+        }
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/model")
+def set_flowchart_node_model(flowchart_id: int, node_id: int):
+    payload = _flowchart_request_payload()
+    model_id_raw = payload.get("model_id") if payload else request.form.get("model_id")
+    try:
+        model_id = _coerce_optional_int(model_id_raw, field_name="model_id", minimum=1)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    with session_scope() as session:
+        flowchart_node = session.get(FlowchartNode, node_id)
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        errors = _validate_flowchart_utility_compatibility(
+            flowchart_node.node_type,
+            model_id=model_id,
+        )
+        if errors:
+            return {"error": errors[0]}, 400
+        if model_id is not None and session.get(LLMModel, model_id) is None:
+            return {"error": f"Model {model_id} was not found."}, 404
+        flowchart_node.model_id = model_id
+        return {"node": _serialize_flowchart_node(flowchart_node)}
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/mcp-servers")
+def attach_flowchart_node_mcp(flowchart_id: int, node_id: int):
+    payload = _flowchart_request_payload()
+    mcp_id_raw = payload.get("mcp_server_id") if payload else request.form.get("mcp_server_id")
+    try:
+        mcp_id = _coerce_optional_int(mcp_id_raw, field_name="mcp_server_id", minimum=1)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    if mcp_id is None:
+        return {"error": "mcp_server_id is required."}, 400
+
+    with session_scope() as session:
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.mcp_servers))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        errors = _validate_flowchart_utility_compatibility(
+            flowchart_node.node_type,
+            model_id=None,
+            mcp_server_ids=[mcp_id],
+        )
+        if errors:
+            return {"error": errors[0]}, 400
+        server = session.get(MCPServer, mcp_id)
+        if server is None:
+            return {"error": f"MCP server {mcp_id} was not found."}, 404
+        existing = {item.id for item in flowchart_node.mcp_servers}
+        if server.id not in existing:
+            flowchart_node.mcp_servers.append(server)
+        return {"node": _serialize_flowchart_node(flowchart_node)}
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/mcp-servers/<int:mcp_id>/delete")
+def detach_flowchart_node_mcp(flowchart_id: int, node_id: int, mcp_id: int):
+    with session_scope() as session:
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.mcp_servers))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        for server in list(flowchart_node.mcp_servers):
+            if server.id == mcp_id:
+                flowchart_node.mcp_servers.remove(server)
+        return {"node": _serialize_flowchart_node(flowchart_node)}
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/scripts")
+def attach_flowchart_node_script(flowchart_id: int, node_id: int):
+    payload = _flowchart_request_payload()
+    script_id_raw = payload.get("script_id") if payload else request.form.get("script_id")
+    try:
+        script_id = _coerce_optional_int(script_id_raw, field_name="script_id", minimum=1)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    if script_id is None:
+        return {"error": "script_id is required."}, 400
+
+    with session_scope() as session:
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.scripts))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        errors = _validate_flowchart_utility_compatibility(
+            flowchart_node.node_type,
+            model_id=None,
+            script_ids=[script_id],
+        )
+        if errors:
+            return {"error": errors[0]}, 400
+        script = session.get(Script, script_id)
+        if script is None:
+            return {"error": f"Script {script_id} was not found."}, 404
+        ordered_ids = [item.id for item in flowchart_node.scripts]
+        if script_id not in ordered_ids:
+            ordered_ids.append(script_id)
+            _set_flowchart_node_scripts(session, node_id, ordered_ids)
+        refreshed = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.scripts))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        return {"node": _serialize_flowchart_node(refreshed)}
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/scripts/<int:script_id>/delete")
+def detach_flowchart_node_script(flowchart_id: int, node_id: int, script_id: int):
+    with session_scope() as session:
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.scripts))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        ordered_ids = [item.id for item in flowchart_node.scripts if item.id != script_id]
+        _set_flowchart_node_scripts(session, node_id, ordered_ids)
+        refreshed = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.scripts))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        return {"node": _serialize_flowchart_node(refreshed)}
+
+
+@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/scripts/reorder")
+def reorder_flowchart_node_scripts(flowchart_id: int, node_id: int):
+    payload = _flowchart_request_payload()
+    script_ids_raw = payload.get("script_ids")
+    if script_ids_raw is None:
+        raw_values = [value.strip() for value in request.form.getlist("script_ids")]
+        script_ids_raw = raw_values
+    if not isinstance(script_ids_raw, list):
+        return {"error": "script_ids must be an array."}, 400
+
+    script_ids: list[int] = []
+    for index, script_id_raw in enumerate(script_ids_raw):
+        try:
+            script_id = _coerce_optional_int(
+                script_id_raw,
+                field_name=f"script_ids[{index}]",
+                minimum=1,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        if script_id is None:
+            return {"error": f"script_ids[{index}] is invalid."}, 400
+        script_ids.append(script_id)
+
+    if len(script_ids) != len(set(script_ids)):
+        return {"error": "script_ids cannot contain duplicates."}, 400
+
+    with session_scope() as session:
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.scripts))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        errors = _validate_flowchart_utility_compatibility(
+            flowchart_node.node_type,
+            model_id=None,
+            script_ids=script_ids,
+        )
+        if errors:
+            return {"error": errors[0]}, 400
+        existing_ids = {script.id for script in flowchart_node.scripts}
+        if set(script_ids) != existing_ids:
+            return {
+                "error": "script_ids must include each attached script exactly once."
+            }, 400
+        _set_flowchart_node_scripts(session, node_id, script_ids)
+        refreshed = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.scripts))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        return {"node": _serialize_flowchart_node(refreshed)}
 
 
 @bp.get("/mcps")
 def list_mcps():
+    sync_integrated_mcp_servers()
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
     mcp_servers = _load_mcp_servers()
+    integrated_mcp_servers, custom_mcp_servers = _split_mcp_servers_by_type(mcp_servers)
     return render_template(
         "mcps.html",
-        mcp_servers=mcp_servers,
+        integrated_mcp_servers=integrated_mcp_servers,
+        custom_mcp_servers=custom_mcp_servers,
         summary=summary,
         human_time=_human_time,
         page_title="MCP Servers",
@@ -4753,7 +7892,10 @@ def list_models():
 @bp.get("/models/new")
 def new_model():
     model_options = _provider_model_options()
+    local_vllm_models = discover_vllm_local_models()
     codex_default_model = _codex_default_model(model_options.get("codex"))
+    vllm_local_default_model = _vllm_local_default_model(local_vllm_models)
+    vllm_remote_default_model = _vllm_remote_default_model()
     return render_template(
         "model_new.html",
         provider_options=_provider_options(),
@@ -4764,6 +7906,15 @@ def new_model():
         ),
         gemini_config=_gemini_model_config_defaults({}),
         claude_config=_simple_model_config_defaults({}),
+        vllm_local_config=_vllm_local_model_config_defaults(
+            {},
+            default_model=vllm_local_default_model,
+        ),
+        vllm_remote_config=_vllm_remote_model_config_defaults(
+            {},
+            default_model=vllm_remote_default_model,
+        ),
+        vllm_local_models=local_vllm_models,
         model_options=model_options,
         page_title="Create Model",
         active_page="models",
@@ -4789,6 +7940,16 @@ def create_model():
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
         flash("Codex model must be selected from the configured options.", "error")
         return redirect(url_for("agents.new_model"))
+    if provider == "vllm_local" and not _model_option_allowed(
+        provider,
+        model_name,
+        model_options,
+    ):
+        flash(
+            "vLLM Local model must be selected from the discovered local model options.",
+            "error",
+        )
+        return redirect(url_for("agents.new_model"))
     config_json = json.dumps(config_payload, indent=2, sort_keys=True)
 
     with session_scope() as session:
@@ -4810,15 +7971,42 @@ def view_model(model_id: int):
         model = session.get(LLMModel, model_id)
         if model is None:
             abort(404)
-        attached_agents = (
+        attached_templates = (
             session.execute(
-                select(Agent)
-                .where(Agent.model_id == model_id)
-                .order_by(Agent.created_at.desc())
+                select(TaskTemplate)
+                .where(TaskTemplate.model_id == model_id)
+                .order_by(TaskTemplate.created_at.desc())
             )
             .scalars()
             .all()
         )
+        attached_nodes = (
+            session.execute(
+                select(FlowchartNode)
+                .where(FlowchartNode.model_id == model_id)
+                .order_by(FlowchartNode.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        attached_tasks = (
+            session.execute(
+                select(AgentTask)
+                .where(AgentTask.model_id == model_id)
+                .order_by(AgentTask.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        flowcharts_by_id: dict[int, str] = {}
+        flowchart_ids = {
+            node.flowchart_id for node in attached_nodes if node.flowchart_id is not None
+        }
+        if flowchart_ids:
+            rows = session.execute(
+                select(Flowchart.id, Flowchart.name).where(Flowchart.id.in_(flowchart_ids))
+            ).all()
+            flowcharts_by_id = {row[0]: row[1] for row in rows}
     llm_settings = _load_integration_settings("llm")
     default_model_id = resolve_default_model_id(llm_settings)
     is_default = default_model_id == model_id
@@ -4831,7 +8019,10 @@ def view_model(model_id: int):
         provider_label=provider_label,
         model_name=_model_display_name(model),
         config_json=formatted_config,
-        attached_agents=attached_agents,
+        attached_templates=attached_templates,
+        attached_nodes=attached_nodes,
+        attached_tasks=attached_tasks,
+        flowcharts_by_id=flowcharts_by_id,
         is_default=is_default,
         page_title=f"Model - {model.name}",
         active_page="models",
@@ -4846,7 +8037,10 @@ def edit_model(model_id: int):
             abort(404)
     config = _decode_model_config(model.config_json)
     model_options = _provider_model_options()
+    local_vllm_models = discover_vllm_local_models()
     codex_default_model = _codex_default_model(model_options.get("codex"))
+    vllm_local_default_model = _vllm_local_default_model(local_vllm_models)
+    vllm_remote_default_model = _vllm_remote_default_model()
     return render_template(
         "model_edit.html",
         model=model,
@@ -4862,6 +8056,15 @@ def edit_model(model_id: int):
         claude_config=_simple_model_config_defaults(
             config if model.provider == "claude" else {}
         ),
+        vllm_local_config=_vllm_local_model_config_defaults(
+            config if model.provider == "vllm_local" else {},
+            default_model=vllm_local_default_model,
+        ),
+        vllm_remote_config=_vllm_remote_model_config_defaults(
+            config if model.provider == "vllm_remote" else {},
+            default_model=vllm_remote_default_model,
+        ),
+        vllm_local_models=local_vllm_models,
         model_options=model_options,
         page_title=f"Edit Model - {model.name}",
         active_page="models",
@@ -4886,6 +8089,16 @@ def update_model(model_id: int):
     model_name = str(config_payload.get("model") or "").strip()
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
         flash("Codex model must be selected from the configured options.", "error")
+        return redirect(url_for("agents.edit_model", model_id=model_id))
+    if provider == "vllm_local" and not _model_option_allowed(
+        provider,
+        model_name,
+        model_options,
+    ):
+        flash(
+            "vLLM Local model must be selected from the discovered local model options.",
+            "error",
+        )
         return redirect(url_for("agents.edit_model", model_id=model_id))
     config_json = json.dumps(config_payload, indent=2, sort_keys=True)
 
@@ -4940,18 +8153,33 @@ def delete_model(model_id: int):
         model = session.get(LLMModel, model_id)
         if model is None:
             abort(404)
-        attached_agents = (
-            session.execute(select(Agent).where(Agent.model_id == model_id))
+        attached_templates = (
+            session.execute(select(TaskTemplate).where(TaskTemplate.model_id == model_id))
             .scalars()
             .all()
         )
-        for agent in attached_agents:
-            agent.model_id = None
+        attached_nodes = (
+            session.execute(select(FlowchartNode).where(FlowchartNode.model_id == model_id))
+            .scalars()
+            .all()
+        )
+        attached_tasks = (
+            session.execute(select(AgentTask).where(AgentTask.model_id == model_id))
+            .scalars()
+            .all()
+        )
+        for template in attached_templates:
+            template.model_id = None
+        for node in attached_nodes:
+            node.model_id = None
+        for task in attached_tasks:
+            task.model_id = None
         session.delete(model)
 
     flash("Model deleted.", "success")
-    if attached_agents:
-        flash(f"Detached from {len(attached_agents)} agent(s).", "info")
+    detached_count = len(attached_templates) + len(attached_nodes) + len(attached_tasks)
+    if detached_count:
+        flash(f"Detached from {detached_count} binding(s).", "info")
     llm_settings = _load_integration_settings("llm")
     if resolve_default_model_id(llm_settings) == model_id:
         _save_integration_settings("llm", {"default_model_id": ""})
@@ -4966,7 +8194,7 @@ def new_mcp():
     return render_template(
         "mcp_new.html",
         summary=summary,
-        page_title="Create MCP Server",
+        page_title="Create Custom MCP Server",
         active_page="mcps",
     )
 
@@ -4983,6 +8211,12 @@ def create_mcp():
         return redirect(url_for("agents.new_mcp"))
     if not raw_config:
         flash("MCP config TOML is required.", "error")
+        return redirect(url_for("agents.new_mcp"))
+    if server_key in SYSTEM_MANAGED_MCP_SERVER_KEYS:
+        flash(
+            f"Server key '{server_key}' is system-managed and cannot be created manually.",
+            "error",
+        )
         return redirect(url_for("agents.new_mcp"))
 
     try:
@@ -5005,6 +8239,7 @@ def create_mcp():
             server_key=server_key,
             description=description or None,
             config_json=formatted_config,
+            server_type=MCP_SERVER_TYPE_CUSTOM,
         )
 
     flash(f"MCP server {mcp.id} created.", "success")
@@ -5019,11 +8254,14 @@ def edit_mcp(mcp_id: int):
         mcp_server = session.get(MCPServer, mcp_id)
         if mcp_server is None:
             abort(404)
+        if mcp_server.is_integrated:
+            flash("Integrated MCP servers are managed from Integrations settings.", "error")
+            return redirect(url_for("agents.view_mcp", mcp_id=mcp_id))
     return render_template(
         "mcp_edit.html",
         mcp_server=mcp_server,
         summary=summary,
-        page_title=f"Edit MCP Server - {mcp_server.name}",
+        page_title=f"Edit Custom MCP Server - {mcp_server.name}",
         active_page="mcps",
     )
 
@@ -5053,6 +8291,18 @@ def update_mcp(mcp_id: int):
         mcp = session.get(MCPServer, mcp_id)
         if mcp is None:
             abort(404)
+        if mcp.is_integrated:
+            flash("Integrated MCP servers are managed from Integrations settings.", "error")
+            return redirect(url_for("agents.view_mcp", mcp_id=mcp_id))
+        if (
+            server_key in SYSTEM_MANAGED_MCP_SERVER_KEYS
+            and server_key != mcp.server_key
+        ):
+            flash(
+                f"Server key '{server_key}' is system-managed and cannot be edited manually.",
+                "error",
+            )
+            return redirect(url_for("agents.edit_mcp", mcp_id=mcp_id))
         existing = (
             session.execute(
                 select(MCPServer).where(
@@ -5083,14 +8333,24 @@ def delete_mcp(mcp_id: int):
         mcp = session.get(MCPServer, mcp_id)
         if mcp is None:
             abort(404)
-        attached_agents = list(mcp.agents)
-        if attached_agents:
-            mcp.agents = []
+        if mcp.is_integrated:
+            flash("Integrated MCP servers cannot be deleted.", "error")
+            return redirect(next_url)
+        attached_templates = list(mcp.task_templates)
+        attached_nodes = list(mcp.flowchart_nodes)
+        attached_tasks = list(mcp.tasks)
+        if attached_templates:
+            mcp.task_templates = []
+        if attached_nodes:
+            mcp.flowchart_nodes = []
+        if attached_tasks:
+            mcp.tasks = []
         session.delete(mcp)
 
     flash("MCP server deleted.", "success")
-    if attached_agents:
-        flash(f"Detached from {len(attached_agents)} agent(s).", "info")
+    detached_count = len(attached_templates) + len(attached_nodes) + len(attached_tasks)
+    if detached_count:
+        flash(f"Detached from {detached_count} binding(s).", "info")
     return redirect(next_url)
 
 
@@ -5102,7 +8362,11 @@ def view_mcp(mcp_id: int):
         mcp_server = (
             session.execute(
                 select(MCPServer)
-                .options(selectinload(MCPServer.agents))
+                .options(
+                    selectinload(MCPServer.task_templates),
+                    selectinload(MCPServer.flowchart_nodes),
+                    selectinload(MCPServer.tasks),
+                )
                 .where(MCPServer.id == mcp_id)
             )
             .scalars()
@@ -5110,11 +8374,25 @@ def view_mcp(mcp_id: int):
         )
         if mcp_server is None:
             abort(404)
-        attached_agents = list(mcp_server.agents)
+        attached_templates = list(mcp_server.task_templates)
+        attached_nodes = list(mcp_server.flowchart_nodes)
+        attached_tasks = list(mcp_server.tasks)
+        flowchart_ids = {
+            node.flowchart_id for node in attached_nodes if node.flowchart_id is not None
+        }
+        flowcharts_by_id: dict[int, str] = {}
+        if flowchart_ids:
+            rows = session.execute(
+                select(Flowchart.id, Flowchart.name).where(Flowchart.id.in_(flowchart_ids))
+            ).all()
+            flowcharts_by_id = {row[0]: row[1] for row in rows}
     return render_template(
         "mcp_detail.html",
         mcp_server=mcp_server,
-        attached_agents=attached_agents,
+        attached_templates=attached_templates,
+        attached_nodes=attached_nodes,
+        attached_tasks=attached_tasks,
+        flowcharts_by_id=flowcharts_by_id,
         summary=summary,
         human_time=_human_time,
         page_title=mcp_server.name,
@@ -5156,7 +8434,6 @@ def view_attachment(attachment_id: int):
                 .options(
                     selectinload(Attachment.tasks),
                     selectinload(Attachment.templates),
-                    selectinload(Attachment.pipeline_steps),
                 )
                 .where(Attachment.id == attachment_id)
             )
@@ -5167,17 +8444,12 @@ def view_attachment(attachment_id: int):
             abort(404)
         tasks = list(attachment.tasks)
         templates = list(attachment.templates)
-        pipeline_steps = list(attachment.pipeline_steps)
 
         tasks.sort(key=lambda item: item.created_at or datetime.min, reverse=True)
         templates.sort(key=lambda item: item.created_at or datetime.min, reverse=True)
-        pipeline_steps.sort(key=lambda item: (item.pipeline_id, item.step_order))
 
         agent_ids = {task.agent_id for task in tasks if task.agent_id is not None}
-        pipeline_ids = {task.pipeline_id for task in tasks if task.pipeline_id}
         template_ids = {task.task_template_id for task in tasks if task.task_template_id}
-        pipeline_ids.update(step.pipeline_id for step in pipeline_steps)
-        template_ids.update(step.task_template_id for step in pipeline_steps)
 
         agents_by_id: dict[int, str] = {}
         if agent_ids:
@@ -5185,13 +8457,6 @@ def view_attachment(attachment_id: int):
                 select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
             ).all()
             agents_by_id = {row[0]: row[1] for row in rows}
-
-        pipelines_by_id: dict[int, str] = {}
-        if pipeline_ids:
-            rows = session.execute(
-                select(Pipeline.id, Pipeline.name).where(Pipeline.id.in_(pipeline_ids))
-            ).all()
-            pipelines_by_id = {row[0]: row[1] for row in rows}
 
         templates_by_id: dict[int, str] = {}
         if template_ids:
@@ -5216,9 +8481,7 @@ def view_attachment(attachment_id: int):
         is_image_attachment=is_image_attachment,
         tasks=tasks,
         templates=templates,
-        pipeline_steps=pipeline_steps,
         agents_by_id=agents_by_id,
-        pipelines_by_id=pipelines_by_id,
         templates_by_id=templates_by_id,
         human_time=_human_time,
         format_bytes=_format_bytes,
@@ -5277,11 +8540,28 @@ def delete_attachment(attachment_id: int):
 
 @bp.get("/memories")
 def list_memories():
-    memories = _load_memories()
+    page = _parse_page(request.args.get("page"))
+    per_page = WORKFLOW_LIST_PER_PAGE
+    with session_scope() as session:
+        total_count = session.execute(select(func.count(Memory.id))).scalar_one()
+        pagination = _build_pagination(request.path, page, per_page, total_count)
+        offset = (pagination["page"] - 1) * per_page
+        memories = (
+            session.execute(
+                select(Memory)
+                .order_by(Memory.created_at.desc())
+                .limit(per_page)
+                .offset(offset)
+            )
+            .scalars()
+            .all()
+        )
     return render_template(
         "memories.html",
         memories=memories,
+        pagination=pagination,
         human_time=_human_time,
+        fixed_list_page=True,
         page_title="Memories",
         active_page="memories",
     )
@@ -5289,25 +8569,14 @@ def list_memories():
 
 @bp.get("/memories/new")
 def new_memory():
-    return render_template(
-        "memory_new.html",
-        page_title="Create Memory",
-        active_page="memories",
-    )
+    flash("Create memories by adding Memory nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.post("/memories")
 def create_memory():
-    description = request.form.get("description", "").strip()
-    if not description:
-        flash("Description is required.", "error")
-        return redirect(url_for("agents.new_memory"))
-
-    with session_scope() as session:
-        memory = Memory.create(session, description=description)
-
-    flash(f"Memory {memory.id} created.", "success")
-    return redirect(url_for("agents.view_memory", memory_id=memory.id))
+    flash("Create memories by adding Memory nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.get("/memories/<int:memory_id>")
@@ -5431,7 +8700,11 @@ def view_script(script_id: int):
         script = (
             session.execute(
                 select(Script)
-                .options(selectinload(Script.agents))
+                .options(
+                    selectinload(Script.tasks),
+                    selectinload(Script.task_templates),
+                    selectinload(Script.flowchart_nodes),
+                )
                 .where(Script.id == script_id)
             )
             .scalars()
@@ -5439,13 +8712,27 @@ def view_script(script_id: int):
         )
         if script is None:
             abort(404)
-        attached_agents = list(script.agents)
+        attached_tasks = list(script.tasks)
+        attached_templates = list(script.task_templates)
+        attached_nodes = list(script.flowchart_nodes)
+        flowchart_ids = {
+            node.flowchart_id for node in attached_nodes if node.flowchart_id is not None
+        }
+        flowcharts_by_id: dict[int, str] = {}
+        if flowchart_ids:
+            rows = session.execute(
+                select(Flowchart.id, Flowchart.name).where(Flowchart.id.in_(flowchart_ids))
+            ).all()
+            flowcharts_by_id = {row[0]: row[1] for row in rows}
         script_content = _read_script_content(script)
     return render_template(
         "script_detail.html",
         script=script,
         script_content=script_content,
-        attached_agents=attached_agents,
+        attached_tasks=attached_tasks,
+        attached_templates=attached_templates,
+        attached_nodes=attached_nodes,
+        flowcharts_by_id=flowcharts_by_id,
         human_time=_human_time,
         page_title=f"Script - {script.file_name}",
         active_page="scripts",
@@ -5527,14 +8814,21 @@ def delete_script(script_id: int):
         if script is None:
             abort(404)
         script_path = script.file_path
-        attached_agents = list(script.agents)
-        if attached_agents:
-            script.agents = []
+        attached_tasks = list(script.tasks)
+        attached_templates = list(script.task_templates)
+        attached_nodes = list(script.flowchart_nodes)
+        if attached_tasks:
+            script.tasks = []
+        if attached_templates:
+            script.task_templates = []
+        if attached_nodes:
+            script.flowchart_nodes = []
         session.delete(script)
 
     flash("Script deleted.", "success")
-    if attached_agents:
-        flash(f"Detached from {len(attached_agents)} agent(s).", "info")
+    detached_count = len(attached_tasks) + len(attached_templates) + len(attached_nodes)
+    if detached_count:
+        flash(f"Detached from {detached_count} binding(s).", "info")
     remove_script_file(script_path)
     return redirect(next_url)
 
@@ -5759,8 +9053,8 @@ def github_pull_request_code_review(pr_number: int):
         if task is not None:
             task.celery_task_id = celery_task.id
 
-    flash(f"Code review task {task_id} queued.", "success")
-    return redirect(url_for("agents.view_task", task_id=task_id))
+    flash(f"Code review node {task_id} queued.", "success")
+    return redirect(url_for("agents.view_node", task_id=task_id))
 
 
 @bp.get("/jira")
@@ -5905,58 +9199,239 @@ def jira_issue_detail(issue_key: str):
 @bp.get("/confluence")
 def confluence_workspace():
     settings = _load_integration_settings("confluence")
-    space = settings.get("space") or "No space selected"
+    selected_space = (settings.get("space") or "").strip()
+    selected_space_name = selected_space or "No space selected"
+    for option in _confluence_space_options(settings):
+        option_value = (option.get("value") or "").strip()
+        if option_value != selected_space:
+            continue
+        option_label = (option.get("label") or "").strip()
+        if " - " in option_label:
+            selected_space_name = option_label.split(" - ", 1)[1].strip() or option_label
+        elif option_label:
+            selected_space_name = option_label
+        break
     site = settings.get("site") or "No site configured"
+    api_key = settings.get("api_key") or ""
+    email = settings.get("email") or ""
+    pages: list[dict[str, object]] = []
+    page: dict[str, object] | None = None
+    selected_page_id = request.args.get("page", "").strip()
+    confluence_error: str | None = None
+    if not selected_space:
+        confluence_error = "Set a Confluence space in Integrations to load pages."
+    if api_key and settings.get("site") and selected_space:
+        auth_key = _combine_atlassian_key(api_key, email)
+        if ":" not in auth_key:
+            confluence_error = (
+                "Confluence API key needs an Atlassian email. Enter it in settings."
+            )
+        else:
+            try:
+                pages = _fetch_confluence_pages(
+                    auth_key,
+                    settings.get("site") or "",
+                    selected_space,
+                )
+                if pages:
+                    page_id = selected_page_id or pages[0].get("id", "")
+                    if page_id:
+                        page = _fetch_confluence_page(
+                            auth_key,
+                            settings.get("site") or "",
+                            page_id,
+                        )
+                elif selected_page_id:
+                    page = _fetch_confluence_page(
+                        auth_key,
+                        settings.get("site") or "",
+                        selected_page_id,
+                    )
+            except ValueError as exc:
+                confluence_error = str(exc)
     return render_template(
         "confluence.html",
-        confluence_space=space,
+        confluence_space=selected_space or "No space selected",
+        confluence_space_name=selected_space_name,
+        confluence_space_key=selected_space,
+        confluence_pages=pages,
+        confluence_selected_page=page,
+        confluence_page_id=selected_page_id or (page.get("id") if page else ""),
+        confluence_error=confluence_error,
         confluence_site=site,
-        confluence_space_selected=bool(settings.get("space")),
+        confluence_space_selected=bool(selected_space),
         confluence_connected=bool(settings.get("api_key")),
         page_title="Confluence",
         active_page="confluence",
     )
 
 
+@bp.get("/chroma")
+def chroma_workspace():
+    return redirect(url_for("agents.chroma_collections"))
+
+
+@bp.get("/chroma/collections")
+def chroma_collections():
+    chroma_settings = _resolved_chroma_settings()
+    if not _chroma_connected(chroma_settings):
+        flash("Configure ChromaDB host and port in Integrations first.", "error")
+        return redirect(url_for("agents.settings_integrations"))
+
+    client, host, port, normalized_hint, error = _chroma_http_client(chroma_settings)
+    collections: list[dict[str, object]] = []
+    chroma_error: str | None = None
+    if error or client is None:
+        chroma_error = (
+            f"Failed to connect to Chroma at {_chroma_endpoint_label(host, port)}: {error}"
+        )
+    else:
+        try:
+            collection_names = _list_collection_names(client.list_collections())
+            for collection_name in collection_names:
+                count: int | None = None
+                metadata: dict[str, object] = {}
+                try:
+                    collection = client.get_collection(name=collection_name)
+                    count = collection.count()
+                    raw_metadata = getattr(collection, "metadata", None)
+                    if isinstance(raw_metadata, dict):
+                        metadata = raw_metadata
+                except Exception:
+                    pass
+                collections.append(
+                    {
+                        "name": collection_name,
+                        "count": count,
+                        "metadata_preview": (
+                            json.dumps(metadata, sort_keys=True) if metadata else "{}"
+                        ),
+                    }
+                )
+        except Exception as exc:
+            chroma_error = f"Failed to load collections: {exc}"
+
+    page = _parse_page(request.args.get("page"))
+    per_page = _parse_page_size(request.args.get("per_page"))
+    total_collections = len(collections)
+    total_pages = (
+        max(1, (total_collections + per_page - 1) // per_page)
+        if total_collections
+        else 1
+    )
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+    paged_collections = collections[offset : offset + per_page]
+    pagination_items = _build_pagination_items(page, total_pages)
+
+    return render_template(
+        "chroma_collections.html",
+        collections=paged_collections,
+        chroma_error=chroma_error,
+        chroma_host=host,
+        chroma_port=port,
+        chroma_ssl="enabled" if _as_bool(chroma_settings.get("ssl")) else "disabled",
+        chroma_normalized_hint=normalized_hint,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        per_page_options=PAGINATION_PAGE_SIZES,
+        total_collections=total_collections,
+        pagination_items=pagination_items,
+        page_title="ChromaDB Collections",
+        active_page="chroma",
+    )
+
+
+@bp.get("/chroma/collections/detail")
+def chroma_collection_detail():
+    collection_name = (request.args.get("name") or "").strip()
+    if not collection_name:
+        flash("Collection name is required.", "error")
+        return redirect(url_for("agents.chroma_collections"))
+
+    chroma_settings = _resolved_chroma_settings()
+    if not _chroma_connected(chroma_settings):
+        flash("Configure ChromaDB host and port in Integrations first.", "error")
+        return redirect(url_for("agents.settings_integrations"))
+
+    client, host, port, normalized_hint, error = _chroma_http_client(chroma_settings)
+    if error or client is None:
+        flash(
+            f"Failed to connect to Chroma at {_chroma_endpoint_label(host, port)}: {error}",
+            "error",
+        )
+        return redirect(url_for("agents.chroma_collections"))
+
+    try:
+        collection = client.get_collection(name=collection_name)
+        count = collection.count()
+        raw_metadata = getattr(collection, "metadata", None)
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    except Exception as exc:
+        flash(f"Failed to load collection '{collection_name}': {exc}", "error")
+        return redirect(url_for("agents.chroma_collections"))
+
+    return render_template(
+        "chroma_collection_detail.html",
+        collection_name=collection_name,
+        collection_count=count,
+        collection_metadata=metadata,
+        collection_metadata_json=json.dumps(metadata, sort_keys=True, indent=2)
+        if metadata
+        else "{}",
+        chroma_host=host,
+        chroma_port=port,
+        chroma_ssl="enabled" if _as_bool(chroma_settings.get("ssl")) else "disabled",
+        chroma_normalized_hint=normalized_hint,
+        page_title=f"ChromaDB - {collection_name}",
+        active_page="chroma",
+    )
+
+
+@bp.post("/chroma/collections/delete")
+def delete_chroma_collection():
+    collection_name = request.form.get("collection_name", "").strip()
+    next_page = request.form.get("next", "").strip().lower()
+    if not collection_name:
+        flash("Collection name is required.", "error")
+        return redirect(url_for("agents.chroma_collections"))
+
+    chroma_settings = _resolved_chroma_settings()
+    if not _chroma_connected(chroma_settings):
+        flash("Configure ChromaDB host and port in Integrations first.", "error")
+        return redirect(url_for("agents.settings_integrations"))
+
+    client, host, port, _, error = _chroma_http_client(chroma_settings)
+    if error or client is None:
+        flash(
+            f"Failed to connect to Chroma at {_chroma_endpoint_label(host, port)}: {error}",
+            "error",
+        )
+        if next_page == "detail":
+            return redirect(
+                url_for("agents.chroma_collection_detail", name=collection_name)
+            )
+        return redirect(url_for("agents.chroma_collections"))
+
+    try:
+        client.delete_collection(name=collection_name)
+    except Exception as exc:
+        flash(f"Failed to delete collection '{collection_name}': {exc}", "error")
+        if next_page == "detail":
+            return redirect(
+                url_for("agents.chroma_collection_detail", name=collection_name)
+            )
+        return redirect(url_for("agents.chroma_collections"))
+
+    flash("Collection deleted.", "success")
+    return redirect(url_for("agents.chroma_collections"))
+
+
 @bp.post("/task-templates")
 def create_task_template():
-    name = request.form.get("name", "").strip()
-    prompt = request.form.get("prompt", "").strip()
-    description = request.form.get("description", "").strip()
-    agent_id_raw = request.form.get("agent_id", "").strip()
-    uploads = request.files.getlist("attachments")
-    agent_id: int | None = None
-    if agent_id_raw:
-        if not agent_id_raw.isdigit():
-            flash("Select a valid agent.", "error")
-            return redirect(url_for("agents.new_task_template"))
-        agent_id = int(agent_id_raw)
-    if not name or not prompt:
-        flash("Template name and prompt are required.", "error")
-        return redirect(url_for("agents.new_task_template"))
-    try:
-        with session_scope() as session:
-            if agent_id is not None:
-                agent = session.get(Agent, agent_id)
-                if agent is None:
-                    flash("Agent not found.", "error")
-                    return redirect(url_for("agents.new_task_template"))
-            template = TaskTemplate.create(
-                session,
-                name=name,
-                prompt=prompt,
-                description=description or None,
-                agent_id=agent_id,
-            )
-            attachments = _save_uploaded_attachments(session, uploads)
-            _attach_attachments(template, attachments)
-            template_id = template.id
-    except (OSError, ValueError) as exc:
-        logger.exception("Failed to save template attachments")
-        flash(str(exc) or "Failed to save attachments.", "error")
-        return redirect(url_for("agents.new_task_template"))
-    flash("Template created.", "success")
-    return redirect(url_for("agents.view_task_template", template_id=template_id))
+    flash("Create tasks by adding Task nodes in a flowchart.", "error")
+    return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.post("/task-templates/<int:template_id>")
@@ -6044,26 +9519,6 @@ def delete_task_template(template_id: int):
         template = session.get(TaskTemplate, template_id)
         if template is None:
             abort(404)
-        steps = (
-            session.execute(
-                select(PipelineStep).where(
-                    PipelineStep.task_template_id == template_id
-                )
-            )
-            .scalars()
-            .all()
-        )
-        step_ids = [step.id for step in steps]
-        if step_ids:
-            tasks = (
-                session.execute(
-                    select(AgentTask).where(AgentTask.pipeline_step_id.in_(step_ids))
-                )
-                .scalars()
-                .all()
-            )
-            for task in tasks:
-                task.pipeline_step_id = None
         tasks_with_template = (
             session.execute(
                 select(AgentTask).where(AgentTask.task_template_id == template_id)
@@ -6073,348 +9528,9 @@ def delete_task_template(template_id: int):
         )
         for task in tasks_with_template:
             task.task_template_id = None
-        for step in steps:
-            session.delete(step)
         session.delete(template)
     flash("Template deleted.", "success")
     return redirect(next_url)
-
-
-@bp.post("/pipelines")
-def create_pipeline():
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    if not name:
-        flash("Pipeline name is required.", "error")
-        return redirect(url_for("agents.new_pipeline"))
-    with session_scope() as session:
-        Pipeline.create(
-            session,
-            name=name,
-            description=description or None,
-        )
-    flash("Pipeline created.", "success")
-    return redirect(url_for("agents.list_pipelines"))
-
-
-@bp.post("/pipelines/<int:pipeline_id>")
-def update_pipeline(pipeline_id: int):
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    if not name:
-        flash("Pipeline name is required.", "error")
-        return redirect(url_for("agents.edit_pipeline", pipeline_id=pipeline_id))
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"),
-        url_for("agents.view_pipeline", pipeline_id=pipeline_id),
-    )
-    with session_scope() as session:
-        pipeline = session.get(Pipeline, pipeline_id)
-        if pipeline is None:
-            abort(404)
-        pipeline.name = name
-        pipeline.description = description or None
-    flash("Pipeline updated.", "success")
-    return redirect(redirect_target)
-
-
-@bp.post("/pipelines/<int:pipeline_id>/delete")
-def delete_pipeline(pipeline_id: int):
-    next_url = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.list_pipelines")
-    )
-    with session_scope() as session:
-        pipeline = session.get(Pipeline, pipeline_id)
-        if pipeline is None:
-            abort(404)
-        steps = (
-            session.execute(
-                select(PipelineStep).where(PipelineStep.pipeline_id == pipeline_id)
-            )
-            .scalars()
-            .all()
-        )
-        runs = (
-            session.execute(
-                select(PipelineRun).where(PipelineRun.pipeline_id == pipeline_id)
-            )
-            .scalars()
-            .all()
-        )
-        step_ids = [step.id for step in steps]
-        run_ids = [run.id for run in runs]
-        task_ids = set(
-            session.execute(
-                select(AgentTask.id).where(AgentTask.pipeline_id == pipeline_id)
-            )
-            .scalars()
-            .all()
-        )
-        if step_ids:
-            task_ids.update(
-                session.execute(
-                    select(AgentTask.id).where(
-                        AgentTask.pipeline_step_id.in_(step_ids)
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        if run_ids:
-            task_ids.update(
-                session.execute(
-                    select(AgentTask.id).where(
-                        AgentTask.pipeline_run_id.in_(run_ids)
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        if task_ids:
-            tasks = (
-                session.execute(select(AgentTask).where(AgentTask.id.in_(task_ids)))
-                .scalars()
-                .all()
-            )
-            for task in tasks:
-                session.delete(task)
-        for step in steps:
-            session.delete(step)
-        for run in runs:
-            session.delete(run)
-        session.delete(pipeline)
-    flash("Pipeline deleted.", "success")
-    return redirect(next_url)
-
-
-@bp.post("/pipelines/<int:pipeline_id>/steps")
-def add_pipeline_step(pipeline_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.list_pipelines")
-    )
-    template_id = request.form.get("template_id", "").strip()
-    additional_prompt = request.form.get("additional_prompt", "").strip()
-    step_order_raw = request.form.get("step_order", "").strip()
-    uploads = request.files.getlist("attachments")
-    if not template_id:
-        flash("Select a template.", "error")
-        return redirect(redirect_target)
-    try:
-        with session_scope() as session:
-            pipeline = session.get(Pipeline, pipeline_id)
-            if pipeline is None:
-                flash("Pipeline not found.", "error")
-                return redirect(url_for("agents.list_pipelines"))
-            template = session.get(TaskTemplate, int(template_id))
-            if template is None:
-                flash("Template not found.", "error")
-                return redirect(redirect_target)
-            if template.agent_id is None:
-                flash("Template must have an agent assigned.", "error")
-                return redirect(redirect_target)
-            if step_order_raw:
-                step_order = int(step_order_raw)
-            else:
-                step_order = (
-                    session.execute(
-                        select(func.max(PipelineStep.step_order)).where(
-                            PipelineStep.pipeline_id == pipeline_id
-                        )
-                    ).scalar_one()
-                    or 0
-                )
-                step_order += 1
-            step = PipelineStep.create(
-                session,
-                pipeline_id=pipeline_id,
-                task_template_id=template.id,
-                step_order=step_order,
-                additional_prompt=additional_prompt or None,
-            )
-            attachments = _save_uploaded_attachments(session, uploads)
-            _attach_attachments(step, attachments)
-    except (OSError, ValueError) as exc:
-        logger.exception("Failed to save pipeline step attachments")
-        flash(str(exc) or "Failed to save attachments.", "error")
-        return redirect(redirect_target)
-    flash("Pipeline step added.", "success")
-    return redirect(redirect_target)
-
-
-@bp.post("/pipelines/<int:pipeline_id>/steps/<int:step_id>/prompt")
-def update_pipeline_step_prompt(pipeline_id: int, step_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"),
-        url_for("agents.view_pipeline", pipeline_id=pipeline_id),
-    )
-    additional_prompt = request.form.get("additional_prompt", "").strip()
-    uploads = request.files.getlist("attachments")
-    try:
-        with session_scope() as session:
-            step = session.get(PipelineStep, step_id)
-            if step is None or step.pipeline_id != pipeline_id:
-                abort(404)
-            step.additional_prompt = additional_prompt or None
-            attachments = _save_uploaded_attachments(session, uploads)
-            _attach_attachments(step, attachments)
-    except (OSError, ValueError) as exc:
-        logger.exception("Failed to save pipeline step attachments")
-        flash(str(exc) or "Failed to save attachments.", "error")
-        return redirect(redirect_target)
-    flash("Pipeline step prompt updated.", "success")
-    return redirect(redirect_target)
-
-
-@bp.post(
-    "/pipelines/<int:pipeline_id>/steps/<int:step_id>/attachments/<int:attachment_id>/remove"
-)
-def remove_pipeline_step_attachment(
-    pipeline_id: int, step_id: int, attachment_id: int
-):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"),
-        url_for("agents.view_pipeline", pipeline_id=pipeline_id),
-    )
-    removed_path: str | None = None
-    with session_scope() as session:
-        step = (
-            session.execute(
-                select(PipelineStep)
-                .options(selectinload(PipelineStep.attachments))
-                .where(PipelineStep.id == step_id)
-            )
-            .scalars()
-            .first()
-        )
-        if step is None or step.pipeline_id != pipeline_id:
-            abort(404)
-        attachment = next(
-            (item for item in step.attachments if item.id == attachment_id), None
-        )
-        if attachment is None:
-            flash("Attachment not found on this step.", "error")
-            return redirect(redirect_target)
-        step.attachments.remove(attachment)
-        session.flush()
-        removed_path = _delete_attachment_if_unused(session, attachment)
-    if removed_path:
-        remove_attachment_file(removed_path)
-    flash("Attachment removed.", "success")
-    return redirect(redirect_target)
-
-
-@bp.post("/pipelines/<int:pipeline_id>/steps/<int:step_id>/delete")
-def delete_pipeline_step(pipeline_id: int, step_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"),
-        url_for("agents.view_pipeline", pipeline_id=pipeline_id),
-    )
-    with session_scope() as session:
-        step = session.get(PipelineStep, step_id)
-        if step is None or step.pipeline_id != pipeline_id:
-            abort(404)
-        tasks = (
-            session.execute(
-                select(AgentTask).where(AgentTask.pipeline_step_id == step_id)
-            )
-            .scalars()
-            .all()
-        )
-        for task in tasks:
-            task.pipeline_step_id = None
-        session.delete(step)
-    flash("Pipeline step deleted.", "success")
-    return redirect(redirect_target)
-
-
-def _move_pipeline_step(pipeline_id: int, step_id: int, direction: str):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"),
-        url_for("agents.view_pipeline", pipeline_id=pipeline_id),
-    )
-    with session_scope() as session:
-        steps = (
-            session.execute(
-                select(PipelineStep)
-                .where(PipelineStep.pipeline_id == pipeline_id)
-                .order_by(PipelineStep.step_order.asc(), PipelineStep.id.asc())
-            )
-            .scalars()
-            .all()
-        )
-        step_index = next(
-            (index for index, step in enumerate(steps) if step.id == step_id),
-            None,
-        )
-        if step_index is None:
-            abort(404)
-        offset = -1 if direction == "up" else 1
-        target_index = step_index + offset
-        if target_index < 0:
-            flash("Pipeline step is already first.", "error")
-            return redirect(redirect_target)
-        if target_index >= len(steps):
-            flash("Pipeline step is already last.", "error")
-            return redirect(redirect_target)
-        steps[step_index], steps[target_index] = (
-            steps[target_index],
-            steps[step_index],
-        )
-        for index, step in enumerate(steps, start=1):
-            step.step_order = index
-    flash("Pipeline step moved.", "success")
-    return redirect(redirect_target)
-
-
-@bp.post("/pipelines/<int:pipeline_id>/steps/<int:step_id>/move-up")
-def move_pipeline_step_up(pipeline_id: int, step_id: int):
-    return _move_pipeline_step(pipeline_id, step_id, "up")
-
-
-@bp.post("/pipelines/<int:pipeline_id>/steps/<int:step_id>/move-down")
-def move_pipeline_step_down(pipeline_id: int, step_id: int):
-    return _move_pipeline_step(pipeline_id, step_id, "down")
-
-
-@bp.post("/pipelines/<int:pipeline_id>/loop")
-def toggle_pipeline_loop(pipeline_id: int):
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"),
-        url_for("agents.view_pipeline", pipeline_id=pipeline_id),
-    )
-    requested = (request.form.get("loop_enabled") or "").strip().lower()
-    with session_scope() as session:
-        pipeline = session.get(Pipeline, pipeline_id)
-        if pipeline is None:
-            abort(404)
-        if requested:
-            pipeline.loop_enabled = requested in {"1", "true", "yes", "on"}
-        else:
-            pipeline.loop_enabled = not bool(pipeline.loop_enabled)
-        loop_enabled = pipeline.loop_enabled
-    flash(
-        f"Pipeline loop {'enabled' if loop_enabled else 'disabled'}.",
-        "success",
-    )
-    return redirect(redirect_target)
-
-
-@bp.post("/pipelines/<int:pipeline_id>/run")
-def start_pipeline(pipeline_id: int):
-    with session_scope() as session:
-        pipeline = session.get(Pipeline, pipeline_id)
-        if pipeline is None:
-            flash("Pipeline not found.", "error")
-            return redirect(url_for("agents.list_pipelines"))
-        run = PipelineRun.create(
-            session,
-            pipeline_id=pipeline_id,
-            status="queued",
-        )
-        run_id = run.id
-    run_pipeline.delay(pipeline_id, run_id)
-    flash("Pipeline started.", "success")
-    return redirect(url_for("agents.view_pipeline_run", run_id=run_id))
 
 
 @bp.get("/settings")
@@ -6436,6 +9552,9 @@ def settings():
         "DATA_DIR": Config.DATA_DIR,
         "DATABASE_FILENAME": Config.DATABASE_FILENAME,
         "CODEX_MODEL": Config.CODEX_MODEL or "default",
+        "VLLM_LOCAL_CMD": Config.VLLM_LOCAL_CMD,
+        "VLLM_LOCAL_CUSTOM_MODELS_DIR": Config.VLLM_LOCAL_CUSTOM_MODELS_DIR,
+        "VLLM_REMOTE_BASE_URL": Config.VLLM_REMOTE_BASE_URL or "not set",
     }
     celery_overview = {
         "CELERY_BROKER_URL": Config.CELERY_BROKER_URL,
@@ -6614,6 +9733,9 @@ def settings_core():
         "GEMINI_MODEL": Config.GEMINI_MODEL or "default",
         "CLAUDE_CMD": Config.CLAUDE_CMD,
         "CLAUDE_MODEL": Config.CLAUDE_MODEL or "default",
+        "VLLM_LOCAL_CMD": Config.VLLM_LOCAL_CMD,
+        "VLLM_REMOTE_BASE_URL": Config.VLLM_REMOTE_BASE_URL or "not set",
+        "VLLM_LOCAL_CUSTOM_MODELS_DIR": Config.VLLM_LOCAL_CUSTOM_MODELS_DIR,
     }
     return render_template(
         "settings_core.html",
@@ -6639,6 +9761,8 @@ def settings_provider():
     codex_settings = _codex_settings_payload(llm_settings)
     gemini_settings = _gemini_settings_payload(llm_settings)
     claude_settings = _claude_settings_payload(llm_settings)
+    vllm_local_settings = _vllm_local_settings_payload(llm_settings)
+    vllm_remote_settings = _vllm_remote_settings_payload(llm_settings)
     provider_details = []
     for provider in LLM_PROVIDERS:
         provider_details.append(
@@ -6659,6 +9783,8 @@ def settings_provider():
         codex_settings=codex_settings,
         gemini_settings=gemini_settings,
         claude_settings=claude_settings,
+        vllm_local_settings=vllm_local_settings,
+        vllm_remote_settings=vllm_remote_settings,
         summary=summary,
         page_title="Settings - Provider",
         active_page="settings",
@@ -6722,6 +9848,42 @@ def update_claude_settings():
     }
     _save_integration_settings("llm", payload)
     flash("Claude auth settings updated.", "success")
+    return redirect(url_for("agents.settings_provider"))
+
+
+@bp.post("/settings/provider/vllm-local")
+def update_vllm_local_settings():
+    local_model = request.form.get("vllm_local_model", "")
+    discovered_local_values = {item["value"] for item in discover_vllm_local_models()}
+    local_model_clean = local_model.strip()
+    if local_model_clean and local_model_clean not in discovered_local_values:
+        flash("vLLM local model must be selected from discovered local models.", "error")
+        return redirect(url_for("agents.settings_provider"))
+    payload = {
+        "vllm_local_model": local_model_clean,
+        # Local provider runs in-container through CLI; clear deprecated HTTP fields.
+        "vllm_local_base_url": "",
+        "vllm_local_api_key": "",
+    }
+    _save_integration_settings("llm", payload)
+    flash("vLLM Local settings updated.", "success")
+    return redirect(url_for("agents.settings_provider"))
+
+
+@bp.post("/settings/provider/vllm-remote")
+def update_vllm_remote_settings():
+    remote_base_url = request.form.get("vllm_remote_base_url", "")
+    remote_api_key = request.form.get("vllm_remote_api_key", "")
+    remote_model = request.form.get("vllm_remote_model", "")
+    remote_models = request.form.get("vllm_remote_models", "")
+    payload = {
+        "vllm_remote_base_url": remote_base_url,
+        "vllm_remote_api_key": remote_api_key,
+        "vllm_remote_model": remote_model,
+        "vllm_remote_models": remote_models,
+    }
+    _save_integration_settings("llm", payload)
+    flash("vLLM Remote settings updated.", "success")
     return redirect(url_for("agents.settings_provider"))
 
 
@@ -6826,10 +9988,12 @@ def update_gitconfig():
 
 @bp.get("/settings/integrations")
 def settings_integrations():
+    sync_integrated_mcp_servers()
     summary = _settings_summary()
     github_settings = _load_integration_settings("github")
     jira_settings = _load_integration_settings("jira")
     confluence_settings = _load_integration_settings("confluence")
+    chroma_settings = _resolved_chroma_settings()
     github_repo_options: list[str] = []
     selected_repo = github_settings.get("repo")
     if selected_repo:
@@ -6844,15 +10008,13 @@ def settings_integrations():
     selected_board = jira_settings.get("board")
     if selected_board:
         jira_board_options = [{"value": selected_board, "label": selected_board}]
-    confluence_space_options: list[dict[str, str]] = []
-    selected_space = confluence_settings.get("space")
-    if selected_space:
-        confluence_space_options = [{"value": selected_space, "label": selected_space}]
+    confluence_space_options = _confluence_space_options(confluence_settings)
     return render_template(
         "settings_integrations.html",
         github_settings=github_settings,
         jira_settings=jira_settings,
         confluence_settings=confluence_settings,
+        chroma_settings=chroma_settings,
         github_repo_options=github_repo_options,
         jira_project_options=jira_project_options,
         jira_board_options=jira_board_options,
@@ -6863,6 +10025,7 @@ def settings_integrations():
         ),
         jira_connected=bool(jira_settings.get("api_key")),
         confluence_connected=bool(confluence_settings.get("api_key")),
+        chroma_connected=_chroma_connected(chroma_settings),
         summary=summary,
         page_title="Settings - Integrations",
         active_page="settings",
@@ -6915,6 +10078,7 @@ def update_github_settings():
                 logger.warning("Failed to save GitHub SSH key: %s", exc)
                 flash("Unable to save GitHub SSH key.", "error")
     _save_integration_settings("github", payload)
+    sync_integrated_mcp_servers()
     if action == "refresh":
         repo_options: list[str] = []
         if pat:
@@ -6936,6 +10100,7 @@ def update_github_settings():
         summary = _settings_summary()
         jira_settings = _load_integration_settings("jira")
         confluence_settings = _load_integration_settings("confluence")
+        chroma_settings = _resolved_chroma_settings()
         github_settings = _load_integration_settings("github")
         jira_project_options: list[dict[str, str]] = []
         selected_project = jira_settings.get("project_key")
@@ -6947,17 +10112,13 @@ def update_github_settings():
         selected_board = jira_settings.get("board")
         if selected_board:
             jira_board_options = [{"value": selected_board, "label": selected_board}]
-        confluence_space_options: list[dict[str, str]] = []
-        selected_space = confluence_settings.get("space")
-        if selected_space:
-            confluence_space_options = [
-                {"value": selected_space, "label": selected_space}
-            ]
+        confluence_space_options = _confluence_space_options(confluence_settings)
         return render_template(
             "settings_integrations.html",
             github_settings=github_settings,
             jira_settings=jira_settings,
             confluence_settings=confluence_settings,
+            chroma_settings=chroma_settings,
             github_repo_options=repo_options,
             jira_project_options=jira_project_options,
             jira_board_options=jira_board_options,
@@ -6968,6 +10129,7 @@ def update_github_settings():
             ),
             jira_connected=bool(jira_settings.get("api_key")),
             confluence_connected=bool(confluence_settings.get("api_key")),
+            chroma_connected=_chroma_connected(chroma_settings),
             summary=summary,
             page_title="Settings - Integrations",
             active_page="settings",
@@ -6976,6 +10138,39 @@ def update_github_settings():
             settings_section="integrations",
         )
     flash("GitHub settings updated.", "success")
+    return redirect(url_for("agents.settings_integrations"))
+
+
+@bp.post("/settings/integrations/chroma")
+def update_chroma_settings():
+    host = request.form.get("chroma_host", "").strip()
+    port = request.form.get("chroma_port", "").strip()
+    ssl = "true" if _as_bool(request.form.get("chroma_ssl")) else "false"
+    normalized_hint = None
+    if port:
+        try:
+            parsed_port = int(port)
+        except ValueError:
+            flash("Chroma port must be a number between 1 and 65535.", "error")
+            return redirect(url_for("agents.settings_integrations"))
+        if parsed_port < 1 or parsed_port > 65535:
+            flash("Chroma port must be a number between 1 and 65535.", "error")
+            return redirect(url_for("agents.settings_integrations"))
+        if host:
+            host, parsed_port, normalized_hint = _normalize_chroma_target(host, parsed_port)
+        port = str(parsed_port)
+    _save_integration_settings(
+        "chroma",
+        {
+            "host": host,
+            "port": port,
+            "ssl": ssl,
+        },
+    )
+    sync_integrated_mcp_servers()
+    if normalized_hint:
+        flash(normalized_hint, "info")
+    flash("ChromaDB settings updated.", "success")
     return redirect(url_for("agents.settings_integrations"))
 
 
@@ -7004,6 +10199,7 @@ def update_jira_settings():
     if "jira_board" in request.form:
         payload["board"] = request.form.get("jira_board", "").strip()
     _save_integration_settings("jira", payload)
+    sync_integrated_mcp_servers()
     if action == "refresh":
         board_options: list[dict[str, str]] = []
         project_options: list[dict[str, str]] = []
@@ -7075,6 +10271,7 @@ def update_jira_settings():
         github_settings = _load_integration_settings("github")
         jira_settings = _load_integration_settings("jira")
         confluence_settings = _load_integration_settings("confluence")
+        chroma_settings = _resolved_chroma_settings()
         github_repo_options: list[str] = []
         selected_repo = github_settings.get("repo")
         if selected_repo:
@@ -7085,24 +10282,24 @@ def update_jira_settings():
             project_options.insert(
                 0, {"value": project_key, "label": project_key}
             )
-        confluence_space_options: list[dict[str, str]] = []
-        selected_space = confluence_settings.get("space")
-        if selected_space:
-            confluence_space_options = [
-                {"value": selected_space, "label": selected_space}
-            ]
+        confluence_space_options = _confluence_space_options(confluence_settings)
         return render_template(
             "settings_integrations.html",
             github_settings=github_settings,
             jira_settings=jira_settings,
             confluence_settings=confluence_settings,
+            chroma_settings=chroma_settings,
             github_repo_options=github_repo_options,
             jira_project_options=project_options,
             jira_board_options=board_options,
             confluence_space_options=confluence_space_options,
-            github_connected=bool(github_settings.get("pat")),
+            github_connected=bool(
+                (github_settings.get("pat") or "").strip()
+                or (github_settings.get("ssh_key_path") or "").strip()
+            ),
             jira_connected=bool(api_key),
             confluence_connected=bool(confluence_settings.get("api_key")),
+            chroma_connected=_chroma_connected(chroma_settings),
             summary=summary,
             page_title="Settings - Integrations",
             active_page="settings",
@@ -7117,9 +10314,30 @@ def update_jira_settings():
 @bp.post("/settings/integrations/confluence")
 def update_confluence_settings():
     action = request.form.get("action", "").strip()
-    api_key = request.form.get("confluence_api_key", "").strip()
-    email = request.form.get("confluence_email", "").strip()
-    site = request.form.get("confluence_site", "").strip()
+    existing_settings = _load_integration_settings("confluence")
+    jira_settings = _load_integration_settings("jira")
+    jira_site = _normalize_confluence_site((jira_settings.get("site") or "").strip())
+    api_key = (
+        request.form.get("confluence_api_key", "").strip()
+        if "confluence_api_key" in request.form
+        else (existing_settings.get("api_key") or jira_settings.get("api_key") or "").strip()
+    )
+    email = (
+        request.form.get("confluence_email", "").strip()
+        if "confluence_email" in request.form
+        else (existing_settings.get("email") or jira_settings.get("email") or "").strip()
+    )
+    site = (
+        request.form.get("confluence_site", "").strip()
+        if "confluence_site" in request.form
+        else (existing_settings.get("site") or jira_site or "").strip()
+    )
+    site = _normalize_confluence_site(site)
+    configured_space = (
+        request.form.get("confluence_space", "").strip()
+        if "confluence_space" in request.form
+        else (existing_settings.get("space") or "").strip()
+    )
     logger.info(
         "Confluence settings update action=%s key_len=%s key_has_colon=%s email_domain=%s site_host=%s has_space=%s",
         action or "save",
@@ -7129,12 +10347,17 @@ def update_confluence_settings():
         _safe_site_label(site),
         "confluence_space" in request.form,
     )
-    payload = {"api_key": api_key, "email": email, "site": site}
-    if "confluence_space" in request.form:
-        payload["space"] = request.form.get("confluence_space", "").strip()
+    payload = {
+        "api_key": api_key,
+        "email": email,
+        "site": site,
+        "space": configured_space,
+    }
     _save_integration_settings("confluence", payload)
+    sync_integrated_mcp_servers()
     if action == "refresh":
         space_options: list[dict[str, str]] = []
+        cache_payload: str | None = None
         if api_key and site:
             try:
                 auth_key = _combine_atlassian_key(api_key, email)
@@ -7159,6 +10382,7 @@ def update_confluence_settings():
                     logger.info("Confluence refresh: skipped due to email validation")
                 else:
                     space_options = _fetch_confluence_spaces(auth_key, site)
+                    cache_payload = _serialize_option_entries(space_options)
                     if space_options:
                         logger.info(
                             "Confluence refresh: loaded %s spaces", len(space_options)
@@ -7176,10 +10400,13 @@ def update_confluence_settings():
                 "Confluence API key and site URL are required to refresh spaces.",
                 "error",
             )
+        if cache_payload is not None:
+            _save_integration_settings("confluence", {"space_options": cache_payload})
         summary = _settings_summary()
         github_settings = _load_integration_settings("github")
         jira_settings = _load_integration_settings("jira")
         confluence_settings = _load_integration_settings("confluence")
+        chroma_settings = _resolved_chroma_settings()
         github_repo_options: list[str] = []
         selected_repo = github_settings.get("repo")
         if selected_repo:
@@ -7194,18 +10421,29 @@ def update_confluence_settings():
         selected_board = jira_settings.get("board")
         if selected_board:
             jira_board_options = [{"value": selected_board, "label": selected_board}]
+        if not space_options:
+            space_options = _confluence_space_options(confluence_settings)
+        else:
+            space_options = _merge_selected_option(
+                space_options, confluence_settings.get("space")
+            )
         return render_template(
             "settings_integrations.html",
             github_settings=github_settings,
             jira_settings=jira_settings,
             confluence_settings=confluence_settings,
+            chroma_settings=chroma_settings,
             github_repo_options=github_repo_options,
             jira_project_options=jira_project_options,
             jira_board_options=jira_board_options,
             confluence_space_options=space_options,
-            github_connected=bool(github_settings.get("pat")),
+            github_connected=bool(
+                (github_settings.get("pat") or "").strip()
+                or (github_settings.get("ssh_key_path") or "").strip()
+            ),
             jira_connected=bool(jira_settings.get("api_key")),
             confluence_connected=bool(api_key),
+            chroma_connected=_chroma_connected(chroma_settings),
             summary=summary,
             page_title="Settings - Integrations",
             active_page="settings",

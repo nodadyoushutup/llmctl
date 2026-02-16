@@ -85,6 +85,7 @@ _INCOMPLETE_INDEX_STATUSES = set(TASK_ACTIVE_STATUSES) | {TASK_STATUS_PAUSED}
 _SOURCE_SCHEDULER_STOP = threading.Event()
 _SOURCE_SCHEDULER_LOCK = threading.Lock()
 _SOURCE_SCHEDULER_THREAD: threading.Thread | None = None
+DOCKER_CHROMA_HOST_ALIASES = {"llmctl-chromadb", "chromadb"}
 
 PAGINATION_PAGE_SIZES = (10, 25, 50, 100)
 PAGINATION_DEFAULT_SIZE = 10
@@ -137,14 +138,16 @@ def _system_prompt(response_style: str) -> str:
 
 def _normalize_chroma_target(host: str, port: int) -> tuple[str, int, str | None]:
     host_value = (host or "").strip()
-    # Inside the docker network, the chromadb service is reachable on container port 8000.
-    if host_value.lower() == "chromadb" and port != 8000:
+    # Inside the Docker network, the Chroma service is reachable on container port 8000.
+    if host_value.lower() in DOCKER_CHROMA_HOST_ALIASES and port != 8000:
         return (
-            host_value,
+            "llmctl-chromadb",
             8000,
-            "Using chromadb:8000 inside Docker. Host-mapped ports (for example 18000) "
+            "Using llmctl-chromadb:8000 inside Docker. Host-mapped ports (for example 18000) "
             "are only for access from your machine.",
         )
+    if host_value.lower() in DOCKER_CHROMA_HOST_ALIASES:
+        return "llmctl-chromadb", port, None
     return host_value, port, None
 
 
@@ -168,7 +171,7 @@ def create_app() -> Flask:
             "chat_max_context_chars": "12000",
             "chat_snippet_chars": "600",
             "chat_context_budget_tokens": "8000",
-            "chroma_host": "chromadb",
+            "chroma_host": "llmctl-chromadb",
             "chroma_port": "8000",
             "web_port": "5050",
         },
@@ -818,11 +821,13 @@ def create_app() -> Flask:
         chroma_host = request.form.get("chroma_host", "").strip()
         chroma_port = request.form.get("chroma_port", "").strip()
         normalized_chroma_port = _coerce_int_str(chroma_port)
+        normalized_chroma_host = chroma_host
         if chroma_host and normalized_chroma_port:
             try:
-                _, fixed_port, _ = _normalize_chroma_target(
+                fixed_host, fixed_port, _ = _normalize_chroma_target(
                     chroma_host, int(normalized_chroma_port)
                 )
+                normalized_chroma_host = fixed_host
                 normalized_chroma_port = str(fixed_port)
             except (TypeError, ValueError):
                 pass
@@ -857,7 +862,7 @@ def create_app() -> Flask:
         ).strip()
         web_port = request.form.get("web_port", "").strip()
         payload = {
-            "chroma_host": chroma_host,
+            "chroma_host": normalized_chroma_host,
             "chroma_port": normalized_chroma_port,
             "embed_provider": embed_provider,
             "chat_provider": chat_provider,

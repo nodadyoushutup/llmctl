@@ -11,7 +11,7 @@ def is_quick_task_kind(kind: str | None) -> bool:
 
 def task_kind_label(kind: str | None) -> str:
     if is_quick_task_kind(kind):
-        return "Quick Task"
+        return "Quick Node"
     if not kind:
         return "task"
     return kind

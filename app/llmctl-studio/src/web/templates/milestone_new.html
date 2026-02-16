@@ -13,7 +13,7 @@
     <h2 class="section-title">Create Milestone</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Define a delivery checkpoint with an optional due date.
+    Define a delivery checkpoint with ownership, health, and completion criteria.
   </p>
   <form
     method="post"
@@ -32,8 +32,44 @@
       />
     </label>
     <label class="label">
+      status
+      <select class="input" name="status">
+        {% for value, label in milestone_status_options %}
+          <option value="{{ value }}" {% if value == "planned" %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      priority
+      <select class="input" name="priority">
+        {% for value, label in milestone_priority_options %}
+          <option value="{{ value }}" {% if value == "medium" %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      health
+      <select class="input" name="health">
+        {% for value, label in milestone_health_options %}
+          <option value="{{ value }}" {% if value == "green" %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      owner
+      <input class="input" type="text" name="owner" placeholder="Who owns this milestone?" />
+    </label>
+    <label class="label">
+      start date
+      <input class="input" type="date" name="start_date" />
+    </label>
+    <label class="label">
       due date
       <input class="input" type="date" name="due_date" />
+    </label>
+    <label class="label">
+      progress %
+      <input class="input" type="number" name="progress_percent" min="0" max="100" value="0" />
     </label>
     <label class="label" style="grid-column: 1 / -1;">
       description
@@ -44,8 +80,36 @@
       ></textarea>
     </label>
     <label class="label" style="grid-column: 1 / -1;">
-      <input type="checkbox" name="completed" value="true" />
-      mark as completed
+      success criteria
+      <textarea
+        name="success_criteria"
+        placeholder="Definition of done for this milestone."
+        class="textarea"
+      ></textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      dependencies
+      <textarea
+        name="dependencies"
+        placeholder="What is this milestone blocked by, or blocking?"
+        class="textarea"
+      ></textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      links
+      <textarea
+        name="links"
+        placeholder="Paste related docs, tickets, PRs, or dashboards."
+        class="textarea"
+      ></textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      latest update
+      <textarea
+        name="latest_update"
+        placeholder="Current status, risks, and next step."
+        class="textarea"
+      ></textarea>
     </label>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">

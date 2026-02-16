@@ -41,6 +41,9 @@ celerybeat.pid
 
 # Local data (generated)
 data/
+models/*
+!models/.gitkeep
+!models/README.md
 
 # Environment files
 .env

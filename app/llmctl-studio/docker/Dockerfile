@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ARG APP_UID=1000
 ARG APP_GID=1000
 ARG DOCKER_GID=999
+ARG INSTALL_VLLM=true
 ENV APP_UID=$APP_UID \
     APP_GID=$APP_GID \
     DOCKER_GID=$DOCKER_GID \
@@ -30,7 +31,7 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         nodejs \
-    && npm install -g @openai/codex @google/gemini-cli \
+    && npm install -g @openai/codex@latest @google/gemini-cli@latest @modelcontextprotocol/server-github@2025.4.8 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -41,10 +42,13 @@ RUN /app/app/llmctl-studio/docker/scripts/install-docker-cli.sh \
     && /app/app/llmctl-studio/docker/scripts/setup-user-groups.sh
 
 COPY app/llmctl-studio/requirements.txt /app/app/llmctl-studio/requirements.txt
+COPY app/llmctl-mcp/requirements.txt /app/app/llmctl-mcp/requirements.txt
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio/requirements.txt
+    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio/requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-mcp/requirements.txt \
+    && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm>=0.8.5"; fi
 
 COPY . /app
 RUN mkdir -p /app/data

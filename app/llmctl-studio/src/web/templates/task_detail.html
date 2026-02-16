@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
 {% block topbar_actions %}
-  <a class="btn btn-secondary" href="{{ url_for('agents.list_tasks') }}">
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_nodes') }}">
     <i class="fa-solid fa-arrow-left"></i>
-    back to tasks
+    back to nodes
   </a>
 {% endblock %}
 
@@ -13,11 +13,12 @@
   id="task-detail-root"
   data-task-id="{{ task.id }}"
   data-task-status="{{ task.status }}"
+  data-task-status-url="{{ url_for('agents.node_status', task_id=task.id) }}"
 >
   <section class="card">
     <div class="card-header">
       <div>
-        <p class="eyebrow">task {{ task.id }}</p>
+        <p class="eyebrow">node {{ task.id }}</p>
         <h2 class="section-title">{{ task_kind_label(task.kind) }}</h2>
       </div>
       <div class="row">
@@ -40,7 +41,7 @@
       <div class="row" style="margin-top: 16px; gap: 10px; flex-wrap: wrap;">
         <form
           method="post"
-          action="{{ url_for('agents.cancel_task', task_id=task.id) }}"
+          action="{{ url_for('agents.cancel_node', task_id=task.id) }}"
         >
           <input type="hidden" name="next" value="{{ request.path }}" />
           <button type="submit" class="btn btn-secondary">
@@ -58,6 +59,8 @@
             Agent:
             {% if agent %}
               <a href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">{{ agent.name }}</a>
+            {% elif is_quick_task and task.agent_id is none %}
+              Quick Node (default profile)
             {% elif task.agent_id is none %}
               -
             {% else %}
@@ -65,42 +68,50 @@
             {% endif %}
           </p>
           <p class="muted">
-            Pipeline:
-            {% if pipeline %}
-              <a href="{{ url_for('agents.view_pipeline', pipeline_id=pipeline.id) }}">{{ pipeline.name }}</a>
-            {% elif task.pipeline_id %}
-              Pipeline {{ task.pipeline_id }}
-            {% else %}
-              -
-            {% endif %}
-          </p>
-          <p class="muted">
-            Template:
+            Task:
             {% if template %}
               <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">{{ template.name }}</a>
             {% elif task.task_template_id %}
-              Template {{ task.task_template_id }}
+              Task {{ task.task_template_id }}
             {% else %}
               -
             {% endif %}
           </p>
           <p class="muted">
-            Task scripts:
-            {% if task.scripts %}
-              {% for script in task.scripts %}
-                <a href="{{ url_for('agents.view_script', script_id=script.id) }}">
-                  {{ script.file_name }}
-                </a>
-                ({{ script_type_label(script.script_type) }}){% if not loop.last %}, {% endif %}
+            Model:
+            {% if task.model %}
+              <a href="{{ url_for('agents.view_model', model_id=task.model.id) }}">{{ task.model.name }}</a>
+            {% elif task.model_id %}
+              Model {{ task.model_id }}
+            {% else %}
+              -
+            {% endif %}
+          </p>
+          <p class="muted">
+            MCP servers:
+            {% if task.mcp_servers %}
+              {% for server in task.mcp_servers %}
+                <a href="{{ url_for('agents.view_mcp', mcp_id=server.id) }}">{{ server.name }}</a>{% if not loop.last %}, {% endif %}
               {% endfor %}
             {% else %}
               -
             {% endif %}
           </p>
           <p class="muted">
-            Agent scripts:
-            {% if agent and agent.scripts %}
-              {% for script in agent.scripts %}
+            Integrations:
+            {% if selected_integration_labels %}
+              {{ selected_integration_labels|join(", ") }}
+              {% if task_integrations_legacy_default %}
+                (legacy default)
+              {% endif %}
+            {% else %}
+              -
+            {% endif %}
+          </p>
+          <p class="muted">
+            Node scripts:
+            {% if task.scripts %}
+              {% for script in task.scripts %}
                 <a href="{{ url_for('agents.view_script', script_id=script.id) }}">
                   {{ script.file_name }}
                 </a>
@@ -120,7 +131,7 @@
                 {% if is_quick_task %}
                   <form
                     method="post"
-                    action="{{ url_for('agents.remove_task_attachment', task_id=task.id, attachment_id=attachment.id) }}"
+                    action="{{ url_for('agents.remove_node_attachment', task_id=task.id, attachment_id=attachment.id) }}"
                     onsubmit="return confirm('Remove this attachment?');"
                   >
                     <input type="hidden" name="next" value="{{ request.path }}" />
@@ -135,7 +146,7 @@
             <p class="muted">Attachments: -</p>
           {% endif %}
           <p class="muted">
-            Autorun task:
+            Autorun node:
             <span id="task-run-task-id">{{ task.run_task_id or "-" }}</span>
           </p>
         </div>
@@ -164,7 +175,7 @@
     </div>
     {% if task.status in ["queued", "running"] %}
       <p class="muted" id="task-auto-refresh" style="margin-top: 16px;">
-        Auto-updating every 2 seconds while the task runs.
+        Auto-updating every 2 seconds while the node runs.
       </p>
     {% endif %}
   </section>
@@ -212,10 +223,13 @@
           </div>
         </div>
         {% if prompt_text %}
-          <pre
-            id="task-prompt-text"
-            style="margin: 0; white-space: pre-wrap;"
-          >{{ prompt_text }}</pre>
+          <div
+            id="task-prompt-text-rendered"
+            class="log-output markdown-content"
+            data-markdown-target="task-prompt-text"
+            style="margin: 0;"
+          ></div>
+          <pre id="task-prompt-text" style="display: none;">{{ prompt_text }}</pre>
         {% else %}
           <p class="muted" style="margin: 0;">No prompt recorded.</p>
         {% endif %}
@@ -233,7 +247,7 @@
 </div>
 
 <section class="card">
-  <details id="task-output-details">
+  <details id="task-output-details" {% if task_output %}open{% endif %}>
     <summary class="card-header collapse-summary">
       <div class="row" style="gap: 10px; align-items: center;">
         <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
@@ -248,20 +262,23 @@
         data-copy-success="copied"
         aria-label="Copy output"
         title="Copy output"
-        {% if not task.output %}disabled{% endif %}
+        {% if not task_output %}disabled{% endif %}
         style="padding: 6px 12px; font-size: 10px; letter-spacing: 0.2em;"
       >
         copy
       </button>
     </summary>
-    <pre
-      id="task-output"
-      style="margin-top: 12px; white-space: pre-wrap;{% if not task.output %} display: none;{% endif %}"
-    >{{ task.output }}</pre>
+    <div
+      id="task-output-rendered"
+      class="log-output markdown-content"
+      data-markdown-target="task-output"
+      style="margin-top: 12px;{% if not task_output %} display: none;{% endif %}"
+    ></div>
+    <pre id="task-output" style="display: none;">{{ task_output }}</pre>
     <p
       class="muted"
       id="task-output-empty"
-      style="margin-top: 12px;{% if task.output %} display: none;{% endif %}"
+      style="margin-top: 12px;{% if task_output %} display: none;{% endif %}"
     >
       No output yet.
     </p>
@@ -304,11 +321,12 @@
               </span>
             </div>
           </summary>
-          <pre
-            class="log-output"
+          <div
+            class="log-output markdown-content"
             data-role="stage-logs"
+            data-markdown-target="self"
             style="margin-top: 12px;{% if not stage.logs %} display: none;{% endif %}"
-          >{{ stage.logs }}</pre>
+          >{{ stage.logs }}</div>
           <p
             class="muted"
             data-role="stage-empty"
@@ -323,6 +341,179 @@
     <p class="muted" style="margin-top: 12px;">No stage data yet.</p>
   {% endif %}
 </section>
+<script>
+  (() => {
+    const escapeHtml = (value) =>
+      String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const sanitizeUrl = (rawValue) => {
+      const raw = String(rawValue || "").trim();
+      if (!raw) {
+        return null;
+      }
+      if (
+        raw.startsWith("/") ||
+        raw.startsWith("#") ||
+        raw.startsWith("./") ||
+        raw.startsWith("../")
+      ) {
+        return raw;
+      }
+      try {
+        const parsed = new URL(raw);
+        if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+          return parsed.toString();
+        }
+      } catch (error) {
+      }
+      return null;
+    };
+
+    const renderInline = (value) => {
+      if (!value) {
+        return "";
+      }
+      const inlineCodeTokens = [];
+      let rendered = value.replace(/`([^`\n]+)`/g, (_, code) => {
+        const token = `@@INLINE_CODE_${inlineCodeTokens.length}@@`;
+        inlineCodeTokens.push(`<code>${code}</code>`);
+        return token;
+      });
+
+      rendered = rendered.replace(
+        /\[([^\]]+)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g,
+        (_, label, href, title) => {
+          const safeHref = sanitizeUrl(href);
+          const labelText = label || href;
+          if (!safeHref) {
+            return labelText;
+          }
+          const escapedHref = escapeHtml(safeHref);
+          const escapedTitle = title ? ` title="${escapeHtml(title)}"` : "";
+          return `<a href="${escapedHref}"${escapedTitle} target="_blank" rel="noopener noreferrer">${labelText}</a>`;
+        },
+      );
+      rendered = rendered.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+      rendered = rendered.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+      rendered = rendered.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+
+      return rendered.replace(/@@INLINE_CODE_(\d+)@@/g, (_, index) => {
+        const token = inlineCodeTokens[Number(index)];
+        return token || "";
+      });
+    };
+
+    const renderMarkdown = (rawValue) => {
+      const normalized = String(rawValue || "").replace(/\r\n/g, "\n");
+      if (!normalized.trim()) {
+        return "";
+      }
+      const escaped = escapeHtml(normalized);
+      const codeBlockTokens = [];
+      let working = escaped.replace(
+        /```([A-Za-z0-9_+-]*)[ \t]*\n?([\s\S]*?)```/g,
+        (_, language, code) => {
+          const token = `@@CODE_BLOCK_${codeBlockTokens.length}@@`;
+          const className = language
+            ? ` class="language-${escapeHtml(language)}"`
+            : "";
+          const codeBody = code.endsWith("\n") ? code.slice(0, -1) : code;
+          codeBlockTokens.push(`<pre><code${className}>${codeBody}</code></pre>`);
+          return token;
+        },
+      );
+
+      const blocks = working
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean);
+
+      const renderedBlocks = blocks.map((block) => {
+        if (/^@@CODE_BLOCK_\d+@@$/.test(block)) {
+          return block;
+        }
+        if (/^([-*_]\s*){3,}$/.test(block)) {
+          return "<hr />";
+        }
+        const heading = block.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          const level = heading[1].length;
+          const text = renderInline(heading[2].trim());
+          return `<h${level}>${text}</h${level}>`;
+        }
+
+        const lines = block.split("\n");
+        if (lines.every((line) => /^\s*[-*]\s+/.test(line))) {
+          const items = lines
+            .map((line) => line.replace(/^\s*[-*]\s+/, ""))
+            .map((line) => `<li>${renderInline(line)}</li>`)
+            .join("");
+          return `<ul>${items}</ul>`;
+        }
+        if (lines.every((line) => /^\s*\d+\.\s+/.test(line))) {
+          const items = lines
+            .map((line) => line.replace(/^\s*\d+\.\s+/, ""))
+            .map((line) => `<li>${renderInline(line)}</li>`)
+            .join("");
+          return `<ol>${items}</ol>`;
+        }
+        if (lines.every((line) => /^\s*>\s?/.test(line))) {
+          const quote = lines
+            .map((line) => line.replace(/^\s*>\s?/, ""))
+            .map((line) => renderInline(line))
+            .join("<br>");
+          return `<blockquote>${quote}</blockquote>`;
+        }
+        return `<p>${lines.map((line) => renderInline(line)).join("<br>")}</p>`;
+      });
+
+      const html = renderedBlocks.join("\n");
+      return html.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, index) => {
+        const token = codeBlockTokens[Number(index)];
+        return token || "";
+      });
+    };
+
+    const renderInto = (targetEl, rawValue) => {
+      if (!targetEl) {
+        return;
+      }
+      const value = typeof rawValue === "string" ? rawValue : "";
+      targetEl.dataset.rawMarkdown = value;
+      targetEl.innerHTML = renderMarkdown(value);
+    };
+
+    const rawFrom = (targetEl) => {
+      if (!targetEl) {
+        return "";
+      }
+      if (typeof targetEl.dataset.rawMarkdown === "string") {
+        return targetEl.dataset.rawMarkdown;
+      }
+      return targetEl.textContent || "";
+    };
+
+    const renderAll = () => {
+      document.querySelectorAll("[data-markdown-target]").forEach((targetEl) => {
+        const sourceId = targetEl.getAttribute("data-markdown-target");
+        if (sourceId === "self") {
+          renderInto(targetEl, rawFrom(targetEl));
+          return;
+        }
+        const sourceEl = sourceId ? document.getElementById(sourceId) : null;
+        renderInto(targetEl, sourceEl ? sourceEl.textContent : "");
+      });
+    };
+
+    window.llmctlMarkdown = { renderInto, rawFrom, renderAll };
+    renderAll();
+  })();
+</script>
 <script>
   (() => {
     const stageList = document.getElementById("task-stage-list");
@@ -368,7 +559,9 @@
         return;
       }
       const logsEl = details.querySelector('[data-role="stage-logs"]');
-      const logsText = logsEl ? logsEl.textContent : "";
+      const logsText = window.llmctlMarkdown
+        ? window.llmctlMarkdown.rawFrom(logsEl)
+        : (logsEl ? logsEl.textContent : "");
       const defaultLabel = button.getAttribute("data-copy-label") || "copy";
       const successLabel = button.getAttribute("data-copy-success") || "copied";
 
@@ -485,11 +678,10 @@
       if (!root) {
         return;
       }
-      const taskId = root.getAttribute("data-task-id");
-      if (!taskId) {
-        return;
-      }
+      const statusUrl = root.getAttribute("data-task-status-url") || "";
       const statusEl = document.getElementById("task-status");
+      const outputDetailsEl = document.getElementById("task-output-details");
+      const outputRenderedEl = document.getElementById("task-output-rendered");
       const outputEl = document.getElementById("task-output");
       const outputEmptyEl = document.getElementById("task-output-empty");
       const outputCopyButton = document.getElementById("task-output-copy");
@@ -549,7 +741,14 @@
         const hasOutput = value.length > 0;
         if (outputEl) {
           outputEl.textContent = value;
-          outputEl.style.display = hasOutput ? "" : "none";
+        }
+        if (outputRenderedEl) {
+          if (window.llmctlMarkdown) {
+            window.llmctlMarkdown.renderInto(outputRenderedEl, value);
+          } else {
+            outputRenderedEl.textContent = value;
+          }
+          outputRenderedEl.style.display = hasOutput ? "" : "none";
         }
         if (outputEmptyEl) {
           outputEmptyEl.style.display = hasOutput ? "none" : "";
@@ -557,6 +756,7 @@
         if (outputCopyButton) {
           outputCopyButton.disabled = !hasOutput;
         }
+        return hasOutput;
       };
 
       const updateStages = (entries, currentStage, taskStatus) => {
@@ -581,7 +781,11 @@
           const logsText = entry.logs || "";
           const hasLogs = logsText.length > 0;
           if (nodes.logsEl) {
-            nodes.logsEl.textContent = logsText;
+            if (window.llmctlMarkdown) {
+              window.llmctlMarkdown.renderInto(nodes.logsEl, logsText);
+            } else {
+              nodes.logsEl.textContent = logsText;
+            }
             nodes.logsEl.style.display = hasLogs ? "" : "none";
           }
           if (nodes.emptyEl) {
@@ -600,6 +804,7 @@
 
       let pollTimer = null;
       let polling = true;
+      let hadOutput = Boolean((outputEl?.textContent || "").length > 0);
 
       const schedulePoll = () => {
         if (!polling) {
@@ -623,8 +828,12 @@
         if (!polling) {
           return;
         }
+        if (!statusUrl) {
+          stopPolling();
+          return;
+        }
         try {
-          const response = await window.fetch(`/tasks/${taskId}/status`, {
+          const response = await window.fetch(statusUrl, {
             cache: "no-store",
             headers: {
               Accept: "application/json",
@@ -641,9 +850,13 @@
           updateText(createdAtEl, data.created_at);
           updateText(runTaskIdEl, data.run_task_id);
           updateText(celeryIdEl, data.celery_task_id);
-          updateOutput(data.output);
+          const hasOutput = updateOutput(data.output);
           updateStages(data.stage_entries, data.current_stage, data.status);
           root.setAttribute("data-task-status", data.status || "");
+          if (outputDetailsEl && hasOutput && !hadOutput && !outputDetailsEl.open) {
+            outputDetailsEl.open = true;
+          }
+          hadOutput = hasOutput;
           if (!["queued", "running"].includes(data.status)) {
             stopPolling();
           }

@@ -10,10 +10,8 @@ from sqlalchemy import delete, func, select
 from core.models import (
     AgentTask,
     Attachment,
-    PipelineStep,
     TaskTemplate,
     agent_task_attachments,
-    pipeline_step_attachments,
     task_template_attachments,
 )
 from storage.attachment_storage import write_attachment_file
@@ -71,12 +69,7 @@ def _attachment_in_use(session, attachment_id: int) -> bool:
     ).scalar_one()
     if template_refs:
         return True
-    step_refs = session.execute(
-        select(func.count())
-        .select_from(pipeline_step_attachments)
-        .where(pipeline_step_attachments.c.attachment_id == attachment_id)
-    ).scalar_one()
-    return bool(step_refs)
+    return False
 
 
 def _unlink_attachment(session, attachment_id: int) -> None:
@@ -88,11 +81,6 @@ def _unlink_attachment(session, attachment_id: int) -> None:
     session.execute(
         delete(task_template_attachments).where(
             task_template_attachments.c.attachment_id == attachment_id
-        )
-    )
-    session.execute(
-        delete(pipeline_step_attachments).where(
-            pipeline_step_attachments.c.attachment_id == attachment_id
         )
     )
 
@@ -123,7 +111,4 @@ def _resolve_attachment_target(session, target: str, target_id: int):
     if normalized in {"template", "task_template", "tasktemplate"}:
         record = session.get(TaskTemplate, target_id)
         return record
-    if normalized in {"pipeline_step", "pipelinestep", "step"}:
-        record = session.get(PipelineStep, target_id)
-        return record
-    raise ValueError("Target must be task, task_template, or pipeline_step.")
+    raise ValueError("Target must be task or task_template.")

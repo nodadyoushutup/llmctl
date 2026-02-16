@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
-from core.models import Agent, MCPServer, Role
+from core.models import Agent, Role
 
 CODE_REVIEW_ROLE_NAME = "Code Reviewer"
 CODE_REVIEW_AGENT_NAME = "Code Reviewer"
@@ -64,14 +63,8 @@ def ensure_code_reviewer_agent(session, role: Role | None) -> Agent:
     agent = (
         session.execute(
             select(Agent)
-            .options(selectinload(Agent.mcp_servers))
             .where(Agent.name == CODE_REVIEW_AGENT_NAME)
         )
-        .scalars()
-        .first()
-    )
-    github_server = (
-        session.execute(select(MCPServer).where(MCPServer.server_key == "github"))
         .scalars()
         .first()
     )
@@ -88,7 +81,6 @@ def ensure_code_reviewer_agent(session, role: Role | None) -> Agent:
             prompt_json=prompt_payload,
             prompt_text=None,
             autonomous_prompt=None,
-            mcp_servers=[github_server] if github_server else [],
             is_system=True,
         )
     else:
@@ -98,8 +90,6 @@ def ensure_code_reviewer_agent(session, role: Role | None) -> Agent:
             agent.is_system = True
         if not agent.description:
             agent.description = "Code Reviewer agent used for GitHub pull request reviews."
-        if github_server and github_server not in agent.mcp_servers:
-            agent.mcp_servers.append(github_server)
     return agent
 
 

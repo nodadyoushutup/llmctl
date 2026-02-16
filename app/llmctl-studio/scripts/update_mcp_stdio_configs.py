@@ -18,62 +18,24 @@ def _bootstrap() -> None:
 
 
 def _build_target_configs(use_llmctl_tap: bool) -> dict[str, dict[str, object]]:
-    llmctl_args: list[str] = [
-        "exec",
-        "-i",
-        "llmctl-mcp",
-        "env",
-        "LLMCTL_MCP_TRANSPORT=stdio",
-        "python3",
-        "app/llmctl-mcp/run.py",
-    ]
-    if use_llmctl_tap:
-        llmctl_args = [
-            "exec",
-            "-i",
-            "llmctl-mcp",
-            "python3",
-            "app/llmctl-mcp/scripts/mcp_stdio_tap.py",
-            "--log",
-            "/app/data/mcp-stdio-tap.log",
-            "--",
-            *llmctl_args[3:],
-        ]
+    repo_root = Path(__file__).resolve().parents[3]
+    chroma_wrapper = (
+        repo_root / "app" / "llmctl-studio" / "src" / "core" / "chroma_mcp_stdio_wrapper.py"
+    )
     return {
-        "github": {
-            "command": "docker",
-            "args": [
-                "exec",
-                "-i",
-                "github-mcp",
-                "/server/github-mcp-server",
-                "stdio",
-            ],
-        },
-        "jira": {
-            "command": "docker",
-            "args": ["exec", "-i", "jira-mcp", "mcp-atlassian", "--transport", "stdio"],
-        },
         "chroma": {
-            "command": "docker",
+            "command": "python3",
             "args": [
-                "exec",
-                "-i",
-                "chromadb-mcp",
-                "chromadb-mcp",
+                str(chroma_wrapper),
                 "--client-type",
                 "http",
                 "--host",
-                "chromadb",
+                "llmctl-chromadb",
                 "--port",
                 "8000",
                 "--ssl",
                 "false",
             ],
-        },
-        "llmctl-mcp": {
-            "command": "docker",
-            "args": llmctl_args,
         },
     }
 
@@ -96,7 +58,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llmctl-stdio-tap",
         action="store_true",
-        help="Wrap llmctl-mcp stdio command with mcp_stdio_tap.py logging.",
+        help="No-op retained for compatibility.",
     )
     parser.add_argument(
         "--print",

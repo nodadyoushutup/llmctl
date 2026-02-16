@@ -127,7 +127,7 @@
         type="text"
         name="codex_notice_hide_key"
         value="{{ codex_config.notice_hide_key }}"
-        placeholder="hide_gpt-5.1-codex-max_migration_prompt"
+        placeholder="hide_gpt-5.2-codex_migration_prompt"
       />
     </label>
     <label class="label" data-provider="codex" style="grid-column: 1 / -1;">
@@ -146,7 +146,7 @@
         type="text"
         name="codex_notice_migration_from"
         value="{{ codex_config.notice_migration_from }}"
-        placeholder="gpt-5.1-codex-max"
+        placeholder="gpt-5.2-codex"
       />
     </label>
     <label class="label" data-provider="codex">
@@ -156,7 +156,7 @@
         type="text"
         name="codex_notice_migration_to"
         value="{{ codex_config.notice_migration_to }}"
-        placeholder="gpt-5.2-codex"
+        placeholder="gpt-5.3-codex"
       />
     </label>
 
@@ -222,6 +222,117 @@
           <option value="{{ option }}"></option>
         {% endfor %}
       </datalist>
+    </label>
+
+    {% set vllm_remote_models = model_options.get("vllm_remote", []) %}
+    {% set discovered_local_models = vllm_local_models or [] %}
+    <label class="label" data-provider="vllm_local" style="grid-column: 1 / -1;">
+      vLLM local model
+      <select class="input" name="vllm_local_model">
+        {% for option in discovered_local_models %}
+          <option
+            value="{{ option.value }}"
+            {% if option.value == vllm_local_config.model %}selected{% endif %}
+          >
+            {{ option.label }} ({{ option.source }})
+          </option>
+        {% endfor %}
+      </select>
+      <p class="muted" style="margin-top: 6px; font-size: 12px;">
+        Discovered from the configured local custom models directory.
+      </p>
+    </label>
+    <label class="label" data-provider="vllm_local">
+      <p class="muted" style="margin: 0;">
+        Runs locally inside Studio via vLLM CLI (no HTTP endpoint).
+      </p>
+    </label>
+    <label class="label" data-provider="vllm_local">
+      Temperature
+      <input
+        class="input"
+        type="text"
+        name="vllm_local_temperature"
+        value="{{ vllm_local_config.temperature }}"
+        placeholder="0.2"
+      />
+    </label>
+    <label class="label" data-provider="vllm_local">
+      Max tokens
+      <input
+        class="input"
+        type="text"
+        name="vllm_local_max_tokens"
+        value="{{ vllm_local_config.max_tokens }}"
+        placeholder="2048"
+      />
+    </label>
+    <label class="label" data-provider="vllm_local" style="grid-column: 1 / -1;">
+      Request timeout seconds
+      <input
+        class="input"
+        type="text"
+        name="vllm_local_request_timeout_seconds"
+        value="{{ vllm_local_config.request_timeout_seconds }}"
+        placeholder="180"
+      />
+    </label>
+
+    <label class="label" data-provider="vllm_remote" style="grid-column: 1 / -1;">
+      vLLM remote model
+      <input
+        class="input"
+        type="text"
+        name="vllm_remote_model"
+        value="{{ vllm_remote_config.model }}"
+        list="vllm-remote-model-options"
+        placeholder="GLM-4.7-Flash"
+      />
+      <datalist id="vllm-remote-model-options">
+        {% for option in vllm_remote_models %}
+          <option value="{{ option }}"></option>
+        {% endfor %}
+      </datalist>
+    </label>
+    <label class="label" data-provider="vllm_remote">
+      Base URL override (optional)
+      <input
+        class="input"
+        type="text"
+        name="vllm_remote_base_url_override"
+        value="{{ vllm_remote_config.base_url_override }}"
+        placeholder="https://vllm.example.com/v1"
+      />
+    </label>
+    <label class="label" data-provider="vllm_remote">
+      Temperature
+      <input
+        class="input"
+        type="text"
+        name="vllm_remote_temperature"
+        value="{{ vllm_remote_config.temperature }}"
+        placeholder="0.2"
+      />
+    </label>
+    <label class="label" data-provider="vllm_remote">
+      Max tokens
+      <input
+        class="input"
+        type="text"
+        name="vllm_remote_max_tokens"
+        value="{{ vllm_remote_config.max_tokens }}"
+        placeholder="4096"
+      />
+    </label>
+    <label class="label" data-provider="vllm_remote" style="grid-column: 1 / -1;">
+      Request timeout seconds
+      <input
+        class="input"
+        type="text"
+        name="vllm_remote_request_timeout_seconds"
+        value="{{ vllm_remote_config.request_timeout_seconds }}"
+        placeholder="240"
+      />
     </label>
 
     <div class="form-actions">

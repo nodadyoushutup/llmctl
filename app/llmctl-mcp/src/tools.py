@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastmcp import FastMCP
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm import selectinload
 
 from core.config import Config
 from core.db import session_scope, utcnow
@@ -14,15 +17,39 @@ from core.models import (
     Agent,
     AgentTask,
     Attachment,
-    Pipeline,
-    PipelineRun,
-    PipelineStep,
+    Flowchart,
+    FlowchartEdge,
+    FlowchartNode,
+    FlowchartRun,
+    FlowchartRunNode,
+    FLOWCHART_NODE_TYPE_CHOICES,
+    FLOWCHART_NODE_TYPE_DECISION,
+    FLOWCHART_NODE_TYPE_MEMORY,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_START,
+    FLOWCHART_NODE_TYPE_TASK,
+    flowchart_node_mcp_servers,
+    flowchart_node_scripts,
+    LLMModel,
+    MCPServer,
+    Memory,
+    Milestone,
+    MILESTONE_HEALTH_CHOICES,
+    MILESTONE_HEALTH_GREEN,
+    MILESTONE_PRIORITY_CHOICES,
+    MILESTONE_PRIORITY_MEDIUM,
+    MILESTONE_STATUS_CHOICES,
+    MILESTONE_STATUS_DONE,
+    MILESTONE_STATUS_PLANNED,
+    Plan,
+    PlanStage,
+    PlanTask,
     Run,
     RUN_ACTIVE_STATUSES,
     Role,
     Script,
     TaskTemplate,
-    agent_scripts,
     agent_task_scripts,
 )
 from core.task_kinds import QUICK_TASK_KIND, is_quick_task_kind
@@ -33,7 +60,7 @@ from services.code_review import (
     ensure_code_reviewer_role,
 )
 from services.integrations import load_integration_settings
-from services.tasks import run_agent, run_agent_task, run_pipeline
+from services.tasks import run_agent, run_agent_task, run_flowchart
 from storage.attachment_storage import remove_attachment_file
 
 from attachments import (
@@ -53,6 +80,452 @@ from db_utils import (
 )
 from prompts import _build_code_review_prompt, _build_quick_task_prompt
 from scripts import _parse_script_ids_by_type, _resolve_script_ids_by_type, _set_script_links
+
+
+def _parse_optional_datetime(value: Any, field_name: str) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        cleaned = str(value).strip()
+        if not cleaned:
+            return None
+        if cleaned.endswith("Z"):
+            cleaned = f"{cleaned[:-1]}+00:00"
+        try:
+            if "T" in cleaned:
+                parsed = datetime.fromisoformat(cleaned)
+            else:
+                parsed = datetime.fromisoformat(f"{cleaned}T00:00:00")
+        except ValueError as exc:
+            raise ValueError(f"{field_name} must be a valid ISO date/datetime.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _normalize_choice(
+    value: Any,
+    *,
+    choices: tuple[str, ...],
+    fallback: str,
+) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in choices:
+        return cleaned
+    return fallback
+
+
+def _parse_milestone_progress(value: Any) -> int:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return 0
+    try:
+        parsed = int(cleaned)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("progress_percent must be an integer between 0 and 100.") from exc
+    if parsed < 0 or parsed > 100:
+        raise ValueError("progress_percent must be an integer between 0 and 100.")
+    return parsed
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in {"1", "true", "yes", "on"}:
+            return True
+        if cleaned in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+FLOWCHART_NODE_TYPE_WITH_REF = {
+    FLOWCHART_NODE_TYPE_TASK,
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_MEMORY,
+}
+FLOWCHART_NODE_TYPE_REQUIRES_REF = {
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_MEMORY,
+}
+
+FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
+    FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False},
+    FLOWCHART_NODE_TYPE_TASK: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True},
+    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True},
+}
+FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES = 1
+FLOWCHART_DECISION_MAX_OUTGOING_EDGES = 3
+
+
+def _coerce_optional_int(
+    value: Any,
+    *,
+    field_name: str,
+    minimum: int | None = None,
+) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        value = cleaned
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer.") from exc
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{field_name} must be >= {minimum}.")
+    return parsed
+
+
+def _coerce_float(value: Any, *, field_name: str, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return default
+        value = cleaned
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number.") from exc
+
+
+def _coerce_optional_handle_id(value: Any, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip().lower()
+    if not cleaned:
+        return None
+    if not re.fullmatch(r"[a-z][0-9]+", cleaned):
+        raise ValueError(f"{field_name} is invalid.")
+    return cleaned
+
+
+def _parse_json_dict(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
+    return FLOWCHART_NODE_UTILITY_COMPATIBILITY.get(
+        node_type,
+        {"model": False, "mcp": False, "scripts": False},
+    )
+
+
+def _validate_flowchart_utility_compatibility(
+    node_type: str,
+    *,
+    model_id: int | None = None,
+    mcp_server_ids: list[int] | None = None,
+    script_ids: list[int] | None = None,
+) -> list[str]:
+    compatibility = _flowchart_node_compatibility(node_type)
+    errors: list[str] = []
+    if model_id is not None and not compatibility["model"]:
+        errors.append(f"Node type '{node_type}' does not support models.")
+    if mcp_server_ids and not compatibility["mcp"]:
+        errors.append(f"Node type '{node_type}' does not support MCP servers.")
+    if script_ids and not compatibility["scripts"]:
+        errors.append(f"Node type '{node_type}' does not support scripts.")
+    return errors
+
+
+def _flowchart_ref_exists(
+    session,
+    *,
+    node_type: str,
+    ref_id: int | None,
+) -> bool:
+    if ref_id is None:
+        return False
+    if node_type == FLOWCHART_NODE_TYPE_TASK:
+        return session.get(TaskTemplate, ref_id) is not None
+    if node_type == FLOWCHART_NODE_TYPE_PLAN:
+        return session.get(Plan, ref_id) is not None
+    if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+        return session.get(Milestone, ref_id) is not None
+    if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+        return session.get(Memory, ref_id) is not None
+    return True
+
+
+def _task_node_has_prompt(config: Any) -> bool:
+    if not isinstance(config, dict):
+        return False
+    prompt = config.get("task_prompt")
+    return isinstance(prompt, str) and bool(prompt.strip())
+
+
+def _set_flowchart_node_scripts(
+    session,
+    node_id: int,
+    script_ids: list[int],
+) -> None:
+    session.execute(
+        delete(flowchart_node_scripts).where(
+            flowchart_node_scripts.c.flowchart_node_id == node_id
+        )
+    )
+    if not script_ids:
+        return
+    rows = [
+        {
+            "flowchart_node_id": node_id,
+            "script_id": script_id,
+            "position": position,
+        }
+        for position, script_id in enumerate(script_ids, start=1)
+    ]
+    session.execute(flowchart_node_scripts.insert(), rows)
+
+
+def _serialize_flowchart_item(flowchart: Flowchart) -> dict[str, Any]:
+    return _serialize_model(flowchart, include_relationships=False)
+
+
+def _serialize_flowchart_node_item(node: FlowchartNode) -> dict[str, Any]:
+    payload = _serialize_model(node, include_relationships=False)
+    payload["config"] = _parse_json_dict(node.config_json)
+    payload["mcp_server_ids"] = [server.id for server in node.mcp_servers]
+    payload["script_ids"] = [script.id for script in node.scripts]
+    payload["compatibility"] = _flowchart_node_compatibility(node.node_type)
+    return payload
+
+
+def _serialize_flowchart_edge_item(edge: FlowchartEdge) -> dict[str, Any]:
+    return _serialize_model(edge, include_relationships=False)
+
+
+def _serialize_flowchart_run_item(run: FlowchartRun) -> dict[str, Any]:
+    return _serialize_model(run, include_relationships=False)
+
+
+def _serialize_flowchart_run_node_item(node_run: FlowchartRunNode) -> dict[str, Any]:
+    payload = _serialize_model(node_run, include_relationships=False)
+    payload["input_context"] = _parse_json_dict(node_run.input_context_json)
+    payload["output_state"] = _parse_json_dict(node_run.output_state_json)
+    payload["routing_state"] = _parse_json_dict(node_run.routing_state_json)
+    return payload
+
+
+def _flowchart_graph_state(
+    flowchart_nodes: list[FlowchartNode],
+    flowchart_edges: list[FlowchartEdge],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    nodes = [
+        {
+            "id": node.id,
+            "node_type": node.node_type,
+            "ref_id": node.ref_id,
+            "config": _parse_json_dict(node.config_json),
+            "model_id": node.model_id,
+            "mcp_server_ids": [server.id for server in node.mcp_servers],
+            "script_ids": [script.id for script in node.scripts],
+        }
+        for node in flowchart_nodes
+    ]
+    edges = [
+        {
+            "id": edge.id,
+            "source_node_id": edge.source_node_id,
+            "target_node_id": edge.target_node_id,
+            "source_handle_id": edge.source_handle_id,
+            "target_handle_id": edge.target_handle_id,
+            "condition_key": edge.condition_key,
+            "label": edge.label,
+        }
+        for edge in flowchart_edges
+    ]
+    return nodes, edges
+
+
+def _validate_flowchart_graph_snapshot(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    node_ids: set[int] = set()
+    node_type_by_id: dict[int, str] = {}
+    incoming: dict[int, int] = {}
+    outgoing: dict[int, int] = {}
+
+    for node in nodes:
+        node_id = int(node["id"])
+        node_ids.add(node_id)
+        node_type = str(node.get("node_type") or "")
+        node_type_by_id[node_id] = node_type
+        incoming.setdefault(node_id, 0)
+        outgoing.setdefault(node_id, 0)
+        if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
+            errors.append(f"Node {node_id} has unknown node_type '{node_type}'.")
+            continue
+        ref_id = node.get("ref_id")
+        if node_type in FLOWCHART_NODE_TYPE_REQUIRES_REF and ref_id is None:
+            errors.append(f"Node {node_id} ({node_type}) requires ref_id.")
+        if node_type not in FLOWCHART_NODE_TYPE_WITH_REF and ref_id is not None:
+            errors.append(f"Node {node_id} ({node_type}) does not allow ref_id.")
+        if (
+            node_type == FLOWCHART_NODE_TYPE_TASK
+            and ref_id is None
+            and not _task_node_has_prompt(node.get("config"))
+        ):
+            errors.append(
+                f"Node {node_id} ({node_type}) requires ref_id or config.task_prompt."
+            )
+
+        compatibility = _flowchart_node_compatibility(node_type)
+        if node.get("model_id") is not None and not compatibility["model"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support models.")
+        mcp_server_ids = node.get("mcp_server_ids") or []
+        if mcp_server_ids and not compatibility["mcp"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support MCP servers.")
+        script_ids = node.get("script_ids") or []
+        if script_ids and not compatibility["scripts"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support scripts.")
+
+    start_nodes = [node for node in nodes if node.get("node_type") == FLOWCHART_NODE_TYPE_START]
+    if len(start_nodes) != 1:
+        errors.append(
+            f"Flowchart must contain exactly one start node; found {len(start_nodes)}."
+        )
+
+    decision_outgoing_keys: dict[int, list[str]] = {}
+    for edge in edges:
+        source_node_id = int(edge["source_node_id"])
+        target_node_id = int(edge["target_node_id"])
+        if source_node_id not in node_ids:
+            errors.append(f"Edge source node {source_node_id} does not exist.")
+            continue
+        if target_node_id not in node_ids:
+            errors.append(f"Edge target node {target_node_id} does not exist.")
+            continue
+        outgoing[source_node_id] = outgoing.get(source_node_id, 0) + 1
+        incoming[target_node_id] = incoming.get(target_node_id, 0) + 1
+        node_type = node_type_by_id.get(source_node_id)
+        condition_key = (str(edge.get("condition_key") or "")).strip()
+        if node_type == FLOWCHART_NODE_TYPE_DECISION:
+            if not condition_key:
+                errors.append(
+                    f"Decision node {source_node_id} requires condition_key on each outgoing edge."
+                )
+            decision_outgoing_keys.setdefault(source_node_id, []).append(condition_key)
+        elif condition_key:
+            errors.append(
+                f"Only decision nodes may define condition_key (source node {source_node_id})."
+            )
+
+    for node in nodes:
+        node_id = int(node["id"])
+        node_type = str(node.get("node_type") or "")
+        if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
+            continue
+        outgoing_count = outgoing.get(node_id, 0)
+        if node_type == FLOWCHART_NODE_TYPE_DECISION:
+            if outgoing_count > FLOWCHART_DECISION_MAX_OUTGOING_EDGES:
+                errors.append(
+                    f"Decision node {node_id} supports at most {FLOWCHART_DECISION_MAX_OUTGOING_EDGES} outgoing edges."
+                )
+        elif outgoing_count > FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES:
+            errors.append(
+                f"Node {node_id} ({node_type}) supports at most {FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES} outgoing edge."
+            )
+        if node.get("node_type") != FLOWCHART_NODE_TYPE_DECISION:
+            continue
+        if outgoing_count == 0:
+            errors.append(f"Decision node {node_id} must have at least one outgoing edge.")
+        keys = [key for key in decision_outgoing_keys.get(node_id, []) if key]
+        if len(keys) != len(set(keys)):
+            errors.append(f"Decision node {node_id} has duplicate condition_key values.")
+
+    if len(start_nodes) == 1:
+        start_id = int(start_nodes[0]["id"])
+        visited: set[int] = set()
+        frontier = [start_id]
+        adjacency: dict[int, list[int]] = {}
+        for edge in edges:
+            source_node_id = int(edge["source_node_id"])
+            target_node_id = int(edge["target_node_id"])
+            adjacency.setdefault(source_node_id, []).append(target_node_id)
+        while frontier:
+            current = frontier.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            for target_id in adjacency.get(current, []):
+                if target_id not in visited:
+                    frontier.append(target_id)
+        disconnected = sorted(node_ids.difference(visited))
+        if disconnected:
+            errors.append(
+                "Disconnected required nodes found: "
+                + ", ".join(str(node_id) for node_id in disconnected)
+            )
+
+    seen_errors: set[str] = set()
+    deduped_errors: list[str] = []
+    for error in errors:
+        if error in seen_errors:
+            continue
+        seen_errors.add(error)
+        deduped_errors.append(error)
+    return deduped_errors
+
+
+def _validate_flowchart_graph(
+    flowchart_nodes: list[FlowchartNode],
+    flowchart_edges: list[FlowchartEdge],
+) -> list[str]:
+    nodes, edges = _flowchart_graph_state(flowchart_nodes, flowchart_edges)
+    return _validate_flowchart_graph_snapshot(nodes, edges)
+
+
+def _serialize_plan_item(
+    plan: Plan,
+    *,
+    include_stages: bool = False,
+    include_tasks: bool = False,
+) -> dict[str, Any]:
+    data = _serialize_model(plan, include_relationships=False)
+    stages = sorted(
+        list(plan.stages or []),
+        key=lambda item: (item.position or 0, item.id or 0),
+    )
+    data["stage_count"] = len(stages)
+    data["task_count"] = sum(len(stage.tasks or []) for stage in stages)
+    if include_stages:
+        stage_items: list[dict[str, Any]] = []
+        for stage in stages:
+            stage_payload = _serialize_model(stage, include_relationships=False)
+            tasks = sorted(
+                list(stage.tasks or []),
+                key=lambda item: (item.position or 0, item.id or 0),
+            )
+            stage_payload["task_count"] = len(tasks)
+            if include_tasks:
+                stage_payload["tasks"] = [
+                    _serialize_model(task, include_relationships=False) for task in tasks
+                ]
+            stage_items.append(stage_payload)
+        data["stages"] = stage_items
+    return data
 
 
 def register(mcp: FastMCP) -> None:
@@ -203,31 +676,67 @@ def register(mcp: FastMCP) -> None:
             return {"ok": True, "count": len(payload), "items": payload}
 
     @mcp.tool()
-    def llmctl_get_pipeline(
+    def llmctl_get_flowchart(
         limit: int | None = None,
         offset: int = 0,
         order_by: str | None = "id",
         descending: bool = False,
-        include_steps: bool = False,
-        pipeline_id: int | None = None,
+        flowchart_id: int | None = None,
+        include_graph: bool = False,
+        include_validation: bool = False,
     ) -> dict[str, Any]:
-        """Read/list LLMCTL Studio pipelines from the database.
-
-        Use this for any request about pipelines, IDs, names, counts, or summaries.
-        If pipeline_id is provided, return that specific pipeline.
-        Do not use filesystem or repo inspection to answer pipeline questions.
-        For additional fields or related records, use llmctl_get_model_rows.
-        Synonyms: read, list.
-        Keywords: pipelines list, workflows, pipeline summary, pipeline catalog.
-        """
-        if pipeline_id is not None:
+        """Read/list flowcharts and optional graph data."""
+        if flowchart_id is not None:
             with session_scope() as session:
-                item = session.get(Pipeline, pipeline_id)
-                if item is None:
-                    return {"ok": False, "error": f"Pipeline {pipeline_id} not found."}
-                return {"ok": True, "item": _serialize_model(item, include_steps)}
-        columns = _column_map(Pipeline)
-        stmt = select(Pipeline)
+                stmt = select(Flowchart).where(Flowchart.id == flowchart_id)
+                if include_graph or include_validation:
+                    stmt = stmt.options(
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                        selectinload(Flowchart.edges),
+                    )
+                flowchart = session.execute(stmt).scalars().first()
+                if flowchart is None:
+                    return {"ok": False, "error": f"Flowchart {flowchart_id} not found."}
+                payload: dict[str, Any] = {
+                    "ok": True,
+                    "item": _serialize_flowchart_item(flowchart),
+                }
+                if include_graph or include_validation:
+                    payload["nodes"] = [
+                        _serialize_flowchart_node_item(node)
+                        for node in sorted(
+                            flowchart.nodes,
+                            key=lambda item: (item.id or 0),
+                        )
+                    ]
+                    payload["edges"] = [
+                        _serialize_flowchart_edge_item(edge)
+                        for edge in sorted(
+                            flowchart.edges,
+                            key=lambda item: (item.id or 0),
+                        )
+                    ]
+                if include_validation:
+                    errors = _validate_flowchart_graph(flowchart.nodes, flowchart.edges)
+                    for node in flowchart.nodes:
+                        if (
+                            node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                            and node.ref_id is not None
+                            and not _flowchart_ref_exists(
+                                session,
+                                node_type=node.node_type,
+                                ref_id=node.ref_id,
+                            )
+                        ):
+                            errors.append(
+                                f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                            )
+                    payload["validation"] = {"valid": len(errors) == 0, "errors": errors}
+                return payload
+
+        columns = _column_map(Flowchart)
+        stmt = select(Flowchart)
         if order_by:
             if order_by not in columns:
                 raise ValueError(f"Unknown order_by column '{order_by}'.")
@@ -240,8 +749,1599 @@ def register(mcp: FastMCP) -> None:
             stmt = stmt.offset(max(0, int(offset)))
         with session_scope() as session:
             items = session.execute(stmt).scalars().all()
-            payload = [_serialize_model(item, include_steps) for item in items]
+            payload = [_serialize_flowchart_item(item) for item in items]
             return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
+    def llmctl_create_flowchart(
+        name: str,
+        description: str | None = None,
+        max_node_executions: int | None = None,
+        max_runtime_minutes: int | None = None,
+        max_parallel_nodes: int | None = 1,
+    ) -> dict[str, Any]:
+        """Create a flowchart."""
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            return {"ok": False, "error": "name is required."}
+        try:
+            max_exec = _coerce_optional_int(
+                max_node_executions,
+                field_name="max_node_executions",
+                minimum=1,
+            )
+            max_runtime = _coerce_optional_int(
+                max_runtime_minutes,
+                field_name="max_runtime_minutes",
+                minimum=1,
+            )
+            max_parallel = _coerce_optional_int(
+                max_parallel_nodes,
+                field_name="max_parallel_nodes",
+                minimum=1,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with session_scope() as session:
+            item = Flowchart.create(
+                session,
+                name=cleaned_name,
+                description=(description or "").strip() or None,
+                max_node_executions=max_exec,
+                max_runtime_minutes=max_runtime,
+                max_parallel_nodes=max_parallel or 1,
+            )
+            return {"ok": True, "item": _serialize_flowchart_item(item)}
+
+    @mcp.tool()
+    def llmctl_update_flowchart(
+        flowchart_id: int,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update a flowchart by id."""
+        if not isinstance(patch, dict) or not patch:
+            return {"ok": False, "error": "patch must be a non-empty object."}
+        allowed = {
+            "name",
+            "description",
+            "max_node_executions",
+            "max_runtime_minutes",
+            "max_parallel_nodes",
+        }
+        unknown = sorted(set(patch).difference(allowed))
+        if unknown:
+            return {"ok": False, "error": f"Unknown fields: {', '.join(unknown)}"}
+        with session_scope() as session:
+            item = session.get(Flowchart, flowchart_id)
+            if item is None:
+                return {"ok": False, "error": f"Flowchart {flowchart_id} not found."}
+            if "name" in patch:
+                cleaned = str(patch.get("name") or "").strip()
+                if not cleaned:
+                    return {"ok": False, "error": "name cannot be empty."}
+                item.name = cleaned
+            if "description" in patch:
+                item.description = str(patch.get("description") or "").strip() or None
+            if "max_node_executions" in patch:
+                try:
+                    item.max_node_executions = _coerce_optional_int(
+                        patch.get("max_node_executions"),
+                        field_name="max_node_executions",
+                        minimum=1,
+                    )
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
+            if "max_runtime_minutes" in patch:
+                try:
+                    item.max_runtime_minutes = _coerce_optional_int(
+                        patch.get("max_runtime_minutes"),
+                        field_name="max_runtime_minutes",
+                        minimum=1,
+                    )
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
+            if "max_parallel_nodes" in patch:
+                try:
+                    parsed = _coerce_optional_int(
+                        patch.get("max_parallel_nodes"),
+                        field_name="max_parallel_nodes",
+                        minimum=1,
+                    )
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
+                if parsed is None:
+                    return {"ok": False, "error": "max_parallel_nodes cannot be null."}
+                item.max_parallel_nodes = parsed
+            return {"ok": True, "item": _serialize_flowchart_item(item)}
+
+    @mcp.tool()
+    def llmctl_delete_flowchart(flowchart_id: int) -> dict[str, Any]:
+        """Delete a flowchart and related graph/run records."""
+        revoke_ids: list[str] = []
+        with session_scope() as session:
+            flowchart = session.get(Flowchart, flowchart_id)
+            if flowchart is None:
+                return {"ok": False, "error": f"Flowchart {flowchart_id} not found."}
+
+            node_ids = (
+                session.execute(
+                    select(FlowchartNode.id).where(FlowchartNode.flowchart_id == flowchart_id)
+                )
+                .scalars()
+                .all()
+            )
+            runs = (
+                session.execute(
+                    select(FlowchartRun).where(FlowchartRun.flowchart_id == flowchart_id)
+                )
+                .scalars()
+                .all()
+            )
+            run_ids = [run.id for run in runs]
+            for run in runs:
+                if run.celery_task_id:
+                    revoke_ids.append(run.celery_task_id)
+
+            task_ids = set(
+                session.execute(
+                    select(AgentTask.id).where(AgentTask.flowchart_id == flowchart_id)
+                )
+                .scalars()
+                .all()
+            )
+            if run_ids:
+                task_ids.update(
+                    session.execute(
+                        select(AgentTask.id).where(AgentTask.flowchart_run_id.in_(run_ids))
+                    )
+                    .scalars()
+                    .all()
+                )
+                session.execute(
+                    delete(FlowchartRunNode).where(FlowchartRunNode.flowchart_run_id.in_(run_ids))
+                )
+            if node_ids:
+                task_ids.update(
+                    session.execute(
+                        select(AgentTask.id).where(AgentTask.flowchart_node_id.in_(node_ids))
+                    )
+                    .scalars()
+                    .all()
+                )
+                session.execute(
+                    delete(flowchart_node_mcp_servers).where(
+                        flowchart_node_mcp_servers.c.flowchart_node_id.in_(node_ids)
+                    )
+                )
+                session.execute(
+                    delete(flowchart_node_scripts).where(
+                        flowchart_node_scripts.c.flowchart_node_id.in_(node_ids)
+                    )
+                )
+
+            if task_ids:
+                tasks = (
+                    session.execute(select(AgentTask).where(AgentTask.id.in_(task_ids)))
+                    .scalars()
+                    .all()
+                )
+                for task in tasks:
+                    if task.celery_task_id:
+                        revoke_ids.append(task.celery_task_id)
+                    session.delete(task)
+
+            session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
+            if node_ids:
+                session.execute(delete(FlowchartNode).where(FlowchartNode.id.in_(node_ids)))
+            if run_ids:
+                session.execute(delete(FlowchartRun).where(FlowchartRun.id.in_(run_ids)))
+            session.delete(flowchart)
+
+        for task_id in revoke_ids:
+            try:
+                celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            except Exception:
+                pass
+        return {"ok": True, "flowchart_id": flowchart_id, "deleted": True}
+
+    @mcp.tool()
+    def llmctl_get_flowchart_graph(flowchart_id: int) -> dict[str, Any]:
+        """Read flowchart graph nodes/edges with validation results."""
+        with session_scope() as session:
+            flowchart = (
+                session.execute(
+                    select(Flowchart)
+                    .options(
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                        selectinload(Flowchart.edges),
+                    )
+                    .where(Flowchart.id == flowchart_id)
+                )
+                .scalars()
+                .first()
+            )
+            if flowchart is None:
+                return {"ok": False, "error": f"Flowchart {flowchart_id} not found."}
+            errors = _validate_flowchart_graph(flowchart.nodes, flowchart.edges)
+            for node in flowchart.nodes:
+                if (
+                    node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                    and node.ref_id is not None
+                    and not _flowchart_ref_exists(
+                        session,
+                        node_type=node.node_type,
+                        ref_id=node.ref_id,
+                    )
+                ):
+                    errors.append(
+                        f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                    )
+            return {
+                "ok": True,
+                "flowchart_id": flowchart_id,
+                "nodes": [_serialize_flowchart_node_item(node) for node in flowchart.nodes],
+                "edges": [_serialize_flowchart_edge_item(edge) for edge in flowchart.edges],
+                "validation": {"valid": len(errors) == 0, "errors": errors},
+            }
+
+    @mcp.tool()
+    def llmctl_update_flowchart_graph(
+        flowchart_id: int,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Atomic upsert for flowchart graph (nodes + edges)."""
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            return {"ok": False, "error": "nodes and edges must be arrays."}
+
+        validation_errors: list[str] = []
+        try:
+            with session_scope() as session:
+                flowchart = session.get(Flowchart, flowchart_id)
+                if flowchart is None:
+                    return {"ok": False, "error": f"Flowchart {flowchart_id} not found."}
+
+                existing_nodes = (
+                    session.execute(
+                        select(FlowchartNode)
+                        .options(
+                            selectinload(FlowchartNode.mcp_servers),
+                            selectinload(FlowchartNode.scripts),
+                        )
+                        .where(FlowchartNode.flowchart_id == flowchart_id)
+                    )
+                    .scalars()
+                    .all()
+                )
+                existing_nodes_by_id = {node.id: node for node in existing_nodes}
+                keep_node_ids: set[int] = set()
+                token_to_node_id: dict[str, int] = {}
+
+                for index, raw_node in enumerate(nodes):
+                    if not isinstance(raw_node, dict):
+                        raise ValueError(f"nodes[{index}] must be an object.")
+                    node_type = str(raw_node.get("node_type") or "").strip().lower()
+                    if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
+                        raise ValueError(f"nodes[{index}] has invalid node_type '{node_type}'.")
+
+                    node_id_raw = raw_node.get("id")
+                    node_id = _coerce_optional_int(node_id_raw, field_name=f"nodes[{index}].id")
+                    ref_id = _coerce_optional_int(
+                        raw_node.get("ref_id"),
+                        field_name=f"nodes[{index}].ref_id",
+                    )
+                    model_field_present = "model_id" in raw_node
+                    model_id = _coerce_optional_int(
+                        raw_node.get("model_id"),
+                        field_name=f"nodes[{index}].model_id",
+                        minimum=1,
+                    )
+                    x = _coerce_float(raw_node.get("x"), field_name=f"nodes[{index}].x")
+                    y = _coerce_float(raw_node.get("y"), field_name=f"nodes[{index}].y")
+                    title = str(raw_node.get("title") or "").strip() or None
+                    config = raw_node.get("config")
+                    if config is None and "config_json" in raw_node:
+                        config = raw_node.get("config_json")
+                    if config is None:
+                        config_payload: dict[str, Any] = {}
+                    elif isinstance(config, dict):
+                        config_payload = config
+                    else:
+                        raise ValueError(f"nodes[{index}].config must be an object.")
+
+                    if node_type in FLOWCHART_NODE_TYPE_REQUIRES_REF and ref_id is None:
+                        raise ValueError(
+                            f"nodes[{index}] requires ref_id for node_type '{node_type}'."
+                        )
+                    if node_type not in FLOWCHART_NODE_TYPE_WITH_REF and ref_id is not None:
+                        raise ValueError(
+                            f"nodes[{index}] node_type '{node_type}' does not allow ref_id."
+                        )
+                    if (
+                        node_type == FLOWCHART_NODE_TYPE_TASK
+                        and ref_id is None
+                        and not _task_node_has_prompt(config_payload)
+                    ):
+                        raise ValueError(
+                            f"nodes[{index}] task node requires ref_id or config.task_prompt."
+                        )
+                    compatibility_errors = _validate_flowchart_utility_compatibility(
+                        node_type,
+                        model_id=model_id if model_field_present else None,
+                    )
+                    if compatibility_errors:
+                        raise ValueError(compatibility_errors[0])
+
+                    flowchart_node = (
+                        existing_nodes_by_id.get(node_id) if node_id is not None else None
+                    )
+                    if flowchart_node is None:
+                        flowchart_node = FlowchartNode.create(
+                            session,
+                            flowchart_id=flowchart_id,
+                            node_type=node_type,
+                            ref_id=ref_id,
+                            title=title,
+                            x=x,
+                            y=y,
+                            config_json=json.dumps(config_payload, sort_keys=True),
+                        )
+                    else:
+                        flowchart_node.node_type = node_type
+                        flowchart_node.ref_id = ref_id
+                        flowchart_node.title = title
+                        flowchart_node.x = x
+                        flowchart_node.y = y
+                        flowchart_node.config_json = json.dumps(config_payload, sort_keys=True)
+
+                    if model_field_present:
+                        if model_id is not None and session.get(LLMModel, model_id) is None:
+                            raise ValueError(f"nodes[{index}].model_id {model_id} was not found.")
+                        flowchart_node.model_id = model_id
+
+                    if (
+                        node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                        and flowchart_node.ref_id is not None
+                        and not _flowchart_ref_exists(
+                            session,
+                            node_type=node_type,
+                            ref_id=flowchart_node.ref_id,
+                        )
+                    ):
+                        raise ValueError(
+                            f"nodes[{index}] references missing ref_id {flowchart_node.ref_id}."
+                        )
+
+                    if "mcp_server_ids" in raw_node:
+                        mcp_server_ids_raw = raw_node.get("mcp_server_ids")
+                        if not isinstance(mcp_server_ids_raw, list):
+                            raise ValueError(f"nodes[{index}].mcp_server_ids must be an array.")
+                        mcp_server_ids: list[int] = []
+                        for mcp_index, mcp_id_raw in enumerate(mcp_server_ids_raw):
+                            mcp_id = _coerce_optional_int(
+                                mcp_id_raw,
+                                field_name=f"nodes[{index}].mcp_server_ids[{mcp_index}]",
+                                minimum=1,
+                            )
+                            if mcp_id is None:
+                                raise ValueError(
+                                    f"nodes[{index}].mcp_server_ids[{mcp_index}] is invalid."
+                                )
+                            mcp_server_ids.append(mcp_id)
+                        if len(mcp_server_ids) != len(set(mcp_server_ids)):
+                            raise ValueError(f"nodes[{index}] has duplicate mcp_server_ids.")
+                        compatibility_errors = _validate_flowchart_utility_compatibility(
+                            node_type,
+                            mcp_server_ids=mcp_server_ids,
+                        )
+                        if compatibility_errors:
+                            raise ValueError(compatibility_errors[0])
+                        selected_servers = (
+                            session.execute(select(MCPServer).where(MCPServer.id.in_(mcp_server_ids)))
+                            .scalars()
+                            .all()
+                        )
+                        if len(selected_servers) != len(set(mcp_server_ids)):
+                            raise ValueError(f"nodes[{index}] contains unknown MCP server IDs.")
+                        flowchart_node.mcp_servers = selected_servers
+
+                    if "script_ids" in raw_node:
+                        script_ids_raw = raw_node.get("script_ids")
+                        if not isinstance(script_ids_raw, list):
+                            raise ValueError(f"nodes[{index}].script_ids must be an array.")
+                        script_ids: list[int] = []
+                        for script_index, script_id_raw in enumerate(script_ids_raw):
+                            script_id = _coerce_optional_int(
+                                script_id_raw,
+                                field_name=f"nodes[{index}].script_ids[{script_index}]",
+                                minimum=1,
+                            )
+                            if script_id is None:
+                                raise ValueError(
+                                    f"nodes[{index}].script_ids[{script_index}] is invalid."
+                                )
+                            script_ids.append(script_id)
+                        if len(script_ids) != len(set(script_ids)):
+                            raise ValueError(f"nodes[{index}] has duplicate script_ids.")
+                        compatibility_errors = _validate_flowchart_utility_compatibility(
+                            node_type,
+                            script_ids=script_ids,
+                        )
+                        if compatibility_errors:
+                            raise ValueError(compatibility_errors[0])
+                        selected_scripts = (
+                            session.execute(select(Script.id).where(Script.id.in_(script_ids)))
+                            .scalars()
+                            .all()
+                        )
+                        if len(selected_scripts) != len(set(script_ids)):
+                            raise ValueError(f"nodes[{index}] contains unknown script IDs.")
+                        _set_flowchart_node_scripts(session, flowchart_node.id, script_ids)
+
+                    keep_node_ids.add(flowchart_node.id)
+                    if node_id_raw is not None:
+                        token_to_node_id[str(node_id_raw)] = flowchart_node.id
+                    if raw_node.get("client_id") is not None:
+                        token_to_node_id[str(raw_node["client_id"])] = flowchart_node.id
+                    token_to_node_id[str(flowchart_node.id)] = flowchart_node.id
+
+                session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
+
+                for index, raw_edge in enumerate(edges):
+                    if not isinstance(raw_edge, dict):
+                        raise ValueError(f"edges[{index}] must be an object.")
+                    source_raw = raw_edge.get("source_node_id")
+                    target_raw = raw_edge.get("target_node_id")
+                    if source_raw is None and "source" in raw_edge:
+                        source_raw = raw_edge.get("source")
+                    if target_raw is None and "target" in raw_edge:
+                        target_raw = raw_edge.get("target")
+                    source_node_id = token_to_node_id.get(str(source_raw))
+                    target_node_id = token_to_node_id.get(str(target_raw))
+                    if source_node_id is None:
+                        raise ValueError(f"edges[{index}].source_node_id is invalid.")
+                    if target_node_id is None:
+                        raise ValueError(f"edges[{index}].target_node_id is invalid.")
+                    source_handle_id = _coerce_optional_handle_id(
+                        raw_edge.get("source_handle_id"),
+                        field_name=f"edges[{index}].source_handle_id",
+                    )
+                    target_handle_id = _coerce_optional_handle_id(
+                        raw_edge.get("target_handle_id"),
+                        field_name=f"edges[{index}].target_handle_id",
+                    )
+                    condition_key = str(raw_edge.get("condition_key") or "").strip() or None
+                    label = str(raw_edge.get("label") or "").strip() or None
+                    FlowchartEdge.create(
+                        session,
+                        flowchart_id=flowchart_id,
+                        source_node_id=source_node_id,
+                        target_node_id=target_node_id,
+                        source_handle_id=source_handle_id,
+                        target_handle_id=target_handle_id,
+                        condition_key=condition_key,
+                        label=label,
+                    )
+
+                removed_node_ids = set(existing_nodes_by_id).difference(keep_node_ids)
+                if removed_node_ids:
+                    session.execute(
+                        delete(flowchart_node_mcp_servers).where(
+                            flowchart_node_mcp_servers.c.flowchart_node_id.in_(removed_node_ids)
+                        )
+                    )
+                    session.execute(
+                        delete(flowchart_node_scripts).where(
+                            flowchart_node_scripts.c.flowchart_node_id.in_(removed_node_ids)
+                        )
+                    )
+                    session.execute(delete(FlowchartNode).where(FlowchartNode.id.in_(removed_node_ids)))
+
+                updated_nodes = (
+                    session.execute(
+                        select(FlowchartNode)
+                        .options(
+                            selectinload(FlowchartNode.mcp_servers),
+                            selectinload(FlowchartNode.scripts),
+                        )
+                        .where(FlowchartNode.flowchart_id == flowchart_id)
+                        .order_by(FlowchartNode.id.asc())
+                    )
+                    .scalars()
+                    .all()
+                )
+                updated_edges = (
+                    session.execute(
+                        select(FlowchartEdge)
+                        .where(FlowchartEdge.flowchart_id == flowchart_id)
+                        .order_by(FlowchartEdge.id.asc())
+                    )
+                    .scalars()
+                    .all()
+                )
+                validation_errors = _validate_flowchart_graph(updated_nodes, updated_edges)
+                for node in updated_nodes:
+                    if (
+                        node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                        and node.ref_id is not None
+                        and not _flowchart_ref_exists(
+                            session,
+                            node_type=node.node_type,
+                            ref_id=node.ref_id,
+                        )
+                    ):
+                        validation_errors.append(
+                            f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                        )
+                if validation_errors:
+                    raise ValueError("Flowchart graph validation failed.")
+        except ValueError as exc:
+            if validation_errors:
+                return {
+                    "ok": False,
+                    "error": str(exc),
+                    "validation": {"valid": False, "errors": validation_errors},
+                }
+            return {"ok": False, "error": str(exc)}
+        return llmctl_get_flowchart_graph(flowchart_id)
+
+    @mcp.tool()
+    def start_flowchart(flowchart_id: int) -> dict[str, Any]:
+        """Queue a new flowchart run after validating the graph."""
+        validation_errors: list[str] = []
+        with session_scope() as session:
+            flowchart = (
+                session.execute(
+                    select(Flowchart)
+                    .options(
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
+                        selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
+                        selectinload(Flowchart.edges),
+                    )
+                    .where(Flowchart.id == flowchart_id)
+                )
+                .scalars()
+                .first()
+            )
+            if flowchart is None:
+                return {"ok": False, "error": f"Flowchart {flowchart_id} not found."}
+            validation_errors = _validate_flowchart_graph(flowchart.nodes, flowchart.edges)
+            for node in flowchart.nodes:
+                if (
+                    node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
+                    and node.ref_id is not None
+                    and not _flowchart_ref_exists(
+                        session,
+                        node_type=node.node_type,
+                        ref_id=node.ref_id,
+                    )
+                ):
+                    validation_errors.append(
+                        f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
+                    )
+            if validation_errors:
+                return {
+                    "ok": False,
+                    "error": "Flowchart graph validation failed.",
+                    "validation": {"valid": False, "errors": validation_errors},
+                }
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart_id,
+                status="queued",
+            )
+            run_id = flowchart_run.id
+
+        async_result = run_flowchart.delay(flowchart_id, run_id)
+        with session_scope() as session:
+            flowchart_run = session.get(FlowchartRun, run_id)
+            if flowchart_run is None:
+                return {"ok": False, "error": f"Flowchart run {run_id} not found after enqueue."}
+            flowchart_run.celery_task_id = async_result.id
+            payload = _serialize_flowchart_run_item(flowchart_run)
+        return {
+            "ok": True,
+            "flowchart_run": {**payload, "validation": {"valid": True, "errors": []}},
+        }
+
+    @mcp.tool()
+    def cancel_flowchart_run(run_id: int) -> dict[str, Any]:
+        """Cancel an active flowchart run."""
+        revoke_ids: list[str] = []
+        with session_scope() as session:
+            flowchart_run = session.get(FlowchartRun, run_id)
+            if flowchart_run is None:
+                return {"ok": False, "error": f"Flowchart run {run_id} not found."}
+            if flowchart_run.status not in {"queued", "running"}:
+                return {
+                    "ok": True,
+                    "flowchart_run": _serialize_flowchart_run_item(flowchart_run),
+                    "canceled": False,
+                }
+
+            now = utcnow()
+            flowchart_run.status = "canceled"
+            flowchart_run.finished_at = now
+            if flowchart_run.celery_task_id:
+                revoke_ids.append(flowchart_run.celery_task_id)
+
+            node_runs = (
+                session.execute(
+                    select(FlowchartRunNode).where(FlowchartRunNode.flowchart_run_id == run_id)
+                )
+                .scalars()
+                .all()
+            )
+            for node_run in node_runs:
+                if node_run.status in {"queued", "running", "pending"}:
+                    node_run.status = "canceled"
+                    node_run.finished_at = now
+
+            tasks = (
+                session.execute(select(AgentTask).where(AgentTask.flowchart_run_id == run_id))
+                .scalars()
+                .all()
+            )
+            for task in tasks:
+                if task.status in {"pending", "queued", "running"}:
+                    task.status = "canceled"
+                    task.finished_at = now
+                    if not task.error:
+                        task.error = "Canceled by user."
+                if task.celery_task_id:
+                    revoke_ids.append(task.celery_task_id)
+
+        for task_id in revoke_ids:
+            try:
+                celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            except Exception:
+                pass
+
+        with session_scope() as session:
+            flowchart_run = session.get(FlowchartRun, run_id)
+            if flowchart_run is None:
+                return {"ok": False, "error": f"Flowchart run {run_id} not found after cancel."}
+            return {
+                "ok": True,
+                "flowchart_run": _serialize_flowchart_run_item(flowchart_run),
+                "canceled": True,
+            }
+
+    @mcp.tool()
+    def llmctl_get_flowchart_run(
+        run_id: int,
+        include_node_runs: bool = True,
+    ) -> dict[str, Any]:
+        """Read a flowchart run and optional node-run details."""
+        with session_scope() as session:
+            flowchart_run = session.get(FlowchartRun, run_id)
+            if flowchart_run is None:
+                return {"ok": False, "error": f"Flowchart run {run_id} not found."}
+            rows = session.execute(
+                select(FlowchartRunNode.status, func.count(FlowchartRunNode.id))
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .group_by(FlowchartRunNode.status)
+            ).all()
+            counts = {str(status): int(count or 0) for status, count in rows}
+            payload: dict[str, Any] = {
+                "ok": True,
+                "flowchart_run": _serialize_flowchart_run_item(flowchart_run),
+                "counts": counts,
+            }
+            if include_node_runs:
+                node_runs = (
+                    session.execute(
+                        select(FlowchartRunNode)
+                        .where(FlowchartRunNode.flowchart_run_id == run_id)
+                        .order_by(
+                            FlowchartRunNode.execution_index.asc(),
+                            FlowchartRunNode.created_at.asc(),
+                            FlowchartRunNode.id.asc(),
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                payload["node_runs"] = [
+                    _serialize_flowchart_run_node_item(node_run) for node_run in node_runs
+                ]
+            return payload
+
+    @mcp.tool()
+    def llmctl_get_node_run(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        node_run_id: int | None = None,
+        flowchart_run_id: int | None = None,
+        flowchart_node_id: int | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Read/list node runs (flowchart_run_nodes)."""
+        if node_run_id is not None:
+            with session_scope() as session:
+                item = session.get(FlowchartRunNode, node_run_id)
+                if item is None:
+                    return {"ok": False, "error": f"Node run {node_run_id} not found."}
+                return {"ok": True, "item": _serialize_flowchart_run_node_item(item)}
+
+        columns = _column_map(FlowchartRunNode)
+        stmt = select(FlowchartRunNode)
+        if flowchart_run_id is not None:
+            stmt = stmt.where(FlowchartRunNode.flowchart_run_id == flowchart_run_id)
+        if flowchart_node_id is not None:
+            stmt = stmt.where(FlowchartRunNode.flowchart_node_id == flowchart_node_id)
+        if status:
+            stmt = stmt.where(FlowchartRunNode.status == str(status).strip())
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            items = session.execute(stmt).scalars().all()
+            payload = [_serialize_flowchart_run_node_item(item) for item in items]
+            return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
+    def llmctl_set_flowchart_node_model(
+        flowchart_id: int,
+        node_id: int,
+        model_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Set or clear the model bound to a flowchart node."""
+        try:
+            parsed_model_id = _coerce_optional_int(model_id, field_name="model_id", minimum=1)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with session_scope() as session:
+            node = session.get(FlowchartNode, node_id)
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            errors = _validate_flowchart_utility_compatibility(
+                node.node_type,
+                model_id=parsed_model_id,
+            )
+            if errors:
+                return {"ok": False, "error": errors[0]}
+            if parsed_model_id is not None and session.get(LLMModel, parsed_model_id) is None:
+                return {"ok": False, "error": f"Model {parsed_model_id} was not found."}
+            node.model_id = parsed_model_id
+            session.flush()
+            refreshed = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(
+                        selectinload(FlowchartNode.mcp_servers),
+                        selectinload(FlowchartNode.scripts),
+                    )
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
+            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
+
+    @mcp.tool()
+    def llmctl_bind_flowchart_node_mcp(
+        flowchart_id: int,
+        node_id: int,
+        mcp_server_id: int,
+    ) -> dict[str, Any]:
+        """Bind an MCP server to a flowchart node."""
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.mcp_servers))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            errors = _validate_flowchart_utility_compatibility(
+                node.node_type,
+                mcp_server_ids=[mcp_server_id],
+            )
+            if errors:
+                return {"ok": False, "error": errors[0]}
+            server = session.get(MCPServer, mcp_server_id)
+            if server is None:
+                return {"ok": False, "error": f"MCP server {mcp_server_id} was not found."}
+            existing = {item.id for item in node.mcp_servers}
+            if server.id not in existing:
+                node.mcp_servers.append(server)
+            session.flush()
+            return {"ok": True, "node": _serialize_flowchart_node_item(node)}
+
+    @mcp.tool()
+    def llmctl_unbind_flowchart_node_mcp(
+        flowchart_id: int,
+        node_id: int,
+        mcp_server_id: int,
+    ) -> dict[str, Any]:
+        """Unbind an MCP server from a flowchart node."""
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.mcp_servers))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            for server in list(node.mcp_servers):
+                if server.id == mcp_server_id:
+                    node.mcp_servers.remove(server)
+            session.flush()
+            return {"ok": True, "node": _serialize_flowchart_node_item(node)}
+
+    @mcp.tool()
+    def llmctl_bind_flowchart_node_script(
+        flowchart_id: int,
+        node_id: int,
+        script_id: int,
+    ) -> dict[str, Any]:
+        """Bind a script to a flowchart node."""
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.scripts))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            errors = _validate_flowchart_utility_compatibility(
+                node.node_type,
+                script_ids=[script_id],
+            )
+            if errors:
+                return {"ok": False, "error": errors[0]}
+            script = session.get(Script, script_id)
+            if script is None:
+                return {"ok": False, "error": f"Script {script_id} was not found."}
+            ordered_ids = [item.id for item in node.scripts]
+            if script_id not in ordered_ids:
+                ordered_ids.append(script_id)
+                _set_flowchart_node_scripts(session, node.id, ordered_ids)
+            refreshed = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.scripts))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
+            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
+
+    @mcp.tool()
+    def llmctl_unbind_flowchart_node_script(
+        flowchart_id: int,
+        node_id: int,
+        script_id: int,
+    ) -> dict[str, Any]:
+        """Unbind a script from a flowchart node."""
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.scripts))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            ordered_ids = [item.id for item in node.scripts if item.id != script_id]
+            _set_flowchart_node_scripts(session, node.id, ordered_ids)
+            refreshed = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.scripts))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
+            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
+
+    @mcp.tool()
+    def llmctl_reorder_flowchart_node_scripts(
+        flowchart_id: int,
+        node_id: int,
+        script_ids: list[int],
+    ) -> dict[str, Any]:
+        """Reorder all scripts attached to a flowchart node."""
+        if not isinstance(script_ids, list):
+            return {"ok": False, "error": "script_ids must be an array."}
+        parsed_script_ids: list[int] = []
+        for index, script_id in enumerate(script_ids):
+            try:
+                parsed = _coerce_optional_int(
+                    script_id,
+                    field_name=f"script_ids[{index}]",
+                    minimum=1,
+                )
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            if parsed is None:
+                return {"ok": False, "error": f"script_ids[{index}] is invalid."}
+            parsed_script_ids.append(parsed)
+        if len(parsed_script_ids) != len(set(parsed_script_ids)):
+            return {"ok": False, "error": "script_ids cannot contain duplicates."}
+
+        with session_scope() as session:
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.scripts))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
+                }
+            errors = _validate_flowchart_utility_compatibility(
+                node.node_type,
+                script_ids=parsed_script_ids,
+            )
+            if errors:
+                return {"ok": False, "error": errors[0]}
+            existing_ids = {script.id for script in node.scripts}
+            if set(parsed_script_ids) != existing_ids:
+                return {
+                    "ok": False,
+                    "error": "script_ids must include each attached script exactly once.",
+                }
+            _set_flowchart_node_scripts(session, node.id, parsed_script_ids)
+            refreshed = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.scripts))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
+            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
+
+    @mcp.tool()
+    def llmctl_get_memory(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        memory_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Read/list LLMCTL Studio memories.
+
+        Use this for memory lookups by id or for listing all saved memory notes.
+        """
+        if memory_id is not None:
+            with session_scope() as session:
+                item = session.get(Memory, memory_id)
+                if item is None:
+                    return {"ok": False, "error": f"Memory {memory_id} not found."}
+                return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+        columns = _column_map(Memory)
+        stmt = select(Memory)
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            items = session.execute(stmt).scalars().all()
+            payload = [_serialize_model(item, include_relationships=False) for item in items]
+            return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
+    def llmctl_create_memory(description: str) -> dict[str, Any]:
+        """Create a memory record."""
+        cleaned = (description or "").strip()
+        if not cleaned:
+            return {"ok": False, "error": "description is required."}
+        with session_scope() as session:
+            item = Memory.create(session, description=cleaned)
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_update_memory(memory_id: int, description: str) -> dict[str, Any]:
+        """Update a memory record by id."""
+        cleaned = (description or "").strip()
+        if not cleaned:
+            return {"ok": False, "error": "description is required."}
+        with session_scope() as session:
+            item = session.get(Memory, memory_id)
+            if item is None:
+                return {"ok": False, "error": f"Memory {memory_id} not found."}
+            item.description = cleaned
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_delete_memory(memory_id: int) -> dict[str, Any]:
+        """Delete a memory record by id."""
+        with session_scope() as session:
+            item = session.get(Memory, memory_id)
+            if item is None:
+                return {"ok": False, "error": f"Memory {memory_id} not found."}
+            session.delete(item)
+        return {"ok": True, "memory_id": memory_id}
+
+    @mcp.tool()
+    def llmctl_get_milestone(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        milestone_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Read/list LLMCTL Studio milestones."""
+        if milestone_id is not None:
+            with session_scope() as session:
+                item = session.get(Milestone, milestone_id)
+                if item is None:
+                    return {"ok": False, "error": f"Milestone {milestone_id} not found."}
+                return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+        columns = _column_map(Milestone)
+        stmt = select(Milestone)
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            items = session.execute(stmt).scalars().all()
+            payload = [_serialize_model(item, include_relationships=False) for item in items]
+            return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
+    def llmctl_create_milestone(
+        name: str,
+        description: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        owner: str | None = None,
+        start_date: str | None = None,
+        due_date: str | None = None,
+        progress_percent: int | None = None,
+        health: str | None = None,
+        success_criteria: str | None = None,
+        dependencies: str | None = None,
+        links: str | None = None,
+        latest_update: str | None = None,
+        completed: bool | None = None,
+    ) -> dict[str, Any]:
+        """Create a milestone record."""
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            return {"ok": False, "error": "name is required."}
+        status_value = _normalize_choice(
+            status,
+            choices=MILESTONE_STATUS_CHOICES,
+            fallback=MILESTONE_STATUS_PLANNED,
+        )
+        priority_value = _normalize_choice(
+            priority,
+            choices=MILESTONE_PRIORITY_CHOICES,
+            fallback=MILESTONE_PRIORITY_MEDIUM,
+        )
+        health_value = _normalize_choice(
+            health,
+            choices=MILESTONE_HEALTH_CHOICES,
+            fallback=MILESTONE_HEALTH_GREEN,
+        )
+        try:
+            start_value = _parse_optional_datetime(start_date, "start_date")
+            due_value = _parse_optional_datetime(due_date, "due_date")
+            progress_value = _parse_milestone_progress(progress_percent)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if start_value and due_value and due_value < start_value:
+            return {"ok": False, "error": "due_date must be on or after start_date."}
+        completed_value = (
+            _coerce_bool(completed)
+            if completed is not None
+            else status_value == MILESTONE_STATUS_DONE
+        )
+        if status_value == MILESTONE_STATUS_DONE:
+            completed_value = True
+        if completed_value:
+            progress_value = max(progress_value, 100)
+        with session_scope() as session:
+            item = Milestone.create(
+                session,
+                name=cleaned_name,
+                description=(description or "").strip() or None,
+                status=status_value,
+                priority=priority_value,
+                owner=(owner or "").strip() or None,
+                completed=completed_value,
+                start_date=start_value,
+                due_date=due_value,
+                progress_percent=progress_value,
+                health=health_value,
+                success_criteria=(success_criteria or "").strip() or None,
+                dependencies=(dependencies or "").strip() or None,
+                links=(links or "").strip() or None,
+                latest_update=(latest_update or "").strip() or None,
+            )
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_update_milestone(
+        milestone_id: int,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update milestone fields by id using a partial patch object."""
+        if not isinstance(patch, dict) or not patch:
+            return {"ok": False, "error": "patch must be a non-empty object."}
+        allowed = {
+            "name",
+            "description",
+            "status",
+            "priority",
+            "owner",
+            "completed",
+            "start_date",
+            "due_date",
+            "progress_percent",
+            "health",
+            "success_criteria",
+            "dependencies",
+            "links",
+            "latest_update",
+        }
+        unknown = sorted(set(patch.keys()) - allowed)
+        if unknown:
+            return {"ok": False, "error": f"Unknown fields: {', '.join(unknown)}"}
+        with session_scope() as session:
+            item = session.get(Milestone, milestone_id)
+            if item is None:
+                return {"ok": False, "error": f"Milestone {milestone_id} not found."}
+
+            if "name" in patch:
+                cleaned_name = str(patch.get("name") or "").strip()
+                if not cleaned_name:
+                    return {"ok": False, "error": "name cannot be empty."}
+                item.name = cleaned_name
+            if "description" in patch:
+                item.description = str(patch.get("description") or "").strip() or None
+            if "status" in patch:
+                item.status = _normalize_choice(
+                    patch.get("status"),
+                    choices=MILESTONE_STATUS_CHOICES,
+                    fallback=MILESTONE_STATUS_PLANNED,
+                )
+            if "priority" in patch:
+                item.priority = _normalize_choice(
+                    patch.get("priority"),
+                    choices=MILESTONE_PRIORITY_CHOICES,
+                    fallback=MILESTONE_PRIORITY_MEDIUM,
+                )
+            if "owner" in patch:
+                item.owner = str(patch.get("owner") or "").strip() or None
+            if "health" in patch:
+                item.health = _normalize_choice(
+                    patch.get("health"),
+                    choices=MILESTONE_HEALTH_CHOICES,
+                    fallback=MILESTONE_HEALTH_GREEN,
+                )
+            if "success_criteria" in patch:
+                item.success_criteria = str(patch.get("success_criteria") or "").strip() or None
+            if "dependencies" in patch:
+                item.dependencies = str(patch.get("dependencies") or "").strip() or None
+            if "links" in patch:
+                item.links = str(patch.get("links") or "").strip() or None
+            if "latest_update" in patch:
+                item.latest_update = str(patch.get("latest_update") or "").strip() or None
+            try:
+                if "start_date" in patch:
+                    item.start_date = _parse_optional_datetime(
+                        patch.get("start_date"), "start_date"
+                    )
+                if "due_date" in patch:
+                    item.due_date = _parse_optional_datetime(
+                        patch.get("due_date"), "due_date"
+                    )
+                if "progress_percent" in patch:
+                    item.progress_percent = _parse_milestone_progress(
+                        patch.get("progress_percent")
+                    )
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+
+            if item.start_date and item.due_date and item.due_date < item.start_date:
+                return {"ok": False, "error": "due_date must be on or after start_date."}
+
+            if "completed" in patch:
+                item.completed = _coerce_bool(patch.get("completed"))
+            if item.status == MILESTONE_STATUS_DONE:
+                item.completed = True
+            if item.completed:
+                item.progress_percent = max(item.progress_percent, 100)
+
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_delete_milestone(milestone_id: int) -> dict[str, Any]:
+        """Delete a milestone record by id."""
+        with session_scope() as session:
+            item = session.get(Milestone, milestone_id)
+            if item is None:
+                return {"ok": False, "error": f"Milestone {milestone_id} not found."}
+            session.delete(item)
+        return {"ok": True, "milestone_id": milestone_id}
+
+    @mcp.tool()
+    def llmctl_get_plan(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        include_stages: bool = True,
+        include_tasks: bool = True,
+        plan_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Read/list plans, including stage/task hierarchy when requested."""
+        if plan_id is not None:
+            with session_scope() as session:
+                stmt = select(Plan).where(Plan.id == plan_id)
+                if include_stages and include_tasks:
+                    stmt = stmt.options(selectinload(Plan.stages).selectinload(PlanStage.tasks))
+                elif include_stages:
+                    stmt = stmt.options(selectinload(Plan.stages))
+                item = session.execute(stmt).scalars().first()
+                if item is None:
+                    return {"ok": False, "error": f"Plan {plan_id} not found."}
+                payload = _serialize_plan_item(
+                    item,
+                    include_stages=include_stages,
+                    include_tasks=include_tasks,
+                )
+                return {"ok": True, "item": payload}
+        columns = _column_map(Plan)
+        stmt = select(Plan)
+        if include_stages and include_tasks:
+            stmt = stmt.options(selectinload(Plan.stages).selectinload(PlanStage.tasks))
+        elif include_stages:
+            stmt = stmt.options(selectinload(Plan.stages))
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            items = session.execute(stmt).scalars().all()
+            payload = [
+                _serialize_plan_item(
+                    item,
+                    include_stages=include_stages,
+                    include_tasks=include_tasks,
+                )
+                for item in items
+            ]
+            return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
+    def llmctl_create_plan(
+        name: str,
+        description: str | None = None,
+        completed_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a plan record."""
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            return {"ok": False, "error": "name is required."}
+        try:
+            completed_value = _parse_optional_datetime(completed_at, "completed_at")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with session_scope() as session:
+            item = Plan.create(
+                session,
+                name=cleaned_name,
+                description=(description or "").strip() or None,
+                completed_at=completed_value,
+            )
+            payload = _serialize_plan_item(item, include_stages=True, include_tasks=True)
+            return {"ok": True, "item": payload}
+
+    @mcp.tool()
+    def llmctl_update_plan(plan_id: int, patch: dict[str, Any]) -> dict[str, Any]:
+        """Update a plan by id using a partial patch object."""
+        if not isinstance(patch, dict) or not patch:
+            return {"ok": False, "error": "patch must be a non-empty object."}
+        allowed = {"name", "description", "completed_at"}
+        unknown = sorted(set(patch.keys()) - allowed)
+        if unknown:
+            return {"ok": False, "error": f"Unknown fields: {', '.join(unknown)}"}
+        with session_scope() as session:
+            item = session.get(Plan, plan_id)
+            if item is None:
+                return {"ok": False, "error": f"Plan {plan_id} not found."}
+            if "name" in patch:
+                cleaned_name = str(patch.get("name") or "").strip()
+                if not cleaned_name:
+                    return {"ok": False, "error": "name cannot be empty."}
+                item.name = cleaned_name
+            if "description" in patch:
+                item.description = str(patch.get("description") or "").strip() or None
+            if "completed_at" in patch:
+                try:
+                    item.completed_at = _parse_optional_datetime(
+                        patch.get("completed_at"),
+                        "completed_at",
+                    )
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
+            payload = _serialize_plan_item(item, include_stages=True, include_tasks=True)
+            return {"ok": True, "item": payload}
+
+    @mcp.tool()
+    def llmctl_delete_plan(plan_id: int) -> dict[str, Any]:
+        """Delete a plan and its child stages/tasks."""
+        with session_scope() as session:
+            item = session.get(Plan, plan_id)
+            if item is None:
+                return {"ok": False, "error": f"Plan {plan_id} not found."}
+            stage_ids = (
+                session.execute(select(PlanStage.id).where(PlanStage.plan_id == plan_id))
+                .scalars()
+                .all()
+            )
+            if stage_ids:
+                session.execute(delete(PlanTask).where(PlanTask.plan_stage_id.in_(stage_ids)))
+            session.execute(delete(PlanStage).where(PlanStage.plan_id == plan_id))
+            session.delete(item)
+        return {"ok": True, "plan_id": plan_id}
+
+    @mcp.tool()
+    def llmctl_create_plan_stage(
+        plan_id: int,
+        name: str,
+        description: str | None = None,
+        completed_at: str | None = None,
+        position: int | None = None,
+    ) -> dict[str, Any]:
+        """Create a plan stage under a plan."""
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            return {"ok": False, "error": "name is required."}
+        try:
+            completed_value = _parse_optional_datetime(completed_at, "completed_at")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with session_scope() as session:
+            plan = session.get(Plan, plan_id)
+            if plan is None:
+                return {"ok": False, "error": f"Plan {plan_id} not found."}
+            if position is None:
+                max_position = session.execute(
+                    select(func.max(PlanStage.position)).where(PlanStage.plan_id == plan_id)
+                ).scalar_one()
+                next_position = int(max_position or 0) + 1
+            else:
+                next_position = max(1, int(position))
+            item = PlanStage.create(
+                session,
+                plan_id=plan_id,
+                name=cleaned_name,
+                description=(description or "").strip() or None,
+                completed_at=completed_value,
+                position=next_position,
+            )
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_update_plan_stage(
+        stage_id: int,
+        patch: dict[str, Any],
+        plan_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Update a plan stage by id using a partial patch object."""
+        if not isinstance(patch, dict) or not patch:
+            return {"ok": False, "error": "patch must be a non-empty object."}
+        allowed = {"name", "description", "completed_at", "position"}
+        unknown = sorted(set(patch.keys()) - allowed)
+        if unknown:
+            return {"ok": False, "error": f"Unknown fields: {', '.join(unknown)}"}
+        with session_scope() as session:
+            item = session.get(PlanStage, stage_id)
+            if item is None:
+                return {"ok": False, "error": f"Plan stage {stage_id} not found."}
+            if plan_id is not None and item.plan_id != plan_id:
+                return {"ok": False, "error": f"Plan stage {stage_id} is not in plan {plan_id}."}
+            if "name" in patch:
+                cleaned_name = str(patch.get("name") or "").strip()
+                if not cleaned_name:
+                    return {"ok": False, "error": "name cannot be empty."}
+                item.name = cleaned_name
+            if "description" in patch:
+                item.description = str(patch.get("description") or "").strip() or None
+            if "completed_at" in patch:
+                try:
+                    item.completed_at = _parse_optional_datetime(
+                        patch.get("completed_at"),
+                        "completed_at",
+                    )
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
+            if "position" in patch:
+                try:
+                    item.position = max(1, int(patch.get("position")))
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "position must be a positive integer."}
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_delete_plan_stage(
+        stage_id: int,
+        plan_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Delete a plan stage and its child tasks."""
+        with session_scope() as session:
+            item = session.get(PlanStage, stage_id)
+            if item is None:
+                return {"ok": False, "error": f"Plan stage {stage_id} not found."}
+            if plan_id is not None and item.plan_id != plan_id:
+                return {"ok": False, "error": f"Plan stage {stage_id} is not in plan {plan_id}."}
+            session.execute(delete(PlanTask).where(PlanTask.plan_stage_id == stage_id))
+            session.delete(item)
+        return {"ok": True, "stage_id": stage_id}
+
+    @mcp.tool()
+    def llmctl_create_plan_task(
+        stage_id: int,
+        name: str,
+        description: str | None = None,
+        completed_at: str | None = None,
+        position: int | None = None,
+    ) -> dict[str, Any]:
+        """Create a plan task under a stage."""
+        cleaned_name = (name or "").strip()
+        if not cleaned_name:
+            return {"ok": False, "error": "name is required."}
+        try:
+            completed_value = _parse_optional_datetime(completed_at, "completed_at")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with session_scope() as session:
+            stage = session.get(PlanStage, stage_id)
+            if stage is None:
+                return {"ok": False, "error": f"Plan stage {stage_id} not found."}
+            if position is None:
+                max_position = session.execute(
+                    select(func.max(PlanTask.position)).where(PlanTask.plan_stage_id == stage_id)
+                ).scalar_one()
+                next_position = int(max_position or 0) + 1
+            else:
+                next_position = max(1, int(position))
+            item = PlanTask.create(
+                session,
+                plan_stage_id=stage_id,
+                name=cleaned_name,
+                description=(description or "").strip() or None,
+                completed_at=completed_value,
+                position=next_position,
+            )
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_update_plan_task(
+        task_id: int,
+        patch: dict[str, Any],
+        stage_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Update a plan task by id using a partial patch object."""
+        if not isinstance(patch, dict) or not patch:
+            return {"ok": False, "error": "patch must be a non-empty object."}
+        allowed = {"name", "description", "completed_at", "position"}
+        unknown = sorted(set(patch.keys()) - allowed)
+        if unknown:
+            return {"ok": False, "error": f"Unknown fields: {', '.join(unknown)}"}
+        with session_scope() as session:
+            item = session.get(PlanTask, task_id)
+            if item is None:
+                return {"ok": False, "error": f"Plan task {task_id} not found."}
+            if stage_id is not None and item.plan_stage_id != stage_id:
+                return {"ok": False, "error": f"Plan task {task_id} is not in stage {stage_id}."}
+            if "name" in patch:
+                cleaned_name = str(patch.get("name") or "").strip()
+                if not cleaned_name:
+                    return {"ok": False, "error": "name cannot be empty."}
+                item.name = cleaned_name
+            if "description" in patch:
+                item.description = str(patch.get("description") or "").strip() or None
+            if "completed_at" in patch:
+                try:
+                    item.completed_at = _parse_optional_datetime(
+                        patch.get("completed_at"),
+                        "completed_at",
+                    )
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
+            if "position" in patch:
+                try:
+                    item.position = max(1, int(patch.get("position")))
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "position must be a positive integer."}
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_delete_plan_task(
+        task_id: int,
+        stage_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Delete a plan task by id."""
+        with session_scope() as session:
+            item = session.get(PlanTask, task_id)
+            if item is None:
+                return {"ok": False, "error": f"Plan task {task_id} not found."}
+            if stage_id is not None and item.plan_stage_id != stage_id:
+                return {"ok": False, "error": f"Plan task {task_id} is not in stage {stage_id}."}
+            session.delete(item)
+        return {"ok": True, "task_id": task_id}
 
     @mcp.tool()
     def llmctl_get_agent_task(
@@ -284,32 +2384,6 @@ def register(mcp: FastMCP) -> None:
             return {"ok": True, "count": len(payload), "items": payload}
 
     @mcp.tool()
-    def set_agent_scripts(
-        agent_id: int,
-        script_ids_by_type: dict[str, list[int]] | None = None,
-    ) -> dict[str, Any]:
-        """Replace the scripts attached to an agent by script type.
-
-        Use to configure agent workflow scripts (pre_init, init, post_run, etc.).
-        This overwrites existing script links for the agent.
-        Keywords: agent scripts, workflow scripts, pre_init, post_run.
-
-        IDs: agent_id and script ids are numeric LLMCTL Studio IDs.
-        Use llmctl_get_model/llmctl_get_model_schema or list queries to discover valid IDs.
-        """
-        with session_scope() as session:
-            agent = session.get(Agent, agent_id)
-            if agent is None:
-                return {"ok": False, "error": f"Agent {agent_id} not found."}
-            try:
-                parsed = _parse_script_ids_by_type(script_ids_by_type)
-                resolved = _resolve_script_ids_by_type(session, parsed)
-            except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
-            _set_script_links(session, agent_scripts, "agent_id", agent_id, resolved)
-        return {"ok": True, "agent_id": agent_id}
-
-    @mcp.tool()
     def set_task_scripts(
         task_id: int,
         script_ids_by_type: dict[str, list[int]] | None = None,
@@ -333,52 +2407,6 @@ def register(mcp: FastMCP) -> None:
                 return {"ok": False, "error": str(exc)}
             _set_script_links(session, agent_task_scripts, "agent_task_id", task_id, resolved)
         return {"ok": True, "task_id": task_id}
-
-    @mcp.tool()
-    def reorder_pipeline_steps(
-        pipeline_id: int,
-        ordered_step_ids: list[int],
-    ) -> dict[str, Any]:
-        """Reorder all steps in a pipeline by supplying the full ordered id list.
-
-        The list must include every step in the pipeline. Use this to change
-        pipeline execution order.
-        Keywords: reorder steps, pipeline order, step sequence.
-
-        IDs: pipeline_id and ordered_step_ids are numeric LLMCTL Studio IDs.
-        """
-        if not ordered_step_ids:
-            return {"ok": False, "error": "ordered_step_ids is required."}
-        with session_scope() as session:
-            steps = (
-                session.execute(
-                    select(PipelineStep).where(PipelineStep.pipeline_id == pipeline_id)
-                )
-                .scalars()
-                .all()
-            )
-            if not steps:
-                return {"ok": False, "error": f"Pipeline {pipeline_id} not found or empty."}
-            step_ids = {step.id for step in steps}
-            requested_ids = []
-            for step_id in ordered_step_ids:
-                if isinstance(step_id, bool):
-                    return {"ok": False, "error": "Step ids must be integers."}
-                if isinstance(step_id, int):
-                    requested_ids.append(step_id)
-                elif isinstance(step_id, str) and step_id.strip().isdigit():
-                    requested_ids.append(int(step_id.strip()))
-                else:
-                    return {"ok": False, "error": "Step ids must be integers."}
-            if set(requested_ids) != step_ids:
-                return {
-                    "ok": False,
-                    "error": "ordered_step_ids must include all pipeline steps.",
-                }
-            steps_by_id = {step.id: step for step in steps}
-            for index, step_id in enumerate(requested_ids, start=1):
-                steps_by_id[step_id].step_order = index
-        return {"ok": True, "pipeline_id": pipeline_id, "count": len(ordered_step_ids)}
 
     @mcp.tool()
     def create_attachment(
@@ -418,8 +2446,8 @@ def register(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Attach an existing attachment to a target model record.
 
-        Use this after create_attachment to link files to tasks, steps, or other records.
-        Targets include task, pipeline_step, and other attachment-aware models.
+        Use this after create_attachment to link files to tasks and task templates.
+        Targets include task and task_template.
         Keywords: link attachment, attach file, add attachment to record.
 
         IDs: target_id and attachment_id are numeric LLMCTL Studio IDs.
@@ -484,7 +2512,7 @@ def register(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Queue a task for an agent, optionally with scripts and attachments.
 
-        Use this to start a standard task run through the agent pipeline.
+        Use this to start a standard task run.
         Prefer enqueue_quick_task for lightweight one-off prompts.
         Keywords: queue task, run task, start task, agent task.
 
@@ -580,7 +2608,7 @@ def register(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Queue a quick task for an agent.
 
-        Use this for lightweight, single-shot tasks without full pipeline context.
+        Use this for lightweight, single-shot tasks.
         Keywords: quick task, short task, one-off task.
 
         IDs: agent_id is a numeric LLMCTL Studio agent ID.
@@ -941,116 +2969,3 @@ def register(mcp: FastMCP) -> None:
         if enabled:
             return start_run(run_id)
         return cancel_run(run_id)
-
-    @mcp.tool()
-    def toggle_pipeline_loop(
-        pipeline_id: int,
-        enabled: bool | None = None,
-    ) -> dict[str, Any]:
-        """Toggle or set a pipeline's loop mode.
-
-        Use enabled to explicitly set; omit to toggle current state.
-        Use this when asked to enable/disable pipeline looping.
-        Keywords: loop pipeline, repeat pipeline, pipeline looping.
-
-        IDs: pipeline_id is a numeric LLMCTL Studio pipeline ID.
-        """
-        with session_scope() as session:
-            pipeline = session.get(Pipeline, pipeline_id)
-            if pipeline is None:
-                return {"ok": False, "error": f"Pipeline {pipeline_id} not found."}
-            if enabled is None:
-                pipeline.loop_enabled = not bool(pipeline.loop_enabled)
-            else:
-                pipeline.loop_enabled = bool(enabled)
-            loop_enabled = pipeline.loop_enabled
-        return {"ok": True, "pipeline_id": pipeline_id, "loop_enabled": loop_enabled}
-
-    @mcp.tool()
-    def start_pipeline(pipeline_id: int) -> dict[str, Any]:
-        """Start a pipeline run.
-
-        Use this to queue the next run for a pipeline.
-        Prefer this over enqueue_task for pipeline-level execution.
-        Keywords: start pipeline, run pipeline, trigger pipeline.
-
-        IDs: pipeline_id is a numeric LLMCTL Studio pipeline ID.
-        """
-        with session_scope() as session:
-            pipeline = session.get(Pipeline, pipeline_id)
-            if pipeline is None:
-                return {"ok": False, "error": f"Pipeline {pipeline_id} not found."}
-            run = PipelineRun.create(
-                session,
-                pipeline_id=pipeline_id,
-                status="queued",
-            )
-            run_id = run.id
-        run_pipeline.delay(pipeline_id, run_id)
-        return {"ok": True, "pipeline_id": pipeline_id, "run_id": run_id}
-
-    @mcp.tool()
-    def cancel_pipeline_run(
-        run_id: int | None = None,
-        pipeline_id: int | None = None,
-    ) -> dict[str, Any]:
-        """Cancel a pipeline run by run id or latest run for pipeline id.
-
-        Use pipeline_id to cancel the most recent active run for that pipeline.
-        Use run_id for a specific pipeline run.
-        Keywords: cancel pipeline, stop pipeline run, abort pipeline run.
-
-        IDs: run_id and pipeline_id are numeric LLMCTL Studio IDs.
-        """
-        if run_id is None and pipeline_id is None:
-            return {"ok": False, "error": "run_id or pipeline_id is required."}
-        revoke_ids: list[str] = []
-        with session_scope() as session:
-            run = None
-            if run_id is not None:
-                run = session.get(PipelineRun, run_id)
-            elif pipeline_id is not None:
-                run = (
-                    session.execute(
-                        select(PipelineRun)
-                        .where(
-                            PipelineRun.pipeline_id == pipeline_id,
-                            PipelineRun.status.in_({"queued", "running"}),
-                        )
-                        .order_by(PipelineRun.created_at.desc())
-                    )
-                    .scalars()
-                    .first()
-                )
-            if run is None:
-                return {"ok": False, "error": "Pipeline run not found."}
-            if run.status not in {"queued", "running"}:
-                return {"ok": False, "error": "Pipeline run already stopped.", "status": run.status}
-            now = utcnow()
-            run.status = "canceled"
-            run.finished_at = now
-            if run.celery_task_id:
-                revoke_ids.append(run.celery_task_id)
-            tasks = (
-                session.execute(
-                    select(AgentTask).where(AgentTask.pipeline_run_id == run.id)
-                )
-                .scalars()
-                .all()
-            )
-            for task in tasks:
-                if task.status in {"pending", "queued", "running"}:
-                    task.status = "canceled"
-                    if not task.error:
-                        task.error = "Canceled by user."
-                    task.finished_at = now
-                if task.celery_task_id:
-                    revoke_ids.append(task.celery_task_id)
-
-        for task_id in revoke_ids:
-            try:
-                celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
-            except Exception:
-                pass
-
-        return {"ok": True, "run_id": run.id, "status": "canceled"}

@@ -3,12 +3,12 @@
 {% block content %}
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">Create Task</h2>
+    <h2 class="section-title">Create Node</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
     Queue a single run and trigger the celery worker.
   </p>
-  <form method="post" action="{{ url_for('agents.create_task') }}" class="form-grid" enctype="multipart/form-data">
+  <form method="post" action="{{ url_for('agents.create_node') }}" class="form-grid" enctype="multipart/form-data">
     <label class="label">
       agent
       <select name="agent_id" class="input">
@@ -19,7 +19,7 @@
       </select>
       {% if not agents %}
         <span class="muted" style="font-size: 12px; margin-top: 6px;">
-          Create an agent first to queue a task.
+          Create an agent first to queue a node.
         </span>
       {% endif %}
     </label>
@@ -28,10 +28,38 @@
       {% include "partials/script_picker.html" %}
     </div>
     <label class="label" style="grid-column: 1 / -1;">
+      integrations (optional)
+      {% if integration_options %}
+        <div class="flow-checkbox-list" style="margin-top: 8px;">
+          {% for option in integration_options %}
+            <label style="display: flex; align-items: center; gap: 8px;">
+              <input
+                type="checkbox"
+                name="integration_keys"
+                value="{{ option.key }}"
+                {% if option.key in selected_integration_keys %}checked{% endif %}
+              />
+              <span>
+                {{ option.label }}
+                <span class="muted">({% if option.connected %}configured{% else %}not configured{% endif %})</span>
+              </span>
+            </label>
+          {% endfor %}
+        </div>
+        <span class="muted" style="font-size: 12px; margin-top: 6px;">
+          Selected integrations are injected into prompt context. GitHub also enables repo checkout in the integration stage.
+        </span>
+      {% else %}
+        <span class="muted" style="font-size: 12px; margin-top: 6px;">
+          No integrations available.
+        </span>
+      {% endif %}
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
       prompt
       <textarea
         name="prompt"
-        placeholder="Write the task prompt."
+        placeholder="Write the node prompt."
         class="textarea"
         data-attachment-paste
         data-attachment-input-id="task-attachments"
@@ -55,11 +83,11 @@
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">
         <i class="fa-solid fa-paper-plane"></i>
-        queue task
+        queue node
       </button>
-      <a class="btn btn-secondary" href="{{ url_for('agents.list_tasks') }}">
+      <a class="btn btn-secondary" href="{{ url_for('agents.list_nodes') }}">
         <i class="fa-solid fa-arrow-left"></i>
-        back to tasks
+        back to nodes
       </a>
     </div>
   </form>

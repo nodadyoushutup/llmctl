@@ -70,26 +70,71 @@
 
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">Attached Agents</h2>
+    <h2 class="section-title">Task Template Bindings</h2>
   </div>
-  {% if attached_agents %}
+  {% if attached_templates %}
     <div class="grid grid-2" style="margin-top: 16px;">
-      {% for agent in attached_agents %}
+      {% for template in attached_templates %}
         <div class="subcard">
-          <p class="eyebrow">agent {{ agent.id }}</p>
-          <a href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">
-            <h3 class="section-title" style="font-size: 18px;">{{ agent.name }}</h3>
+          <p class="eyebrow">task {{ template.id }}</p>
+          <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">{{ template.name }}</h3>
           </a>
-          {% if agent.description %}
+          {% if template.description %}
             <p class="muted" style="margin-top: 8px; font-size: 12px;">
-              {{ agent.description | truncate(120, True, "...") }}
+              {{ template.description | truncate(120, True, "...") }}
             </p>
           {% endif %}
         </div>
       {% endfor %}
     </div>
   {% else %}
-    <p class="muted" style="margin-top: 12px;">No agents attached yet.</p>
+    <p class="muted" style="margin-top: 12px;">No task templates bound yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Node Bindings</h2>
+  </div>
+  {% if attached_tasks %}
+    <div class="grid grid-2" style="margin-top: 16px;">
+      {% for task in attached_tasks %}
+        <div class="subcard">
+          <p class="eyebrow">node {{ task.id }}</p>
+          <a href="{{ url_for('agents.view_node', task_id=task.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">{{ task_kind_label(task.kind) }}</h3>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No nodes bound yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Flowchart Node Bindings</h2>
+  </div>
+  {% if attached_nodes %}
+    <div class="grid grid-2" style="margin-top: 16px;">
+      {% for node in attached_nodes %}
+        <div class="subcard">
+          <p class="eyebrow">node {{ node.id }}</p>
+          <a href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id) }}">
+            <h3 class="section-title" style="font-size: 18px;">
+              {{ flowcharts_by_id.get(node.flowchart_id, "Flowchart " ~ node.flowchart_id) }}
+            </h3>
+          </a>
+          <p class="muted" style="margin-top: 8px; font-size: 12px;">
+            {{ node.title or ("Node " ~ node.id) }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No flowchart nodes bound yet.</p>
   {% endif %}
 </section>
 {% endblock %}

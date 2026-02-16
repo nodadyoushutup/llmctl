@@ -3,17 +3,17 @@
 {% block topbar_actions %}
   <a class="btn btn-secondary" href="{{ url_for('agents.list_task_templates') }}">
     <i class="fa-solid fa-arrow-left"></i>
-    back to templates
+    back to tasks
   </a>
 {% endblock %}
 
 {% block content %}
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">Create Template</h2>
+    <h2 class="section-title">Create Task</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Templates are prefabricated tasks that a pipeline can execute. Agents can be assigned later.
+    Tasks are reusable definitions executed by flowchart task nodes. Agents can be assigned later.
   </p>
   <form method="post" action="{{ url_for('agents.create_task_template') }}" class="form-grid" enctype="multipart/form-data">
     <label class="label">
@@ -71,11 +71,11 @@
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">
         <i class="fa-solid fa-plus"></i>
-        create template
+        create task
       </button>
       <a class="btn btn-secondary" href="{{ url_for('agents.list_task_templates') }}">
         <i class="fa-solid fa-arrow-left"></i>
-        back to templates
+        back to tasks
       </a>
     </div>
   </form>
