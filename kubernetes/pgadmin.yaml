@@ -107,6 +107,8 @@ spec:
                   key: PGADMIN_DEFAULT_PASSWORD
             - name: PGADMIN_LISTEN_PORT
               value: "5050"
+            - name: PGPASSFILE
+              value: /pgpass/pgpassfile
           volumeMounts:
             - name: pgadmin-data
               mountPath: /var/lib/pgadmin
@@ -116,18 +118,28 @@ spec:
             - name: pgadmin-bootstrap
               mountPath: /pgpass/pgpassfile
               subPath: pgpassfile
+          startupProbe:
+            httpGet:
+              path: /misc/ping
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /misc/ping
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /misc/ping
               port: http
-            initialDelaySeconds: 30
+            initialDelaySeconds: 10
             periodSeconds: 20
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: 100m

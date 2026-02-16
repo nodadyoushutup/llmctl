@@ -41,6 +41,14 @@ kubectl apply -f /tmp/llmctl-studio-secret.yaml
 kubectl apply -f /tmp/llmctl-pgadmin-secret.yaml
 ```
 
+Guard before ArgoCD sync or `kubectl apply -k`:
+
+```bash
+kubectl -n llmctl get secret llmctl-studio-secrets llmctl-pgadmin-secrets
+```
+
+If either secret is missing, create it first; pgAdmin stays unhealthy until `llmctl-pgadmin-secrets` exists.
+
 Apply the full stack:
 
 ```bash
