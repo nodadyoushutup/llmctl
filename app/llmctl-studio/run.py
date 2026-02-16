@@ -27,6 +27,43 @@ def _build_runtime_env(src_path: Path) -> dict[str, str]:
     return env
 
 
+def _env_float(name: str, default: float, minimum: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    if parsed < minimum:
+        return default
+    return parsed
+
+
+def _run_database_preflight() -> None:
+    if not _env_flag("LLMCTL_STUDIO_DB_HEALTHCHECK_ENABLED", True):
+        return
+
+    from core.config import Config
+    from core.db import run_startup_db_healthcheck
+
+    timeout_seconds = _env_float(
+        "LLMCTL_STUDIO_DB_HEALTHCHECK_TIMEOUT_SECONDS",
+        60.0,
+        0.0,
+    )
+    interval_seconds = _env_float(
+        "LLMCTL_STUDIO_DB_HEALTHCHECK_INTERVAL_SECONDS",
+        2.0,
+        0.1,
+    )
+    run_startup_db_healthcheck(
+        Config.SQLALCHEMY_DATABASE_URI,
+        timeout_seconds=timeout_seconds,
+        interval_seconds=interval_seconds,
+    )
+
+
 def _should_start_worker(debug: bool) -> bool:
     if not _env_flag("CELERY_AUTOSTART", True):
         return False
@@ -228,6 +265,8 @@ def main() -> int:
     sys.path.insert(0, str(src_path))
 
     os.chdir(repo_root)
+
+    _run_database_preflight()
 
     host = os.getenv("FLASK_HOST", "0.0.0.0")
     port = int(os.getenv("FLASK_PORT", "5055"))

@@ -1,31 +1,42 @@
 # Kubernetes manifests
 
-This folder deploys `llmctl-studio` with Redis and enables Kubernetes-based ephemeral node executor Jobs.
+This folder deploys the full `llmctl` stack into a single `llmctl` namespace:
+
+- `llmctl-studio`
+- `llmctl-redis`
+- `llmctl-postgres`
+- `llmctl-chromadb`
+
+ArgoCD tracks this as one application (`llmctl-kubernetes`) so everything is visible on one screen.
 
 ## Files
 
 - `namespace.yaml`: `llmctl` namespace.
 - `redis.yaml`: in-cluster Redis for Celery and Socket.IO queueing.
+- `postgres.yaml`: in-cluster PostgreSQL for mandatory Studio persistence.
+- `chromadb.yaml`: in-cluster ChromaDB for RAG vector storage.
 - `studio-configmap.yaml`: non-secret Studio runtime settings.
 - `studio-rbac.yaml`: service accounts and RBAC for Studio to create/read/delete executor Jobs.
 - `studio-pvc.yaml`: persistent storage for `/app/data`.
 - `studio-deployment.yaml`: Studio Deployment.
-- `studio-service.yaml`: NodePort Service (`30155`) targeting Studio port `5155` (test port, separate from local Docker defaults).
-- `studio-secret.example.yaml`: optional secret template for API keys and `FLASK_SECRET_KEY`.
-- `executor-smoke-job.example.yaml`: optional one-off Job to validate `llmctl-executor` image.
+- `studio-service.yaml`: NodePort Service (`30155`) targeting Studio port `5155`.
+- `studio-secret.example.yaml`: required secret template for PostgreSQL password, `FLASK_SECRET_KEY`, and optional API keys.
+- `argocd-application.yaml`: single ArgoCD Application pointing at `kubernetes/`.
 
 ## Quick start
 
-```bash
-kubectl apply -k kubernetes
-```
-
-Create secrets if needed:
+Create secrets before applying manifests:
 
 ```bash
 cp kubernetes/studio-secret.example.yaml /tmp/llmctl-studio-secret.yaml
 # edit /tmp/llmctl-studio-secret.yaml
 kubectl apply -f /tmp/llmctl-studio-secret.yaml
+```
+
+Apply the full stack:
+
+```bash
+kubectl apply -k kubernetes
 ```
 
 Port-forward Studio:
@@ -43,25 +54,29 @@ minikube -p llmctl ip
 
 ## ArgoCD application
 
-Create the ArgoCD application resource:
+Create the single ArgoCD application resource:
 
 ```bash
 kubectl apply -f kubernetes/argocd-application.yaml
 ```
 
-Note: ArgoCD reads from `https://github.com/nodadyoushutup/llmctl.git` at `main`, path `kubernetes`.
-If this folder is not pushed to `main` yet, the app will exist but show `ComparisonError` until pushed.
+This tracks repo path `kubernetes` on `main`, which includes namespace, redis, postgres, chromadb, and studio resources together.
 
 ## Runtime knobs to edit
 
 Edit `kubernetes/studio-configmap.yaml` for these keys:
 
+- `LLMCTL_POSTGRES_HOST`, `LLMCTL_POSTGRES_PORT`, `LLMCTL_POSTGRES_DB`, `LLMCTL_POSTGRES_USER`
+- `CHROMA_HOST`, `CHROMA_PORT`, `CHROMA_SSL`
 - `LLMCTL_NODE_EXECUTOR_PROVIDER` (`kubernetes` or `workspace`)
 - `LLMCTL_NODE_EXECUTOR_K8S_IMAGE` (executor image)
 - `LLMCTL_NODE_EXECUTOR_K8S_SERVICE_ACCOUNT` (job pod service account)
 - `LLMCTL_NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON` (JSON list, for private registries)
 
-If `llmctl-executor:latest` is not available yet, keep provider as `kubernetes` with fallback enabled (already defaulted), or switch `LLMCTL_NODE_EXECUTOR_PROVIDER` to `workspace` temporarily.
+Edit `kubernetes/studio-secret.example.yaml` for:
+
+- `LLMCTL_POSTGRES_PASSWORD` (required)
+- optional `LLMCTL_STUDIO_DATABASE_URI` override
 
 ## Optional executor smoke test
 

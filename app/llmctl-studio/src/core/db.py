@@ -4,8 +4,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import time
 
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from storage.script_storage import write_script_file
@@ -38,6 +39,13 @@ NODE_EXECUTOR_API_FAILURE_CATEGORY_ALLOWED_VALUES = (
     "timeout",
     "preflight_failed",
     "unknown",
+)
+DB_HEALTHCHECK_REQUIRED_TABLES: tuple[str, ...] = (
+    "roles",
+    "agents",
+    "mcp_servers",
+    "integration_settings",
+    "llm_models",
 )
 NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
     (
@@ -142,11 +150,11 @@ class BaseModel(Base):
 def init_engine(database_uri: str):
     global _engine, SessionLocal
     if _engine is None:
-        _engine = create_engine(
-            database_uri,
-            connect_args={"check_same_thread": False},
-            future=True,
-        )
+        if database_uri.lower().startswith("sqlite:"):
+            raise RuntimeError(
+                "SQLite is no longer supported. Configure a PostgreSQL database URI."
+            )
+        _engine = create_engine(database_uri, pool_pre_ping=True, future=True)
         SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, class_=Session)
     return _engine
 
@@ -172,7 +180,7 @@ def _ensure_schema() -> None:
         role_columns = {
             "description": "TEXT",
             "details_json": "TEXT",
-            "is_system": "BOOLEAN NOT NULL DEFAULT 0",
+            "is_system": "BOOLEAN NOT NULL DEFAULT FALSE",
         }
         _ensure_columns(connection, "roles", role_columns)
         _migrate_role_payloads(connection)
@@ -181,10 +189,10 @@ def _ensure_schema() -> None:
             "description": "TEXT",
             "autonomous_prompt": "TEXT",
             "role_id": "INTEGER",
-            "is_system": "BOOLEAN NOT NULL DEFAULT 0",
+            "is_system": "BOOLEAN NOT NULL DEFAULT FALSE",
             "last_run_task_id": "TEXT",
             "run_max_loops": "INTEGER",
-            "run_end_requested": "BOOLEAN NOT NULL DEFAULT 0",
+            "run_end_requested": "BOOLEAN NOT NULL DEFAULT FALSE",
         }
         _ensure_columns(connection, "agents", agent_columns)
         _migrate_agent_descriptions(connection)
@@ -331,11 +339,11 @@ def _ensure_schema() -> None:
             "provider_dispatch_id": "TEXT",
             "workspace_identity": "TEXT NOT NULL DEFAULT 'default'",
             "dispatch_status": "TEXT NOT NULL DEFAULT 'dispatch_pending'",
-            "fallback_attempted": "BOOLEAN NOT NULL DEFAULT 0",
+            "fallback_attempted": "BOOLEAN NOT NULL DEFAULT FALSE",
             "fallback_reason": "TEXT",
-            "dispatch_uncertain": "BOOLEAN NOT NULL DEFAULT 0",
+            "dispatch_uncertain": "BOOLEAN NOT NULL DEFAULT FALSE",
             "api_failure_category": "TEXT",
-            "cli_fallback_used": "BOOLEAN NOT NULL DEFAULT 0",
+            "cli_fallback_used": "BOOLEAN NOT NULL DEFAULT FALSE",
             "cli_preflight_passed": "BOOLEAN",
         }
         _ensure_columns(connection, "agent_tasks", task_columns)
@@ -354,13 +362,17 @@ def _ensure_schema() -> None:
 
 
 def _ensure_columns(connection, table: str, columns: dict[str, str]) -> None:
-    existing = {
-        row[1]
-        for row in connection.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    }
+    existing = _table_columns(connection, table)
     for name, col_type in columns.items():
         if name in existing:
             continue
+        if connection.dialect.name == "postgresql" and "BOOLEAN" in col_type.upper():
+            col_type = (
+                col_type.replace("DEFAULT 0", "DEFAULT FALSE")
+                .replace("default 0", "default false")
+                .replace("DEFAULT 1", "DEFAULT TRUE")
+                .replace("default 1", "default true")
+            )
         connection.execute(
             text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
         )
@@ -688,19 +700,18 @@ def _ensure_agent_tasks_node_executor_checks_sqlite(connection) -> None:
 
 
 def _table_columns(connection, table: str) -> set[str]:
-    if connection.dialect.name != "sqlite":
+    table_names = _table_names(connection)
+    if table not in table_names:
         return set()
-    rows = connection.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    return {row[1] for row in rows}
+    return {
+        str(column.get("name"))
+        for column in inspect(connection).get_columns(table)
+        if column.get("name")
+    }
 
 
 def _table_names(connection) -> set[str]:
-    if connection.dialect.name != "sqlite":
-        return set()
-    rows = connection.execute(
-        text("SELECT name FROM sqlite_master WHERE type='table'")
-    ).fetchall()
-    return {row[0] for row in rows}
+    return {str(name) for name in inspect(connection).get_table_names()}
 
 
 def _quote_identifier(identifier: str) -> str:
@@ -1821,6 +1832,8 @@ def _ensure_node_skill_binding_deprecation_triggers(connection) -> None:
 
 
 def _migrate_flowchart_node_skills_to_agent_bindings(connection) -> None:
+    if connection.dialect.name != "sqlite":
+        return
     tables = _table_names(connection)
     required_tables = {
         "flowchart_node_skills",
@@ -2279,7 +2292,7 @@ def _ensure_chat_schema(connection) -> None:
             "history_tokens INTEGER, "
             "rag_tokens INTEGER, "
             "mcp_tokens INTEGER, "
-            "compaction_applied BOOLEAN NOT NULL DEFAULT 0, "
+            "compaction_applied BOOLEAN NOT NULL DEFAULT FALSE, "
             "compaction_metadata_json TEXT, "
             "citation_metadata_json TEXT, "
             "runtime_metadata_json TEXT, "
@@ -2313,7 +2326,7 @@ def _ensure_chat_schema(connection) -> None:
             "history_tokens": "INTEGER",
             "rag_tokens": "INTEGER",
             "mcp_tokens": "INTEGER",
-            "compaction_applied": "BOOLEAN NOT NULL DEFAULT 0",
+            "compaction_applied": "BOOLEAN NOT NULL DEFAULT FALSE",
             "compaction_metadata_json": "TEXT",
             "citation_metadata_json": "TEXT",
             "runtime_metadata_json": "TEXT",
@@ -2548,6 +2561,53 @@ def _ensure_canonical_workflow_views(connection) -> None:
     if "agent_tasks" in tables:
         connection.execute(text("DROP VIEW IF EXISTS node_runs"))
         connection.execute(text("CREATE VIEW node_runs AS SELECT * FROM agent_tasks"))
+
+
+def _assert_required_tables(connection) -> None:
+    existing = _table_names(connection)
+    missing = [name for name in DB_HEALTHCHECK_REQUIRED_TABLES if name not in existing]
+    if missing:
+        raise RuntimeError(
+            "Database schema health check failed. Missing required tables: "
+            + ", ".join(sorted(missing))
+        )
+
+
+def run_startup_db_healthcheck(
+    database_uri: str,
+    *,
+    timeout_seconds: float = 60.0,
+    interval_seconds: float = 2.0,
+) -> None:
+    if not database_uri:
+        raise RuntimeError("Database URI is required for startup health checks.")
+    init_engine(database_uri)
+    if _engine is None:
+        raise RuntimeError("Database engine is not initialized")
+
+    timeout = max(float(timeout_seconds), 0.0)
+    interval = max(float(interval_seconds), 0.1)
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+
+    while True:
+        try:
+            with _engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            init_db()
+            with _engine.connect() as connection:
+                _assert_required_tables(connection)
+            return
+        except Exception as exc:
+            last_error = exc
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(interval)
+
+    raise RuntimeError(
+        "Database health check failed after "
+        f"{timeout:.1f}s (interval {interval:.1f}s)."
+    ) from last_error
 
 
 @contextmanager

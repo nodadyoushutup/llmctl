@@ -30,7 +30,6 @@ spec:
                 name: llmctl-studio-config
             - secretRef:
                 name: llmctl-studio-secrets
-                optional: true
           volumeMounts:
             - name: studio-data
               mountPath: /app/data

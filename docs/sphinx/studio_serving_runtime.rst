@@ -10,7 +10,52 @@ backend-to-frontend updates. The runtime is designed for:
 - direct HTTP development
 - HTTPS and reverse-proxy deployments
 - multi-worker Gunicorn with Redis-backed Socket.IO fan-out
+- PostgreSQL-backed persistent metadata (SQLite is not supported)
 - compatibility with both current Jinja pages and future React frontend clients
+
+Database Configuration
+----------------------
+
+Studio requires PostgreSQL for all runtime database access.
+
+Set one of the following:
+
+- ``LLMCTL_STUDIO_DATABASE_URI`` (full PostgreSQL SQLAlchemy URI)
+- ``LLMCTL_POSTGRES_HOST``, ``LLMCTL_POSTGRES_PORT``,
+  ``LLMCTL_POSTGRES_DB``, ``LLMCTL_POSTGRES_USER``,
+  ``LLMCTL_POSTGRES_PASSWORD``
+
+Startup DB Health Check
+-----------------------
+
+Studio performs DB preflight checks before worker/web startup. The preflight verifies:
+
+- database connectivity (``SELECT 1``)
+- schema readiness by creating/migrating tables
+- presence of required core tables
+
+Optional controls:
+
+- ``LLMCTL_STUDIO_DB_HEALTHCHECK_ENABLED`` (default ``true``)
+- ``LLMCTL_STUDIO_DB_HEALTHCHECK_TIMEOUT_SECONDS`` (default ``60``)
+- ``LLMCTL_STUDIO_DB_HEALTHCHECK_INTERVAL_SECONDS`` (default ``2``)
+
+Standalone CLI check:
+
+.. code-block:: bash
+
+   python3 app/llmctl-studio/scripts/check_database_health.py
+
+SQLite One-Time Migration Utility
+---------------------------------
+
+For existing local SQLite data, use the one-time copy tool:
+
+.. code-block:: bash
+
+   python3 app/llmctl-studio/scripts/migrate_sqlite_to_postgres.py \
+     --sqlite-path data/llmctl-studio.sqlite3 \
+     --truncate-target
 
 Gunicorn-First Serving
 ----------------------

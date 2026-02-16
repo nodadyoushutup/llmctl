@@ -4,10 +4,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from sqlalchemy import select
 
 
 def _bootstrap() -> None:
@@ -73,29 +74,34 @@ def main() -> int:
     args = _parse_args()
 
     from core.config import Config
+    from core.db import create_session, init_db, init_engine
     from core.mcp_config import parse_mcp_config, render_mcp_config
+    from core.models import MCPServer
 
-    db_url = Config.SQLALCHEMY_DATABASE_URI
-    if not db_url.startswith("sqlite:///"):
-        raise RuntimeError("Only sqlite:/// URLs are supported by this script.")
-    db_path = db_url[len("sqlite:///") :]
+    init_engine(Config.SQLALCHEMY_DATABASE_URI)
+    init_db()
 
     target_configs = _build_target_configs(args.llmctl_stdio_tap)
     target_keys = args.server or sorted(target_configs.keys())
 
-    def update_session(conn: sqlite3.Connection) -> list[str]:
+    def update_session(session) -> list[str]:
+        servers = (
+            session.execute(
+                select(MCPServer).where(MCPServer.server_key.in_(target_keys))
+            )
+            .scalars()
+            .all()
+        )
+        by_key = {server.server_key: server for server in servers}
         updated: list[str] = []
         for server_key in target_keys:
             target = target_configs[server_key]
-            row = conn.execute(
-                "SELECT id, server_key, config_json FROM mcp_servers WHERE server_key = ?",
-                (server_key,),
-            ).fetchone()
+            row = by_key.get(server_key)
             if row is None:
                 print(f"Skipping {server_key}: not found in DB.")
                 continue
             try:
-                current = parse_mcp_config(row["config_json"], server_key=server_key)
+                current = parse_mcp_config(row.config_json, server_key=server_key)
             except Exception as exc:
                 print(f"Skipping {server_key}: invalid config ({exc}).")
                 continue
@@ -106,7 +112,7 @@ def main() -> int:
             next_config["command"] = target["command"]
             next_config["args"] = target["args"]
             rendered = render_mcp_config(server_key, next_config)
-            if rendered.strip() == (row["config_json"] or "").strip():
+            if rendered.strip() == (row.config_json or "").strip():
                 print(f"No change for {server_key}.")
                 if args.print:
                     print(rendered)
@@ -115,24 +121,20 @@ def main() -> int:
             if args.print:
                 print(rendered)
             if args.apply:
-                updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-                conn.execute(
-                    "UPDATE mcp_servers SET config_json = ?, updated_at = ? WHERE id = ?",
-                    (rendered, updated_at, row["id"]),
-                )
+                row.config_json = rendered
+                row.updated_at = datetime.now(timezone.utc)
             updated.append(server_key)
         return updated
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    session = create_session()
     try:
-        updated = update_session(conn)
+        updated = update_session(session)
         if args.apply:
-            conn.commit()
+            session.commit()
         else:
-            conn.rollback()
+            session.rollback()
     finally:
-        conn.close()
+        session.close()
     print(json.dumps({"applied": bool(args.apply), "updated": updated}, indent=2))
 
     return 0

@@ -10,6 +10,26 @@ services:
     ports:
       - "6380:6380"
 
+  llmctl-postgres:
+    image: postgres:16-alpine
+    container_name: llmctl-postgres
+    environment:
+      - POSTGRES_DB=${LLMCTL_POSTGRES_DB:-llmctl_studio}
+      - POSTGRES_USER=${LLMCTL_POSTGRES_USER:-llmctl}
+      - POSTGRES_PASSWORD=${LLMCTL_POSTGRES_PASSWORD:-llmctl}
+    ports:
+      - "${LLMCTL_POSTGRES_HOST_PORT:-15432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${LLMCTL_POSTGRES_USER:-llmctl} -d ${LLMCTL_POSTGRES_DB:-llmctl_studio}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   llmctl-chromadb:
     image: chromadb/chroma:latest
     container_name: llmctl-chromadb
@@ -101,6 +121,12 @@ services:
       - CELERY_REDIS_PORT=${CELERY_REDIS_PORT:-6380}
       - CELERY_REDIS_BROKER_DB=${CELERY_REDIS_BROKER_DB:-0}
       - CELERY_REDIS_BACKEND_DB=${CELERY_REDIS_BACKEND_DB:-1}
+      - LLMCTL_POSTGRES_HOST=${LLMCTL_POSTGRES_HOST:-llmctl-postgres}
+      - LLMCTL_POSTGRES_PORT=${LLMCTL_POSTGRES_PORT:-5432}
+      - LLMCTL_POSTGRES_DB=${LLMCTL_POSTGRES_DB:-llmctl_studio}
+      - LLMCTL_POSTGRES_USER=${LLMCTL_POSTGRES_USER:-llmctl}
+      - LLMCTL_POSTGRES_PASSWORD=${LLMCTL_POSTGRES_PASSWORD:-llmctl}
+      - LLMCTL_STUDIO_DATABASE_URI=${LLMCTL_STUDIO_DATABASE_URI:-}
       - CHROMA_HOST=${CHROMA_HOST:-}
       - CHROMA_PORT=${CHROMA_PORT:-}
       - CHROMA_SSL=${CHROMA_SSL:-false}
@@ -158,6 +184,9 @@ services:
       - 8.8.8.8
     ports:
       - "5055:5055"
+    depends_on:
+      llmctl-postgres:
+        condition: service_healthy
     volumes:
       - ../app/llmctl-studio/run.py:/app/app/llmctl-studio/run.py
       - ../app/llmctl-studio/src:/app/app/llmctl-studio/src
@@ -177,5 +206,23 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
 
+  # Harbor bootstrap registry profile.
+  # This gives us a local "remote" OCI registry endpoint now; full Harbor services can be layered later.
+  llmctl-harbor-registry:
+    profiles: ["harbor"]
+    image: registry:2.8.3
+    container_name: llmctl-harbor-registry
+    environment:
+      - REGISTRY_HTTP_ADDR=0.0.0.0:${HARBOR_REGISTRY_CONTAINER_PORT:-5000}
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/var/lib/registry
+    ports:
+      - "${HARBOR_REGISTRY_HOST_PORT:-15000}:${HARBOR_REGISTRY_CONTAINER_PORT:-5000}"
+    volumes:
+      - harbor_registry_data:/var/lib/registry
+    restart: unless-stopped
+
 volumes:
   chroma_data:
+  postgres_data:
+  harbor_registry_data:

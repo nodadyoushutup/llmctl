@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import quote_plus
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -48,6 +49,25 @@ def _env_str(name: str, default: str) -> str:
     return text or default
 
 
+def _build_studio_database_uri() -> str:
+    direct_uri = os.getenv("LLMCTL_STUDIO_DATABASE_URI", "").strip()
+    if direct_uri:
+        return direct_uri
+
+    host = os.getenv("LLMCTL_POSTGRES_HOST", "").strip()
+    port = os.getenv("LLMCTL_POSTGRES_PORT", "").strip()
+    database = os.getenv("LLMCTL_POSTGRES_DB", "").strip()
+    user = os.getenv("LLMCTL_POSTGRES_USER", "").strip()
+    password = os.getenv("LLMCTL_POSTGRES_PASSWORD", "").strip()
+    if not all((host, port, database, user, password)):
+        return ""
+    safe_user = quote_plus(user)
+    safe_password = quote_plus(password)
+    return (
+        f"postgresql+psycopg://{safe_user}:{safe_password}@{host}:{port}/{database}"
+    )
+
+
 class Config:
     DATA_DIR = str(
         _ensure_dir(Path(os.getenv("LLMCTL_STUDIO_DATA_DIR", REPO_ROOT / "data")))
@@ -65,8 +85,22 @@ class Config:
     SCRIPTS_DIR = str(_ensure_dir(Path(DATA_DIR) / "scripts"))
     ATTACHMENTS_DIR = str(_ensure_dir(Path(DATA_DIR) / "attachments"))
     SSH_KEYS_DIR = str(_ensure_dir(Path(DATA_DIR) / "ssh-keys"))
-    DATABASE_FILENAME = os.getenv("LLMCTL_STUDIO_DB_NAME", "llmctl-studio.sqlite3")
-    SQLALCHEMY_DATABASE_URI = f"sqlite:///{Path(DATA_DIR) / DATABASE_FILENAME}"
+    SQLALCHEMY_DATABASE_URI = _build_studio_database_uri()
+    if not SQLALCHEMY_DATABASE_URI:
+        raise RuntimeError(
+            "PostgreSQL is required. Set LLMCTL_STUDIO_DATABASE_URI or "
+            "LLMCTL_POSTGRES_HOST, LLMCTL_POSTGRES_PORT, LLMCTL_POSTGRES_DB, "
+            "LLMCTL_POSTGRES_USER, and LLMCTL_POSTGRES_PASSWORD."
+        )
+    if SQLALCHEMY_DATABASE_URI.lower().startswith("sqlite:"):
+        raise RuntimeError(
+            "SQLite is no longer supported. Configure LLMCTL_STUDIO_DATABASE_URI "
+            "with a PostgreSQL URL."
+        )
+    if not SQLALCHEMY_DATABASE_URI.lower().startswith("postgresql"):
+        raise RuntimeError(
+            "Only PostgreSQL is supported for LLMCTL_STUDIO_DATABASE_URI."
+        )
 
     SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev")
     PREFERRED_URL_SCHEME = os.getenv("LLMCTL_STUDIO_PREFERRED_URL_SCHEME", "http")
@@ -94,9 +128,7 @@ class Config:
     if _CELERY_RESULT_BACKEND_ENV is None and CELERY_BROKER_URL.startswith(
         "filesystem://"
     ):
-        CELERY_RESULT_BACKEND = (
-            f"db+sqlite:///{Path(DATA_DIR) / 'celery-results.sqlite3'}"
-        )
+        CELERY_RESULT_BACKEND = "cache+memory://"
     else:
         CELERY_RESULT_BACKEND = _CELERY_RESULT_BACKEND_ENV or _DEFAULT_CELERY_RESULT_BACKEND
     CELERY_BROKER_TRANSPORT_OPTIONS = None

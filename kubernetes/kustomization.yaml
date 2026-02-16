@@ -3,6 +3,8 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - redis.yaml
+  - postgres.yaml
+  - chromadb.yaml
   - studio-configmap.yaml
   - studio-pvc.yaml
   - studio-rbac.yaml
