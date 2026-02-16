@@ -330,6 +330,16 @@
           </label>
         </div>
 
+        <div class="grid grid-2" style="grid-column: 1 / -1; gap: 10px;">
+          <label class="label">
+            Kubernetes GPU Limit (nvidia.com/gpu)
+            <input class="input" type="number" min="0" max="8" name="k8s_gpu_limit" value="{{ node_executor_settings.k8s_gpu_limit }}" />
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              Set to <code>0</code> to disable GPU requests for executor Jobs.
+            </p>
+          </label>
+        </div>
+
         <label class="label" style="grid-column: 1 / -1;">
           Kubernetes Image Pull Secrets JSON
           <textarea class="input" name="k8s_image_pull_secrets_json" rows="3">{{ node_executor_settings.k8s_image_pull_secrets_json }}</textarea>

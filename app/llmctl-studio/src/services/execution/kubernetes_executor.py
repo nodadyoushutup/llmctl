@@ -167,6 +167,12 @@ class KubernetesExecutor:
         image_pull_secrets = _parse_image_pull_secrets(
             settings.get("k8s_image_pull_secrets_json")
         )
+        k8s_gpu_limit = _as_int(
+            settings.get("k8s_gpu_limit"),
+            default=0,
+            minimum=0,
+            maximum=8,
+        )
         dispatch_timeout = _as_int(
             settings.get("dispatch_timeout_seconds"),
             default=60,
@@ -218,6 +224,7 @@ class KubernetesExecutor:
                 service_account=service_account,
                 kubeconfig=kubeconfig,
                 image_pull_secrets=image_pull_secrets,
+                k8s_gpu_limit=k8s_gpu_limit,
                 dispatch_timeout=dispatch_timeout,
                 execution_timeout=execution_timeout,
                 log_collection_timeout=log_collection_timeout,
@@ -323,6 +330,7 @@ class KubernetesExecutor:
             "provider_dispatch_id": provider_dispatch_id,
             "workspace_identity": request.workspace_identity,
             "k8s_namespace": namespace,
+            "k8s_gpu_limit": str(k8s_gpu_limit),
             "k8s_job_name": outcome.job_name,
             "k8s_pod_name": outcome.pod_name or "",
             "startup_marker_seen": outcome.startup_marker_seen,
@@ -357,6 +365,7 @@ class KubernetesExecutor:
         service_account: str,
         kubeconfig: str,
         image_pull_secrets: list[dict[str, str]],
+        k8s_gpu_limit: int,
         dispatch_timeout: int,
         execution_timeout: int,
         log_collection_timeout: int,
@@ -385,6 +394,7 @@ class KubernetesExecutor:
                 payload_json=payload_json,
                 service_account=service_account,
                 image_pull_secrets=image_pull_secrets,
+                k8s_gpu_limit=k8s_gpu_limit,
                 execution_timeout=execution_timeout,
             )
             self._kubectl_apply_manifest(
@@ -513,9 +523,16 @@ class KubernetesExecutor:
         payload_json: str,
         service_account: str,
         image_pull_secrets: list[dict[str, str]],
+        k8s_gpu_limit: int,
         execution_timeout: int,
     ) -> dict[str, Any]:
         labels = self._job_labels(request)
+        resources: dict[str, dict[str, str]] = {
+            "requests": {"cpu": "100m", "memory": "128Mi"},
+            "limits": {"cpu": "1", "memory": "1Gi"},
+        }
+        if k8s_gpu_limit > 0:
+            resources["limits"]["nvidia.com/gpu"] = str(k8s_gpu_limit)
         template_spec: dict[str, Any] = {
             "restartPolicy": "Never",
             "containers": [
@@ -528,10 +545,7 @@ class KubernetesExecutor:
                             "value": payload_json,
                         }
                     ],
-                    "resources": {
-                        "requests": {"cpu": "100m", "memory": "128Mi"},
-                        "limits": {"cpu": "1", "memory": "1Gi"},
-                    },
+                    "resources": resources,
                 }
             ],
             "activeDeadlineSeconds": max(5, min(execution_timeout, 24 * 3600)),

@@ -123,6 +123,7 @@ NODE_EXECUTOR_SETTING_KEYS = (
     "k8s_in_cluster",
     "k8s_service_account",
     "k8s_kubeconfig",
+    "k8s_gpu_limit",
     "k8s_image_pull_secrets_json",
 )
 NODE_EXECUTOR_K8S_KUBECONFIG_ENCRYPTED_PREFIX = "enc:v1:"
@@ -567,6 +568,12 @@ def node_executor_default_settings() -> dict[str, str]:
             (Config.NODE_EXECUTOR_K8S_SERVICE_ACCOUNT or "").strip()
         ),
         "k8s_kubeconfig": "",
+        "k8s_gpu_limit": _coerce_int_setting(
+            str(Config.NODE_EXECUTOR_K8S_GPU_LIMIT),
+            default=0,
+            minimum=0,
+            maximum=8,
+        ),
         "k8s_image_pull_secrets_json": (
             (Config.NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON or "").strip()
         ),
@@ -708,6 +715,12 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
     settings["k8s_service_account"] = (
         settings.get("k8s_service_account") or ""
     ).strip()
+    settings["k8s_gpu_limit"] = _coerce_int_setting(
+        settings.get("k8s_gpu_limit"),
+        default=int(defaults["k8s_gpu_limit"]),
+        minimum=0,
+        maximum=8,
+    )
     kubeconfig_value = (settings.get("k8s_kubeconfig") or "").strip()
     kubeconfig_fingerprint = ""
     if kubeconfig_value:
@@ -807,6 +820,12 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         "k8s_kubeconfig": _encrypt_node_executor_secret(
             candidate.get("k8s_kubeconfig")
         ),
+        "k8s_gpu_limit": _coerce_int_setting(
+            candidate.get("k8s_gpu_limit"),
+            default=0,
+            minimum=0,
+            maximum=8,
+        ),
         "k8s_image_pull_secrets_json": (
             candidate.get("k8s_image_pull_secrets_json") or ""
         ).strip(),
@@ -869,6 +888,7 @@ def node_executor_effective_config_summary() -> dict[str, str]:
         "k8s_image": settings.get("k8s_image") or "llmctl-executor:latest",
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
+        "k8s_gpu_limit": settings.get("k8s_gpu_limit") or "0",
         "k8s_kubeconfig_is_set": settings.get("k8s_kubeconfig_is_set") or "false",
         "k8s_kubeconfig_fingerprint": settings.get("k8s_kubeconfig_fingerprint")
         or "",
@@ -905,6 +925,7 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
         "k8s_kubeconfig": settings.get("k8s_kubeconfig") or "",
+        "k8s_gpu_limit": settings.get("k8s_gpu_limit") or "0",
         "k8s_image_pull_secrets_json": settings.get("k8s_image_pull_secrets_json") or "",
     }
 

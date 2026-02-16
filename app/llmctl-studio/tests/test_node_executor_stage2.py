@@ -62,6 +62,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("workspace", settings.get("fallback_provider"))
         self.assertEqual("true", settings.get("fallback_enabled"))
         self.assertEqual("10", settings.get("docker_api_stall_seconds"))
+        self.assertEqual("0", settings.get("k8s_gpu_limit"))
         self.assertEqual("default", settings.get("workspace_identity_key"))
 
     def test_node_executor_settings_save_and_validate(self) -> None:
@@ -84,11 +85,13 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "workspace_identity_key": "workspace-prod",
                 "docker_image": "llmctl-executor:latest",
                 "k8s_image": "llmctl-executor@sha256:" + ("a" * 64),
+                "k8s_gpu_limit": "2",
             }
         )
         self.assertEqual("docker", updated.get("provider"))
         self.assertEqual("15", updated.get("docker_api_stall_seconds"))
         self.assertEqual("workspace-prod", updated.get("workspace_identity_key"))
+        self.assertEqual("2", updated.get("k8s_gpu_limit"))
 
     def test_node_executor_settings_db_overrides_env_defaults(self) -> None:
         save_node_executor_settings(
@@ -179,6 +182,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "k8s_image": "llmctl-executor:latest",
                 "k8s_in_cluster": "true",
                 "k8s_service_account": "executor",
+                "k8s_gpu_limit": "1",
                 "k8s_kubeconfig": "",
                 "k8s_image_pull_secrets_json": "[]",
             },
@@ -192,6 +196,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("120", settings.get("dispatch_timeout_seconds"))
         self.assertEqual("5", settings.get("docker_api_stall_seconds"))
         self.assertEqual("true", settings.get("k8s_in_cluster"))
+        self.assertEqual("1", settings.get("k8s_gpu_limit"))
 
     def test_agent_task_node_executor_metadata_defaults(self) -> None:
         with session_scope() as session:

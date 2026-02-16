@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/build-minikube.sh [--profile <name>]
 
-Builds llmctl-studio:latest into the selected Minikube profile's Docker daemon.
+Builds llmctl-studio:latest and llmctl-executor:latest into the selected Minikube profile's Docker daemon.
 
 Options:
   --profile <name>   Minikube profile to target (default: $MINIKUBE_PROFILE or llmctl)
@@ -52,13 +52,16 @@ if ! minikube -p "${PROFILE}" status >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Building llmctl-studio:latest in minikube profile '${PROFILE}'..."
+echo "Building llmctl-studio:latest and llmctl-executor:latest in minikube profile '${PROFILE}'..."
 (
   eval "$(minikube -p "${PROFILE}" docker-env)"
   "${REPO_ROOT}/app/llmctl-studio/docker/build-studio.sh"
+  "${REPO_ROOT}/app/llmctl-executor/build-executor.sh"
 )
 
 minikube -p "${PROFILE}" ssh -- \
   "docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^llmctl-studio:latest$'"
+minikube -p "${PROFILE}" ssh -- \
+  "docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^llmctl-executor:latest$'"
 
-echo "Done: llmctl-studio:latest is available inside minikube profile '${PROFILE}'."
+echo "Done: llmctl-studio:latest and llmctl-executor:latest are available inside minikube profile '${PROFILE}'."

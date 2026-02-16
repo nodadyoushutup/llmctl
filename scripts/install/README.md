@@ -16,6 +16,7 @@ Centralized install/setup scripts live in this directory.
 - `install-minikube-single-node.sh`
   - Installs `kubectl` + `minikube` and starts a single-node local cluster.
   - Default profile: `llmctl`
+  - GPU flags: `--gpu`, `--no-gpu`, `--gpu-mode auto|on|off`
   - Example:
     - `scripts/install/install-minikube-single-node.sh`
 
@@ -39,6 +40,7 @@ Centralized install/setup scripts live in this directory.
 - `MINIKUBE_CPUS` (default `4`)
 - `MINIKUBE_MEMORY_MB` (default `8192`)
 - `MINIKUBE_DISK_SIZE` (default `30g`)
+- `MINIKUBE_GPU` (default `auto`; values: `auto`, `on`, `off`)
 
 ### Argo CD script variables
 

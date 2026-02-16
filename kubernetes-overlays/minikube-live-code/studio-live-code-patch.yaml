@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-studio
+  namespace: llmctl
+spec:
+  template:
+    spec:
+      containers:
+        - name: studio
+          volumeMounts:
+            - name: studio-project-code
+              mountPath: /app/app/llmctl-studio/run.py
+              subPath: app/llmctl-studio/run.py
+            - name: studio-project-code
+              mountPath: /app/app/llmctl-studio/src
+              subPath: app/llmctl-studio/src
+            - name: studio-project-code
+              mountPath: /app/app/llmctl-mcp
+              subPath: app/llmctl-mcp
+      volumes:
+        - name: studio-project-code
+          hostPath:
+            path: /workspace/llmctl
+            type: Directory

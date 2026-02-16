@@ -4,6 +4,7 @@ resources:
   - namespace.yaml
   - redis.yaml
   - postgres.yaml
+  - pgadmin.yaml
   - chromadb.yaml
   - studio-configmap.yaml
   - studio-pvc.yaml

@@ -948,14 +948,14 @@ class AgentTask(BaseModel):
         Boolean,
         nullable=False,
         default=False,
-        server_default=text("0"),
+        server_default=text("false"),
     )
     fallback_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     dispatch_uncertain: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
-        server_default=text("0"),
+        server_default=text("false"),
     )
     api_failure_category: Mapped[str | None] = mapped_column(
         String(64),
@@ -965,7 +965,7 @@ class AgentTask(BaseModel):
         Boolean,
         nullable=False,
         default=False,
-        server_default=text("0"),
+        server_default=text("false"),
     )
     cli_preflight_passed: Mapped[bool | None] = mapped_column(
         Boolean,
@@ -1529,7 +1529,7 @@ class ChatTurn(BaseModel):
     rag_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mcp_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     compaction_applied: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("0")
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     compaction_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     citation_metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)

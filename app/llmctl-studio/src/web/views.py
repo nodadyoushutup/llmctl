@@ -14334,6 +14334,7 @@ def update_node_executor_runtime_settings_route():
         "k8s_image": request.form.get("k8s_image", ""),
         "k8s_in_cluster": "true" if _as_bool(request.form.get("k8s_in_cluster")) else "false",
         "k8s_service_account": request.form.get("k8s_service_account", ""),
+        "k8s_gpu_limit": request.form.get("k8s_gpu_limit", ""),
         "k8s_image_pull_secrets_json": request.form.get(
             "k8s_image_pull_secrets_json",
             "",

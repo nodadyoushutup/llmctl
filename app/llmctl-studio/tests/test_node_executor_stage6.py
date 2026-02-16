@@ -237,6 +237,42 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         executor._prune_completed_jobs(["--namespace", "default"])
         self.assertEqual(["job-old"], deleted)
 
+    def test_build_job_manifest_includes_gpu_limit_when_configured(self) -> None:
+        executor = KubernetesExecutor({})
+        manifest = executor._build_job_manifest(
+            request=_request(),
+            job_name="job-gpu",
+            namespace="default",
+            image="llmctl-executor:latest",
+            payload_json="{}",
+            service_account="",
+            image_pull_secrets=[],
+            k8s_gpu_limit=2,
+            execution_timeout=120,
+        )
+        limits = (
+            manifest["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
+        )
+        self.assertEqual("2", limits.get("nvidia.com/gpu"))
+
+    def test_build_job_manifest_omits_gpu_limit_when_disabled(self) -> None:
+        executor = KubernetesExecutor({})
+        manifest = executor._build_job_manifest(
+            request=_request(),
+            job_name="job-cpu",
+            namespace="default",
+            image="llmctl-executor:latest",
+            payload_json="{}",
+            service_account="",
+            image_pull_secrets=[],
+            k8s_gpu_limit=0,
+            execution_timeout=120,
+        )
+        limits = (
+            manifest["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
+        )
+        self.assertNotIn("nvidia.com/gpu", limits)
+
 
 if __name__ == "__main__":
     unittest.main()

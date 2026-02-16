@@ -159,9 +159,15 @@ def init_engine(database_uri: str):
     return _engine
 
 
+def _ensure_model_metadata_loaded() -> None:
+    # Import side effect: registers ORM models on Base.metadata.
+    import core.models  # noqa: F401
+
+
 def init_db() -> None:
     if _engine is None:
         raise RuntimeError("Database engine is not initialized")
+    _ensure_model_metadata_loaded()
     Base.metadata.create_all(bind=_engine)
     _ensure_schema()
 
@@ -366,16 +372,34 @@ def _ensure_columns(connection, table: str, columns: dict[str, str]) -> None:
     for name, col_type in columns.items():
         if name in existing:
             continue
-        if connection.dialect.name == "postgresql" and "BOOLEAN" in col_type.upper():
-            col_type = (
-                col_type.replace("DEFAULT 0", "DEFAULT FALSE")
-                .replace("default 0", "default false")
-                .replace("DEFAULT 1", "DEFAULT TRUE")
-                .replace("default 1", "default true")
-            )
+        if connection.dialect.name == "postgresql":
+            col_type = _normalize_postgres_sql(col_type)
         connection.execute(
             text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
         )
+
+
+def _normalize_postgres_sql(sql: str) -> str:
+    return (
+        sql.replace("DATETIME", "TIMESTAMP WITH TIME ZONE")
+        .replace("datetime", "timestamp with time zone")
+        .replace("DEFAULT 0", "DEFAULT FALSE")
+        .replace("default 0", "default false")
+        .replace("DEFAULT 1", "DEFAULT TRUE")
+        .replace("default 1", "default true")
+    )
+
+
+def _execute_ddl(connection, ddl_sql: str) -> None:
+    if connection.dialect.name == "postgresql":
+        ddl_sql = _normalize_postgres_sql(ddl_sql)
+    connection.execute(text(ddl_sql))
+
+
+def _bool_sql_literal(connection, value: bool) -> str:
+    if connection.dialect.name == "postgresql":
+        return "TRUE" if value else "FALSE"
+    return "1" if value else "0"
 
 
 def _quote_sqlite_literal(value: str) -> str:
@@ -424,6 +448,8 @@ def _migrate_agent_task_node_executor_fields(
     dispatch_values = _in_list_sql(NODE_EXECUTOR_DISPATCH_STATUS_ALLOWED_VALUES)
     fallback_reason_values = _in_list_sql(NODE_EXECUTOR_FALLBACK_REASON_ALLOWED_VALUES)
     api_failure_values = _in_list_sql(NODE_EXECUTOR_API_FAILURE_CATEGORY_ALLOWED_VALUES)
+    false_literal = _bool_sql_literal(connection, False)
+    true_literal = _bool_sql_literal(connection, True)
 
     connection.execute(
         text(
@@ -478,19 +504,19 @@ def _migrate_agent_task_node_executor_fields(
     )
     connection.execute(
         text(
-            "UPDATE agent_tasks SET fallback_attempted = 0 "
+            f"UPDATE agent_tasks SET fallback_attempted = {false_literal} "
             "WHERE fallback_attempted IS NULL"
         )
     )
     connection.execute(
         text(
-            "UPDATE agent_tasks SET dispatch_uncertain = 0 "
+            f"UPDATE agent_tasks SET dispatch_uncertain = {false_literal} "
             "WHERE dispatch_uncertain IS NULL"
         )
     )
     connection.execute(
         text(
-            "UPDATE agent_tasks SET cli_fallback_used = 0 "
+            f"UPDATE agent_tasks SET cli_fallback_used = {false_literal} "
             "WHERE cli_fallback_used IS NULL"
         )
     )
@@ -511,25 +537,25 @@ def _migrate_agent_task_node_executor_fields(
     connection.execute(
         text(
             "UPDATE agent_tasks SET cli_preflight_passed = NULL "
-            "WHERE cli_fallback_used = 0"
+            f"WHERE cli_fallback_used = {false_literal}"
         )
     )
     connection.execute(
         text(
             "UPDATE agent_tasks SET fallback_reason = NULL "
-            "WHERE fallback_attempted = 0"
+            f"WHERE fallback_attempted = {false_literal}"
         )
     )
     connection.execute(
         text(
             "UPDATE agent_tasks SET final_provider = 'workspace' "
-            "WHERE fallback_attempted = 1"
+            f"WHERE fallback_attempted = {true_literal}"
         )
     )
     connection.execute(
         text(
             "UPDATE agent_tasks "
-            "SET fallback_reason = 'unknown', fallback_attempted = 1, final_provider = 'workspace' "
+            f"SET fallback_reason = 'unknown', fallback_attempted = {true_literal}, final_provider = 'workspace' "
             "WHERE dispatch_status = 'fallback_started' "
             "AND (fallback_reason IS NULL OR TRIM(fallback_reason) = '')"
         )
@@ -538,17 +564,17 @@ def _migrate_agent_task_node_executor_fields(
         text(
             "UPDATE agent_tasks "
             "SET fallback_reason = 'unknown' "
-            "WHERE fallback_attempted = 1 "
+            f"WHERE fallback_attempted = {true_literal} "
             "AND dispatch_status = 'dispatch_failed' "
-            "AND dispatch_uncertain = 0 "
+            f"AND dispatch_uncertain = {false_literal} "
             "AND (fallback_reason IS NULL OR TRIM(fallback_reason) = '')"
         )
     )
     connection.execute(
         text(
             "UPDATE agent_tasks "
-            "SET fallback_attempted = 0, fallback_reason = NULL "
-            "WHERE dispatch_uncertain = 1"
+            f"SET fallback_attempted = {false_literal}, fallback_reason = NULL "
+            f"WHERE dispatch_uncertain = {true_literal}"
         )
     )
     connection.execute(
@@ -1614,8 +1640,9 @@ def _migrate_flowchart_edge_modes(connection) -> None:
 
 
 def _ensure_agent_priority_schema(connection) -> None:
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS agent_priorities ("
             "id INTEGER PRIMARY KEY, "
             "agent_id INTEGER NOT NULL, "
@@ -1625,7 +1652,7 @@ def _ensure_agent_priority_schema(connection) -> None:
             "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "FOREIGN KEY(agent_id) REFERENCES agents (id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -1676,8 +1703,9 @@ def _extract_agent_id_from_node_config(raw_config_json: str | None) -> int | Non
 
 
 def _ensure_agent_skill_binding_schema(connection) -> None:
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS agent_skill_bindings ("
             "agent_id INTEGER NOT NULL, "
             "skill_id INTEGER NOT NULL, "
@@ -1688,7 +1716,7 @@ def _ensure_agent_skill_binding_schema(connection) -> None:
             "FOREIGN KEY(agent_id) REFERENCES agents (id), "
             "FOREIGN KEY(skill_id) REFERENCES skills (id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -1713,8 +1741,9 @@ def _ensure_agent_skill_binding_schema(connection) -> None:
             "ON agent_skill_bindings (skill_id)"
         )
     )
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS legacy_unmapped_node_skills ("
             "id INTEGER PRIMARY KEY, "
             "flowchart_node_id INTEGER NOT NULL, "
@@ -1727,7 +1756,7 @@ def _ensure_agent_skill_binding_schema(connection) -> None:
             "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "UNIQUE(flowchart_node_id, skill_id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -1759,8 +1788,9 @@ def _ensure_agent_skill_binding_schema(connection) -> None:
 
 
 def _ensure_flowchart_node_attachment_schema(connection) -> None:
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS flowchart_node_attachments ("
             "flowchart_node_id INTEGER NOT NULL, "
             "attachment_id INTEGER NOT NULL, "
@@ -1770,7 +1800,7 @@ def _ensure_flowchart_node_attachment_schema(connection) -> None:
             "FOREIGN KEY(flowchart_node_id) REFERENCES flowchart_nodes (id), "
             "FOREIGN KEY(attachment_id) REFERENCES attachments (id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -2209,8 +2239,9 @@ def _ensure_rag_indexes(connection) -> None:
 
 
 def _ensure_chat_schema(connection) -> None:
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS chat_threads ("
             "id INTEGER PRIMARY KEY, "
             "title VARCHAR(255) NOT NULL DEFAULT 'New Chat', "
@@ -2224,7 +2255,7 @@ def _ensure_chat_schema(connection) -> None:
             "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "FOREIGN KEY(model_id) REFERENCES llm_models (id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -2242,8 +2273,9 @@ def _ensure_chat_schema(connection) -> None:
         },
     )
 
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS chat_messages ("
             "id INTEGER PRIMARY KEY, "
             "thread_id INTEGER NOT NULL, "
@@ -2255,7 +2287,7 @@ def _ensure_chat_schema(connection) -> None:
             "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "FOREIGN KEY(thread_id) REFERENCES chat_threads (id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -2271,8 +2303,9 @@ def _ensure_chat_schema(connection) -> None:
         },
     )
 
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS chat_turns ("
             "id INTEGER PRIMARY KEY, "
             "thread_id INTEGER NOT NULL, "
@@ -2303,7 +2336,7 @@ def _ensure_chat_schema(connection) -> None:
             "FOREIGN KEY(user_message_id) REFERENCES chat_messages (id), "
             "FOREIGN KEY(assistant_message_id) REFERENCES chat_messages (id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -2335,8 +2368,9 @@ def _ensure_chat_schema(connection) -> None:
         },
     )
 
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS chat_activity_events ("
             "id INTEGER PRIMARY KEY, "
             "thread_id INTEGER NOT NULL, "
@@ -2351,7 +2385,7 @@ def _ensure_chat_schema(connection) -> None:
             "FOREIGN KEY(thread_id) REFERENCES chat_threads (id), "
             "FOREIGN KEY(turn_id) REFERENCES chat_turns (id)"
             ")"
-        )
+        ),
     )
     _ensure_columns(
         connection,
@@ -2369,8 +2403,9 @@ def _ensure_chat_schema(connection) -> None:
         },
     )
 
-    connection.execute(
-        text(
+    _execute_ddl(
+        connection,
+        (
             "CREATE TABLE IF NOT EXISTS chat_thread_mcp_servers ("
             "chat_thread_id INTEGER NOT NULL, "
             "mcp_server_id INTEGER NOT NULL, "
@@ -2378,7 +2413,7 @@ def _ensure_chat_schema(connection) -> None:
             "FOREIGN KEY(chat_thread_id) REFERENCES chat_threads (id), "
             "FOREIGN KEY(mcp_server_id) REFERENCES mcp_servers (id)"
             ")"
-        )
+        ),
     )
 
 

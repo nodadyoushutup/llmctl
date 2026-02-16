@@ -315,6 +315,10 @@ class Config:
         "LLMCTL_NODE_EXECUTOR_K8S_SERVICE_ACCOUNT",
         "",
     )
+    NODE_EXECUTOR_K8S_GPU_LIMIT = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_GPU_LIMIT",
+        "0",
+    )
     NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON",
         "",

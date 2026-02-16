@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llmctl-harbor
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://helm.goharbor.io
+    chart: harbor
+    targetRevision: 1.18.2
+    helm:
+      values: |
+        expose:
+          type: nodePort
+          tls:
+            enabled: false
+          nodePort:
+            ports:
+              http:
+                nodePort: 30082
+        externalURL: http://harbor.local:30082
+        trivy:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: llmctl-harbor
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true
