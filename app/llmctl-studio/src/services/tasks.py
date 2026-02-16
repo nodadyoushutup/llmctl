@@ -2254,6 +2254,9 @@ def _build_agent_markdown(agent: Agent) -> str:
     ]
     prompt_payload = _load_prompt_payload(agent.prompt_json, agent.prompt_text)
     if isinstance(prompt_payload, dict) and prompt_payload:
+        prompt_payload = dict(prompt_payload)
+        prompt_payload.pop("autoprompt", None)
+    if isinstance(prompt_payload, dict) and prompt_payload:
         lines.extend(
             [
                 "",
@@ -2271,15 +2274,6 @@ def _build_agent_markdown(agent: Agent) -> str:
                 "## Prompt Text",
                 "",
                 prompt_payload.strip(),
-            ]
-        )
-    if agent.autonomous_prompt:
-        lines.extend(
-            [
-                "",
-                "## Autorun Prompt",
-                "",
-                agent.autonomous_prompt.strip(),
             ]
         )
     return "\n".join(lines)
@@ -2443,29 +2437,17 @@ def _merge_attachments(
     return merged
 
 
-def _build_agent_payload(
-    agent: Agent,
-    include_autoprompt: bool = True,
-) -> dict[str, object]:
+def _build_agent_payload(agent: Agent) -> dict[str, object]:
     description = agent.description or agent.name or ""
-    payload: dict[str, object] = {
+    return {
         "id": agent.id,
         "name": agent.name,
         "description": description,
     }
-    if include_autoprompt and agent.autonomous_prompt:
-        payload["autoprompt"] = agent.autonomous_prompt
-    return payload
 
 
-def _build_agent_prompt_payload(
-    agent: Agent,
-    include_autoprompt: bool = True,
-) -> dict[str, object]:
-    agent_payload = _build_agent_payload(
-        agent,
-        include_autoprompt=include_autoprompt,
-    )
+def _build_agent_prompt_payload(agent: Agent) -> dict[str, object]:
+    agent_payload = _build_agent_payload(agent)
     role = agent.role
     if agent.role_id and role is not None:
         agent_payload["role"] = _build_role_payload(role)
@@ -2499,11 +2481,34 @@ def _build_output_contract() -> dict[str, object]:
     return build_one_off_output_contract()
 
 
+def _build_autorun_user_request(agent: Agent) -> str:
+    priorities = _serialize_agent_priorities(agent)
+    if priorities:
+        return (
+            "Execute work for this agent based on the configured priority order. "
+            "Start from the highest priority and continue making concrete progress."
+        )
+    return (
+        "Execute work for this agent based on its role and description, and continue "
+        "making concrete progress."
+    )
+
+
+def _build_default_task_user_request(agent: Agent) -> str:
+    description = str(agent.description or "").strip()
+    if description:
+        return description
+    name = str(agent.name or "").strip()
+    if name:
+        return f"Execute work for agent '{name}' based on the configured role."
+    return "Execute work for the configured agent based on the role."
+
+
 def _build_run_prompt_payload(agent: Agent) -> str:
     envelope = build_prompt_envelope(
-        user_request=agent.autonomous_prompt or "",
+        user_request=_build_autorun_user_request(agent),
         system_contract=_build_system_contract(agent),
-        agent_profile=_build_agent_payload(agent, include_autoprompt=False),
+        agent_profile=_build_agent_payload(agent),
         task_context={"kind": "autorun"},
         output_contract=_build_output_contract(),
     )
@@ -2512,7 +2517,7 @@ def _build_run_prompt_payload(agent: Agent) -> str:
 
 def _render_prompt(agent: Agent) -> str:
     envelope = build_prompt_envelope(
-        user_request=agent.autonomous_prompt or "",
+        user_request=_build_default_task_user_request(agent),
         system_contract=_build_system_contract(agent),
         agent_profile=_build_agent_payload(agent),
         task_context={"kind": "task"},
@@ -3705,11 +3710,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             github_repo = (github_settings.get("repo") or "").strip()
         payload = _build_task_payload(task.kind, prompt)
         system_contract = _build_system_contract(agent)
-        agent_profile = (
-            _build_agent_payload(agent, include_autoprompt=False)
-            if agent is not None
-            else None
-        )
+        agent_profile = _build_agent_payload(agent) if agent is not None else None
         if agent is None and is_quick_task_kind(task_kind):
             system_contract = build_quick_node_system_contract()
             agent_profile = build_quick_node_agent_profile()
@@ -5329,7 +5330,6 @@ def _execute_flowchart_task_node(
     selected_agent_source: str | None = None
     selected_agent_role_markdown = ""
     selected_agent_markdown = ""
-    selected_agent_priorities: tuple[str, ...] = tuple()
     compiled_instruction_package = None
     resolved_skills = None
     with session_scope() as session:
@@ -5391,14 +5391,10 @@ def _execute_flowchart_task_node(
             selected_agent_role_version = _resolve_updated_at_version(
                 selected_agent.role.updated_at if selected_agent.role is not None else None
             )
-            selected_agent_profile = _build_agent_payload(
-                selected_agent,
-                include_autoprompt=False,
-            )
+            selected_agent_profile = _build_agent_payload(selected_agent)
             selected_system_contract = _build_system_contract(selected_agent)
             selected_agent_role_markdown = _build_role_markdown(selected_agent.role)
             selected_agent_markdown = _build_agent_markdown(selected_agent)
-            selected_agent_priorities = _serialize_agent_priorities(selected_agent)
         if "skill_ids" in node_config:
             logger.warning(
                 "Flowchart node %s supplied legacy node-level skill_ids payload; "
@@ -5617,7 +5613,7 @@ def _execute_flowchart_task_node(
                 provider=provider,
                 role_markdown=selected_agent_role_markdown,
                 agent_markdown=selected_agent_markdown,
-                priorities=selected_agent_priorities,
+                priorities=tuple(),
                 runtime_overrides=(base_prompt,),
                 source_ids={
                     "agent_id": selected_agent_id,

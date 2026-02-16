@@ -139,9 +139,10 @@ class AgentRoleMarkdownStage4Tests(StudioDbTestCase):
             cwd,
             env,
         ) -> subprocess.CompletedProcess[str]:
-            del prompt, mcp_configs, model_config, on_update, on_log, env
+            del mcp_configs, model_config, on_update, on_log, env
             workspace = Path(str(cwd))
             captured["provider"] = provider
+            captured["prompt"] = prompt
             captured["agents_md"] = (workspace / "AGENTS.md").read_text(encoding="utf-8")
             return subprocess.CompletedProcess(
                 args=[provider],
@@ -159,6 +160,13 @@ class AgentRoleMarkdownStage4Tests(StudioDbTestCase):
             agent_markdown.find("First priority"),
             agent_markdown.find("Second priority"),
         )
+        prompt_payload = json.loads(captured.get("prompt") or "{}")
+        self.assertEqual("autorun", prompt_payload.get("task_context", {}).get("kind"))
+        self.assertIn(
+            "configured priority order",
+            prompt_payload.get("user_request") or "",
+        )
+        self.assertNotIn("Always stay on task", prompt_payload.get("user_request") or "")
 
         with session_scope() as session:
             task = session.get(AgentTask, task_id)

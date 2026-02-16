@@ -20,7 +20,7 @@
     </div>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Update the agent description, role, and runtime configuration.
+    Update the agent description and role.
   </p>
   <form
     method="post"
@@ -59,10 +59,6 @@
         </span>
       {% endif %}
     </label>
-    <label class="label">
-      autoprompt (autorun loop)
-      <textarea name="autonomous_prompt" class="textarea">{{ agent.autonomous_prompt or "" }}</textarea>
-    </label>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">
         <i class="fa-solid fa-floppy-disk"></i>
@@ -81,7 +77,7 @@
     <h2 class="section-title">Priorities</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Ordered priorities are compiled into autorun instruction markdown only.
+    Ordered priorities are compiled into runtime instruction markdown for autoruns.
   </p>
   {% if priorities %}
     <div style="margin-top: 16px; overflow-x: auto;">

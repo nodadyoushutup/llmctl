@@ -8,6 +8,10 @@ Studio provider routing is DB-backed through integration settings
 (``provider='llm'``). Provider auth/config updates are written to the DB and
 read by runtime execution paths.
 
+For node execution provider routing (``workspace|docker|kubernetes``),
+fallback semantics, and execution contract details, see
+:doc:`node_executor_runtime`.
+
 Claude Runtime Readiness
 ------------------------
 

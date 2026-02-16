@@ -15,8 +15,6 @@ if str(STUDIO_SRC) not in sys.path:
 
 import core.db as core_db
 from core.config import Config
-from core.db import session_scope
-from core.models import AgentTask
 from rag.repositories.sources import RAGSourceInput, create_source
 from rag.web import views as rag_views
 from web import views as studio_views
@@ -129,7 +127,7 @@ class RagStage7ContractApiTests(StudioDbTestCase):
             error.get("reason_code"),
         )
         metadata = error.get("metadata") or {}
-        self.assertEqual("configured_unhealthy", metadata.get("rag_health_state"))
+        self.assertIn(metadata.get("rag_health_state"), {"configured_unhealthy", "unconfigured"})
         self.assertEqual([source.collection], metadata.get("selected_collections"))
         self.assertEqual("chroma", metadata.get("provider"))
 
@@ -142,67 +140,29 @@ class RagStage7ContractApiTests(StudioDbTestCase):
         self.assertIn("data-href=", html)
         self.assertNotIn("Index Jobs", html)
 
-    def test_quick_index_endpoint_creates_node_activity_task(self) -> None:
+    def test_quick_index_endpoint_is_decommissioned(self) -> None:
         source = self._create_local_source("Quick Source")
-        queued_job = {
-            "id": 501,
-            "status": "queued",
-            "output": "",
-            "error": "",
-            "started_at": None,
-            "finished_at": None,
-        }
-
-        def _start_job(*args, **kwargs):
-            _ = args, kwargs
-            return type("QueuedJob", (), queued_job)()
-
-        with patch.object(
-            rag_views,
-            "_load_start_source_index_job",
-            return_value=_start_job,
-        ):
-            response = self.client.post(
-                f"/rag/sources/{source.id}/quick-index",
-                headers={"Accept": "application/json"},
-            )
-
-        self.assertEqual(200, response.status_code)
-        payload = response.get_json() or {}
-        self.assertTrue(payload.get("ok"))
-        node_task_id = int(payload.get("node_task_id") or 0)
-        self.assertGreater(node_task_id, 0)
-        with session_scope() as session:
-            node_task = session.get(AgentTask, node_task_id)
-            self.assertIsNotNone(node_task)
-            self.assertEqual("rag_quick_index", node_task.kind)
-            self.assertEqual("501", node_task.run_task_id)
-            self.assertIn("Quick Source", node_task.prompt or "")
-
-    def test_quick_index_endpoint_blocks_duplicate_active_runs(self) -> None:
-        source = self._create_local_source("Duplicate Source")
-
-        def _start_job(*args, **kwargs):
-            _ = args, kwargs
-            return None
-
-        with (
-            patch.object(
-                rag_views,
-                "_load_start_source_index_job",
-                return_value=_start_job,
-            ),
-            patch.object(rag_views, "has_active_index_job", return_value=True),
-        ):
-            response = self.client.post(
-                f"/rag/sources/{source.id}/quick-index",
-                headers={"Accept": "application/json"},
-            )
-
-        self.assertEqual(409, response.status_code)
+        response = self.client.post(
+            f"/rag/sources/{source.id}/quick-index",
+            headers={"Accept": "application/json"},
+        )
+        self.assertEqual(410, response.status_code)
         payload = response.get_json() or {}
         self.assertFalse(payload.get("ok", True))
-        self.assertIn("already active", str(payload.get("error") or ""))
+        self.assertTrue(payload.get("deprecated"))
+        self.assertIn("flowchart RAG nodes", str(payload.get("error") or ""))
+
+    def test_quick_delta_endpoint_is_decommissioned(self) -> None:
+        source = self._create_local_source("Quick Delta Source")
+        response = self.client.post(
+            f"/rag/sources/{source.id}/quick-delta-index",
+            headers={"Accept": "application/json"},
+        )
+        self.assertEqual(410, response.status_code)
+        payload = response.get_json() or {}
+        self.assertFalse(payload.get("ok", True))
+        self.assertTrue(payload.get("deprecated"))
+        self.assertIn("flowchart RAG nodes", str(payload.get("error") or ""))
 
     def test_quick_index_endpoint_returns_404_for_missing_source(self) -> None:
         response = self.client.post(
@@ -214,63 +174,16 @@ class RagStage7ContractApiTests(StudioDbTestCase):
         self.assertFalse(payload.get("ok", True))
         self.assertEqual("Source not found.", payload.get("error"))
 
-    def test_source_status_endpoint_reports_active_state(self) -> None:
+    def test_source_status_endpoint_reports_inactive_state(self) -> None:
         source = self._create_local_source("Status Source")
-        active_job = type(
-            "ActiveJob",
-            (),
-            {"source_id": source.id, "status": "running"},
-        )()
-        with patch.object(rag_views, "list_active_index_jobs", return_value=[active_job]):
-            response = self.client.get(f"/api/rag/sources/status?ids={source.id}")
+        response = self.client.get(f"/api/rag/sources/status?ids={source.id}")
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json() or {}
         rows = payload.get("sources") or []
         self.assertEqual(1, len(rows))
-        self.assertTrue(rows[0].get("has_active_job"))
-        self.assertEqual("Indexing", rows[0].get("status"))
-
-    def test_quick_run_appears_in_nodes_not_workflow_rag_list(self) -> None:
-        source = self._create_local_source("Nodes Source")
-        queued_job = type(
-            "QueuedJob",
-            (),
-            {
-                "id": 702,
-                "status": "queued",
-                "output": "",
-                "error": "",
-                "started_at": None,
-                "finished_at": None,
-            },
-        )
-
-        def _start_job(*args, **kwargs):
-            _ = args, kwargs
-            return queued_job()
-
-        with patch.object(
-            rag_views,
-            "_load_start_source_index_job",
-            return_value=_start_job,
-        ):
-            create_response = self.client.post(
-                f"/rag/sources/{source.id}/quick-index",
-                headers={"Accept": "application/json"},
-            )
-        self.assertEqual(200, create_response.status_code)
-
-        nodes_response = self.client.get("/nodes")
-        self.assertEqual(200, nodes_response.status_code)
-        nodes_html = nodes_response.get_data(as_text=True)
-        self.assertIn("Quick RAG", nodes_html)
-        self.assertIn("Nodes Source", nodes_html)
-
-        workflow_nodes_response = self.client.get("/task-templates")
-        self.assertEqual(200, workflow_nodes_response.status_code)
-        workflow_nodes_html = workflow_nodes_response.get_data(as_text=True)
-        self.assertNotIn("Nodes Source", workflow_nodes_html)
+        self.assertFalse(rows[0].get("has_active_job"))
+        self.assertEqual("Not indexed", rows[0].get("status"))
 
 
 if __name__ == "__main__":

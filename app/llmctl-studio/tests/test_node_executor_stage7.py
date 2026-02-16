@@ -25,7 +25,7 @@ from services.execution.kubernetes_executor import (
     KubernetesExecutor,
     _KubernetesDispatchOutcome,
 )
-from services.execution.idempotency import clear_dispatch_registry
+from services.execution.idempotency import clear_dispatch_registry, register_dispatch_key
 from services.execution.workspace_executor import WorkspaceExecutor
 
 
@@ -222,6 +222,45 @@ class NodeExecutorStage7Tests(unittest.TestCase):
             "provider_unavailable",
             result.run_metadata.get("fallback_reason"),
         )
+
+    def test_fallback_dispatch_race_fails_closed_on_duplicate_workspace_dispatch_id(self) -> None:
+        executor = DockerExecutor(
+            {
+                "fallback_enabled": "true",
+                "fallback_on_dispatch_error": "true",
+                "fallback_provider": "workspace",
+            }
+        )
+
+        def _dispatch_failure(**_kwargs):
+            raise _DockerDispatchFailure(
+                fallback_reason="provider_unavailable",
+                message="docker down",
+                dispatch_submitted=False,
+            )
+
+        executor._dispatch_via_docker = _dispatch_failure  # type: ignore[method-assign]
+        request = _request(9106)
+        self.assertTrue(
+            register_dispatch_key(
+                request.execution_id,
+                f"workspace:workspace-{request.execution_id}",
+            )
+        )
+
+        callback_called = {"value": False}
+
+        def _callback(_request: ExecutionRequest):
+            callback_called["value"] = True
+            return {"ok": True}, {}
+
+        result = executor.execute(request, _callback)
+        self.assertFalse(callback_called["value"])
+        self.assertEqual("failed", result.status)
+        self.assertEqual(EXECUTION_DISPATCH_FAILED, result.run_metadata.get("dispatch_status"))
+        self.assertTrue(bool(result.run_metadata.get("dispatch_uncertain")))
+        self.assertFalse(bool(result.run_metadata.get("fallback_attempted")))
+        self.assertIsNone(result.run_metadata.get("fallback_reason"))
 
 
 if __name__ == "__main__":

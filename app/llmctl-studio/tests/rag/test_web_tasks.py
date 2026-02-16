@@ -16,24 +16,26 @@ class WebTaskProgressTests(unittest.TestCase):
         cls.views_source = (
             STUDIO_SRC / "rag" / "web" / "views.py"
         ).read_text(encoding="utf-8")
-        cls.task_detail_template = (
-            STUDIO_SRC / "web" / "templates" / "rag" / "index_job_detail.html"
+        cls.sources_template = (
+            STUDIO_SRC / "web" / "templates" / "rag" / "sources.html"
         ).read_text(encoding="utf-8")
         cls.app_js_source = (
             STUDIO_SRC / "web" / "static" / "rag" / "app.js"
         ).read_text(encoding="utf-8")
 
-    def test_task_payload_includes_progress(self) -> None:
-        self.assertIn('"progress": progress', self.views_source)
+    def test_quick_run_routes_are_decommissioned(self) -> None:
+        self.assertIn("Quick source {mode_text} runs now execute through flowchart RAG nodes.", self.views_source)
+        self.assertIn('"deprecated": True', self.views_source)
+        self.assertIn("}, 410", self.views_source)
 
-    def test_task_status_api_serializes_task_payload(self) -> None:
-        self.assertIn("return {\"tasks\": tasks}", self.views_source)
-        self.assertIn("tasks.append(_task_payload(job))", self.views_source)
+    def test_source_status_api_forces_inactive_jobs(self) -> None:
+        self.assertIn("has_active_job=False", self.views_source)
+        self.assertIn("return {\"sources\": payload}", self.views_source)
 
-    def test_task_detail_template_renders_progress(self) -> None:
-        self.assertIn('id="rag-job-detail-progress"', self.task_detail_template)
-        self.assertIn("No progress details yet.", self.task_detail_template)
-        self.assertIn("progressEl.textContent = summary || \"No progress details yet.\"", self.app_js_source)
+    def test_legacy_index_job_ui_is_removed(self) -> None:
+        self.assertNotIn("data-rag-quick-run", self.sources_template)
+        self.assertNotIn("rag-job-detail-progress", self.app_js_source)
+        self.assertNotIn("index_jobs_page", self.views_source)
 
 
 if __name__ == "__main__":

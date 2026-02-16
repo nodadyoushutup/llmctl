@@ -336,11 +336,9 @@ def chat_page():
 @bp.get(RAG_PAGE_SOURCES)
 def sources_page():
     sources = list_sources(limit=None)
-    active_source_job_ids: set[int] = set()
     return render_template(
         "rag/sources.html",
         sources=sources,
-        active_source_job_ids=active_source_job_ids,
         source_location=_source_location,
         source_schedule_text=_source_schedule_text,
         format_source_time=_format_source_time,
@@ -407,7 +405,6 @@ def source_detail_page(source_id: int):
     if not source:
         flash("Source not found.", "error")
         return redirect(url_for("rag.sources_page"))
-    source_has_active_job = False
 
     file_types: list[dict[str, Any]] = []
     raw_types = getattr(source, "indexed_file_types", None)
@@ -423,7 +420,6 @@ def source_detail_page(source_id: int):
     return render_template(
         "rag/source_detail.html",
         source=source,
-        source_has_active_job=source_has_active_job,
         file_types=file_types,
         source_location=_source_location,
         source_schedule_text=_source_schedule_text,

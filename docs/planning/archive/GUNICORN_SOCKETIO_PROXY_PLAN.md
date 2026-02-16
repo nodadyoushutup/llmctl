@@ -357,18 +357,53 @@ Stage 8 validation run:
 - `docker compose -f docker/docker-compose.yml config`
 
 ## Stage 9 - Automated Testing
-- [ ] Add/adjust automated tests for Gunicorn config loading and env default behavior.
-- [ ] Add/adjust tests for forwarded-header/proxy correctness (scheme/host/url generation behind proxy).
-- [ ] Add/adjust Socket.IO tests for connect/disconnect, emit contract validity, and Redis-backed cross-worker propagation.
-- [ ] Add/adjust tests for socket-failure-triggered polling fallback behavior.
-- [ ] Add/adjust tests proving runtime parity of emitted events across workspace and executor paths.
-- [ ] Run targeted automated test suites for touched Studio modules and include command log in implementation notes.
-- [ ] Acceptance criteria: automated tests pass for changed areas and guard key concurrency/proxy/socket regressions.
+- [x] Add/adjust automated tests for Gunicorn config loading and env default behavior.
+- [x] Add/adjust tests for forwarded-header/proxy correctness (scheme/host/url generation behind proxy).
+- [x] Add/adjust Socket.IO tests for connect/disconnect, emit contract validity, and Redis-backed cross-worker propagation.
+- [x] Add/adjust tests for socket-failure-triggered polling fallback behavior.
+- [x] Add/adjust tests proving runtime parity of emitted events across workspace and executor paths.
+- [x] Run targeted automated test suites for touched Studio modules and include command log in implementation notes.
+- [x] Acceptance criteria: automated tests pass for changed areas and guard key concurrency/proxy/socket regressions.
+
+Stage 9 implementation notes:
+- Added `app/llmctl-studio/tests/test_socket_proxy_gunicorn_stage9.py` covering:
+  - Gunicorn env/default parsing behavior in `web.gunicorn_config`.
+  - Forwarded-header + `ProxyFix` scheme/host/script-root URL behavior.
+  - Socket lifecycle handlers (`connect`, `disconnect`, `rt.health`, `rt.subscribe`, `rt.unsubscribe`) and room-scoped event delivery.
+  - Socket.IO Redis queue configuration wiring and Celery Redis default queue derivation.
+  - Client fallback gating assertions in `app/llmctl-studio/src/web/templates/base.html` ensuring polling fallback only triggers on verified socket failures.
+  - Runtime metadata schema parity checks across workspace-style and executor-style payloads.
+- Re-ran existing parity integration suite `app/llmctl-studio/tests/test_realtime_events_stage6.py` to verify runtime event schema consistency and room fan-out behavior remains intact.
+- Test execution note: Compose mounts Studio `src/` and `run.py` but not `tests/`, so updated tests were copied into the running `llmctl-studio` container before execution.
+
+Stage 9 validation run:
+- `python3 -m compileall app/llmctl-studio/tests/test_socket_proxy_gunicorn_stage9.py`
+- `docker cp app/llmctl-studio/tests/test_socket_proxy_gunicorn_stage9.py llmctl-studio:/app/app/llmctl-studio/tests/test_socket_proxy_gunicorn_stage9.py`
+- `docker cp app/llmctl-studio/tests/test_realtime_events_stage6.py llmctl-studio:/app/app/llmctl-studio/tests/test_realtime_events_stage6.py`
+- `docker compose -f docker/docker-compose.yml exec -T llmctl-studio python3 /app/app/llmctl-studio/tests/test_socket_proxy_gunicorn_stage9.py` -> `Ran 9 tests ... OK`
+- `docker compose -f docker/docker-compose.yml exec -T llmctl-studio python3 /app/app/llmctl-studio/tests/test_realtime_events_stage6.py` -> `Ran 4 tests ... OK`
 
 ## Stage 10 - Docs Updates
-- [ ] Update Sphinx and Read the Docs documentation for Gunicorn-first serving, env/Compose controls, and recommended defaults.
-- [ ] Document reverse proxy requirements (forwarded headers, websocket upgrade settings, timeout guidance, TLS termination modes).
-- [ ] Document Flask-SocketIO + Redis architecture, scaling behavior, and multi-worker expectations.
-- [ ] Document Socket.IO event contract and frontend consumption model suitable for both current Jinja and future React frontend.
-- [ ] Document operational guidance: troubleshooting websocket fallback, Redis dependency expectations, and CORS hardening follow-up.
-- [ ] Acceptance criteria: deployment and developer docs are sufficient to run, scale, and extend the new architecture without code spelunking.
+- [x] Update Sphinx and Read the Docs documentation for Gunicorn-first serving, env/Compose controls, and recommended defaults.
+- [x] Document reverse proxy requirements (forwarded headers, websocket upgrade settings, timeout guidance, TLS termination modes).
+- [x] Document Flask-SocketIO + Redis architecture, scaling behavior, and multi-worker expectations.
+- [x] Document Socket.IO event contract and frontend consumption model suitable for both current Jinja and future React frontend.
+- [x] Document operational guidance: troubleshooting websocket fallback, Redis dependency expectations, and CORS hardening follow-up.
+- [x] Acceptance criteria: deployment and developer docs are sufficient to run, scale, and extend the new architecture without code spelunking.
+
+Stage 10 implementation notes:
+- Added `docs/sphinx/studio_serving_runtime.rst` covering:
+  - Gunicorn-first serving model and optional env controls.
+  - Reverse-proxy and TLS termination guidance (`X-Forwarded-*`, websocket upgrade, timeout expectations).
+  - Flask-SocketIO + Redis multi-worker architecture and sticky-session guidance for polling fallback paths.
+  - Canonical realtime event envelope/room conventions and frontend-agnostic consumption model for Jinja now + React later.
+  - Operational troubleshooting and CORS hardening follow-up.
+- Added/linked `docs/sphinx/agent_skill_binding.rst` to resolve missing toctree reference from the runtime docs index.
+- Updated `docs/sphinx/index.rst` to include `studio_serving_runtime`.
+- Updated `docs/sphinx/changelog.rst` with Gunicorn/proxy/Socket.IO architecture documentation entries.
+- Updated `docs/sphinx/requirements.txt` to include autodoc/runtime dependencies used by the new docs surfaces (`Flask-SocketIO`, `kombu`) for better Read the Docs parity.
+
+Stage 10 validation run:
+- `python3 -m venv .venv-docs`
+- `.venv-docs/bin/pip install -r docs/sphinx/requirements.txt`
+- `.venv-docs/bin/python -m sphinx -b html docs/sphinx docs/sphinx/_build/html` -> build succeeded; residual warnings remain from existing autodoc/import and duplicate API cross-reference targets.

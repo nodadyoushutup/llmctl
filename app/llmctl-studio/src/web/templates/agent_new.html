@@ -13,7 +13,7 @@
     <h2 class="section-title">Create Agent</h2>
   </div>
   <p class="muted" style="margin-top: 12px;">
-    Define the agent description and role.
+    Define the agent description and role. Configure ordered priorities after creation.
   </p>
   <form method="post" action="{{ url_for('agents.create_agent') }}" class="form-grid">
     <label class="label">
@@ -46,14 +46,6 @@
           to reuse shared prompts.
         </span>
       {% endif %}
-    </label>
-    <label class="label">
-      autoprompt (autorun loop)
-      <textarea
-        name="autonomous_prompt"
-        placeholder="Take the next planning step and execute it."
-        class="textarea"
-      ></textarea>
     </label>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">

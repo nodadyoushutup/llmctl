@@ -9,6 +9,8 @@ Technical reference for llmctl runtime surfaces.
 
    chat_runtime
    provider_runtime
+   node_executor_runtime
+   studio_serving_runtime
    agent_skill_binding
    rag_flowchart_node
    changelog

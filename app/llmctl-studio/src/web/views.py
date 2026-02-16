@@ -759,26 +759,17 @@ def _build_role_payload(role: Role) -> dict[str, object]:
     }
 
 
-def _build_agent_payload(
-    agent: Agent,
-    include_autoprompt: bool = True,
-) -> dict[str, object]:
+def _build_agent_payload(agent: Agent) -> dict[str, object]:
     description = agent.description or agent.name or ""
-    payload: dict[str, object] = {
+    return {
         "id": agent.id,
         "name": agent.name,
         "description": description,
     }
-    if include_autoprompt and agent.autonomous_prompt:
-        payload["autoprompt"] = agent.autonomous_prompt
-    return payload
 
 
-def _build_agent_prompt_payload(
-    agent: Agent,
-    include_autoprompt: bool = True,
-) -> object | None:
-    agent_payload = _build_agent_payload(agent, include_autoprompt=include_autoprompt)
+def _build_agent_prompt_payload(agent: Agent) -> object | None:
+    agent_payload = _build_agent_payload(agent)
     role = agent.role
     if agent.role_id and role is not None:
         agent_payload["role"] = _build_role_payload(role)
@@ -6734,7 +6725,6 @@ def new_agent():
 def create_agent():
     name = request.form.get("name", "").strip()
     description = request.form.get("description", "").strip()
-    autonomous_prompt = request.form.get("autonomous_prompt", "").strip()
     role_raw = request.form.get("role_id", "").strip()
 
     if not description:
@@ -6758,8 +6748,6 @@ def create_agent():
                 flash("Role not found.", "error")
                 return redirect(url_for("agents.new_agent"))
         prompt_payload = {"description": description}
-        if autonomous_prompt:
-            prompt_payload["autoprompt"] = autonomous_prompt
         prompt_json = json.dumps(prompt_payload, indent=2, sort_keys=True)
         agent = Agent.create(
             session,
@@ -6768,7 +6756,7 @@ def create_agent():
             description=description,
             prompt_json=prompt_json,
             prompt_text=None,
-            autonomous_prompt=autonomous_prompt or None,
+            autonomous_prompt=None,
             is_system=False,
         )
         agent_id = agent.id
@@ -6864,7 +6852,6 @@ def edit_agent(agent_id: int):
 def update_agent(agent_id: int):
     name = request.form.get("name", "").strip()
     description = request.form.get("description", "").strip()
-    autonomous_prompt = request.form.get("autonomous_prompt", "").strip()
     role_raw = request.form.get("role_id", "").strip()
 
     if not description:
@@ -6891,14 +6878,12 @@ def update_agent(agent_id: int):
         if not name:
             name = agent.name or "Untitled Agent"
         prompt_payload = {"description": description}
-        if autonomous_prompt:
-            prompt_payload["autoprompt"] = autonomous_prompt
         prompt_json = json.dumps(prompt_payload, indent=2, sort_keys=True)
         agent.name = name
         agent.description = description
         agent.prompt_json = prompt_json
         agent.prompt_text = None
-        agent.autonomous_prompt = autonomous_prompt or None
+        agent.autonomous_prompt = None
         agent.role_id = role_id
 
     flash("Agent updated.", "success")
@@ -7912,10 +7897,7 @@ def create_quick_task():
                 system_contract = {}
                 if agent.role_id and agent.role is not None:
                     system_contract["role"] = _build_role_payload(agent.role)
-                agent_profile = _build_agent_payload(
-                    agent,
-                    include_autoprompt=False,
-                )
+                agent_profile = _build_agent_payload(agent)
             prompt_payload = serialize_prompt_envelope(
                 build_prompt_envelope(
                     user_request=prompt,

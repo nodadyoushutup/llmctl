@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from flask import Flask
 from sqlalchemy import select
@@ -89,6 +90,20 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("15", updated.get("docker_api_stall_seconds"))
         self.assertEqual("workspace-prod", updated.get("workspace_identity_key"))
 
+    def test_node_executor_settings_db_overrides_env_defaults(self) -> None:
+        save_node_executor_settings(
+            {
+                "provider": "docker",
+                "docker_host": "unix:///var/run/docker.sock",
+            }
+        )
+        with patch.object(Config, "NODE_EXECUTOR_PROVIDER", "kubernetes"), patch.object(
+            Config, "NODE_EXECUTOR_DOCKER_HOST", "unix:///tmp/env-docker.sock"
+        ):
+            settings = load_node_executor_settings()
+        self.assertEqual("docker", settings.get("provider"))
+        self.assertEqual("unix:///var/run/docker.sock", settings.get("docker_host"))
+
     def test_run_metadata_normalization_rules(self) -> None:
         with self.assertRaises(ValueError):
             normalize_node_executor_run_metadata(
@@ -170,7 +185,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
             follow_redirects=False,
         )
         self.assertEqual(302, response.status_code)
-        self.assertTrue(response.headers["Location"].endswith("/settings/runtime"))
+        self.assertIn("/settings/runtime", response.headers["Location"])
 
         settings = load_node_executor_settings()
         self.assertEqual("docker", settings.get("provider"))

@@ -630,12 +630,6 @@ class RAGSource(BaseModel):
     )
 
 
-class RAGIndexJob:
-    """Legacy compatibility placeholder for removed rag_index_jobs rows."""
-
-    pass
-
-
 class RAGSourceFileState(BaseModel):
     __tablename__ = "rag_source_file_states"
     __table_args__ = (

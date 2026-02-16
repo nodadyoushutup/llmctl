@@ -26,3 +26,8 @@ Changelog
 - Split Google integrations into separate ``google_cloud`` and ``google_workspace`` providers with independent service-account settings and dedicated Integrations tabs/routes.
 - Added automatic migration of legacy ``google_drive`` integration settings into split Cloud/Workspace providers during settings reads/writes.
 - Added Google Workspace integrated MCP scaffold controls while intentionally guarding runtime server creation until a supported Workspace MCP service-account execution path is finalized.
+- Added Gunicorn-first Studio serving controls with optional environment overrides for concurrency, worker behavior, logs, and timeout/lifecycle tuning.
+- Added reverse-proxy compliance controls/documentation for trusted forwarded headers, scheme/host resolution, WebSocket upgrades, and TLS termination modes.
+- Added Flask-SocketIO + Redis multi-worker architecture documentation including sticky-session guidance for polling fallback and websocket-first transport recommendations.
+- Added canonical realtime event-contract and room-scoping documentation for Jinja now and React migration compatibility.
+- Added Node Executor runtime documentation covering DB-backed settings, multi-provider architecture (workspace/docker/kubernetes), execution contract versioning, dispatch state machine, fallback semantics, and cancellation behavior.

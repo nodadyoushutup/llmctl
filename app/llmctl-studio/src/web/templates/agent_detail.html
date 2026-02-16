@@ -55,13 +55,11 @@
 
 <section class="card">
   <div class="card-header">
-    <h2 class="section-title">Autoprompt</h2>
+    <h2 class="section-title">Autorun Behavior</h2>
   </div>
-  {% if agent.autonomous_prompt %}
-    <pre class="code-block code-scroll">{{ agent.autonomous_prompt }}</pre>
-  {% else %}
-    <p class="muted" style="margin-top: 12px;">No autoprompt set.</p>
-  {% endif %}
+  <p class="muted" style="margin-top: 12px;">
+    Autoruns use the agent role plus ordered priorities to decide and execute work.
+  </p>
 </section>
 
 <script>

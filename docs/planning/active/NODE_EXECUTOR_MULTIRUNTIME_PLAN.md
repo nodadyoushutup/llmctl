@@ -143,20 +143,20 @@ Execution handoff notes:
 
 ## Non-negotiable constraints
 
-- [ ] Existing node execution behavior must remain functional while rollout is in progress.
-- [ ] Fallback must be idempotent and must not create duplicate successful runs.
-- [ ] Workspace provider remains always available as last-resort runtime.
-- [ ] Provider selection and effective settings must be observable in run history/logs.
-- [ ] For template/pipeline updates, treat as DB updates unless explicitly asked to update seed data.
+- [x] Existing node execution behavior must remain functional while rollout is in progress.
+- [x] Fallback must be idempotent and must not create duplicate successful runs.
+- [x] Workspace provider remains always available as last-resort runtime.
+- [x] Provider selection and effective settings must be observable in run history/logs.
+- [x] For template/pipeline updates, treat as DB updates unless explicitly asked to update seed data.
 
 ## Definition of done
 
-- [ ] Studio can execute nodes through `workspace`, `docker`, or `kubernetes` providers via one runtime contract.
-- [ ] Studio runtime settings UI/API can configure provider + provider-specific options in DB.
-- [ ] `docker` and `kubernetes` providers can launch `llmctl-executor` containers/jobs successfully.
-- [ ] Fallback to `workspace` is automatic for eligible remote dispatch failures.
-- [ ] Node run detail clearly shows selected provider, dispatch status, fallback decisions, and final provider used.
-- [ ] Regression suite covers provider selection, fallback rules, and cancellation/cleanup semantics.
+- [x] Studio can execute nodes through `workspace`, `docker`, or `kubernetes` providers via one runtime contract.
+- [x] Studio runtime settings UI/API can configure provider + provider-specific options in DB.
+- [x] `docker` and `kubernetes` providers can launch `llmctl-executor` containers/jobs successfully.
+- [x] Fallback to `workspace` is automatic for eligible remote dispatch failures.
+- [x] Node run detail clearly shows selected provider, dispatch status, fallback decisions, and final provider used.
+- [x] Regression suite covers provider selection, fallback rules, and cancellation/cleanup semantics.
 
 ## Target architecture
 
@@ -590,56 +590,64 @@ Deliverables:
 
 ## Stage 9 - Automated Testing
 
-- [ ] Unit tests:
-  - [ ] provider config parsing/validation
-  - [ ] router selection precedence (DB vs env)
-  - [ ] fallback decision matrix
-  - [ ] timeout and cancellation config validation
-  - [ ] execution contract version compatibility checks
-- [ ] Integration tests:
-  - [ ] workspace baseline remains green
-  - [ ] docker dispatch success/failure + fallback
-  - [ ] kubernetes dispatch success/failure + fallback
-  - [ ] cancel behavior per provider
-- [ ] Failure-injection tests:
-  - [ ] provider unavailable
-  - [ ] image pull fail
-  - [ ] API timeout
-  - [ ] ambiguous dispatch state
-  - [ ] fallback-cancellation race handling
+- [x] Unit tests:
+  - [x] provider config parsing/validation
+  - [x] router selection precedence (DB vs env)
+  - [x] fallback decision matrix
+  - [x] timeout and cancellation config validation
+  - [x] execution contract version compatibility checks
+- [x] Integration tests:
+  - [x] workspace baseline remains green
+  - [x] docker dispatch success/failure + fallback
+  - [x] kubernetes dispatch success/failure + fallback
+  - [x] cancel behavior per provider
+- [x] Failure-injection tests:
+  - [x] provider unavailable
+  - [x] image pull fail
+  - [x] API timeout
+  - [x] ambiguous dispatch state
+  - [x] fallback-cancellation race handling
 
 Deliverables:
-- [ ] Automated confidence gates before merge.
+- [x] Automated confidence gates before merge.
+
+Progress notes (2026-02-16):
+- [x] Runtime suite gate passed locally: `38` tests across node executor stages, realtime parity, and executor contract tests.
+- [x] Kubernetes environment smoke checks passed against active context (`kubectl cluster-info`, node/pod listing, executor preflight).
+- [x] Added targeted Stage 9 coverage for Docker API timeout fallback metadata, image-pull failure classification, Docker cancel-on-timeout behavior, and fallback dispatch race fail-closed semantics.
+- [x] Added Sphinx operator guide `docs/sphinx/node_executor_runtime.rst` covering runtime settings, architecture, execution contract versioning, fallback semantics, cancellation semantics, and run-history observability.
+- [x] Verified Sphinx build with `./.venv/bin/python3 -m sphinx -b html docs/sphinx docs/sphinx/_build/html` (build succeeded; existing autosummary cross-reference warnings in generated API docs remain non-blocking).
+- [x] Read the Docs configuration remains valid; no `.readthedocs.yaml` changes were required for this update.
 
 ## Stage 10 - Docs Updates
 
-- [ ] Update runtime settings documentation for node executor providers.
-- [ ] Update architecture docs for Studio control plane and `llmctl-executor`.
-- [ ] Document execution contract versioning and compatibility guarantees.
-- [ ] Update Sphinx docs and verify docs build.
-- [ ] Update Read the Docs content/config if required.
-- [ ] Add operator notes for fallback semantics and cancellation behavior.
+- [x] Update runtime settings documentation for node executor providers.
+- [x] Update architecture docs for Studio control plane and `llmctl-executor`.
+- [x] Document execution contract versioning and compatibility guarantees.
+- [x] Update Sphinx docs and verify docs build.
+- [x] Update Read the Docs content/config if required.
+- [x] Add operator notes for fallback semantics and cancellation behavior.
 
 Deliverables:
-- [ ] Documentation reflects implementation and operational behavior.
+- [x] Documentation reflects implementation and operational behavior.
 
 ## Risks and mitigations
 
-- [ ] Risk: duplicate execution during fallback.
-  - [ ] Mitigation: strict dispatch state machine and no fallback on ambiguous start.
-  - [ ] Owner: Runtime router implementation (Stage 7).
-- [ ] Risk: settings sprawl/invalid combinations.
-  - [ ] Mitigation: provider-specific validation + effective-config preview.
-  - [ ] Owner: Settings/data model work (Stage 2).
-- [ ] Risk: docker socket dependency drift in containerized Studio deployments.
-  - [ ] Mitigation: keep docker provider optional; prefer kubernetes provider in cluster.
-  - [ ] Owner: Docker provider implementation/docs (Stages 5, 10).
-- [ ] Risk: executor image and Studio runtime contract drift.
-  - [ ] Mitigation: versioned execution contract with compatibility checks.
-  - [ ] Owner: Executor app + contract tests (Stages 4, 9).
-- [ ] Risk: insecure kubeconfig handling in DB.
-  - [ ] Mitigation: encrypt-at-rest, redact in logs, and restrict read path to runtime service account.
-  - [ ] Owner: Settings + k8s provider + docs (Stages 2, 6, 10).
+- [x] Risk: duplicate execution during fallback.
+  - [x] Mitigation: strict dispatch state machine and no fallback on ambiguous start.
+  - [x] Owner: Runtime router implementation (Stage 7).
+- [x] Risk: settings sprawl/invalid combinations.
+  - [x] Mitigation: provider-specific validation + effective-config preview.
+  - [x] Owner: Settings/data model work (Stage 2).
+- [x] Risk: docker socket dependency drift in containerized Studio deployments.
+  - [x] Mitigation: keep docker provider optional; prefer kubernetes provider in cluster.
+  - [x] Owner: Docker provider implementation/docs (Stages 5, 10).
+- [x] Risk: executor image and Studio runtime contract drift.
+  - [x] Mitigation: versioned execution contract with compatibility checks.
+  - [x] Owner: Executor app + contract tests (Stages 4, 9).
+- [x] Risk: insecure kubeconfig handling in DB.
+  - [x] Mitigation: encrypt-at-rest, redact in logs, and restrict read path to runtime service account.
+  - [x] Owner: Settings + k8s provider + docs (Stages 2, 6, 10).
 - [x] Risk: orphaned remote resources after Studio crash/network partition (`docker` containers or `kubernetes` Jobs).
   - [x] Mitigation: provider cleanup/reaper loop + startup reconciliation + TTL/label-based garbage collection.
   - [x] Owner: Docker + Kubernetes provider implementation (Stages 5, 6) and operator docs (Stage 10).

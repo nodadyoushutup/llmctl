@@ -18,16 +18,8 @@ import core.db as core_db
 from core.config import Config
 from core.db import session_scope, utcnow
 from core.models import (
-    RAG_INDEX_JOB_STATUS_QUEUED,
     RAG_INDEX_MODE_DELTA,
     RAG_INDEX_MODE_FRESH,
-)
-from rag.repositories.index_jobs import (
-    create_index_job,
-    get_index_job,
-    index_job_meta,
-    update_index_job_checkpoint,
-    update_index_job_progress,
 )
 from rag.repositories.settings import load_rag_settings, save_rag_settings
 from rag.repositories.source_file_states import (
@@ -78,7 +70,7 @@ class RagStage3Tests(StudioDbTestCase):
                 ).all()
             }
             self.assertIn("rag_sources", tables)
-            self.assertIn("rag_index_jobs", tables)
+            self.assertNotIn("rag_index_jobs", tables)
             self.assertIn("rag_source_file_states", tables)
             self.assertIn("rag_settings", tables)
 
@@ -88,13 +80,6 @@ class RagStage3Tests(StudioDbTestCase):
             }
             self.assertIn("index_schedule_mode", source_columns)
             self.assertIn("next_index_at", source_columns)
-
-            job_columns = {
-                row[1]
-                for row in session.execute(text("PRAGMA table_info(rag_index_jobs)")).all()
-            }
-            self.assertIn("mode", job_columns)
-            self.assertIn("meta_json", job_columns)
 
     def test_source_schedule_mode_and_due_selection(self) -> None:
         source = create_source(
@@ -121,7 +106,7 @@ class RagStage3Tests(StudioDbTestCase):
         due = list_due_sources(now=utcnow())
         self.assertTrue(any(item.id == source.id for item in due))
 
-    def test_index_job_meta_shape_for_checkpoint_and_progress(self) -> None:
+    def test_legacy_index_jobs_table_is_dropped(self) -> None:
         source = create_source(
             RAGSourceInput(
                 name="Local Source",
@@ -130,27 +115,15 @@ class RagStage3Tests(StudioDbTestCase):
                 index_schedule_mode=RAG_INDEX_MODE_FRESH,
             )
         )
-        job = create_index_job(
-            source_id=source.id,
-            mode=RAG_INDEX_MODE_FRESH,
-            status=RAG_INDEX_JOB_STATUS_QUEUED,
-        )
-        meta = index_job_meta(job)
-        self.assertIn("checkpoint", meta)
-        self.assertIn("progress", meta)
-        self.assertEqual("queued", meta["progress"]["phase"])
-
-        update_index_job_checkpoint(job.id, {"stage": "scan", "cursor": "path:42"})
-        update_index_job_progress(job.id, {"phase": "running", "percent": 35.5})
-
-        reloaded = get_index_job(job.id)
-        assert reloaded is not None
-        updated_meta = index_job_meta(reloaded)
-        self.assertEqual("scan", updated_meta["checkpoint"]["stage"])
-        self.assertEqual("path:42", updated_meta["checkpoint"]["cursor"])
-        self.assertEqual("running", updated_meta["progress"]["phase"])
-        self.assertAlmostEqual(35.5, updated_meta["progress"]["percent"])
-        json.loads(reloaded.meta_json or "{}")
+        self.assertGreater(source.id, 0)
+        with session_scope() as session:
+            tables = {
+                row[0]
+                for row in session.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table'")
+                ).all()
+            }
+        self.assertNotIn("rag_index_jobs", tables)
 
     def test_source_file_state_summary_and_settings_crud(self) -> None:
         source = create_source(
