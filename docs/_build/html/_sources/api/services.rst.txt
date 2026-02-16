@@ -1,0 +1,29 @@
+services package
+================
+
+.. automodule:: services
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   services.execution
+   services.instruction_adapters
+   services.instructions
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   services.celery_app
+   services.huggingface_downloads
+   services.realtime_events
+   services.skill_adapters
+   services.skills

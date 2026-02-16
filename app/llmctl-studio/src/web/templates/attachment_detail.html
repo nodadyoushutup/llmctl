@@ -38,6 +38,7 @@
         <p class="muted">Path: {{ attachment.file_path or "-" }}</p>
         <p class="muted">Linked tasks: {{ tasks | length }}</p>
         <p class="muted">Linked templates: {{ templates | length }}</p>
+        <p class="muted">Linked flowchart nodes: {{ flowchart_nodes | length }}</p>
         <p class="muted">Created: {{ human_time(attachment.created_at) }}</p>
         <p class="muted">Updated: {{ human_time(attachment.updated_at) }}</p>
       </div>
@@ -167,6 +168,47 @@
     </div>
   {% else %}
     <p class="muted" style="margin-top: 16px;">No templates attached yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Attached Flowchart Nodes</h2>
+  </div>
+  {% if flowchart_nodes %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Node</th>
+            <th>Type</th>
+            <th>Flowchart</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for node in flowchart_nodes %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id, node=node.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id, node=node.id) }}">
+                  {{ node.title or ("Node " ~ node.id) }}
+                </a>
+              </td>
+              <td class="muted">{{ node.node_type }}</td>
+              <td class="muted">
+                {{ flowcharts_by_id.get(node.flowchart_id, "Flowchart " ~ node.flowchart_id) }}
+              </td>
+              <td class="muted">{{ human_time(node.updated_at) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No flowchart nodes attached yet.</p>
   {% endif %}
 </section>
 

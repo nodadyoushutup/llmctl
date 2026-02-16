@@ -1,0 +1,7 @@
+rag.engine.chunkers module
+==========================
+
+.. automodule:: rag.engine.chunkers
+   :members:
+   :show-inheritance:
+   :undoc-members:

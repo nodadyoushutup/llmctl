@@ -212,11 +212,53 @@
       }
 
       .nav-section-title {
-        margin: 6px 14px 2px;
+        margin: 0;
         font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 0.32em;
         color: var(--muted);
+      }
+
+      .nav-section-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        padding: 6px 14px 2px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: transparent;
+        cursor: pointer;
+        color: var(--muted);
+      }
+
+      .nav-section-toggle:hover {
+        color: #fff;
+      }
+
+      .nav-section-toggle:focus-visible {
+        outline: 2px solid rgba(255, 122, 24, 0.5);
+        outline-offset: 2px;
+      }
+
+      .nav-section-chevron {
+        font-size: 11px;
+        transition: transform 0.2s ease;
+      }
+
+      .nav-section-toggle[aria-expanded="true"] .nav-section-chevron {
+        transform: rotate(90deg);
+      }
+
+      .nav-section-items {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .nav-section-items[hidden] {
+        display: none;
       }
 
       .nav-item {
@@ -2581,15 +2623,9 @@
     } %}
     {% set nav_settings_provider = {
       "id": "settings_provider",
-      "label": "Provider",
+      "label": "Providers",
       "icon": "fa-solid fa-wave-square",
       "url": url_for("agents.settings_provider"),
-    } %}
-    {% set nav_settings_gitconfig = {
-      "id": "settings_gitconfig",
-      "label": "GitConfig",
-      "icon": "fa-solid fa-code-branch",
-      "url": url_for("agents.settings_gitconfig"),
     } %}
     {% set nav_settings_integrations = {
       "id": "settings_integrations",
@@ -2618,7 +2654,7 @@
     {% set nav_sections = [
       {
         "label": "Agent",
-        "items": [nav_agents, nav_roles],
+        "items": [nav_agents, nav_roles, nav_skills],
       },
       {
         "label": "Launch",
@@ -2638,7 +2674,7 @@
       },
       {
         "label": "Node Resources",
-        "items": [nav_mcps, nav_models, nav_skills, nav_scripts],
+        "items": [nav_mcps, nav_models, nav_scripts, nav_attachments],
       },
       {
         "label": "Integration",
@@ -2650,7 +2686,6 @@
           nav_settings_overview,
           nav_settings_core,
           nav_settings_provider,
-          nav_settings_gitconfig,
           nav_settings_integrations,
           nav_settings_celery,
           nav_settings_runtime,
@@ -2659,12 +2694,13 @@
       },
       {
         "label": "System",
-        "items": [nav_overview, nav_attachments],
+        "items": [nav_overview],
       },
     ] %}
     {% set nav_items = [
       nav_agents,
       nav_roles,
+      nav_skills,
       nav_flowcharts,
       nav_quick,
       nav_chat,
@@ -2678,8 +2714,8 @@
       nav_rag_sources,
       nav_mcps,
       nav_models,
-      nav_skills,
       nav_scripts,
+      nav_attachments,
       nav_github,
       nav_jira,
       nav_confluence,
@@ -2687,13 +2723,11 @@
       nav_settings_overview,
       nav_settings_core,
       nav_settings_provider,
-      nav_settings_gitconfig,
       nav_settings_integrations,
       nav_settings_celery,
       nav_settings_runtime,
       nav_settings_chat,
       nav_overview,
-      nav_attachments,
     ] %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -2726,30 +2760,49 @@
           </div>
           <nav class="nav">
             {% for section in nav_sections %}
-              {% set ns = namespace(visible_items=[]) %}
+              {% set ns = namespace(visible_items=[], has_active_item=False) %}
               {% for item in section["items"] %}
                 {% if item.get("visible", True) %}
                   {% set ns.visible_items = ns.visible_items + [item] %}
+                  {% if active_page == item.id %}
+                    {% set ns.has_active_item = True %}
+                  {% endif %}
                 {% endif %}
               {% endfor %}
               {% if ns.visible_items %}
-                <div class="nav-section">
-                  <p class="nav-section-title">{{ section.label }}</p>
-                  {% for item in ns.visible_items %}
-                    {% set is_active = active_page == item.id %}
-                    <a
-                      href="{{ item.url }}"
-                      class="nav-item{% if is_active %} is-active{% endif %}"
-                    >
-                      <span class="row">
-                        <span class="nav-icon">
-                          <i class="{{ item.icon }}"></i>
+                <div class="nav-section" data-nav-section>
+                  <button
+                    class="nav-section-toggle"
+                    type="button"
+                    data-nav-section-toggle
+                    aria-expanded="{{ 'true' if ns.has_active_item else 'false' }}"
+                    aria-controls="nav-section-{{ loop.index }}"
+                  >
+                    <span class="nav-section-title">{{ section.label }}</span>
+                    <i class="fa-solid fa-chevron-right nav-section-chevron" aria-hidden="true"></i>
+                  </button>
+                  <div
+                    class="nav-section-items"
+                    id="nav-section-{{ loop.index }}"
+                    data-nav-section-items
+                    {% if not ns.has_active_item %}hidden{% endif %}
+                  >
+                    {% for item in ns.visible_items %}
+                      {% set is_active = active_page == item.id %}
+                      <a
+                        href="{{ item.url }}"
+                        class="nav-item{% if is_active %} is-active{% endif %}"
+                      >
+                        <span class="row">
+                          <span class="nav-icon">
+                            <i class="{{ item.icon }}"></i>
+                          </span>
+                          {{ item.label }}
                         </span>
-                        {{ item.label }}
-                      </span>
-                      <i class="fa-solid fa-chevron-right"></i>
-                    </a>
-                  {% endfor %}
+                        <i class="fa-solid fa-chevron-right"></i>
+                      </a>
+                    {% endfor %}
+                  </div>
                 </div>
               {% endif %}
             {% endfor %}
@@ -2803,7 +2856,175 @@
         </div>
       </div>
     </div>
+    {% set socketio_path = (config.SOCKETIO_PATH | default('socket.io')) %}
+    {% set socketio_path = '/' ~ socketio_path.strip('/') ~ '/socket.io.js' %}
+    <script src="{{ (request.script_root or '') ~ socketio_path }}"></script>
     <script>
+      window.llmctlRealtime = (() => {
+        const namespace = "/rt";
+        const socketPath = "{{ '/' ~ (config.SOCKETIO_PATH | default('socket.io')).strip('/') }}";
+        const dedupeRooms = (rooms) => {
+          if (!Array.isArray(rooms)) {
+            return [];
+          }
+          const next = [];
+          const seen = new Set();
+          rooms.forEach((rawRoom) => {
+            const room = String(rawRoom || "").trim();
+            if (!room || seen.has(room)) {
+              return;
+            }
+            seen.add(room);
+            next.push(room);
+          });
+          return next;
+        };
+
+        const connect = ({
+          roomKeys = [],
+          onEvent = null,
+          onSocketReady = null,
+          onSocketFailure = null,
+        } = {}) => {
+          if (typeof window.io !== "function") {
+            if (typeof onSocketFailure === "function") {
+              onSocketFailure("socketio_client_missing");
+            }
+            return null;
+          }
+
+          const desiredRooms = new Set(dedupeRooms(roomKeys));
+          const joinedRooms = new Set();
+          let connected = false;
+          let ready = false;
+          let failed = false;
+          let stopped = false;
+          let socket = null;
+          let connectFailureTimer = null;
+          let disconnectFailureTimer = null;
+
+          const clearFailureTimers = () => {
+            if (connectFailureTimer) {
+              window.clearTimeout(connectFailureTimer);
+              connectFailureTimer = null;
+            }
+            if (disconnectFailureTimer) {
+              window.clearTimeout(disconnectFailureTimer);
+              disconnectFailureTimer = null;
+            }
+          };
+
+          const triggerFailure = (reason) => {
+            if (stopped || failed) {
+              return;
+            }
+            failed = true;
+            clearFailureTimers();
+            if (socket) {
+              try {
+                socket.disconnect();
+              } catch (_error) {
+                // no-op
+              }
+            }
+            if (typeof onSocketFailure === "function") {
+              onSocketFailure(reason);
+            }
+          };
+
+          socket = window.io(namespace, {
+            path: socketPath,
+            transports: ["websocket", "polling"],
+            reconnection: true,
+            timeout: 4000,
+          });
+
+          connectFailureTimer = window.setTimeout(() => {
+            if (connected || ready || stopped || failed) {
+              return;
+            }
+            triggerFailure("socket_connect_timeout");
+          }, 5000);
+
+          const syncRooms = () => {
+            if (!connected || stopped) {
+              return;
+            }
+            const subscribeRooms = [];
+            desiredRooms.forEach((room) => {
+              if (!joinedRooms.has(room)) {
+                subscribeRooms.push(room);
+              }
+            });
+            const unsubscribeRooms = [];
+            joinedRooms.forEach((room) => {
+              if (!desiredRooms.has(room)) {
+                unsubscribeRooms.push(room);
+              }
+            });
+            if (subscribeRooms.length) {
+              socket.emit("rt.subscribe", { rooms: subscribeRooms });
+              subscribeRooms.forEach((room) => joinedRooms.add(room));
+            }
+            if (unsubscribeRooms.length) {
+              socket.emit("rt.unsubscribe", { rooms: unsubscribeRooms });
+              unsubscribeRooms.forEach((room) => joinedRooms.delete(room));
+            }
+          };
+
+          socket.on("connect", () => {
+            connected = true;
+            ready = true;
+            clearFailureTimers();
+            syncRooms();
+            if (typeof onSocketReady === "function") {
+              onSocketReady();
+            }
+          });
+
+          socket.on("disconnect", () => {
+            connected = false;
+            if (stopped || failed || !ready) {
+              if (!ready) {
+                triggerFailure("socket_disconnected_before_ready");
+              }
+              return;
+            }
+            disconnectFailureTimer = window.setTimeout(() => {
+              triggerFailure("socket_disconnected");
+            }, 3000);
+          });
+
+          socket.on("connect_error", () => {
+            if (stopped || failed || connected || ready) {
+              return;
+            }
+            // Wait for connection timeout window before failing over to polling.
+          });
+
+          socket.onAny((eventName, payload) => {
+            if (typeof onEvent === "function") {
+              onEvent(eventName, payload || {});
+            }
+          });
+
+          return {
+            updateRooms(nextRoomKeys) {
+              desiredRooms.clear();
+              dedupeRooms(nextRoomKeys).forEach((room) => desiredRooms.add(room));
+              syncRooms();
+            },
+            disconnect() {
+              stopped = true;
+              clearFailureTimers();
+              socket.disconnect();
+            },
+          };
+        };
+
+        return { connect };
+      })();
+
       (() => {
         const flashZone = document.querySelector("[data-flash-zone]");
         if (!flashZone) {
@@ -2828,6 +3049,20 @@
               dismissFlash(flash);
             });
           }
+        });
+      })();
+      (() => {
+        document.querySelectorAll("[data-nav-section]").forEach((section) => {
+          const toggle = section.querySelector("[data-nav-section-toggle]");
+          const items = section.querySelector("[data-nav-section-items]");
+          if (!toggle || !items) {
+            return;
+          }
+          toggle.addEventListener("click", () => {
+            const expanded = toggle.getAttribute("aria-expanded") === "true";
+            toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+            items.hidden = expanded;
+          });
         });
       })();
       (() => {

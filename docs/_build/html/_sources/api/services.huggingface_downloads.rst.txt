@@ -1,0 +1,7 @@
+services.huggingface\_downloads module
+======================================
+
+.. automodule:: services.huggingface_downloads
+   :members:
+   :show-inheritance:
+   :undoc-members:

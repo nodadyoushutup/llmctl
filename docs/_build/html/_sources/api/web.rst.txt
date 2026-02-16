@@ -1,0 +1,16 @@
+web package
+===========
+
+.. automodule:: web
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   web.gunicorn_config
+   web.realtime

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
+import binascii
 from typing import Any, Iterable, Sequence
 
 from sqlalchemy import select
@@ -14,8 +15,9 @@ from core.models import SKILL_STATUS_CHOICES, Skill, SkillFile, SkillVersion
 
 SKILL_BUNDLE_SCHEMA_VERSION = 1
 MAX_SKILL_MD_BYTES = 64 * 1024
-MAX_SKILL_FILE_BYTES = 256 * 1024
-MAX_SKILL_PACKAGE_BYTES = 1024 * 1024
+MAX_SKILL_FILE_BYTES = 10 * 1024 * 1024
+MAX_SKILL_PACKAGE_BYTES = 50 * 1024 * 1024
+BINARY_CONTENT_PREFIX = "__LLMCTL_BINARY_BASE64__:"
 
 _ALLOWED_ROOT_DIRS = ("scripts", "references", "assets")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -78,8 +80,41 @@ class SkillImportResult:
     file_count: int
 
 
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
 def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return _sha256_bytes(value.encode("utf-8"))
+
+
+def is_binary_skill_content(content: str) -> bool:
+    return content.startswith(BINARY_CONTENT_PREFIX)
+
+
+def encode_binary_skill_content(payload: bytes) -> str:
+    encoded = binascii.b2a_base64(payload, newline=False).decode("ascii")
+    return f"{BINARY_CONTENT_PREFIX}{encoded}"
+
+
+def decode_skill_file_content_bytes(content: str) -> bytes:
+    if not is_binary_skill_content(content):
+        return content.encode("utf-8")
+    encoded_payload = content[len(BINARY_CONTENT_PREFIX) :].strip()
+    if not encoded_payload:
+        return b""
+    try:
+        return binascii.a2b_base64(encoded_payload)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Binary skill content payload is not valid base64.") from exc
+
+
+def skill_file_content_size_bytes(content: str) -> int:
+    return len(decode_skill_file_content_bytes(content))
+
+
+def skill_file_content_checksum(content: str) -> str:
+    return _sha256_bytes(decode_skill_file_content_bytes(content))
 
 
 def normalize_skill_slug(value: str | None) -> str:
@@ -201,8 +236,17 @@ def _validate_file_sizes(files: Sequence[tuple[str, str]]) -> list[SkillValidati
     total_bytes = 0
     has_skill_md = False
     for path, content in files:
-        payload = content.encode("utf-8")
-        size_bytes = len(payload)
+        try:
+            size_bytes = skill_file_content_size_bytes(content)
+        except ValueError:
+            errors.append(
+                SkillValidationError(
+                    code="invalid_binary_payload",
+                    message="Binary skill content payload is invalid.",
+                    path=path,
+                )
+            )
+            continue
         total_bytes += size_bytes
         if path == "SKILL.md":
             has_skill_md = True
@@ -334,15 +378,28 @@ def build_skill_package(
 
     package_files: list[SkillPackageFile] = []
     for path, content in valid_files:
-        size_bytes = len(content.encode("utf-8"))
+        try:
+            size_bytes = skill_file_content_size_bytes(content)
+            checksum = skill_file_content_checksum(content)
+        except ValueError:
+            errors.append(
+                SkillValidationError(
+                    code="invalid_binary_payload",
+                    message="Binary skill content payload is invalid.",
+                    path=path,
+                )
+            )
+            continue
         package_files.append(
             SkillPackageFile(
                 path=path,
                 content=content,
-                checksum=_sha256_text(content),
+                checksum=checksum,
                 size_bytes=size_bytes,
             )
         )
+    if errors:
+        raise SkillPackageValidationError(errors)
 
     files_manifest = [
         {

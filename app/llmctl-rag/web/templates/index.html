@@ -205,8 +205,8 @@
                 <div class="card">
                   <div class="card-header">
                     <div>
-                      <h2 class="section-title">Google Drive integration</h2>
-                      <p class="muted">Paste a Google service account JSON key for Drive folder indexing.</p>
+                      <h2 class="section-title">Google Workspace integration</h2>
+                      <p class="muted">Paste a Google Workspace service account JSON key for Drive folder indexing.</p>
                     </div>
                     <span class="status-pill {% if google_drive_connected %}status-success{% else %}status-warning{% endif %}">
                       {% if google_drive_connected %}connected{% else %}needs key{% endif %}
@@ -225,12 +225,12 @@
                         {% if google_drive_service_email %}
                           Service account: {{ google_drive_service_email }}
                         {% else %}
-                          Share Drive folders with the service account email before verifying.
+                          Share Drive folders with the Google service account email before verifying.
                         {% endif %}
                       </span>
                     </label>
                     <div class="form-actions">
-                      <button type="submit">Save Google Drive</button>
+                      <button type="submit">Save Google Workspace</button>
                     </div>
                   </form>
                 </div>

@@ -1,0 +1,222 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Provider Runtime &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="RAG Flowchart Node" href="rag_flowchart_node.html" />
+    <link rel="prev" title="Launch Chat Runtime" href="chat_runtime.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Provider Runtime</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#claude-runtime-readiness">Claude Runtime Readiness</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#claude-auth-policy">Claude Auth Policy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#claude-model-defaults">Claude Model Defaults</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#vllm-local-huggingface-downloads">vLLM Local HuggingFace Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#google-cloud-workspace-integrations">Google Cloud + Workspace Integrations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#agent-skill-binding-compatibility-mode">Agent Skill Binding Compatibility Mode</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Provider Runtime</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/provider_runtime.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="provider-runtime">
+<h1>Provider Runtime<a class="headerlink" href="#provider-runtime" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Studio provider routing is DB-backed through integration settings
+(<code class="docutils literal notranslate"><span class="pre">provider='llm'</span></code>). Provider auth/config updates are written to the DB and
+read by runtime execution paths.</p>
+</section>
+<section id="claude-runtime-readiness">
+<h2>Claude Runtime Readiness<a class="headerlink" href="#claude-runtime-readiness" title="Link to this heading"></a></h2>
+<p>Claude execution uses <code class="docutils literal notranslate"><span class="pre">CLAUDE_CMD</span></code> (default: <code class="docutils literal notranslate"><span class="pre">claude</span></code>) and performs a
+runtime readiness check before Claude runs:</p>
+<ul class="simple">
+<li><p>command must be discoverable on <code class="docutils literal notranslate"><span class="pre">PATH</span></code> (or configured via <code class="docutils literal notranslate"><span class="pre">CLAUDE_CMD</span></code>)</p></li>
+<li><p>version check uses <code class="docutils literal notranslate"><span class="pre">claude</span> <span class="pre">--version</span></code></p></li>
+</ul>
+<p>If the CLI is not ready, behavior is controlled by:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CLAUDE_CLI_AUTO_INSTALL</span></code> (default: <code class="docutils literal notranslate"><span class="pre">false</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CLAUDE_CLI_REQUIRE_READY</span></code> (default: <code class="docutils literal notranslate"><span class="pre">true</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CLAUDE_CLI_INSTALL_SCRIPT</span></code>
+(default: <code class="docutils literal notranslate"><span class="pre">scripts/install/install-claude-cli.sh</span></code>)</p></li>
+</ul>
+<p>When auto-install is enabled, Studio runs the configured install script and
+re-checks readiness.</p>
+</section>
+<section id="claude-auth-policy">
+<h2>Claude Auth Policy<a class="headerlink" href="#claude-auth-policy" title="Link to this heading"></a></h2>
+<p>Claude auth key resolution is DB-first with environment fallback:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">integration_settings(provider='llm',</span> <span class="pre">key='claude_api_key')</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ANTHROPIC_API_KEY</span></code> environment variable</p></li>
+</ol>
+<p>Key requirement policy:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CLAUDE_AUTH_REQUIRE_API_KEY</span></code> (default: <code class="docutils literal notranslate"><span class="pre">true</span></code>)</p></li>
+</ul>
+<p>Provider Settings UI surfaces Claude diagnostics for:</p>
+<ul class="simple">
+<li><p>CLI readiness (installed/path/version/error)</p></li>
+<li><p>auth readiness/source</p></li>
+<li><p>auto-install and fail-fast policy flags</p></li>
+</ul>
+</section>
+<section id="claude-model-defaults">
+<h2>Claude Model Defaults<a class="headerlink" href="#claude-model-defaults" title="Link to this heading"></a></h2>
+<p>Claude model selection supports curated defaults plus freeform IDs.</p>
+<p>Curated suggestions are surfaced in model create/edit forms, and custom
+model IDs are still accepted for Claude provider models.</p>
+</section>
+<section id="vllm-local-huggingface-downloads">
+<h2>vLLM Local HuggingFace Downloads<a class="headerlink" href="#vllm-local-huggingface-downloads" title="Link to this heading"></a></h2>
+<p>vLLM Local provider settings include HuggingFace download actions backed by
+<code class="docutils literal notranslate"><span class="pre">integration_settings(provider='llm')</span></code> values:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">vllm_local_hf_token</span></code>: optional HuggingFace token (<code class="docutils literal notranslate"><span class="pre">hf_*</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">vllm_local_model</span></code>: selected discovered local default model</p></li>
+</ul>
+<p>Behavior:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Download</span> <span class="pre">Qwen</span></code> always stays available and uses <code class="docutils literal notranslate"><span class="pre">vllm_local_hf_token</span></code>
+automatically when present; otherwise it downloads anonymously.</p></li>
+<li><p>Generic HuggingFace model download controls are shown only when
+<code class="docutils literal notranslate"><span class="pre">vllm_local_hf_token</span></code> is configured.</p></li>
+<li><p>Generic downloads require repo ID format <code class="docutils literal notranslate"><span class="pre">owner/model</span></code> and auto-generate
+the local directory from the model name component.</p></li>
+<li><p>If the generated local directory already contains model files, Studio skips
+download and reports the model as already present.</p></li>
+</ul>
+</section>
+<section id="google-cloud-workspace-integrations">
+<h2>Google Cloud + Workspace Integrations<a class="headerlink" href="#google-cloud-workspace-integrations" title="Link to this heading"></a></h2>
+<p>Google integrations are split across two DB-backed providers:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">integration_settings(provider='google_cloud')</span></code> for Google Cloud service
+account JSON, optional project ID, and Cloud integrated MCP enablement.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">integration_settings(provider='google_workspace')</span></code> for Workspace service
+account JSON, optional delegated user email, and Workspace MCP scaffold
+controls.</p></li>
+</ul>
+<p>Legacy <code class="docutils literal notranslate"><span class="pre">provider='google_drive'</span></code> rows are auto-migrated into the split
+providers on settings read/write paths. Drive indexing/runtime credential
+checks now resolve service account JSON from <code class="docutils literal notranslate"><span class="pre">google_workspace</span></code>.</p>
+<p>Workspace MCP behavior is intentionally guarded in this stage: settings are
+stored and surfaced in UI, but runtime integrated MCP server creation remains
+disabled until a supported Workspace MCP service-account execution path is
+finalized.</p>
+</section>
+<section id="agent-skill-binding-compatibility-mode">
+<h2>Agent Skill Binding Compatibility Mode<a class="headerlink" href="#agent-skill-binding-compatibility-mode" title="Link to this heading"></a></h2>
+<p>Runtime settings also expose <code class="docutils literal notranslate"><span class="pre">node_skill_binding_mode</span></code> for legacy client
+compatibility during Agent-only skill binding cutover:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">warn</span></code>: ignore node-level <code class="docutils literal notranslate"><span class="pre">skill_ids</span></code> writes and emit deprecation metadata/logs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">reject</span></code>: return explicit validation errors for node-level <code class="docutils literal notranslate"><span class="pre">skill_ids</span></code> writes.</p></li>
+</ul>
+<p>See <span class="xref std std-doc">agent_skill_binding</span> for full Agent/node binding behavior and
+migration notes.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="chat_runtime.html" class="btn btn-neutral float-left" title="Launch Chat Runtime" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="rag_flowchart_node.html" class="btn btn-neutral float-right" title="RAG Flowchart Node" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -28,11 +28,11 @@
 
   {% if not google_drive_connected %}
     <div class="alert alert-warning" style="margin-top: 16px;">
-      Google Drive service account JSON is not set in Integrations. Drive verification and indexing will fail.
+      Google Workspace service account JSON is not set in Integrations. Google Drive verification and indexing will fail.
     </div>
   {% elif google_drive_service_email %}
     <div class="alert alert-info" style="margin-top: 16px;">
-      Google Drive service account: <span class="mono">{{ google_drive_service_email }}</span>
+      Google Workspace service account: <span class="mono">{{ google_drive_service_email }}</span>
     </div>
   {% endif %}
 
@@ -128,7 +128,7 @@
         </button>
       </div>
       <span class="muted" id="drive-folder-status" style="font-size: 12px; margin-top: 6px; display: block;">
-        Verify folder access before saving.
+        Verify that the Google Workspace service account can access this folder.
       </span>
     </label>
 

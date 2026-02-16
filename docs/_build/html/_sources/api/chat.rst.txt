@@ -1,0 +1,18 @@
+chat package
+============
+
+.. automodule:: chat
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   chat.contracts
+   chat.rag_client
+   chat.runtime
+   chat.settings

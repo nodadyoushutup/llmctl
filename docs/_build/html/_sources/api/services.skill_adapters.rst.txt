@@ -1,0 +1,7 @@
+services.skill\_adapters module
+===============================
+
+.. automodule:: services.skill_adapters
+   :members:
+   :show-inheritance:
+   :undoc-members:

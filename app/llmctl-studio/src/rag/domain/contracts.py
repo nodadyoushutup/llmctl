@@ -465,7 +465,8 @@ def _run_fresh_source_index(
         git_fetch_and_reset(source_config)
     if source.kind == "google_drive":
         service_account_json = (
-            load_integration_settings("google_drive").get("service_account_json") or ""
+            load_integration_settings("google_workspace").get("service_account_json")
+            or ""
         ).strip()
         local_path = str(getattr(source, "local_path", "") or "").strip()
         folder_id = str(getattr(source, "drive_folder_id", "") or "").strip()
@@ -560,7 +561,8 @@ def _run_delta_source_index(
         git_fetch_and_reset(source_config)
     if source.kind == "google_drive":
         service_account_json = (
-            load_integration_settings("google_drive").get("service_account_json") or ""
+            load_integration_settings("google_workspace").get("service_account_json")
+            or ""
         ).strip()
         local_path = str(getattr(source, "local_path", "") or "").strip()
         folder_id = str(getattr(source, "drive_folder_id", "") or "").strip()

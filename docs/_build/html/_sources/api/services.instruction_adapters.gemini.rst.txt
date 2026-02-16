@@ -1,0 +1,7 @@
+services.instruction\_adapters.gemini module
+============================================
+
+.. automodule:: services.instruction_adapters.gemini
+   :members:
+   :show-inheritance:
+   :undoc-members:

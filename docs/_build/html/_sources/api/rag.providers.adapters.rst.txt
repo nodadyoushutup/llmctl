@@ -1,0 +1,7 @@
+rag.providers.adapters module
+=============================
+
+.. automodule:: rag.providers.adapters
+   :members:
+   :show-inheritance:
+   :undoc-members:

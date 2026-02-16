@@ -1,0 +1,7 @@
+rag.engine.code\_spans module
+=============================
+
+.. automodule:: rag.engine.code_spans
+   :members:
+   :show-inheritance:
+   :undoc-members:

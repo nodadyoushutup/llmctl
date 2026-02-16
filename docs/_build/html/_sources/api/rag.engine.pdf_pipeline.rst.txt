@@ -1,0 +1,7 @@
+rag.engine.pdf\_pipeline module
+===============================
+
+.. automodule:: rag.engine.pdf_pipeline
+   :members:
+   :show-inheritance:
+   :undoc-members:

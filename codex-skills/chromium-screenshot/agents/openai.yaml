@@ -1,4 +1,0 @@
-interface:
-  display_name: "Chromium Screenshot"
-  short_description: "Take traceable Chromium UI screenshots"
-  default_prompt: "Capture and validate frontend screenshots with standardized naming and artifact tracking."

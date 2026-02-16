@@ -1,0 +1,7 @@
+services.celery\_app module
+===========================
+
+.. automodule:: services.celery_app
+   :members:
+   :show-inheritance:
+   :undoc-members:

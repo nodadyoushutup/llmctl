@@ -4,12 +4,14 @@ from pathlib import Path
 
 from flask import Flask
 from flask_seeder import FlaskSeeder
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from core.config import Config
 from core.db import create_session, init_db, init_engine
 from core.migrations import apply_runtime_migrations
 from core.seed import seed_defaults
 from rag.web.views import bp as rag_bp
+from web.realtime import init_socketio
 from web.views import bp as agents_bp
 
 
@@ -30,10 +32,26 @@ class _SeederDB:
             self._session = None
 
 
+def _configure_proxy_middleware(app: Flask) -> None:
+    if not bool(app.config.get("PROXY_FIX_ENABLED", False)):
+        return
+
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=int(app.config.get("PROXY_FIX_X_FOR", 1)),
+        x_proto=int(app.config.get("PROXY_FIX_X_PROTO", 1)),
+        x_host=int(app.config.get("PROXY_FIX_X_HOST", 1)),
+        x_port=int(app.config.get("PROXY_FIX_X_PORT", 1)),
+        x_prefix=int(app.config.get("PROXY_FIX_X_PREFIX", 1)),
+    )
+
+
 def create_app() -> Flask:
     template_dir = Path(__file__).resolve().parent / "templates"
     app = Flask(__name__, template_folder=str(template_dir))
     app.config.from_object(Config)
+    _configure_proxy_middleware(app)
+    init_socketio(app)
 
     init_engine(app.config["SQLALCHEMY_DATABASE_URI"])
     init_db()

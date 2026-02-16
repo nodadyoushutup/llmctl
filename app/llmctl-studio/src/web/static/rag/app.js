@@ -18,6 +18,228 @@
     });
   }
 
+  function showFlash(message, category) {
+    const text = String(message || "").trim();
+    if (!text) {
+      return;
+    }
+
+    let flashZone = document.querySelector("[data-flash-zone]");
+    if (!flashZone) {
+      flashZone = document.createElement("div");
+      flashZone.className = "flash-zone";
+      flashZone.setAttribute("data-flash-zone", "");
+      flashZone.setAttribute("role", "status");
+      flashZone.setAttribute("aria-live", "polite");
+      document.body.appendChild(flashZone);
+    }
+
+    const flash = document.createElement("div");
+    flash.className = "alert flash-message alert-info";
+    if (category === "success") {
+      flash.className = "alert flash-message alert-success";
+    } else if (category === "error") {
+      flash.className = "alert flash-message alert-error";
+    }
+    flash.setAttribute("data-flash", "");
+    flash.setAttribute("data-flash-timeout", "4500");
+
+    const content = document.createElement("div");
+    content.className = "flash-content";
+    content.textContent = text;
+
+    const dismissButton = document.createElement("button");
+    dismissButton.className = "flash-dismiss";
+    dismissButton.type = "button";
+    dismissButton.setAttribute("aria-label", "Dismiss");
+    dismissButton.setAttribute("data-flash-dismiss", "");
+    dismissButton.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+
+    const dismissFlash = () => {
+      if (flash.classList.contains("is-hiding")) {
+        return;
+      }
+      flash.classList.add("is-hiding");
+      window.setTimeout(() => {
+        flash.remove();
+      }, 250);
+    };
+
+    const timeout = window.setTimeout(dismissFlash, 4500);
+    dismissButton.addEventListener("click", () => {
+      window.clearTimeout(timeout);
+      dismissFlash();
+    });
+
+    flash.appendChild(content);
+    flash.appendChild(dismissButton);
+    flashZone.appendChild(flash);
+  }
+
+  function wireSourceQuickRuns() {
+    const quickRunButtons = Array.from(
+      document.querySelectorAll("[data-rag-quick-run]")
+    );
+    if (!quickRunButtons.length) {
+      return;
+    }
+
+    const buttonsBySourceId = new Map();
+    quickRunButtons.forEach((button) => {
+      const sourceId = Number.parseInt(
+        String(button.dataset.ragSourceId || ""),
+        10
+      );
+      if (Number.isNaN(sourceId) || sourceId <= 0) {
+        return;
+      }
+      if (!buttonsBySourceId.has(sourceId)) {
+        buttonsBySourceId.set(sourceId, []);
+      }
+      buttonsBySourceId.get(sourceId).push(button);
+    });
+    const sourceIds = Array.from(buttonsBySourceId.keys());
+    if (!sourceIds.length) {
+      return;
+    }
+
+    const pendingBySourceId = new Set();
+    const statusElsBySourceId = new Map();
+    const lastIndexedElsBySourceId = new Map();
+
+    document
+      .querySelectorAll("[data-rag-source-status][data-source-id]")
+      .forEach((el) => {
+        const sourceId = Number.parseInt(String(el.dataset.sourceId || ""), 10);
+        if (Number.isNaN(sourceId) || sourceId <= 0) {
+          return;
+        }
+        if (!statusElsBySourceId.has(sourceId)) {
+          statusElsBySourceId.set(sourceId, []);
+        }
+        statusElsBySourceId.get(sourceId).push(el);
+      });
+
+    document
+      .querySelectorAll("[data-rag-source-last-indexed][data-source-id]")
+      .forEach((el) => {
+        const sourceId = Number.parseInt(String(el.dataset.sourceId || ""), 10);
+        if (Number.isNaN(sourceId) || sourceId <= 0) {
+          return;
+        }
+        if (!lastIndexedElsBySourceId.has(sourceId)) {
+          lastIndexedElsBySourceId.set(sourceId, []);
+        }
+        lastIndexedElsBySourceId.get(sourceId).push(el);
+      });
+
+    function setButtonState(sourceId, hasActiveJob) {
+      const pending = pendingBySourceId.has(sourceId);
+      const shouldDisable = pending || Boolean(hasActiveJob);
+      const sourceButtons = buttonsBySourceId.get(sourceId) || [];
+      sourceButtons.forEach((button) => {
+        button.disabled = shouldDisable;
+      });
+    }
+
+    function updateSourceStatusFromPayload(sourcePayload) {
+      const sourceId = Number.parseInt(String(sourcePayload.id || ""), 10);
+      if (Number.isNaN(sourceId) || sourceId <= 0) {
+        return;
+      }
+      const hasActiveJob = Boolean(sourcePayload.has_active_job);
+      const statusText = textOrFallback(sourcePayload.status, "Not indexed");
+      const statusEls = statusElsBySourceId.get(sourceId) || [];
+      statusEls.forEach((el) => {
+        el.textContent = statusText;
+      });
+      const lastIndexedEls = lastIndexedElsBySourceId.get(sourceId) || [];
+      lastIndexedEls.forEach((el) => {
+        el.textContent = formatTimestamp(sourcePayload.last_indexed_at);
+      });
+      setButtonState(sourceId, hasActiveJob);
+    }
+
+    async function pollSourceStatus() {
+      const params = new URLSearchParams({ ids: sourceIds.join(",") });
+      try {
+        const response = await fetch(`/api/rag/sources/status?${params.toString()}`, {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const sources = Array.isArray(data.sources) ? data.sources : [];
+        sources.forEach(updateSourceStatusFromPayload);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function triggerQuickRun(sourceId, mode, sourceName) {
+      const endpoint =
+        mode === "delta"
+          ? `/rag/sources/${sourceId}/quick-delta-index`
+          : `/rag/sources/${sourceId}/quick-index`;
+      pendingBySourceId.add(sourceId);
+      setButtonState(sourceId, true);
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+          const errorMessage = textOrFallback(
+            data.error,
+            `Unable to start quick run for ${sourceName}.`
+          );
+          showFlash(errorMessage, "error");
+          return;
+        }
+        showFlash(
+          textOrFallback(data.message, `Quick run queued for ${sourceName}.`),
+          "success"
+        );
+        if (data.source) {
+          updateSourceStatusFromPayload(data.source);
+        }
+      } catch (error) {
+        showFlash(`Unable to start quick run for ${sourceName}.`, "error");
+      } finally {
+        pendingBySourceId.delete(sourceId);
+        await pollSourceStatus();
+      }
+    }
+
+    quickRunButtons.forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const sourceId = Number.parseInt(
+          String(button.dataset.ragSourceId || ""),
+          10
+        );
+        if (Number.isNaN(sourceId) || sourceId <= 0) {
+          return;
+        }
+        if (pendingBySourceId.has(sourceId)) {
+          return;
+        }
+        const mode = String(button.dataset.ragQuickRunMode || "fresh")
+          .trim()
+          .toLowerCase();
+        const sourceName = textOrFallback(button.dataset.ragSourceName, "source");
+        await triggerQuickRun(sourceId, mode, sourceName);
+      });
+    });
+
+    pollSourceStatus();
+    window.setInterval(pollSourceStatus, 2000);
+  }
+
   function textOrFallback(value, fallback) {
     if (value === null || value === undefined || String(value).trim() === "") {
       return fallback;
@@ -616,6 +838,7 @@
 
   wireRowLinks();
   wireSourceForm();
+  wireSourceQuickRuns();
   wireChat();
   wireIndexJobsPolling();
   wireIndexJobDetailPolling();

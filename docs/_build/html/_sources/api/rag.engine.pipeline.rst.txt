@@ -1,0 +1,7 @@
+rag.engine.pipeline module
+==========================
+
+.. automodule:: rag.engine.pipeline
+   :members:
+   :show-inheritance:
+   :undoc-members:

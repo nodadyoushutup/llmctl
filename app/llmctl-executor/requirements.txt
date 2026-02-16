@@ -1,0 +1,2 @@
+# Stage 4 baseline keeps runtime dependencies stdlib-only.
+# Additional provider/runtime dependencies can be appended in later stages.

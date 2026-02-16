@@ -22,15 +22,30 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from services.celery_app import celery_app
-from core.config import Config
+from services.huggingface_downloads import (
+    run_huggingface_model_download,
+    summarize_subprocess_error,
+    vllm_local_model_directory,
+)
+from core.config import Config, REPO_ROOT
 from core.db import init_db, init_engine, session_scope
 from services.integrations import (
     LLM_PROVIDER_LABELS,
     LLM_PROVIDERS,
     load_integration_settings,
+    load_node_executor_runtime_settings,
     resolve_default_model_id,
     resolve_enabled_llm_providers,
     resolve_llm_provider,
+)
+from services.execution.contracts import ExecutionRequest
+from services.execution.router import ExecutionRouter
+from services.realtime_events import (
+    combine_room_keys,
+    download_scope_rooms,
+    emit_contract_event,
+    flowchart_scope_rooms,
+    task_scope_rooms,
 )
 from core.mcp_config import build_mcp_overrides, parse_mcp_config
 from core.prompt_envelope import (
@@ -156,6 +171,211 @@ def _resolve_updated_at_version(value: datetime | None) -> str | None:
     else:
         timestamp = timestamp.astimezone(timezone.utc)
     return timestamp.isoformat()
+
+
+def _task_runtime_metadata(
+    task: AgentTask,
+    *,
+    runtime_override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if isinstance(runtime_override, dict):
+        return dict(runtime_override)
+    return {
+        "selected_provider": task.selected_provider,
+        "final_provider": task.final_provider,
+        "provider_dispatch_id": task.provider_dispatch_id,
+        "workspace_identity": task.workspace_identity,
+        "dispatch_status": task.dispatch_status,
+        "fallback_attempted": bool(task.fallback_attempted),
+        "fallback_reason": task.fallback_reason,
+        "dispatch_uncertain": bool(task.dispatch_uncertain),
+        "api_failure_category": task.api_failure_category,
+        "cli_fallback_used": bool(task.cli_fallback_used),
+        "cli_preflight_passed": task.cli_preflight_passed,
+    }
+
+
+def _task_event_payload(task: AgentTask) -> dict[str, Any]:
+    return {
+        "task_id": int(task.id),
+        "status": str(task.status),
+        "kind": str(task.kind or "task"),
+        "run_id": task.run_id,
+        "flowchart_id": task.flowchart_id,
+        "flowchart_run_id": task.flowchart_run_id,
+        "flowchart_node_id": task.flowchart_node_id,
+        "current_stage": task.current_stage,
+        "started_at": _resolve_updated_at_version(task.started_at),
+        "finished_at": _resolve_updated_at_version(task.finished_at),
+        "updated_at": _resolve_updated_at_version(task.updated_at),
+    }
+
+
+def _emit_task_event(
+    event_type: str,
+    *,
+    task: AgentTask,
+    payload: dict[str, Any] | None = None,
+    runtime_override: dict[str, Any] | None = None,
+    extra_room_keys: list[str] | None = None,
+) -> None:
+    event_payload = _task_event_payload(task)
+    if payload:
+        event_payload.update(payload)
+    room_keys = combine_room_keys(
+        task_scope_rooms(
+            task_id=task.id,
+            run_id=task.run_id,
+            flowchart_id=task.flowchart_id,
+            flowchart_run_id=task.flowchart_run_id,
+            flowchart_node_id=task.flowchart_node_id,
+        ),
+        extra_room_keys,
+    )
+    emit_contract_event(
+        event_type=event_type,
+        entity_kind="task",
+        entity_id=task.id,
+        room_keys=room_keys,
+        payload=event_payload,
+        runtime=_task_runtime_metadata(task, runtime_override=runtime_override),
+    )
+
+
+def _emit_flowchart_node_event(
+    event_type: str,
+    *,
+    flowchart_id: int,
+    flowchart_run_id: int,
+    flowchart_node_id: int,
+    node_type: str,
+    status: str,
+    execution_index: int | None = None,
+    node_run_id: int | None = None,
+    agent_task_id: int | None = None,
+    error: str | None = None,
+    output_state: dict[str, Any] | None = None,
+    routing_state: dict[str, Any] | None = None,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    runtime: dict[str, Any] | None = None,
+) -> None:
+    payload = {
+        "flowchart_id": flowchart_id,
+        "flowchart_run_id": flowchart_run_id,
+        "flowchart_node_id": flowchart_node_id,
+        "flowchart_node_type": node_type,
+        "node_run_id": node_run_id,
+        "agent_task_id": agent_task_id,
+        "status": status,
+        "execution_index": execution_index,
+        "error": error,
+        "output_state": output_state,
+        "routing_state": routing_state,
+        "started_at": _resolve_updated_at_version(started_at),
+        "finished_at": _resolve_updated_at_version(finished_at),
+    }
+    emit_contract_event(
+        event_type=event_type,
+        entity_kind="flowchart_node",
+        entity_id=node_run_id if node_run_id is not None else flowchart_node_id,
+        room_keys=flowchart_scope_rooms(
+            flowchart_id=flowchart_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_node_id=flowchart_node_id,
+        ),
+        payload=payload,
+        runtime=runtime,
+    )
+
+
+def _emit_flowchart_run_event(
+    event_type: str,
+    *,
+    run: FlowchartRun,
+    flowchart_id: int,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    event_payload = {
+        "flowchart_id": flowchart_id,
+        "flowchart_run_id": int(run.id),
+        "status": str(run.status),
+        "started_at": _resolve_updated_at_version(run.started_at),
+        "finished_at": _resolve_updated_at_version(run.finished_at),
+        "updated_at": _resolve_updated_at_version(run.updated_at),
+    }
+    if payload:
+        event_payload.update(payload)
+    emit_contract_event(
+        event_type=event_type,
+        entity_kind="flowchart_run",
+        entity_id=run.id,
+        room_keys=flowchart_scope_rooms(
+            flowchart_id=flowchart_id,
+            flowchart_run_id=run.id,
+        ),
+        payload=event_payload,
+        runtime=None,
+    )
+
+
+def _download_job_status_from_task_state(
+    *,
+    phase: str,
+    state: str,
+) -> str:
+    normalized_state = str(state or "").strip().upper()
+    normalized_phase = str(phase or "").strip().lower()
+    if normalized_state in {"FAILURE", "REVOKED"} or normalized_phase == "failed":
+        return "failed"
+    if normalized_state == "SUCCESS" or normalized_phase == "succeeded":
+        return "succeeded"
+    if normalized_state in {"PENDING", "RECEIVED"}:
+        return "queued"
+    if normalized_phase in {"queued", "preparing"}:
+        return "queued"
+    return "running"
+
+
+def _emit_download_job_event(
+    *,
+    job_id: str,
+    kind: str,
+    model_id: str,
+    target_dir: str,
+    phase: str,
+    summary: str,
+    state: str,
+    log_lines: list[str],
+    percent: float | None = None,
+) -> None:
+    status = _download_job_status_from_task_state(phase=phase, state=state)
+    payload = {
+        "download_job": {
+            "id": job_id,
+            "kind": kind,
+            "status": status,
+            "phase": phase,
+            "model_id": model_id,
+            "target_dir": target_dir,
+            "summary": summary,
+            "error": summary if status == "failed" else "",
+            "percent": percent,
+            "log_lines": list(log_lines),
+        }
+    }
+    emit_contract_event(
+        event_type=(
+            "download.job.completed"
+            if status in {"failed", "succeeded"}
+            else "download.job.updated"
+        ),
+        entity_kind="download_job",
+        entity_id=job_id,
+        room_keys=download_scope_rooms(job_id=job_id),
+        payload=payload,
+        runtime=None,
+    )
 
 
 def _serialize_materialized_paths(paths: list[str]) -> str | None:
@@ -487,6 +707,166 @@ def _load_gemini_auth_key() -> str:
 def _load_claude_auth_key() -> str:
     settings = load_integration_settings("llm")
     return (settings.get("claude_api_key") or "").strip()
+
+
+def _resolve_claude_auth_key(
+    env: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    settings_key = _load_claude_auth_key()
+    if settings_key:
+        return settings_key, "integration_settings"
+    source_env = env or os.environ
+    env_key = str(source_env.get("ANTHROPIC_API_KEY") or "").strip()
+    if env_key:
+        return env_key, "environment"
+    return "", ""
+
+
+def _resolve_claude_install_script() -> Path:
+    raw = str(Config.CLAUDE_CLI_INSTALL_SCRIPT or "").strip()
+    candidate = Path(raw) if raw else Path("scripts/install/install-claude-cli.sh")
+    if candidate == Path("app/llmctl-studio/scripts/install-claude.sh"):
+        candidate = Path("scripts/install/install-claude-cli.sh")
+    if candidate.is_absolute():
+        return candidate
+    return (REPO_ROOT / candidate).resolve()
+
+
+def _claude_cli_diagnostics(
+    env: dict[str, str] | None = None,
+) -> dict[str, object]:
+    source_env = env or os.environ
+    command = str(Config.CLAUDE_CMD or "claude").strip() or "claude"
+    path = shutil.which(command, path=source_env.get("PATH"))
+    diagnostics: dict[str, object] = {
+        "command": command,
+        "path": path or "",
+        "installed": bool(path),
+        "version": "",
+        "error": "",
+    }
+    if not path:
+        diagnostics["error"] = (
+            f"Command '{command}' is not on PATH. "
+            "Install Claude CLI or set CLAUDE_CMD to an absolute path."
+        )
+        return diagnostics
+    try:
+        result = subprocess.run(
+            [command, "--version"],
+            capture_output=True,
+            text=True,
+            env=source_env,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        diagnostics["error"] = f"Failed to read Claude CLI version: {exc}"
+        return diagnostics
+    version_text = (result.stdout or "").strip() or (result.stderr or "").strip()
+    if result.returncode != 0:
+        diagnostics["error"] = (
+            "Claude CLI returned a non-zero exit code while checking version: "
+            f"{version_text or 'unknown error'}"
+        )
+        return diagnostics
+    if not version_text:
+        diagnostics["error"] = "Claude CLI did not return a version string."
+        return diagnostics
+    diagnostics["version"] = version_text.splitlines()[0].strip()
+    return diagnostics
+
+
+def _ensure_claude_cli_ready(
+    *,
+    on_log: Callable[[str], None] | None = None,
+    env: dict[str, str] | None = None,
+) -> dict[str, object]:
+    diagnostics = _claude_cli_diagnostics(env=env)
+    if diagnostics["installed"] and diagnostics["version"]:
+        if on_log:
+            on_log(
+                "Claude runtime ready: "
+                f"{diagnostics['command']} ({diagnostics['version']})."
+            )
+        return diagnostics
+
+    install_script = _resolve_claude_install_script()
+    should_install = bool(Config.CLAUDE_CLI_AUTO_INSTALL)
+    if should_install:
+        if on_log:
+            on_log(
+                "Claude CLI not ready; attempting install via "
+                f"{install_script}."
+            )
+        if not install_script.exists():
+            if on_log:
+                on_log(
+                    "Claude install script is missing: "
+                    f"{install_script}."
+                )
+        else:
+            install_result = subprocess.run(
+                ["bash", str(install_script)],
+                capture_output=True,
+                text=True,
+                env=env or os.environ,
+                check=False,
+            )
+            if on_log and install_result.stdout.strip():
+                on_log(install_result.stdout.strip().splitlines()[-1])
+            if on_log and install_result.stderr.strip():
+                on_log(install_result.stderr.strip().splitlines()[-1])
+            diagnostics = _claude_cli_diagnostics(env=env)
+            if diagnostics["installed"] and diagnostics["version"]:
+                if on_log:
+                    on_log(
+                        "Claude install succeeded: "
+                        f"{diagnostics['command']} ({diagnostics['version']})."
+                    )
+                return diagnostics
+
+    error = str(diagnostics.get("error") or "Claude CLI is not ready.").strip()
+    message = (
+        "Claude runtime CLI check failed. "
+        f"{error} "
+        f"auto_install={'true' if should_install else 'false'} "
+        f"require_ready={'true' if Config.CLAUDE_CLI_REQUIRE_READY else 'false'}."
+    )
+    if Config.CLAUDE_CLI_REQUIRE_READY:
+        raise RuntimeError(message)
+    if on_log:
+        on_log(message)
+    return diagnostics
+
+
+def claude_runtime_diagnostics(
+    *,
+    env: dict[str, str] | None = None,
+) -> dict[str, object]:
+    cli = _claude_cli_diagnostics(env=env)
+    auth_key, auth_source = _resolve_claude_auth_key(env=env)
+    auth_required = bool(Config.CLAUDE_AUTH_REQUIRE_API_KEY)
+    auth_ready = bool(auth_key)
+    auth_status = "ready"
+    if auth_required and not auth_ready:
+        auth_status = "missing"
+    elif not auth_required and not auth_ready:
+        auth_status = "optional"
+    return {
+        "command": str(cli.get("command") or "claude"),
+        "cli_installed": bool(cli.get("installed")),
+        "cli_path": str(cli.get("path") or ""),
+        "cli_version": str(cli.get("version") or ""),
+        "cli_error": str(cli.get("error") or ""),
+        "cli_ready": bool(cli.get("installed")) and bool(cli.get("version")),
+        "auth_required": auth_required,
+        "auth_ready": auth_ready,
+        "auth_source": auth_source,
+        "auth_status": auth_status,
+        "auto_install_enabled": bool(Config.CLAUDE_CLI_AUTO_INSTALL),
+        "require_cli_ready": bool(Config.CLAUDE_CLI_REQUIRE_READY),
+    }
 
 
 def _load_vllm_remote_auth_key() -> str:
@@ -1698,6 +2078,113 @@ def cleanup_workspaces(self) -> dict[str, int]:
     }
 
 
+@celery_app.task(bind=True, name="services.tasks.run_huggingface_download_task")
+def run_huggingface_download_task(
+    self,
+    *,
+    kind: str,
+    model_id: str,
+    model_dir_name: str,
+    token: str,
+    model_container_path: str,
+) -> dict[str, object]:
+    job_id = str(self.request.id or "")
+    target_dir = str(vllm_local_model_directory(model_dir_name))
+    log_lines: deque[str] = deque(maxlen=24)
+
+    def _task_update(
+        *,
+        phase: str,
+        summary: str,
+        percent: float | None = None,
+        raw_line: str = "",
+        state: str = "PROGRESS",
+    ) -> None:
+        if raw_line:
+            log_lines.append(raw_line[:240])
+        meta: dict[str, object] = {
+            "kind": kind,
+            "model_id": model_id,
+            "target_dir": target_dir,
+            "phase": phase,
+            "summary": summary,
+            "log_lines": list(log_lines),
+        }
+        if percent is not None:
+            meta["percent"] = max(0.0, min(100.0, float(percent)))
+        self.update_state(state=state, meta=meta)
+        if job_id:
+            _emit_download_job_event(
+                job_id=job_id,
+                kind=kind,
+                model_id=model_id,
+                target_dir=target_dir,
+                phase=phase,
+                summary=summary,
+                state=state,
+                log_lines=list(log_lines),
+                percent=(meta.get("percent") if percent is not None else None),
+            )
+
+    _task_update(
+        phase="preparing",
+        summary=f"Preparing download for {model_id}.",
+        percent=1.0,
+        state="STARTED",
+    )
+    try:
+        run_huggingface_model_download(
+            model_id,
+            model_dir_name,
+            token=token,
+            model_container_path=model_container_path,
+            progress_callback=lambda payload: _task_update(
+                phase=str(payload.get("phase") or "downloading"),
+                summary=str(payload.get("summary") or "Downloading..."),
+                percent=(
+                    float(payload["percent"])
+                    if payload.get("percent") is not None
+                    else None
+                ),
+                raw_line=str(payload.get("raw_line") or ""),
+            ),
+        )
+    except FileNotFoundError as exc:
+        message = str(exc)
+        _task_update(phase="failed", summary=message, state="FAILURE")
+        raise RuntimeError(message) from exc
+    except ValueError as exc:
+        message = str(exc)
+        _task_update(phase="failed", summary=message, state="FAILURE")
+        raise RuntimeError(message) from exc
+    except subprocess.CalledProcessError as exc:
+        message = summarize_subprocess_error(exc)
+        _task_update(phase="failed", summary=message, state="FAILURE")
+        raise RuntimeError(message) from exc
+    except Exception as exc:  # pragma: no cover - defensive path
+        logger.exception("Unexpected HuggingFace download failure.")
+        message = "Download failed due to an unexpected error."
+        _task_update(phase="failed", summary=message, state="FAILURE")
+        raise RuntimeError(message) from exc
+
+    _task_update(
+        phase="succeeded",
+        summary=f"Downloaded {model_id} to {target_dir}.",
+        percent=100.0,
+        state="SUCCESS",
+    )
+
+    return {
+        "kind": kind,
+        "model_id": model_id,
+        "target_dir": target_dir,
+        "phase": "succeeded",
+        "summary": f"Downloaded {model_id} to {target_dir}.",
+        "percent": 100.0,
+        "log_lines": list(log_lines),
+    }
+
+
 def _load_prompt_payload(prompt_json: str | None, prompt_text: str | None) -> object | None:
     if prompt_json:
         try:
@@ -1939,6 +2426,21 @@ def _attach_task_attachments(task: AgentTask, attachments: list[Attachment]) -> 
         if attachment.id in existing_ids:
             continue
         task.attachments.append(attachment)
+
+
+def _merge_attachments(
+    first: list[Attachment],
+    second: list[Attachment],
+) -> list[Attachment]:
+    merged: list[Attachment] = []
+    seen: set[int] = set()
+    for attachment in list(first) + list(second):
+        attachment_id = int(getattr(attachment, "id", 0) or 0)
+        if attachment_id <= 0 or attachment_id in seen:
+            continue
+        seen.add(attachment_id)
+        merged.append(attachment)
+    return merged
 
 
 def _build_agent_payload(
@@ -2592,6 +3094,11 @@ def _run_llm(
     provider_label = _provider_label(provider)
     cmd: list[str] | None = None
     if provider == "codex":
+        env = dict(env or os.environ.copy())
+        codex_api_key = _load_codex_auth_key()
+        if codex_api_key:
+            env["OPENAI_API_KEY"] = codex_api_key
+            env["CODEX_API_KEY"] = codex_api_key
         codex_settings = _codex_settings_from_model_config(model_config or {})
         mcp_overrides = _build_mcp_overrides_from_configs(mcp_configs)
         codex_overrides = _build_codex_overrides(codex_settings)
@@ -2628,6 +3135,23 @@ def _run_llm(
             extra_args=gemini_settings.get("extra_args"),
         )
     elif provider == "claude":
+        env = dict(env or os.environ.copy())
+        claude_api_key, auth_source = _resolve_claude_auth_key(env)
+        if claude_api_key:
+            env["ANTHROPIC_API_KEY"] = claude_api_key
+        elif Config.CLAUDE_AUTH_REQUIRE_API_KEY:
+            raise RuntimeError(
+                "Claude runtime requires ANTHROPIC_API_KEY. "
+                "Set it in Settings -> Provider -> Claude or via environment."
+            )
+        elif on_log:
+            on_log(
+                "Claude auth key not set. Continuing because "
+                "CLAUDE_AUTH_REQUIRE_API_KEY=false."
+            )
+        if claude_api_key and on_log:
+            on_log(f"Claude auth source: {auth_source}.")
+        _ensure_claude_cli_ready(on_log=on_log, env=env)
         mcp_config = _build_claude_mcp_config(mcp_configs)
         model_name = str((model_config or {}).get("model") or "").strip()
         cmd = _build_claude_cmd(mcp_config, model=model_name)
@@ -2760,12 +3284,21 @@ def _update_task_logs(
         task = session.get(AgentTask, task_id)
         if task is None:
             return
+        previous_stage = task.current_stage
         task.output = output
         task.error = error
         if stage is not None:
             task.current_stage = stage
         if stage_logs is not None:
             task.stage_logs = stage_logs
+        if stage is not None and stage != previous_stage:
+            _emit_task_event(
+                "node.task.stage.updated",
+                task=task,
+                payload={
+                    "current_stage": task.current_stage,
+                },
+            )
 
 
 @celery_app.task(bind=True)
@@ -3150,6 +3683,13 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         task.celery_task_id = celery_task_id or task.celery_task_id
         task.status = "running"
         task.started_at = _utcnow()
+        _emit_task_event(
+            "node.task.updated",
+            task=task,
+            payload={
+                "transition": "started",
+            },
+        )
         selected_integration_keys = parse_task_integration_keys(
             task.integration_keys_json
         )
@@ -3437,6 +3977,14 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     instruction_materialized_paths
                 )
                 task.finished_at = now
+                _emit_task_event(
+                    "node.task.completed",
+                    task=task,
+                    payload={
+                        "terminal_status": "failed",
+                        "failure_message": message,
+                    },
+                )
             if agent is not None:
                 agent.last_run_at = now
                 agent.last_error = message
@@ -3643,7 +4191,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     llm_env["GEMINI_API_KEY"] = gemini_api_key
                     llm_env["GOOGLE_API_KEY"] = gemini_api_key
             elif provider == "claude":
-                claude_api_key = _load_claude_auth_key()
+                claude_api_key, _ = _resolve_claude_auth_key(llm_env)
                 if claude_api_key:
                     llm_env["ANTHROPIC_API_KEY"] = claude_api_key
             _validate_runtime_isolation_env(
@@ -3849,6 +4397,13 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 task.instruction_materialized_paths_json = _serialize_materialized_paths(
                     instruction_materialized_paths
                 )
+                _emit_task_event(
+                    "node.task.completed",
+                    task=task,
+                    payload={
+                        "terminal_status": "canceled",
+                    },
+                )
                 return
             task.status = "failed" if final_failed else "succeeded"
             task.finished_at = now
@@ -3869,6 +4424,14 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             task.instruction_adapter_mode = instruction_adapter_mode
             task.instruction_materialized_paths_json = _serialize_materialized_paths(
                 instruction_materialized_paths
+            )
+            _emit_task_event(
+                "node.task.completed",
+                task=task,
+                payload={
+                    "terminal_status": str(task.status),
+                    "failure_message": failure_message if final_failed else None,
+                },
             )
             if agent is not None:
                 agent.last_run_at = now
@@ -4305,6 +4868,68 @@ def _flowchart_node_task_prompt(
     )
 
 
+def _apply_flowchart_node_task_run_metadata(
+    task: AgentTask,
+    run_metadata: dict[str, Any] | None,
+) -> None:
+    if not isinstance(run_metadata, dict):
+        return
+
+    provider = str(run_metadata.get("selected_provider") or "").strip().lower()
+    if provider in {"workspace", "docker", "kubernetes"}:
+        task.selected_provider = provider
+
+    final_provider = str(run_metadata.get("final_provider") or "").strip().lower()
+    if final_provider in {"workspace", "docker", "kubernetes"}:
+        task.final_provider = final_provider
+
+    provider_dispatch_id_raw = run_metadata.get("provider_dispatch_id")
+    if provider_dispatch_id_raw is None:
+        task.provider_dispatch_id = None
+    else:
+        provider_dispatch_id = str(provider_dispatch_id_raw).strip()
+        task.provider_dispatch_id = provider_dispatch_id or None
+
+    workspace_identity = str(run_metadata.get("workspace_identity") or "").strip()
+    if workspace_identity:
+        task.workspace_identity = workspace_identity
+
+    dispatch_status = str(run_metadata.get("dispatch_status") or "").strip().lower()
+    if dispatch_status in {
+        "dispatch_pending",
+        "dispatch_submitted",
+        "dispatch_confirmed",
+        "dispatch_failed",
+        "fallback_started",
+    }:
+        task.dispatch_status = dispatch_status
+
+    task.fallback_attempted = _coerce_bool(run_metadata.get("fallback_attempted"))
+
+    fallback_reason_raw = run_metadata.get("fallback_reason")
+    if fallback_reason_raw is None:
+        task.fallback_reason = None
+    else:
+        fallback_reason = str(fallback_reason_raw).strip().lower()
+        task.fallback_reason = fallback_reason or None
+
+    task.dispatch_uncertain = _coerce_bool(run_metadata.get("dispatch_uncertain"))
+
+    api_failure_category_raw = run_metadata.get("api_failure_category")
+    if api_failure_category_raw is None:
+        task.api_failure_category = None
+    else:
+        api_failure_category = str(api_failure_category_raw).strip().lower()
+        task.api_failure_category = api_failure_category or None
+
+    task.cli_fallback_used = _coerce_bool(run_metadata.get("cli_fallback_used"))
+    cli_preflight_raw = run_metadata.get("cli_preflight_passed")
+    if cli_preflight_raw is None:
+        task.cli_preflight_passed = None
+    else:
+        task.cli_preflight_passed = _coerce_bool(cli_preflight_raw)
+
+
 def _create_flowchart_node_task(
     session,
     *,
@@ -4321,12 +4946,13 @@ def _create_flowchart_node_task(
     finished_at: datetime | None = None,
     output_state: dict[str, Any] | None = None,
     error: str | None = None,
+    run_metadata: dict[str, Any] | None = None,
 ) -> AgentTask:
     parsed_ref_id = _parse_optional_int(node_ref_id, default=0, minimum=0)
     task_template_id: int | None = None
     if node_type == FLOWCHART_NODE_TYPE_TASK and parsed_ref_id > 0:
         task_template_id = parsed_ref_id
-    return AgentTask.create(
+    task = AgentTask.create(
         session,
         agent_id=agent_id,
         task_template_id=task_template_id,
@@ -4348,6 +4974,8 @@ def _create_flowchart_node_task(
         started_at=started_at,
         finished_at=finished_at,
     )
+    _apply_flowchart_node_task_run_metadata(task, run_metadata)
+    return task
 
 
 def _update_flowchart_node_task(
@@ -4358,12 +4986,14 @@ def _update_flowchart_node_task(
     output_state: dict[str, Any] | None = None,
     error: str | None = None,
     finished_at: datetime | None = None,
+    run_metadata: dict[str, Any] | None = None,
 ) -> None:
     if node_run is None or node_run.agent_task_id is None:
         return
     task = session.get(AgentTask, node_run.agent_task_id)
     if task is None:
         return
+    _apply_flowchart_node_task_run_metadata(task, run_metadata)
     task.status = status
     if task.started_at is None and node_run.started_at is not None:
         task.started_at = node_run.started_at
@@ -4579,7 +5209,7 @@ def _record_flowchart_guardrail_failure(
             finished_at=now,
             error=message,
         )
-        FlowchartRunNode.create(
+        node_run = FlowchartRunNode.create(
             session,
             flowchart_run_id=run_id,
             flowchart_node_id=node_id,
@@ -4590,6 +5220,30 @@ def _record_flowchart_guardrail_failure(
             error=message,
             started_at=now,
             finished_at=now,
+        )
+        _emit_task_event(
+            "node.task.completed",
+            task=node_task,
+            payload={
+                "terminal_status": "failed",
+                "failure_message": message,
+                "guardrail_failure": True,
+            },
+        )
+        _emit_flowchart_node_event(
+            "flowchart.node.updated",
+            flowchart_id=flowchart_id,
+            flowchart_run_id=run_id,
+            flowchart_node_id=node_id,
+            node_type=node_type,
+            status="failed",
+            execution_index=execution_index,
+            node_run_id=node_run.id,
+            agent_task_id=node_task.id,
+            error=message,
+            started_at=now,
+            finished_at=now,
+            runtime=None,
         )
 
 
@@ -4619,6 +5273,7 @@ def _execute_optional_llm_transform(
     model: LLMModel,
     enabled_providers: set[str],
     mcp_configs: dict[str, dict[str, Any]],
+    attachments: list[Attachment] | None = None,
 ) -> Any:
     provider = model.provider
     if provider not in LLM_PROVIDERS:
@@ -4626,13 +5281,20 @@ def _execute_optional_llm_transform(
     if provider not in enabled_providers:
         raise ValueError(f"Provider disabled: {provider}.")
     model_config = _parse_model_config(model.config_json)
+    transform_prompt = prompt
+    if attachments:
+        transform_prompt = _inject_attachments(
+            transform_prompt,
+            _build_attachment_entries(attachments),
+            replace_existing=False,
+        )
     llm_env = os.environ.copy()
     with tempfile.TemporaryDirectory(prefix="llmctl-flowchart-transform-home-") as tmp_home:
         runtime_home = Path(tmp_home)
         _apply_run_local_home_env(llm_env, runtime_home)
         result = _run_llm(
             provider,
-            prompt,
+            transform_prompt,
             mcp_configs=mcp_configs,
             model_config=model_config,
             on_update=None,
@@ -4677,6 +5339,7 @@ def _execute_flowchart_task_node(
                 .options(
                     selectinload(FlowchartNode.mcp_servers),
                     selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.attachments),
                 )
                 .where(FlowchartNode.id == node_id)
             )
@@ -4761,7 +5424,11 @@ def _execute_flowchart_task_node(
         mcp_servers = list(node.mcp_servers)
         template_scripts = list(task_template.scripts) if task_template is not None else []
         node_scripts = list(node.scripts)
-        attachments = list(task_template.attachments) if task_template is not None else []
+        template_attachments = (
+            list(task_template.attachments) if task_template is not None else []
+        )
+        node_attachments = list(node.attachments)
+        attachments = _merge_attachments(template_attachments, node_attachments)
         if selected_agent_id is not None:
             try:
                 resolved_skills = resolve_agent_skills(session, selected_agent_id)
@@ -4769,6 +5436,8 @@ def _execute_flowchart_task_node(
                 raise ValueError(
                     f"Skill resolution failed for agent {selected_agent_id}: {exc}"
                 ) from exc
+    attachment_ids = [attachment.id for attachment in attachments]
+    attachment_entries = _build_attachment_entries(attachments)
 
     provider = model.provider
     llm_settings = load_integration_settings("llm")
@@ -4994,7 +5663,7 @@ def _execute_flowchart_task_node(
             agent_profile=selected_agent_profile,
             task_kind="flowchart",
         )
-    payload = _inject_attachments(payload, _build_attachment_entries(attachments))
+    payload = _inject_attachments(payload, attachment_entries)
     payload = _inject_runtime_metadata(payload, _build_runtime_payload(provider, model_config))
 
     resolved_skill_ids = (
@@ -5022,6 +5691,15 @@ def _execute_flowchart_task_node(
         if execution_task_id is not None:
             task = session.get(AgentTask, execution_task_id)
             if task is not None:
+                if attachment_ids:
+                    task_attachments = (
+                        session.execute(
+                            select(Attachment).where(Attachment.id.in_(attachment_ids))
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    _attach_task_attachments(task, task_attachments)
                 task.resolved_role_id = selected_agent_role_id
                 task.resolved_role_version = selected_agent_role_version
                 task.resolved_agent_id = selected_agent_id
@@ -5196,7 +5874,7 @@ def _execute_flowchart_task_node(
                 llm_env["GEMINI_API_KEY"] = gemini_api_key
                 llm_env["GOOGLE_API_KEY"] = gemini_api_key
         elif provider == "claude":
-            claude_api_key = _load_claude_auth_key()
+            claude_api_key, _ = _resolve_claude_auth_key(llm_env)
             if claude_api_key:
                 llm_env["ANTHROPIC_API_KEY"] = claude_api_key
         _validate_runtime_isolation_env(
@@ -5366,6 +6044,7 @@ def _execute_flowchart_task_node(
         "model_id": model.id,
         "model_name": model.name,
         "mcp_server_keys": [server.server_key for server in mcp_servers],
+        "attachments": attachment_entries,
         "integration_keys": (
             sorted(selected_integration_keys)
             if selected_integration_keys is not None
@@ -5475,6 +6154,7 @@ def _execute_flowchart_plan_node(
                 .options(
                     selectinload(FlowchartNode.mcp_servers),
                     selectinload(FlowchartNode.model),
+                    selectinload(FlowchartNode.attachments),
                 )
                 .where(FlowchartNode.id == node_id)
             )
@@ -5538,6 +6218,7 @@ def _execute_flowchart_plan_node(
                     model=model,
                     enabled_providers=enabled_providers,
                     mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
+                    attachments=list(node.attachments),
                 )
                 if isinstance(llm_patch, dict):
                     _apply_plan_completion_patch(
@@ -5553,6 +6234,7 @@ def _execute_flowchart_plan_node(
             "action": action,
             "action_results": action_results,
             "mcp_server_keys": list(mcp_server_keys),
+            "attachments": _build_attachment_entries(list(node.attachments)),
             "plan": _serialize_plan_for_node(plan),
         }
 
@@ -5584,6 +6266,7 @@ def _execute_flowchart_milestone_node(
                 .options(
                     selectinload(FlowchartNode.mcp_servers),
                     selectinload(FlowchartNode.model),
+                    selectinload(FlowchartNode.attachments),
                 )
                 .where(FlowchartNode.id == node_id)
             )
@@ -5666,6 +6349,7 @@ def _execute_flowchart_milestone_node(
                     model=model,
                     enabled_providers=enabled_providers,
                     mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
+                    attachments=list(node.attachments),
                 )
                 if isinstance(llm_patch, dict):
                     if "latest_update" in llm_patch:
@@ -5696,6 +6380,7 @@ def _execute_flowchart_milestone_node(
             "checkpoint_hit": checkpoint_hit,
             "action_results": action_results,
             "mcp_server_keys": list(mcp_server_keys),
+            "attachments": _build_attachment_entries(list(node.attachments)),
             "milestone": _serialize_milestone_for_node(milestone),
         }
 
@@ -5727,6 +6412,7 @@ def _execute_flowchart_milestone_node(
 
 def _execute_flowchart_memory_node(
     *,
+    node_id: int,
     node_ref_id: int | None,
     node_config: dict[str, Any],
     input_context: dict[str, Any],
@@ -5737,8 +6423,21 @@ def _execute_flowchart_memory_node(
     retrieved: list[dict[str, Any]] = []
     stored_memory: dict[str, Any] | None = None
     action_results: list[str] = []
+    attachment_entries: list[dict[str, object]] = []
 
     with session_scope() as session:
+        node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.attachments))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if node is None:
+            raise ValueError(f"Flowchart node {node_id} was not found.")
+        attachment_entries = _build_attachment_entries(list(node.attachments))
         if action == "fetch":
             if node_ref_id is not None:
                 memory = session.get(Memory, node_ref_id)
@@ -5795,6 +6494,7 @@ def _execute_flowchart_memory_node(
         "action": action,
         "action_results": action_results,
         "mcp_server_keys": list(mcp_server_keys),
+        "attachments": attachment_entries,
         "retrieved_memories": retrieved,
         "stored_memory": stored_memory,
     }
@@ -6160,12 +6860,31 @@ def _execute_flowchart_node(
         )
     if node_type == FLOWCHART_NODE_TYPE_MEMORY:
         return _execute_flowchart_memory_node(
+            node_id=node_id,
             node_ref_id=node_ref_id,
             node_config=node_config,
             input_context=input_context,
             mcp_server_keys=mcp_server_keys,
         )
     raise ValueError(f"Unsupported flowchart node type '{node_type}'.")
+
+
+def _execute_flowchart_node_request(
+    request: ExecutionRequest,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return _execute_flowchart_node(
+        node_id=request.node_id,
+        node_type=request.node_type,
+        node_ref_id=request.node_ref_id,
+        node_config=request.node_config,
+        input_context=request.input_context,
+        execution_id=request.execution_id,
+        execution_task_id=request.execution_task_id,
+        execution_index=request.execution_index,
+        enabled_providers=request.enabled_providers,
+        default_model_id=request.default_model_id,
+        mcp_server_keys=request.mcp_server_keys,
+    )
 
 
 def _queue_followup_flowchart_run(
@@ -6251,6 +6970,12 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
         run.celery_task_id = self.request.id
         run.status = "running"
         run.started_at = run.started_at or _utcnow()
+        _emit_flowchart_run_event(
+            "flowchart.run.updated",
+            run=run,
+            flowchart_id=flowchart_id,
+            payload={"transition": "started"},
+        )
 
         node_specs: dict[int, dict[str, Any]] = {}
         for node in list(flowchart.nodes):
@@ -6318,6 +7043,15 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                 )
                 run.status = "failed"
                 run.finished_at = _utcnow()
+                _emit_flowchart_run_event(
+                    "flowchart.run.updated",
+                    run=run,
+                    flowchart_id=flowchart_id,
+                    payload={
+                        "transition": "failed_precheck",
+                        "failure_message": message,
+                    },
+                )
                 rag_precheck_failure = (int(rag_node_ids[0]), message)
 
     if rag_precheck_failure is not None:
@@ -6340,6 +7074,8 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     llm_settings = load_integration_settings("llm")
     enabled_providers = resolve_enabled_llm_providers(llm_settings)
     default_model_id = resolve_default_model_id(llm_settings)
+    node_executor_runtime_settings = load_node_executor_runtime_settings()
+    execution_router = ExecutionRouter(runtime_settings=node_executor_runtime_settings)
 
     node_execution_counts: dict[int, int] = {}
     latest_results: dict[int, dict[str, Any]] = {}
@@ -6514,6 +7250,9 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                 if parsed_agent_id > 0:
                     node_agent_id = parsed_agent_id
 
+            routed_execution_request: ExecutionRequest | None = None
+            execution_result = None
+            node_task_id: int | None = None
             with session_scope() as session:
                 node_run_started_at = _utcnow()
                 node_task = _create_flowchart_node_task(
@@ -6532,6 +7271,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     status="running",
                     started_at=node_run_started_at,
                 )
+                node_task_id = node_task.id
                 node_run = FlowchartRunNode.create(
                     session,
                     flowchart_run_id=run_id,
@@ -6543,21 +7283,70 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     started_at=node_run_started_at,
                 )
                 node_run_id = node_run.id
-
-            try:
-                output_state, routing_state = _execute_flowchart_node(
+                execution_request = ExecutionRequest(
                     node_id=node_id,
                     node_type=str(node_spec["node_type"]),
                     node_ref_id=node_spec.get("ref_id"),
                     node_config=node_config,
                     input_context=input_context,
                     execution_id=node_run_id,
-                    execution_task_id=node_task.id,
+                    execution_task_id=node_task_id,
                     execution_index=execution_index,
                     enabled_providers=enabled_providers,
                     default_model_id=default_model_id,
                     mcp_server_keys=list(node_spec.get("mcp_server_keys") or []),
                 )
+                routed_execution_request = execution_router.route_request(execution_request)
+                _apply_flowchart_node_task_run_metadata(
+                    node_task,
+                    routed_execution_request.run_metadata_payload(),
+                )
+                runtime_payload = routed_execution_request.run_metadata_payload()
+                _emit_task_event(
+                    "node.task.updated",
+                    task=node_task,
+                    payload={
+                        "transition": "started",
+                        "execution_index": execution_index,
+                        "flowchart_node_run_id": node_run_id,
+                    },
+                    runtime_override=runtime_payload,
+                )
+                _emit_flowchart_node_event(
+                    "flowchart.node.updated",
+                    flowchart_id=flowchart_id,
+                    flowchart_run_id=run_id,
+                    flowchart_node_id=node_id,
+                    node_type=str(node_spec["node_type"]),
+                    status="running",
+                    execution_index=execution_index,
+                    node_run_id=node_run_id,
+                    agent_task_id=node_task_id,
+                    started_at=node_run_started_at,
+                    runtime=runtime_payload,
+                )
+
+            try:
+                if routed_execution_request is None:
+                    raise RuntimeError("Execution request routing did not initialize.")
+                execution_result = execution_router.execute_routed(
+                    routed_execution_request,
+                    _execute_flowchart_node_request,
+                )
+                if execution_result.status != "success":
+                    failure_error = execution_result.error
+                    failure_message = (
+                        str(failure_error.get("message") or "").strip()
+                        if isinstance(failure_error, dict)
+                        else ""
+                    )
+                    if not failure_message:
+                        failure_message = (
+                            f"Execution failed with status '{execution_result.status}'."
+                        )
+                    raise RuntimeError(failure_message)
+                output_state = execution_result.output_state
+                routing_state = execution_result.routing_state
             except Exception as exc:
                 logger.exception(
                     "Flowchart run %s failed in node %s (%s)",
@@ -6572,17 +7361,83 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         failed_node_run.status = "failed"
                         failed_node_run.error = str(exc)
                         failed_node_run.finished_at = finished_at
+                    runtime_payload = (
+                        execution_result.run_metadata
+                        if execution_result is not None
+                        else (
+                            routed_execution_request.run_metadata_payload()
+                            if routed_execution_request is not None
+                            else None
+                        )
+                    )
                     _update_flowchart_node_task(
                         session,
                         node_run=failed_node_run,
                         status="failed",
                         error=str(exc),
                         finished_at=finished_at,
+                        run_metadata=runtime_payload,
+                    )
+                    failed_task = None
+                    if (
+                        failed_node_run is not None
+                        and failed_node_run.agent_task_id is not None
+                    ):
+                        failed_task = session.get(AgentTask, failed_node_run.agent_task_id)
+                    if failed_task is not None:
+                        _emit_task_event(
+                            "node.task.completed",
+                            task=failed_task,
+                            payload={
+                                "terminal_status": "failed",
+                                "failure_message": str(exc),
+                                "flowchart_node_run_id": node_run_id,
+                                "execution_index": failed_node_run.execution_index
+                                if failed_node_run is not None
+                                else execution_index,
+                            },
+                            runtime_override=runtime_payload,
+                        )
+                    _emit_flowchart_node_event(
+                        "flowchart.node.updated",
+                        flowchart_id=flowchart_id,
+                        flowchart_run_id=run_id,
+                        flowchart_node_id=node_id,
+                        node_type=str(node_spec["node_type"]),
+                        status="failed",
+                        execution_index=(
+                            failed_node_run.execution_index
+                            if failed_node_run is not None
+                            else execution_index
+                        ),
+                        node_run_id=node_run_id,
+                        agent_task_id=(
+                            failed_node_run.agent_task_id
+                            if failed_node_run is not None
+                            else node_task_id
+                        ),
+                        error=str(exc),
+                        started_at=(
+                            failed_node_run.started_at
+                            if failed_node_run is not None
+                            else None
+                        ),
+                        finished_at=finished_at,
+                        runtime=runtime_payload,
                     )
                     run = session.get(FlowchartRun, run_id)
                     if run is not None and run.status != "canceled":
                         run.status = "failed"
                         run.finished_at = _utcnow()
+                        _emit_flowchart_run_event(
+                            "flowchart.run.updated",
+                            run=run,
+                            flowchart_id=flowchart_id,
+                            payload={
+                                "transition": "failed",
+                                "failure_message": str(exc),
+                            },
+                        )
                 return
 
             latest_results[node_id] = {
@@ -6662,6 +7517,71 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     status="succeeded",
                     output_state=output_state,
                     finished_at=finished_at,
+                    run_metadata=(
+                        execution_result.run_metadata
+                        if execution_result is not None
+                        else (
+                            routed_execution_request.run_metadata_payload()
+                            if routed_execution_request is not None
+                            else None
+                        )
+                    ),
+                )
+                runtime_payload = (
+                    execution_result.run_metadata
+                    if execution_result is not None
+                    else (
+                        routed_execution_request.run_metadata_payload()
+                        if routed_execution_request is not None
+                        else None
+                    )
+                )
+                succeeded_task = None
+                if (
+                    succeeded_node_run is not None
+                    and succeeded_node_run.agent_task_id is not None
+                ):
+                    succeeded_task = session.get(
+                        AgentTask, succeeded_node_run.agent_task_id
+                    )
+                if succeeded_task is not None:
+                    _emit_task_event(
+                        "node.task.completed",
+                        task=succeeded_task,
+                        payload={
+                            "terminal_status": "succeeded",
+                            "flowchart_node_run_id": node_run_id,
+                            "execution_index": succeeded_node_run.execution_index,
+                        },
+                        runtime_override=runtime_payload,
+                    )
+                _emit_flowchart_node_event(
+                    "flowchart.node.updated",
+                    flowchart_id=flowchart_id,
+                    flowchart_run_id=run_id,
+                    flowchart_node_id=node_id,
+                    node_type=str(node_spec["node_type"]),
+                    status="succeeded",
+                    execution_index=(
+                        succeeded_node_run.execution_index
+                        if succeeded_node_run is not None
+                        else execution_index
+                    ),
+                    node_run_id=node_run_id,
+                    agent_task_id=(
+                        succeeded_node_run.agent_task_id
+                        if succeeded_node_run is not None
+                        else node_task_id
+                    ),
+                    output_state=output_state,
+                    routing_state=routing_state,
+                    started_at=(
+                        succeeded_node_run.started_at
+                        if succeeded_node_run is not None
+                        else None
+                    ),
+                    finished_at=finished_at,
+                    runtime=runtime_payload,
                 )
 
             if _coerce_bool(routing_state.get("terminate_run")):
@@ -6707,6 +7627,78 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         error=str(exc),
                         finished_at=failed_node_run.finished_at if failed_node_run is not None else None,
                     )
+                    failed_task = None
+                    if (
+                        failed_node_run is not None
+                        and failed_node_run.agent_task_id is not None
+                    ):
+                        failed_task = session.get(AgentTask, failed_node_run.agent_task_id)
+                    if failed_task is not None:
+                        _emit_task_event(
+                            "node.task.completed",
+                            task=failed_task,
+                            payload={
+                                "terminal_status": str(failed_task.status),
+                                "failure_message": str(exc),
+                                "flowchart_node_run_id": failed_node_run.id
+                                if failed_node_run is not None
+                                else None,
+                                "execution_index": failed_node_run.execution_index
+                                if failed_node_run is not None
+                                else execution_index,
+                            },
+                        )
+                    _emit_flowchart_node_event(
+                        "flowchart.node.updated",
+                        flowchart_id=flowchart_id,
+                        flowchart_run_id=run_id,
+                        flowchart_node_id=node_id,
+                        node_type=str(node_spec["node_type"]),
+                        status=(
+                            failed_node_run.status
+                            if failed_node_run is not None
+                            else "failed"
+                        ),
+                        execution_index=(
+                            failed_node_run.execution_index
+                            if failed_node_run is not None
+                            else execution_index
+                        ),
+                        node_run_id=(
+                            failed_node_run.id if failed_node_run is not None else None
+                        ),
+                        agent_task_id=(
+                            failed_node_run.agent_task_id
+                            if failed_node_run is not None
+                            else node_task_id
+                        ),
+                        error=str(exc),
+                        started_at=(
+                            failed_node_run.started_at
+                            if failed_node_run is not None
+                            else None
+                        ),
+                        finished_at=(
+                            failed_node_run.finished_at
+                            if failed_node_run is not None
+                            else None
+                        ),
+                        runtime=(
+                            _task_runtime_metadata(failed_task)
+                            if failed_task is not None
+                            else None
+                        ),
+                    )
+                    if run is not None:
+                        _emit_flowchart_run_event(
+                            "flowchart.run.updated",
+                            run=run,
+                            flowchart_id=flowchart_id,
+                            payload={
+                                "transition": "failed",
+                                "failure_message": str(exc),
+                            },
+                        )
                 return
 
             if logger.isEnabledFor(logging.DEBUG):
@@ -6815,3 +7807,12 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             )
         run.status = final_status
         run.finished_at = _utcnow()
+        _emit_flowchart_run_event(
+            "flowchart.run.updated",
+            run=run,
+            flowchart_id=flowchart_id,
+            payload={
+                "transition": "completed",
+                "failure_message": failure_message if final_status == "failed" else None,
+            },
+        )

@@ -1,0 +1,370 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>chat.settings &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">chat.settings</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for chat.settings</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Iterable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">services.integrations</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_integration_settings</span><span class="p">,</span> <span class="n">save_integration_settings</span>
+
+<span class="n">CHAT_RUNTIME_SETTINGS_PROVIDER</span> <span class="o">=</span> <span class="s2">&quot;chat_runtime&quot;</span>
+<span class="n">CHAT_DEFAULT_SETTINGS_PROVIDER</span> <span class="o">=</span> <span class="s2">&quot;chat&quot;</span>
+
+<span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;history_budget_percent&quot;</span><span class="p">:</span> <span class="s2">&quot;60&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;rag_budget_percent&quot;</span><span class="p">:</span> <span class="s2">&quot;25&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp_budget_percent&quot;</span><span class="p">:</span> <span class="s2">&quot;15&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;compaction_trigger_percent&quot;</span><span class="p">:</span> <span class="s2">&quot;100&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;compaction_target_percent&quot;</span><span class="p">:</span> <span class="s2">&quot;85&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;preserve_recent_turns&quot;</span><span class="p">:</span> <span class="s2">&quot;4&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;rag_top_k&quot;</span><span class="p">:</span> <span class="s2">&quot;5&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;default_context_window_tokens&quot;</span><span class="p">:</span> <span class="s2">&quot;16000&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;max_compaction_summary_chars&quot;</span><span class="p">:</span> <span class="s2">&quot;2400&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">CHAT_DEFAULTS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;default_model_id&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;default_response_complexity&quot;</span><span class="p">:</span> <span class="s2">&quot;medium&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;default_mcp_server_ids&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;default_rag_collections&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">CHAT_RESPONSE_COMPLEXITY_CHOICES</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;low&quot;</span><span class="p">,</span> <span class="s2">&quot;medium&quot;</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span> <span class="s2">&quot;extra_high&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_as_int_range</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">minimum</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">maximum</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">parsed</span> <span class="o">=</span> <span class="nb">int</span><span class="p">((</span><span class="n">value</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">default</span>
+    <span class="k">if</span> <span class="n">parsed</span> <span class="o">&lt;</span> <span class="n">minimum</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">minimum</span>
+    <span class="k">if</span> <span class="n">parsed</span> <span class="o">&gt;</span> <span class="n">maximum</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">maximum</span>
+    <span class="k">return</span> <span class="n">parsed</span>
+
+
+<div class="viewcode-block" id="ChatRuntimeSettings">
+<a class="viewcode-back" href="../../api/chat.settings.html#chat.settings.ChatRuntimeSettings">[docs]</a>
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">ChatRuntimeSettings</span><span class="p">:</span>
+    <span class="n">history_budget_percent</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">rag_budget_percent</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">mcp_budget_percent</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">compaction_trigger_percent</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">compaction_target_percent</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">preserve_recent_turns</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">rag_top_k</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">default_context_window_tokens</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">max_compaction_summary_chars</span><span class="p">:</span> <span class="nb">int</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_unique_ordered</span><span class="p">(</span><span class="n">values</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="n">seen</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">ordered</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">values</span><span class="p">:</span>
+        <span class="n">cleaned</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cleaned</span> <span class="ow">or</span> <span class="n">cleaned</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">cleaned</span><span class="p">)</span>
+        <span class="n">ordered</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cleaned</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">ordered</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_coerce_string_list</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">object</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">raw</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">,</span> <span class="nb">set</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="n">_unique_ordered</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">raw</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;,&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_unique_ordered</span><span class="p">(</span><span class="n">part</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">text</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_coerce_positive_int</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">object</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">parsed</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">raw</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">parsed</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">parsed</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_coerce_int_list</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">object</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+    <span class="n">values</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">_coerce_string_list</span><span class="p">(</span><span class="n">raw</span><span class="p">):</span>
+        <span class="n">parsed</span> <span class="o">=</span> <span class="n">_coerce_positive_int</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">parsed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">parsed</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">values</span><span class="p">:</span>
+            <span class="n">values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">parsed</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">values</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalize_default_response_complexity</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">object</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_CHOICES</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">candidate</span>
+    <span class="k">return</span> <span class="s2">&quot;medium&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalized_settings_values</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+    <span class="n">history</span> <span class="o">=</span> <span class="n">_as_int_range</span><span class="p">(</span>
+        <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;history_budget_percent&quot;</span><span class="p">),</span>
+        <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;history_budget_percent&quot;</span><span class="p">]),</span>
+        <span class="mi">10</span><span class="p">,</span>
+        <span class="mi">90</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">rag</span> <span class="o">=</span> <span class="n">_as_int_range</span><span class="p">(</span>
+        <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rag_budget_percent&quot;</span><span class="p">),</span>
+        <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;rag_budget_percent&quot;</span><span class="p">]),</span>
+        <span class="mi">0</span><span class="p">,</span>
+        <span class="mi">80</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">history</span> <span class="o">+</span> <span class="n">rag</span> <span class="o">&gt;</span> <span class="mi">95</span><span class="p">:</span>
+        <span class="n">rag</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">95</span> <span class="o">-</span> <span class="n">history</span><span class="p">)</span>
+    <span class="n">mcp</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span> <span class="o">-</span> <span class="n">history</span> <span class="o">-</span> <span class="n">rag</span><span class="p">)</span>
+    <span class="n">trigger</span> <span class="o">=</span> <span class="n">_as_int_range</span><span class="p">(</span>
+        <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;compaction_trigger_percent&quot;</span><span class="p">),</span>
+        <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;compaction_trigger_percent&quot;</span><span class="p">]),</span>
+        <span class="mi">70</span><span class="p">,</span>
+        <span class="mi">100</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">target</span> <span class="o">=</span> <span class="n">_as_int_range</span><span class="p">(</span>
+        <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;compaction_target_percent&quot;</span><span class="p">),</span>
+        <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;compaction_target_percent&quot;</span><span class="p">]),</span>
+        <span class="mi">40</span><span class="p">,</span>
+        <span class="mi">99</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">target</span> <span class="o">&gt;=</span> <span class="n">trigger</span><span class="p">:</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">40</span><span class="p">,</span> <span class="n">trigger</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;history_budget_percent&quot;</span><span class="p">:</span> <span class="n">history</span><span class="p">,</span>
+        <span class="s2">&quot;rag_budget_percent&quot;</span><span class="p">:</span> <span class="n">rag</span><span class="p">,</span>
+        <span class="s2">&quot;mcp_budget_percent&quot;</span><span class="p">:</span> <span class="n">mcp</span><span class="p">,</span>
+        <span class="s2">&quot;compaction_trigger_percent&quot;</span><span class="p">:</span> <span class="n">trigger</span><span class="p">,</span>
+        <span class="s2">&quot;compaction_target_percent&quot;</span><span class="p">:</span> <span class="n">target</span><span class="p">,</span>
+        <span class="s2">&quot;preserve_recent_turns&quot;</span><span class="p">:</span> <span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;preserve_recent_turns&quot;</span><span class="p">),</span>
+            <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;preserve_recent_turns&quot;</span><span class="p">]),</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="mi">20</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;rag_top_k&quot;</span><span class="p">:</span> <span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rag_top_k&quot;</span><span class="p">),</span>
+            <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;rag_top_k&quot;</span><span class="p">]),</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="mi">50</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;default_context_window_tokens&quot;</span><span class="p">:</span> <span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_context_window_tokens&quot;</span><span class="p">),</span>
+            <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;default_context_window_tokens&quot;</span><span class="p">]),</span>
+            <span class="mi">1024</span><span class="p">,</span>
+            <span class="mi">1000000</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;max_compaction_summary_chars&quot;</span><span class="p">:</span> <span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;max_compaction_summary_chars&quot;</span><span class="p">),</span>
+            <span class="nb">int</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">[</span><span class="s2">&quot;max_compaction_summary_chars&quot;</span><span class="p">]),</span>
+            <span class="mi">200</span><span class="p">,</span>
+            <span class="mi">10000</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalized_chat_default_values</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+    <span class="n">default_model_id</span> <span class="o">=</span> <span class="n">_coerce_positive_int</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_model_id&quot;</span><span class="p">))</span>
+    <span class="n">default_response_complexity</span> <span class="o">=</span> <span class="n">_normalize_default_response_complexity</span><span class="p">(</span>
+        <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_response_complexity&quot;</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">mcp_server_ids</span> <span class="o">=</span> <span class="n">_coerce_int_list</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_mcp_server_ids&quot;</span><span class="p">))</span>
+    <span class="n">rag_collections</span> <span class="o">=</span> <span class="n">_coerce_string_list</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_rag_collections&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;default_model_id&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">default_model_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">default_model_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;default_response_complexity&quot;</span><span class="p">:</span> <span class="n">default_response_complexity</span><span class="p">,</span>
+        <span class="s2">&quot;default_mcp_server_ids&quot;</span><span class="p">:</span> <span class="s2">&quot;,&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">mcp_server_ids</span><span class="p">),</span>
+        <span class="s2">&quot;default_rag_collections&quot;</span><span class="p">:</span> <span class="s2">&quot;,&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">rag_collections</span><span class="p">),</span>
+    <span class="p">}</span>
+
+
+<div class="viewcode-block" id="load_chat_runtime_settings">
+<a class="viewcode-back" href="../../api/chat.settings.html#chat.settings.load_chat_runtime_settings">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_chat_runtime_settings</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ChatRuntimeSettings</span><span class="p">:</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">)</span>
+    <span class="n">raw</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">load_integration_settings</span><span class="p">(</span><span class="n">CHAT_RUNTIME_SETTINGS_PROVIDER</span><span class="p">))</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="n">_normalized_settings_values</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">ChatRuntimeSettings</span><span class="p">(</span>
+        <span class="n">history_budget_percent</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;history_budget_percent&quot;</span><span class="p">],</span>
+        <span class="n">rag_budget_percent</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;rag_budget_percent&quot;</span><span class="p">],</span>
+        <span class="n">mcp_budget_percent</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;mcp_budget_percent&quot;</span><span class="p">],</span>
+        <span class="n">compaction_trigger_percent</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;compaction_trigger_percent&quot;</span><span class="p">],</span>
+        <span class="n">compaction_target_percent</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;compaction_target_percent&quot;</span><span class="p">],</span>
+        <span class="n">preserve_recent_turns</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;preserve_recent_turns&quot;</span><span class="p">],</span>
+        <span class="n">rag_top_k</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;rag_top_k&quot;</span><span class="p">],</span>
+        <span class="n">default_context_window_tokens</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;default_context_window_tokens&quot;</span><span class="p">],</span>
+        <span class="n">max_compaction_summary_chars</span><span class="o">=</span><span class="n">values</span><span class="p">[</span><span class="s2">&quot;max_compaction_summary_chars&quot;</span><span class="p">],</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="load_chat_default_settings_payload">
+<a class="viewcode-back" href="../../api/chat.settings.html#chat.settings.load_chat_default_settings_payload">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_chat_default_settings_payload</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]:</span>
+    <span class="n">raw</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">CHAT_DEFAULTS</span><span class="p">)</span>
+    <span class="n">raw</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">load_integration_settings</span><span class="p">(</span><span class="n">CHAT_DEFAULT_SETTINGS_PROVIDER</span><span class="p">))</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="n">_normalized_chat_default_values</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+    <span class="n">default_model_id</span> <span class="o">=</span> <span class="n">_coerce_positive_int</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_model_id&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;default_model_id&quot;</span><span class="p">:</span> <span class="n">default_model_id</span><span class="p">,</span>
+        <span class="s2">&quot;default_response_complexity&quot;</span><span class="p">:</span> <span class="n">_normalize_default_response_complexity</span><span class="p">(</span>
+            <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_response_complexity&quot;</span><span class="p">)</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;default_mcp_server_ids&quot;</span><span class="p">:</span> <span class="n">_coerce_int_list</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_mcp_server_ids&quot;</span><span class="p">)),</span>
+        <span class="s2">&quot;default_rag_collections&quot;</span><span class="p">:</span> <span class="n">_coerce_string_list</span><span class="p">(</span>
+            <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_rag_collections&quot;</span><span class="p">)</span>
+        <span class="p">),</span>
+    <span class="p">}</span></div>
+
+
+
+<div class="viewcode-block" id="load_chat_runtime_settings_payload">
+<a class="viewcode-back" href="../../api/chat.settings.html#chat.settings.load_chat_runtime_settings_payload">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_chat_runtime_settings_payload</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="n">load_chat_runtime_settings</span><span class="p">()</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;history_budget_percent&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">history_budget_percent</span><span class="p">),</span>
+        <span class="s2">&quot;rag_budget_percent&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">rag_budget_percent</span><span class="p">),</span>
+        <span class="s2">&quot;mcp_budget_percent&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">mcp_budget_percent</span><span class="p">),</span>
+        <span class="s2">&quot;compaction_trigger_percent&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">compaction_trigger_percent</span><span class="p">),</span>
+        <span class="s2">&quot;compaction_target_percent&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">compaction_target_percent</span><span class="p">),</span>
+        <span class="s2">&quot;preserve_recent_turns&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">preserve_recent_turns</span><span class="p">),</span>
+        <span class="s2">&quot;rag_top_k&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">rag_top_k</span><span class="p">),</span>
+        <span class="s2">&quot;default_context_window_tokens&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">default_context_window_tokens</span><span class="p">),</span>
+        <span class="s2">&quot;max_compaction_summary_chars&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">max_compaction_summary_chars</span><span class="p">),</span>
+    <span class="p">}</span></div>
+
+
+
+<div class="viewcode-block" id="save_chat_runtime_settings">
+<a class="viewcode-back" href="../../api/chat.settings.html#chat.settings.save_chat_runtime_settings">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">save_chat_runtime_settings</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">merged</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">CHAT_RUNTIME_DEFAULTS</span><span class="p">)</span>
+    <span class="n">merged</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="n">_normalized_settings_values</span><span class="p">(</span><span class="n">merged</span><span class="p">)</span>
+    <span class="n">serialized</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">values</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">save_integration_settings</span><span class="p">(</span><span class="n">CHAT_RUNTIME_SETTINGS_PROVIDER</span><span class="p">,</span> <span class="n">serialized</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="save_chat_default_settings">
+<a class="viewcode-back" href="../../api/chat.settings.html#chat.settings.save_chat_default_settings">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">save_chat_default_settings</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">merged</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">CHAT_DEFAULTS</span><span class="p">)</span>
+    <span class="n">merged</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="n">_normalized_chat_default_values</span><span class="p">(</span><span class="n">merged</span><span class="p">)</span>
+    <span class="n">save_integration_settings</span><span class="p">(</span><span class="n">CHAT_DEFAULT_SETTINGS_PROVIDER</span><span class="p">,</span> <span class="n">values</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

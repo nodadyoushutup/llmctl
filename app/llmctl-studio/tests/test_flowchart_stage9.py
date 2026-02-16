@@ -22,6 +22,7 @@ from core.db import session_scope
 from core.models import (
     Agent,
     AgentTask,
+    Attachment,
     FLOWCHART_NODE_TYPE_DECISION,
     FLOWCHART_NODE_TYPE_END,
     FLOWCHART_NODE_TYPE_FLOWCHART,
@@ -486,6 +487,137 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             self.assertIsNotNone(task)
             assert task is not None
             self.assertEqual(agent_id, task.agent_id)
+
+    def test_task_node_merges_template_and_node_attachments(self) -> None:
+        with session_scope() as session:
+            model = LLMModel.create(
+                session,
+                name="attachment-task-model",
+                provider="codex",
+                config_json="{}",
+            )
+            template = TaskTemplate.create(
+                session,
+                name="template-with-attachments",
+                prompt="Return route_key=done",
+                model_id=model.id,
+            )
+            template_attachment = Attachment.create(
+                session,
+                file_name="template.txt",
+                file_path="/tmp/template.txt",
+                content_type="text/plain",
+                size_bytes=8,
+            )
+            node_attachment = Attachment.create(
+                session,
+                file_name="node.txt",
+                file_path="/tmp/node.txt",
+                content_type="text/plain",
+                size_bytes=4,
+            )
+            template.attachments.append(template_attachment)
+            flowchart = Flowchart.create(session, name="attachment-flowchart")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            task_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                ref_id=template.id,
+                model_id=model.id,
+                x=1.0,
+                y=0.0,
+                config_json=json.dumps({}, sort_keys=True),
+            )
+            task_node.attachments.append(node_attachment)
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=task_node.id,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            run_id = flowchart_run.id
+            task_node_id = task_node.id
+            flowchart_id = flowchart.id
+            template_attachment_id = template_attachment.id
+            node_attachment_id = node_attachment.id
+
+        with patch.object(
+            studio_tasks,
+            "_run_llm",
+            return_value=SimpleNamespace(
+                args=[],
+                returncode=0,
+                stdout=json.dumps({"route_key": "done"}),
+                stderr="",
+            ),
+        ) as llm_mock, patch.object(
+            studio_tasks,
+            "load_integration_settings",
+            return_value={},
+        ), patch.object(
+            studio_tasks,
+            "resolve_enabled_llm_providers",
+            return_value={"codex"},
+        ), patch.object(
+            studio_tasks,
+            "resolve_default_model_id",
+            return_value=None,
+        ):
+            studio_tasks.run_flowchart.run(flowchart_id, run_id)
+
+        llm_prompt = llm_mock.call_args.args[1]
+        llm_payload = json.loads(llm_prompt)
+        attachment_entries = (
+            (llm_payload.get("task_context") or {}).get("attachments") or []
+        )
+        attachment_ids = {int(entry.get("id")) for entry in attachment_entries if entry.get("id")}
+        self.assertEqual({template_attachment_id, node_attachment_id}, attachment_ids)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            self.assertIsNotNone(run)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            node_run = (
+                session.query(FlowchartRunNode)
+                .where(
+                    FlowchartRunNode.flowchart_run_id == run_id,
+                    FlowchartRunNode.flowchart_node_id == task_node_id,
+                )
+                .first()
+            )
+            self.assertIsNotNone(node_run)
+            assert node_run is not None
+            output_state = json.loads(node_run.output_state_json or "{}")
+            output_attachment_ids = {
+                int(entry.get("id"))
+                for entry in (output_state.get("attachments") or [])
+                if entry.get("id")
+            }
+            self.assertEqual(
+                {template_attachment_id, node_attachment_id},
+                output_attachment_ids,
+            )
+            task = session.get(AgentTask, node_run.agent_task_id)
+            self.assertIsNotNone(task)
+            assert task is not None
+            task_attachment_ids = {attachment.id for attachment in list(task.attachments)}
+            self.assertEqual(
+                {template_attachment_id, node_attachment_id},
+                task_attachment_ids,
+            )
 
     def test_flowchart_task_output_display_prefers_raw_output(self) -> None:
         output = studio_tasks._flowchart_task_output_display(
@@ -1249,6 +1381,29 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         self.assertEqual(1, run_mock.call_count)
         self.assertIn("--skip-git-repo-check", run_mock.call_args.args[0])
 
+    def test_run_llm_codex_injects_api_key_env(self) -> None:
+        failed = subprocess.CompletedProcess(
+            args=["codex", "exec"],
+            returncode=1,
+            stdout="",
+            stderr="unauthorized",
+        )
+
+        with patch.object(
+            studio_tasks, "_load_codex_auth_key", return_value="test-codex-key"
+        ), patch.object(studio_tasks, "_run_llm_process", return_value=failed) as run_mock:
+            result = studio_tasks._run_llm(
+                provider="codex",
+                prompt="hello",
+                mcp_configs={},
+                model_config={},
+            )
+
+        self.assertEqual(1, result.returncode)
+        env = run_mock.call_args.kwargs.get("env") or {}
+        self.assertEqual("test-codex-key", env.get("OPENAI_API_KEY"))
+        self.assertEqual("test-codex-key", env.get("CODEX_API_KEY"))
+
 
 class FlowchartStage9ApiTests(StudioDbTestCase):
     def setUp(self) -> None:
@@ -1374,6 +1529,81 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         )
         self.assertEqual(200, delete_response.status_code)
         self.assertTrue((delete_response.get_json() or {}).get("deleted"))
+
+    def test_graph_persists_attachment_ids_and_rejects_unsupported_node_types(self) -> None:
+        with session_scope() as session:
+            attachment = Attachment.create(
+                session,
+                file_name="context.txt",
+                file_path="/tmp/context.txt",
+                content_type="text/plain",
+                size_bytes=12,
+            )
+            attachment_id = attachment.id
+
+        flowchart_id = self._create_flowchart("Stage 9 Attachments")
+        graph_before = self.client.get(f"/flowcharts/{flowchart_id}/graph")
+        self.assertEqual(200, graph_before.status_code)
+        existing_nodes = (graph_before.get_json() or {}).get("nodes") or []
+        start_node_id = next(
+            int(node["id"])
+            for node in existing_nodes
+            if node.get("node_type") == FLOWCHART_NODE_TYPE_START
+        )
+        save_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "id": start_node_id,
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-memory",
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "x": 120,
+                        "y": 0,
+                        "attachment_ids": [attachment_id],
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-memory",
+                        "edge_mode": "solid",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, save_response.status_code)
+        payload = save_response.get_json() or {}
+        memory_node = next(
+            node for node in (payload.get("nodes") or []) if node.get("node_type") == "memory"
+        )
+        self.assertIn(attachment_id, memory_node.get("attachment_ids") or [])
+
+        invalid_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "id": start_node_id,
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                        "attachment_ids": [attachment_id],
+                    }
+                ],
+                "edges": [],
+            },
+        )
+        self.assertEqual(400, invalid_response.status_code)
+        error_text = str((invalid_response.get_json() or {}).get("error") or "")
+        self.assertIn("does not support attachments", error_text)
 
     def test_graph_allows_any_edge_handle_direction(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Flexible Handles")

@@ -11,6 +11,43 @@ def _ensure_dir(path: Path) -> Path:
     return path
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= minimum else default
+
+
+def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value >= minimum else default
+
+
+def _env_str(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    text = value.strip()
+    return text or default
+
+
 class Config:
     DATA_DIR = str(
         _ensure_dir(Path(os.getenv("LLMCTL_STUDIO_DATA_DIR", REPO_ROOT / "data")))
@@ -32,6 +69,15 @@ class Config:
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{Path(DATA_DIR) / DATABASE_FILENAME}"
 
     SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev")
+    PREFERRED_URL_SCHEME = os.getenv("LLMCTL_STUDIO_PREFERRED_URL_SCHEME", "http")
+
+    # Reverse proxy trust controls. Keep disabled unless explicitly enabled.
+    PROXY_FIX_ENABLED = _env_bool("LLMCTL_STUDIO_PROXY_FIX_ENABLED", False)
+    PROXY_FIX_X_FOR = _env_int("LLMCTL_STUDIO_PROXY_FIX_X_FOR", 1, minimum=0)
+    PROXY_FIX_X_PROTO = _env_int("LLMCTL_STUDIO_PROXY_FIX_X_PROTO", 1, minimum=0)
+    PROXY_FIX_X_HOST = _env_int("LLMCTL_STUDIO_PROXY_FIX_X_HOST", 1, minimum=0)
+    PROXY_FIX_X_PORT = _env_int("LLMCTL_STUDIO_PROXY_FIX_X_PORT", 1, minimum=0)
+    PROXY_FIX_X_PREFIX = _env_int("LLMCTL_STUDIO_PROXY_FIX_X_PREFIX", 1, minimum=0)
 
     CELERY_REDIS_HOST = os.getenv("CELERY_REDIS_HOST", "127.0.0.1")
     CELERY_REDIS_PORT = int(os.getenv("CELERY_REDIS_PORT", "6380"))
@@ -63,6 +109,43 @@ class Config:
             ),
             "store_processed": True,
         }
+    SOCKETIO_REDIS_DB = _env_str(
+        "LLMCTL_STUDIO_SOCKETIO_REDIS_DB",
+        CELERY_REDIS_BROKER_DB,
+    )
+    _DEFAULT_SOCKETIO_MESSAGE_QUEUE = (
+        f"redis://{CELERY_REDIS_HOST}:{CELERY_REDIS_PORT}/{SOCKETIO_REDIS_DB}"
+    )
+    SOCKETIO_MESSAGE_QUEUE = _env_str(
+        "LLMCTL_STUDIO_SOCKETIO_MESSAGE_QUEUE",
+        _DEFAULT_SOCKETIO_MESSAGE_QUEUE,
+    )
+    SOCKETIO_ASYNC_MODE = _env_str("LLMCTL_STUDIO_SOCKETIO_ASYNC_MODE", "threading")
+    SOCKETIO_PATH = _env_str("LLMCTL_STUDIO_SOCKETIO_PATH", "socket.io")
+    SOCKETIO_CORS_ALLOWED_ORIGINS = _env_str(
+        "LLMCTL_STUDIO_SOCKETIO_CORS_ALLOWED_ORIGINS",
+        "*",
+    )
+    SOCKETIO_TRANSPORTS = _env_str(
+        "LLMCTL_STUDIO_SOCKETIO_TRANSPORTS",
+        "websocket,polling",
+    )
+    SOCKETIO_PING_INTERVAL = _env_float(
+        "LLMCTL_STUDIO_SOCKETIO_PING_INTERVAL",
+        25.0,
+        minimum=1.0,
+    )
+    SOCKETIO_PING_TIMEOUT = _env_float(
+        "LLMCTL_STUDIO_SOCKETIO_PING_TIMEOUT",
+        60.0,
+        minimum=1.0,
+    )
+    SOCKETIO_MONITOR_CLIENTS = _env_bool("LLMCTL_STUDIO_SOCKETIO_MONITOR_CLIENTS", True)
+    SOCKETIO_LOGGER = _env_bool("LLMCTL_STUDIO_SOCKETIO_LOGGER", False)
+    SOCKETIO_ENGINEIO_LOGGER = _env_bool(
+        "LLMCTL_STUDIO_SOCKETIO_ENGINEIO_LOGGER",
+        False,
+    )
 
     AGENT_POLL_SECONDS = float(os.getenv("AGENT_POLL_SECONDS", "1"))
     CELERY_REVOKE_ON_STOP = os.getenv("CELERY_REVOKE_ON_STOP", "false").lower() == "true"
@@ -83,6 +166,19 @@ class Config:
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
     CLAUDE_CMD = os.getenv("CLAUDE_CMD", "claude")
     CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "")
+    CLAUDE_CLI_AUTO_INSTALL = (
+        os.getenv("CLAUDE_CLI_AUTO_INSTALL", "false").lower() == "true"
+    )
+    CLAUDE_CLI_REQUIRE_READY = (
+        os.getenv("CLAUDE_CLI_REQUIRE_READY", "true").lower() == "true"
+    )
+    CLAUDE_CLI_INSTALL_SCRIPT = os.getenv(
+        "CLAUDE_CLI_INSTALL_SCRIPT",
+        "scripts/install/install-claude-cli.sh",
+    )
+    CLAUDE_AUTH_REQUIRE_API_KEY = (
+        os.getenv("CLAUDE_AUTH_REQUIRE_API_KEY", "true").lower() == "true"
+    )
     VLLM_LOCAL_CMD = os.getenv("VLLM_LOCAL_CMD", "vllm")
     VLLM_REMOTE_BASE_URL = os.getenv("VLLM_REMOTE_BASE_URL", "")
     VLLM_REMOTE_API_KEY = os.getenv("VLLM_REMOTE_API_KEY", "")
@@ -92,9 +188,9 @@ class Config:
     if _VLLM_LOCAL_CUSTOM_MODELS_DIR_ENV:
         VLLM_LOCAL_CUSTOM_MODELS_DIR = str(Path(_VLLM_LOCAL_CUSTOM_MODELS_DIR_ENV))
     else:
-        VLLM_LOCAL_CUSTOM_MODELS_DIR = str(_ensure_dir(REPO_ROOT / "models"))
+        VLLM_LOCAL_CUSTOM_MODELS_DIR = str(_ensure_dir(Path(DATA_DIR) / "models"))
     VLLM_LOCAL_FALLBACK_MODEL = os.getenv(
-        "VLLM_LOCAL_FALLBACK_MODEL", "/app/models/custom/qwen2.5-0.5b-instruct"
+        "VLLM_LOCAL_FALLBACK_MODEL", ""
     )
     VLLM_REMOTE_DEFAULT_MODEL = os.getenv("VLLM_REMOTE_DEFAULT_MODEL", "GLM-4.7-Flash")
 
@@ -103,3 +199,91 @@ class Config:
     CHROMA_SSL = os.getenv("CHROMA_SSL", "false")
 
     GITHUB_MCP_URL = os.getenv("GITHUB_MCP_URL", "")
+
+    NODE_EXECUTOR_PROVIDER = os.getenv("LLMCTL_NODE_EXECUTOR_PROVIDER", "workspace")
+    NODE_EXECUTOR_FALLBACK_PROVIDER = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_FALLBACK_PROVIDER",
+        "workspace",
+    )
+    NODE_EXECUTOR_FALLBACK_ENABLED = (
+        os.getenv("LLMCTL_NODE_EXECUTOR_FALLBACK_ENABLED", "true").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    NODE_EXECUTOR_FALLBACK_ON_DISPATCH_ERROR = (
+        os.getenv(
+            "LLMCTL_NODE_EXECUTOR_FALLBACK_ON_DISPATCH_ERROR",
+            "true",
+        )
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+    NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS",
+        "60",
+    )
+    NODE_EXECUTOR_EXECUTION_TIMEOUT_SECONDS = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_EXECUTION_TIMEOUT_SECONDS",
+        "1800",
+    )
+    NODE_EXECUTOR_LOG_COLLECTION_TIMEOUT_SECONDS = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_LOG_COLLECTION_TIMEOUT_SECONDS",
+        "30",
+    )
+    NODE_EXECUTOR_CANCEL_GRACE_TIMEOUT_SECONDS = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_CANCEL_GRACE_TIMEOUT_SECONDS",
+        "15",
+    )
+    NODE_EXECUTOR_CANCEL_FORCE_KILL_ENABLED = (
+        os.getenv("LLMCTL_NODE_EXECUTOR_CANCEL_FORCE_KILL_ENABLED", "true")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+    NODE_EXECUTOR_WORKSPACE_ROOT = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_WORKSPACE_ROOT",
+        WORKSPACES_DIR,
+    )
+    NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY",
+        "default",
+    )
+    NODE_EXECUTOR_DOCKER_HOST = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_DOCKER_HOST",
+        os.getenv("DOCKER_HOST", "unix:///var/run/docker.sock"),
+    )
+    NODE_EXECUTOR_DOCKER_IMAGE = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_DOCKER_IMAGE",
+        "llmctl-executor:latest",
+    )
+    NODE_EXECUTOR_DOCKER_NETWORK = os.getenv("LLMCTL_NODE_EXECUTOR_DOCKER_NETWORK", "")
+    NODE_EXECUTOR_DOCKER_PULL_POLICY = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_DOCKER_PULL_POLICY",
+        "if_not_present",
+    )
+    NODE_EXECUTOR_DOCKER_ENV_JSON = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_DOCKER_ENV_JSON",
+        "",
+    )
+    NODE_EXECUTOR_K8S_NAMESPACE = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_NAMESPACE",
+        "default",
+    )
+    NODE_EXECUTOR_K8S_IMAGE = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_IMAGE",
+        "llmctl-executor:latest",
+    )
+    NODE_EXECUTOR_K8S_IN_CLUSTER = (
+        os.getenv("LLMCTL_NODE_EXECUTOR_K8S_IN_CLUSTER", "false")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+    NODE_EXECUTOR_K8S_SERVICE_ACCOUNT = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_SERVICE_ACCOUNT",
+        "",
+    )
+    NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON",
+        "",
+    )

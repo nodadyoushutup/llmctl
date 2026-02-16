@@ -7,6 +7,7 @@ from core.config import Config
 from rag.contracts import RAG_QUEUE_DRIVE, RAG_QUEUE_GIT, RAG_QUEUE_INDEX
 
 STUDIO_TASK_QUEUE = "llmctl_studio"
+HUGGINGFACE_DOWNLOAD_QUEUE = "llmctl_studio.downloads.huggingface"
 
 celery_app = Celery("llmctl_studio")
 celery_config = {
@@ -20,12 +21,14 @@ celery_config = {
     "timezone": "UTC",
     "task_queues": [
         Queue(STUDIO_TASK_QUEUE),
+        Queue(HUGGINGFACE_DOWNLOAD_QUEUE),
         Queue(RAG_QUEUE_INDEX),
         Queue(RAG_QUEUE_DRIVE),
         Queue(RAG_QUEUE_GIT),
     ],
     "task_routes": {
         "rag.worker.tasks.run_index_task": {"queue": RAG_QUEUE_INDEX},
+        "services.tasks.run_huggingface_download_task": {"queue": HUGGINGFACE_DOWNLOAD_QUEUE},
     },
 }
 if Config.WORKSPACE_CLEANUP_ENABLED and Config.WORKSPACE_CLEANUP_INTERVAL_SECONDS > 0:

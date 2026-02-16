@@ -1,0 +1,7 @@
+rag.engine.office\_parsers module
+=================================
+
+.. automodule:: rag.engine.office_parsers
+   :members:
+   :show-inheritance:
+   :undoc-members:

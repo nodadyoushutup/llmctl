@@ -1,0 +1,7 @@
+rag.integrations.git\_sync module
+=================================
+
+.. automodule:: rag.integrations.git_sync
+   :members:
+   :show-inheritance:
+   :undoc-members:

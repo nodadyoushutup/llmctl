@@ -185,6 +185,54 @@ def _source_location(source: Any) -> str:
     return "-"
 
 
+def _wants_json_response() -> bool:
+    accept = str(request.headers.get("Accept") or "").lower()
+    if "application/json" in accept:
+        return True
+    requested_with = str(request.headers.get("X-Requested-With") or "").strip().lower()
+    return requested_with == "xmlhttprequest"
+
+
+def _parse_source_ids_csv(raw_ids: str | None) -> list[int]:
+    if not raw_ids:
+        return []
+    source_ids: list[int] = []
+    for item in str(raw_ids).split(","):
+        cleaned = item.strip()
+        if not cleaned:
+            continue
+        try:
+            parsed = int(cleaned)
+        except ValueError:
+            continue
+        if parsed > 0 and parsed not in source_ids:
+            source_ids.append(parsed)
+    return source_ids
+
+
+def _source_status_label(source: Any, *, has_active_job: bool) -> str:
+    if has_active_job:
+        return "Indexing"
+    if getattr(source, "last_error", None):
+        return "Error"
+    if getattr(source, "last_indexed_at", None):
+        return "Indexed"
+    return "Not indexed"
+
+
+def _source_status_payload(source: Any, *, has_active_job: bool) -> dict[str, Any]:
+    return {
+        "id": int(getattr(source, "id")),
+        "has_active_job": bool(has_active_job),
+        "status": _source_status_label(source, has_active_job=has_active_job),
+        "last_indexed_at": (
+            getattr(source, "last_indexed_at").isoformat()
+            if getattr(source, "last_indexed_at", None)
+            else None
+        ),
+    }
+
+
 def _resolve_chroma_settings() -> dict[str, str]:
     settings = load_integration_settings("chroma")
     host = (settings.get("host") or "").strip() or (Config.CHROMA_HOST or "").strip()
@@ -288,9 +336,11 @@ def chat_page():
 @bp.get(RAG_PAGE_SOURCES)
 def sources_page():
     sources = list_sources(limit=None)
+    active_source_job_ids: set[int] = set()
     return render_template(
         "rag/sources.html",
         sources=sources,
+        active_source_job_ids=active_source_job_ids,
         source_location=_source_location,
         source_schedule_text=_source_schedule_text,
         format_source_time=_format_source_time,
@@ -304,7 +354,7 @@ def sources_page():
 @bp.get(f"{RAG_PAGE_SOURCES}/new")
 def new_source_page():
     github_settings = load_integration_settings("github")
-    drive_settings = load_integration_settings("google_drive")
+    drive_settings = load_integration_settings("google_workspace")
     service_email = None
     service_json = (drive_settings.get("service_account_json") or "").strip()
     if service_json:
@@ -357,6 +407,7 @@ def source_detail_page(source_id: int):
     if not source:
         flash("Source not found.", "error")
         return redirect(url_for("rag.sources_page"))
+    source_has_active_job = False
 
     file_types: list[dict[str, Any]] = []
     raw_types = getattr(source, "indexed_file_types", None)
@@ -372,6 +423,7 @@ def source_detail_page(source_id: int):
     return render_template(
         "rag/source_detail.html",
         source=source,
+        source_has_active_job=source_has_active_job,
         file_types=file_types,
         source_location=_source_location,
         source_schedule_text=_source_schedule_text,
@@ -390,7 +442,7 @@ def edit_source_page(source_id: int):
         return redirect(url_for("rag.sources_page"))
 
     github_settings = load_integration_settings("github")
-    drive_settings = load_integration_settings("google_drive")
+    drive_settings = load_integration_settings("google_workspace")
     service_email = None
     service_json = (drive_settings.get("service_account_json") or "").strip()
     if service_json:
@@ -453,6 +505,62 @@ def delete_source_page(source_id: int):
     delete_source(source_id)
     flash("Source deleted.", "success")
     return redirect(url_for("rag.sources_page"))
+
+
+def _start_source_quick_run_response(*, source_id: int, index_mode: str):
+    source = get_source(source_id)
+    if not source:
+        message = "Source not found."
+        if _wants_json_response():
+            return {"ok": False, "error": message}, 404
+        flash(message, "error")
+        return redirect(url_for("rag.sources_page"))
+
+    mode_text = "delta index" if str(index_mode).strip().lower() == "delta" else "index"
+    message = (
+        f"Quick source {mode_text} runs now execute through flowchart RAG nodes. "
+        "Use a flowchart run instead."
+    )
+    if _wants_json_response():
+        return {
+            "ok": False,
+            "deprecated": True,
+            "error": message,
+            "source": _source_status_payload(source, has_active_job=False),
+        }, 410
+    flash(message, "warning")
+    return redirect(url_for("rag.source_detail_page", source_id=source_id))
+
+
+@bp.post(f"{RAG_PAGE_SOURCES}/<int:source_id>/quick-index")
+def quick_index_source_page(source_id: int):
+    return _start_source_quick_run_response(source_id=source_id, index_mode="fresh")
+
+
+@bp.post(f"{RAG_PAGE_SOURCES}/<int:source_id>/quick-delta-index")
+def quick_delta_index_source_page(source_id: int):
+    return _start_source_quick_run_response(source_id=source_id, index_mode="delta")
+
+
+@bp.get("/api/rag/sources/status")
+def api_source_status():
+    source_ids = _parse_source_ids_csv(request.args.get("ids"))
+    sources = list_sources(limit=None)
+    source_by_id = {int(source.id): source for source in sources}
+
+    if source_ids:
+        selected_sources = [source_by_id[source_id] for source_id in source_ids if source_id in source_by_id]
+    else:
+        selected_sources = sources
+
+    payload = [
+        _source_status_payload(
+            source,
+            has_active_job=False,
+        )
+        for source in selected_sources
+    ]
+    return {"sources": payload}
 
 
 @bp.get(RAG_API_HEALTH)
@@ -709,12 +817,12 @@ def api_google_drive_verify():
 
     service_account_json = str(payload.get("service_account_json") or "").strip()
     if not service_account_json:
-        settings = load_integration_settings("google_drive")
+        settings = load_integration_settings("google_workspace")
         service_account_json = str(settings.get("service_account_json") or "").strip()
     if not service_account_json:
         return {
             "ok": False,
-            "error": "Google Drive service account JSON is not configured.",
+            "error": "Google Workspace service account JSON is not configured.",
         }, 400
 
     try:

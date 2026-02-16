@@ -1,0 +1,7 @@
+core.db module
+==============
+
+.. automodule:: core.db
+   :members:
+   :show-inheritance:
+   :undoc-members:

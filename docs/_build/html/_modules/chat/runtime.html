@@ -1,0 +1,1389 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>chat.runtime &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">chat.runtime</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for chat.runtime</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timezone</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">sqlalchemy</span><span class="w"> </span><span class="kn">import</span> <span class="n">delete</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">select</span><span class="p">,</span> <span class="n">update</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sqlalchemy.orm</span><span class="w"> </span><span class="kn">import</span> <span class="n">selectinload</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">chat.contracts</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">CHAT_EVENT_CLASS_COMPACTION</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_CLASS_FAILURE</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_CLASS_RETRIEVAL_TOOL</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_CLASS_THREAD</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_CLASS_TURN</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_COMPACTED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_FAILED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_RETRIEVAL_USED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_THREAD_ARCHIVED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_THREAD_CLEARED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_THREAD_CREATED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_THREAD_DELETED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_THREAD_RESTORED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_TOOL_USED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_TURN_REQUESTED</span><span class="p">,</span>
+    <span class="n">CHAT_EVENT_TYPE_TURN_RESPONDED</span><span class="p">,</span>
+    <span class="n">CHAT_REASON_MCP_FAILED</span><span class="p">,</span>
+    <span class="n">CHAT_REASON_MODEL_FAILED</span><span class="p">,</span>
+    <span class="n">RAG_REASON_RETRIEVAL_FAILED</span><span class="p">,</span>
+    <span class="n">RAG_REASON_UNAVAILABLE</span><span class="p">,</span>
+    <span class="n">RAG_HEALTH_CONFIGURED_HEALTHY</span><span class="p">,</span>
+    <span class="n">RAG_HEALTH_UNCONFIGURED</span><span class="p">,</span>
+    <span class="n">RAGContractError</span><span class="p">,</span>
+    <span class="n">RAGRetrievalRequest</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chat.rag_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">RAGContractClient</span><span class="p">,</span> <span class="n">get_rag_contract_client</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chat.settings</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ChatRuntimeSettings</span><span class="p">,</span>
+    <span class="n">load_chat_default_settings_payload</span><span class="p">,</span>
+    <span class="n">load_chat_runtime_settings</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">core.db</span><span class="w"> </span><span class="kn">import</span> <span class="n">session_scope</span><span class="p">,</span> <span class="n">utcnow</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">core.mcp_config</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_mcp_config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">core.models</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">CHAT_THREAD_STATUS_ACTIVE</span><span class="p">,</span>
+    <span class="n">CHAT_THREAD_STATUS_ARCHIVED</span><span class="p">,</span>
+    <span class="n">CHAT_TURN_STATUS_FAILED</span><span class="p">,</span>
+    <span class="n">CHAT_TURN_STATUS_SUCCEEDED</span><span class="p">,</span>
+    <span class="n">ChatActivityEvent</span><span class="p">,</span>
+    <span class="n">ChatMessage</span><span class="p">,</span>
+    <span class="n">ChatThread</span><span class="p">,</span>
+    <span class="n">ChatTurn</span><span class="p">,</span>
+    <span class="n">LLMModel</span><span class="p">,</span>
+    <span class="n">MCPServer</span><span class="p">,</span>
+    <span class="n">chat_thread_mcp_servers</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">services.integrations</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_integration_settings</span><span class="p">,</span> <span class="n">resolve_default_model_id</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">services.tasks</span><span class="w"> </span><span class="kn">import</span> <span class="n">_run_llm</span>
+
+<span class="n">CHAT_CONTEXT_CHARS_PER_TOKEN</span> <span class="o">=</span> <span class="mi">4</span>
+<span class="n">CHAT_DEFAULT_THREAD_TITLE</span> <span class="o">=</span> <span class="s2">&quot;New Chat&quot;</span>
+<span class="n">CHAT_LEGACY_DEFAULT_THREAD_TITLE</span> <span class="o">=</span> <span class="s2">&quot;New chat&quot;</span>
+<span class="n">CHAT_AUTO_TITLE_MAX_CHARS</span> <span class="o">=</span> <span class="mi">72</span>
+<span class="n">CHAT_TITLE_SMALL_WORDS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;a&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;an&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;and&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;as&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;at&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;but&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;by&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;for&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;from&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;in&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;nor&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;of&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;on&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;or&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;per&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;so&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;the&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;to&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;via&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;with&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;yet&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">CHAT_TITLE_ACRONYMS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;api&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;cli&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;cpu&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;css&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;gpu&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;html&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;http&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;https&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;json&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;jwt&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;llm&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;rag&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sdk&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sql&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;tcp&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;tls&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;udp&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ui&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;url&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ux&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;xml&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;yaml&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">CHAT_TITLE_LEADING_PATTERNS</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="sa">r</span><span class="s2">&quot;^(?:can|could|would|will)\s+you\s+&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^please\s+&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^help\s+me\s+(?:with\s+)?&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^i\s+need\s+(?:help\s+)?(?:to\s+|with\s+)?&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^i\s+want\s+to\s+&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^is\s+there\s+(?:a|an|any)\s+way\s+(?:to\s+)?&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^how\s+do\s+i\s+&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^what(?:&#39;s|\s+is)\s+the\s+best\s+way\s+to\s+&quot;</span><span class="p">,</span>
+    <span class="sa">r</span><span class="s2">&quot;^we\s+could\s+&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">CHAT_RESPONSE_COMPLEXITY_LOW</span> <span class="o">=</span> <span class="s2">&quot;low&quot;</span>
+<span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span> <span class="o">=</span> <span class="s2">&quot;medium&quot;</span>
+<span class="n">CHAT_RESPONSE_COMPLEXITY_HIGH</span> <span class="o">=</span> <span class="s2">&quot;high&quot;</span>
+<span class="n">CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH</span> <span class="o">=</span> <span class="s2">&quot;extra_high&quot;</span>
+<span class="n">CHAT_RESPONSE_COMPLEXITY_CHOICES</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_LOW</span><span class="p">,</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span><span class="p">,</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_HIGH</span><span class="p">,</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">CHAT_RESPONSE_COMPLEXITY_ALIASES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;concise&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_LOW</span><span class="p">,</span>
+    <span class="s2">&quot;brief&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_LOW</span><span class="p">,</span>
+    <span class="s2">&quot;balanced&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span><span class="p">,</span>
+    <span class="s2">&quot;detailed&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_HIGH</span><span class="p">,</span>
+    <span class="s2">&quot;verbose&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_HIGH</span><span class="p">,</span>
+    <span class="s2">&quot;extra high&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH</span><span class="p">,</span>
+    <span class="s2">&quot;extra-high&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH</span><span class="p">,</span>
+    <span class="s2">&quot;extra&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH</span><span class="p">,</span>
+    <span class="s2">&quot;very_high&quot;</span><span class="p">:</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">CHAT_RESPONSE_COMPLEXITY_LABELS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_LOW</span><span class="p">:</span> <span class="s2">&quot;Low&quot;</span><span class="p">,</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span><span class="p">:</span> <span class="s2">&quot;Medium&quot;</span><span class="p">,</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_HIGH</span><span class="p">:</span> <span class="s2">&quot;High&quot;</span><span class="p">,</span>
+    <span class="n">CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH</span><span class="p">:</span> <span class="s2">&quot;Extra High&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_now</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">datetime</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">timezone</span><span class="o">.</span><span class="n">utc</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_safe_json_load</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">raw</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_safe_json_dump</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">sort_keys</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="normalize_response_complexity">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.normalize_response_complexity">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">normalize_response_complexity</span><span class="p">(</span>
+    <span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">default</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">candidate</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">)</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_ALIASES</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">candidate</span><span class="p">,</span> <span class="n">candidate</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_CHOICES</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">candidate</span>
+    <span class="k">if</span> <span class="n">default</span> <span class="ow">in</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_CHOICES</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">default</span>
+    <span class="k">return</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span></div>
+
+
+
+<div class="viewcode-block" id="response_complexity_label">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.response_complexity_label">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">response_complexity_label</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">normalized</span> <span class="o">=</span> <span class="n">normalize_response_complexity</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+        <span class="n">normalized</span><span class="p">,</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_LABELS</span><span class="p">[</span><span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span><span class="p">]</span>
+    <span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_estimate_tokens</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">cleaned</span> <span class="o">=</span> <span class="p">(</span><span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cleaned</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">math</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cleaned</span><span class="p">)</span> <span class="o">/</span> <span class="n">CHAT_CONTEXT_CHARS_PER_TOKEN</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_collapse_whitespace</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_select_title_candidate</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">_collapse_whitespace</span><span class="p">(</span><span class="n">part</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(?&lt;=[.!?])\s+|\n+&quot;</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="n">candidates</span> <span class="o">=</span> <span class="p">[</span><span class="n">part</span> <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">parts</span> <span class="k">if</span> <span class="n">part</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">candidates</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">message</span>
+    <span class="n">question</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">part</span> <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">candidates</span> <span class="k">if</span> <span class="s2">&quot;?&quot;</span> <span class="ow">in</span> <span class="n">part</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">selected</span> <span class="o">=</span> <span class="n">question</span> <span class="k">if</span> <span class="n">question</span> <span class="k">else</span> <span class="n">candidates</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">selected</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;.,!?&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_strip_prompt_prefixes</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">value</span> <span class="o">=</span> <span class="n">text</span>
+    <span class="k">while</span> <span class="n">value</span><span class="p">:</span>
+        <span class="n">updated</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="k">for</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">CHAT_TITLE_LEADING_PATTERNS</span><span class="p">:</span>
+            <span class="n">updated</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">updated</span><span class="p">,</span> <span class="n">flags</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">updated</span> <span class="o">==</span> <span class="n">value</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="n">updated</span>
+    <span class="k">return</span> <span class="n">value</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_title_case_word</span><span class="p">(</span><span class="n">word</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">index</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">last_index</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">word</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">word</span>
+    <span class="n">match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^([^A-Za-z0-9]*)(.*?)([^A-Za-z0-9]*)$&quot;</span><span class="p">,</span> <span class="n">word</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">match</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">word</span>
+    <span class="n">lead</span><span class="p">,</span> <span class="n">core</span><span class="p">,</span> <span class="n">tail</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">groups</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">core</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">word</span>
+    <span class="n">lower_core</span> <span class="o">=</span> <span class="n">core</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">lower_core</span> <span class="ow">in</span> <span class="n">CHAT_TITLE_ACRONYMS</span><span class="p">:</span>
+        <span class="n">transformed</span> <span class="o">=</span> <span class="n">lower_core</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+    <span class="k">elif</span> <span class="nb">any</span><span class="p">(</span><span class="n">ch</span><span class="o">.</span><span class="n">isupper</span><span class="p">()</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">core</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span> <span class="ow">or</span> <span class="nb">any</span><span class="p">(</span><span class="n">ch</span><span class="o">.</span><span class="n">isdigit</span><span class="p">()</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">core</span><span class="p">):</span>
+        <span class="n">transformed</span> <span class="o">=</span> <span class="n">core</span>
+    <span class="k">elif</span> <span class="n">index</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">last_index</span><span class="p">)</span> <span class="ow">and</span> <span class="n">lower_core</span> <span class="ow">in</span> <span class="n">CHAT_TITLE_SMALL_WORDS</span><span class="p">:</span>
+        <span class="n">transformed</span> <span class="o">=</span> <span class="n">lower_core</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">transformed</span> <span class="o">=</span> <span class="n">lower_core</span><span class="o">.</span><span class="n">capitalize</span><span class="p">()</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">lead</span><span class="si">}{</span><span class="n">transformed</span><span class="si">}{</span><span class="n">tail</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_smart_title_case</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">words</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">words</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">text</span>
+    <span class="n">last_index</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">words</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">_title_case_word</span><span class="p">(</span><span class="n">word</span><span class="p">,</span> <span class="n">idx</span><span class="p">,</span> <span class="n">last_index</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">word</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">words</span><span class="p">)</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_truncate_title</span><span class="p">(</span><span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">max_chars</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">title</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">max_chars</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">title</span>
+    <span class="n">cutoff</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">max_chars</span> <span class="o">-</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="n">clipped</span> <span class="o">=</span> <span class="n">title</span><span class="p">[:</span><span class="n">cutoff</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="s2">&quot; &quot;</span> <span class="ow">in</span> <span class="n">clipped</span><span class="p">:</span>
+        <span class="n">clipped</span> <span class="o">=</span> <span class="n">clipped</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s2">&quot; ,;:-&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">clipped</span><span class="p">:</span>
+        <span class="n">clipped</span> <span class="o">=</span> <span class="n">title</span><span class="p">[:</span><span class="n">cutoff</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">clipped</span><span class="si">}</span><span class="s2">...&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_derive_thread_title</span><span class="p">(</span><span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">cleaned</span> <span class="o">=</span> <span class="n">_collapse_whitespace</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cleaned</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">CHAT_DEFAULT_THREAD_TITLE</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">_select_title_candidate</span><span class="p">(</span><span class="n">cleaned</span><span class="p">)</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">_strip_prompt_prefixes</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">_collapse_whitespace</span><span class="p">(</span><span class="n">candidate</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; </span><span class="se">\&quot;</span><span class="s2">&#39;`*_&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">candidate</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">CHAT_DEFAULT_THREAD_TITLE</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">_smart_title_case</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_truncate_title</span><span class="p">(</span><span class="n">candidate</span><span class="p">,</span> <span class="n">max_chars</span><span class="o">=</span><span class="n">CHAT_AUTO_TITLE_MAX_CHARS</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_unique_ordered</span><span class="p">(</span><span class="n">values</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="n">seen</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">ordered</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">values</span><span class="p">:</span>
+        <span class="n">cleaned</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cleaned</span> <span class="ow">or</span> <span class="n">cleaned</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">cleaned</span><span class="p">)</span>
+        <span class="n">ordered</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cleaned</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">ordered</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_parse_model_config</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">_safe_json_load</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">payload</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="k">else</span> <span class="p">{}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resolve_thread_default_model</span><span class="p">(</span><span class="n">session</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">LLMModel</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">candidate_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">chat_defaults</span> <span class="o">=</span> <span class="n">load_chat_default_settings_payload</span><span class="p">()</span>
+    <span class="n">chat_default_id</span> <span class="o">=</span> <span class="n">chat_defaults</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;default_model_id&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">chat_default_id</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="n">candidate_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chat_default_id</span><span class="p">)</span>
+
+    <span class="n">llm_default_id</span> <span class="o">=</span> <span class="n">resolve_default_model_id</span><span class="p">(</span><span class="n">load_integration_settings</span><span class="p">(</span><span class="s2">&quot;llm&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">llm_default_id</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="ow">and</span> <span class="n">llm_default_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">candidate_ids</span><span class="p">:</span>
+        <span class="n">candidate_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">llm_default_id</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">model_id</span> <span class="ow">in</span> <span class="n">candidate_ids</span><span class="p">:</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">LLMModel</span><span class="p">,</span> <span class="n">model_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">model</span>
+
+    <span class="k">return</span> <span class="p">(</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">select</span><span class="p">(</span><span class="n">LLMModel</span><span class="p">)</span><span class="o">.</span><span class="n">order_by</span><span class="p">(</span><span class="n">LLMModel</span><span class="o">.</span><span class="n">created_at</span><span class="o">.</span><span class="n">desc</span><span class="p">())</span><span class="o">.</span><span class="n">limit</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+        <span class="o">.</span><span class="n">scalars</span><span class="p">()</span>
+        <span class="o">.</span><span class="n">first</span><span class="p">()</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_model_context_window_tokens</span><span class="p">(</span>
+    <span class="n">model</span><span class="p">:</span> <span class="n">LLMModel</span><span class="p">,</span>
+    <span class="n">settings</span><span class="p">:</span> <span class="n">ChatRuntimeSettings</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">_parse_model_config</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">config_json</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;context_window_tokens&quot;</span><span class="p">,</span> <span class="s2">&quot;context_window&quot;</span><span class="p">,</span> <span class="s2">&quot;max_context_tokens&quot;</span><span class="p">):</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">parsed</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">parsed</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">parsed</span>
+    <span class="k">return</span> <span class="n">settings</span><span class="o">.</span><span class="n">default_context_window_tokens</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_parse_summary_text</span><span class="p">(</span><span class="n">raw_json</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">_safe_json_load</span><span class="p">(</span><span class="n">raw_json</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">payload</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;summary_text&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">text</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_compaction_summary</span><span class="p">(</span>
+    <span class="n">messages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">ChatMessage</span><span class="p">],</span>
+    <span class="n">existing_summary</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">max_chars</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">parts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">existing_summary</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">existing_summary</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+    <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">messages</span><span class="p">:</span>
+        <span class="n">role</span> <span class="o">=</span> <span class="s2">&quot;User&quot;</span> <span class="k">if</span> <span class="n">message</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;user&quot;</span> <span class="k">else</span> <span class="s2">&quot;Assistant&quot;</span>
+        <span class="n">excerpt</span> <span class="o">=</span> <span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">content</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">excerpt</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">220</span><span class="p">:</span>
+            <span class="n">excerpt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">excerpt</span><span class="p">[:</span><span class="mi">217</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span>
+        <span class="k">if</span> <span class="n">excerpt</span><span class="p">:</span>
+            <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;- </span><span class="si">{</span><span class="n">role</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">excerpt</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">summary</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">summary</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">max_chars</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">summary</span>
+    <span class="k">if</span> <span class="n">max_chars</span> <span class="o">&lt;</span> <span class="mi">10</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">summary</span><span class="p">[:</span><span class="n">max_chars</span><span class="p">]</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">summary</span><span class="p">[:</span><span class="w"> </span><span class="n">max_chars</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">3</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">()</span><span class="si">}</span><span class="s2">...&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_render_history_block</span><span class="p">(</span><span class="n">summary_text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">messages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">ChatMessage</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">chunks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">summary_text</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+        <span class="n">chunks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Conversation summary:</span><span class="se">\n</span><span class="si">{</span><span class="n">summary_text</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">messages</span><span class="p">:</span>
+        <span class="n">lines</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">messages</span><span class="p">:</span>
+            <span class="n">label</span> <span class="o">=</span> <span class="s2">&quot;User&quot;</span> <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;user&quot;</span> <span class="k">else</span> <span class="s2">&quot;Assistant&quot;</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">item</span><span class="o">.</span><span class="n">content</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">chunks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;Recent conversation:</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">chunks</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_serialize_thread_row</span><span class="p">(</span><span class="n">thread</span><span class="p">:</span> <span class="n">ChatThread</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+    <span class="n">rag_payload</span> <span class="o">=</span> <span class="n">_safe_json_load</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">selected_rag_collections_json</span><span class="p">)</span>
+    <span class="n">rag_collections</span> <span class="o">=</span> <span class="n">rag_payload</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rag_payload</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="k">else</span> <span class="p">[]</span>
+    <span class="n">normalized_complexity</span> <span class="o">=</span> <span class="n">normalize_response_complexity</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">response_complexity</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+        <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">title</span><span class="p">,</span>
+        <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">status</span><span class="p">,</span>
+        <span class="s2">&quot;model_id&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">model_id</span><span class="p">,</span>
+        <span class="s2">&quot;model_name&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">name</span> <span class="k">if</span> <span class="n">thread</span><span class="o">.</span><span class="n">model</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="s2">&quot;response_complexity&quot;</span><span class="p">:</span> <span class="n">normalized_complexity</span><span class="p">,</span>
+        <span class="s2">&quot;response_complexity_label&quot;</span><span class="p">:</span> <span class="n">response_complexity_label</span><span class="p">(</span><span class="n">normalized_complexity</span><span class="p">),</span>
+        <span class="s2">&quot;rag_collections&quot;</span><span class="p">:</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">rag_collections</span> <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()],</span>
+        <span class="s2">&quot;mcp_servers&quot;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">server</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">server</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">&quot;server_key&quot;</span><span class="p">:</span> <span class="n">server</span><span class="o">.</span><span class="n">server_key</span><span class="p">}</span>
+            <span class="k">for</span> <span class="n">server</span> <span class="ow">in</span> <span class="n">thread</span><span class="o">.</span><span class="n">mcp_servers</span>
+        <span class="p">],</span>
+        <span class="s2">&quot;last_activity_at&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span><span class="p">,</span>
+        <span class="s2">&quot;updated_at&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">updated_at</span><span class="p">,</span>
+        <span class="s2">&quot;created_at&quot;</span><span class="p">:</span> <span class="n">thread</span><span class="o">.</span><span class="n">created_at</span><span class="p">,</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_record_activity</span><span class="p">(</span>
+    <span class="n">session</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">event_class</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">event_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">turn_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">reason_code</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">message</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ChatActivityEvent</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+        <span class="n">session</span><span class="p">,</span>
+        <span class="n">thread_id</span><span class="o">=</span><span class="n">thread_id</span><span class="p">,</span>
+        <span class="n">turn_id</span><span class="o">=</span><span class="n">turn_id</span><span class="p">,</span>
+        <span class="n">event_class</span><span class="o">=</span><span class="n">event_class</span><span class="p">,</span>
+        <span class="n">event_type</span><span class="o">=</span><span class="n">event_type</span><span class="p">,</span>
+        <span class="n">reason_code</span><span class="o">=</span><span class="n">reason_code</span><span class="p">,</span>
+        <span class="n">message</span><span class="o">=</span><span class="n">message</span><span class="p">,</span>
+        <span class="n">metadata_json</span><span class="o">=</span><span class="n">_safe_json_dump</span><span class="p">(</span><span class="n">metadata</span> <span class="ow">or</span> <span class="p">{}),</span>
+    <span class="p">)</span>
+
+
+<div class="viewcode-block" id="list_threads">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.list_threads">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">list_threads</span><span class="p">(</span><span class="n">include_archived</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">select</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">options</span><span class="p">(</span>
+                <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">model</span><span class="p">),</span>
+                <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">mcp_servers</span><span class="p">),</span>
+            <span class="p">)</span>
+            <span class="o">.</span><span class="n">order_by</span><span class="p">(</span>
+                <span class="n">ChatThread</span><span class="o">.</span><span class="n">last_activity_at</span><span class="o">.</span><span class="n">desc</span><span class="p">()</span><span class="o">.</span><span class="n">nullslast</span><span class="p">(),</span>
+                <span class="n">ChatThread</span><span class="o">.</span><span class="n">updated_at</span><span class="o">.</span><span class="n">desc</span><span class="p">(),</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">include_archived</span><span class="p">:</span>
+            <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="n">CHAT_THREAD_STATUS_ACTIVE</span><span class="p">)</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span><span class="o">.</span><span class="n">scalars</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">_serialize_thread_row</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="get_thread">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.get_thread">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_thread</span><span class="p">(</span><span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+                <span class="n">select</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">options</span><span class="p">(</span>
+                    <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">model</span><span class="p">),</span>
+                    <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">mcp_servers</span><span class="p">),</span>
+                    <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">messages</span><span class="p">),</span>
+                    <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">turns</span><span class="p">),</span>
+                <span class="p">)</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">thread_id</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="o">.</span><span class="n">scalars</span><span class="p">()</span>
+            <span class="o">.</span><span class="n">first</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">_serialize_thread_row</span><span class="p">(</span><span class="n">thread</span><span class="p">)</span>
+        <span class="n">row</span><span class="p">[</span><span class="s2">&quot;messages&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">item</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="n">item</span><span class="o">.</span><span class="n">role</span><span class="p">,</span>
+                <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="n">item</span><span class="o">.</span><span class="n">content</span><span class="p">,</span>
+                <span class="s2">&quot;created_at&quot;</span><span class="p">:</span> <span class="n">item</span><span class="o">.</span><span class="n">created_at</span><span class="p">,</span>
+            <span class="p">}</span>
+            <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">thread</span><span class="o">.</span><span class="n">messages</span>
+        <span class="p">]</span>
+        <span class="n">summary_text</span> <span class="o">=</span> <span class="n">_parse_summary_text</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">compaction_summary_json</span><span class="p">)</span>
+        <span class="n">row</span><span class="p">[</span><span class="s2">&quot;compaction_summary_text&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">summary_text</span>
+        <span class="n">latest_turn</span> <span class="o">=</span> <span class="n">thread</span><span class="o">.</span><span class="n">turns</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">thread</span><span class="o">.</span><span class="n">turns</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="n">row</span><span class="p">[</span><span class="s2">&quot;latest_turn&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">latest_turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">latest_turn</span><span class="o">.</span><span class="n">status</span><span class="p">,</span>
+                <span class="s2">&quot;reason_code&quot;</span><span class="p">:</span> <span class="n">latest_turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                <span class="s2">&quot;context_usage_before&quot;</span><span class="p">:</span> <span class="n">latest_turn</span><span class="o">.</span><span class="n">context_usage_before</span><span class="p">,</span>
+                <span class="s2">&quot;context_usage_after&quot;</span><span class="p">:</span> <span class="n">latest_turn</span><span class="o">.</span><span class="n">context_usage_after</span><span class="p">,</span>
+                <span class="s2">&quot;context_limit_tokens&quot;</span><span class="p">:</span> <span class="n">latest_turn</span><span class="o">.</span><span class="n">context_limit_tokens</span><span class="p">,</span>
+                <span class="s2">&quot;compaction_applied&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">(</span><span class="n">latest_turn</span><span class="o">.</span><span class="n">compaction_applied</span><span class="p">),</span>
+                <span class="s2">&quot;created_at&quot;</span><span class="p">:</span> <span class="n">latest_turn</span><span class="o">.</span><span class="n">created_at</span><span class="p">,</span>
+            <span class="p">}</span>
+            <span class="k">if</span> <span class="n">latest_turn</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">else</span> <span class="kc">None</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">row</span></div>
+
+
+
+<div class="viewcode-block" id="create_thread">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.create_thread">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_thread</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">model_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">mcp_server_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">rag_collections</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">response_complexity</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">selected_model_id</span> <span class="o">=</span> <span class="n">model_id</span>
+        <span class="k">if</span> <span class="n">selected_model_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">LLMModel</span><span class="p">,</span> <span class="n">selected_model_id</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Selected model does not exist.&quot;</span><span class="p">)</span>
+        <span class="n">selected_mcp_ids</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="p">(</span><span class="n">mcp_server_ids</span> <span class="ow">or</span> <span class="p">[])]</span>
+        <span class="n">selected_servers</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MCPServer</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">selected_mcp_ids</span><span class="p">:</span>
+            <span class="n">selected_servers</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">select</span><span class="p">(</span><span class="n">MCPServer</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">MCPServer</span><span class="o">.</span><span class="n">id</span><span class="o">.</span><span class="n">in_</span><span class="p">(</span><span class="n">selected_mcp_ids</span><span class="p">)))</span>
+                <span class="o">.</span><span class="n">scalars</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">all</span><span class="p">()</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">selected_servers</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">selected_mcp_ids</span><span class="p">)):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;One or more selected MCP servers do not exist.&quot;</span><span class="p">)</span>
+            <span class="n">by_id</span> <span class="o">=</span> <span class="p">{</span><span class="n">item</span><span class="o">.</span><span class="n">id</span><span class="p">:</span> <span class="n">item</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">selected_servers</span><span class="p">}</span>
+            <span class="n">selected_servers</span> <span class="o">=</span> <span class="p">[</span><span class="n">by_id</span><span class="p">[</span><span class="n">item</span><span class="p">]</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">selected_mcp_ids</span> <span class="k">if</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">by_id</span><span class="p">]</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="n">ChatThread</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">title</span><span class="o">=</span><span class="p">(</span><span class="n">title</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="n">CHAT_DEFAULT_THREAD_TITLE</span><span class="p">,</span>
+            <span class="n">status</span><span class="o">=</span><span class="n">CHAT_THREAD_STATUS_ACTIVE</span><span class="p">,</span>
+            <span class="n">model_id</span><span class="o">=</span><span class="n">selected_model_id</span><span class="p">,</span>
+            <span class="n">response_complexity</span><span class="o">=</span><span class="n">normalize_response_complexity</span><span class="p">(</span><span class="n">response_complexity</span><span class="p">),</span>
+            <span class="n">selected_rag_collections_json</span><span class="o">=</span><span class="n">_safe_json_dump</span><span class="p">(</span>
+                <span class="n">_unique_ordered</span><span class="p">([</span><span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="p">(</span><span class="n">rag_collections</span> <span class="ow">or</span> <span class="p">[])])</span>
+            <span class="p">),</span>
+            <span class="n">compaction_summary_json</span><span class="o">=</span><span class="n">_safe_json_dump</span><span class="p">({}),</span>
+            <span class="n">last_activity_at</span><span class="o">=</span><span class="n">utcnow</span><span class="p">(),</span>
+        <span class="p">)</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">mcp_servers</span> <span class="o">=</span> <span class="n">selected_servers</span>
+        <span class="n">_record_activity</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_THREAD</span><span class="p">,</span>
+            <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_THREAD_CREATED</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">_serialize_thread_row</span><span class="p">(</span><span class="n">thread</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="update_thread_config">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.update_thread_config">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">update_thread_config</span><span class="p">(</span>
+    <span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">model_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">mcp_server_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span>
+    <span class="n">rag_collections</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">response_complexity</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+                <span class="n">select</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">options</span><span class="p">(</span><span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">mcp_servers</span><span class="p">),</span> <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">model</span><span class="p">))</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">thread_id</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="o">.</span><span class="n">scalars</span><span class="p">()</span>
+            <span class="o">.</span><span class="n">first</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Thread not found.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">model_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">LLMModel</span><span class="p">,</span> <span class="n">model_id</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Selected model does not exist.&quot;</span><span class="p">)</span>
+        <span class="n">selected_servers</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">MCPServer</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">mcp_server_ids</span><span class="p">:</span>
+            <span class="n">selected_servers</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">select</span><span class="p">(</span><span class="n">MCPServer</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">MCPServer</span><span class="o">.</span><span class="n">id</span><span class="o">.</span><span class="n">in_</span><span class="p">(</span><span class="n">mcp_server_ids</span><span class="p">)))</span>
+                <span class="o">.</span><span class="n">scalars</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">all</span><span class="p">()</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">selected_servers</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">mcp_server_ids</span><span class="p">)):</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;One or more selected MCP servers do not exist.&quot;</span><span class="p">)</span>
+            <span class="n">by_id</span> <span class="o">=</span> <span class="p">{</span><span class="n">server</span><span class="o">.</span><span class="n">id</span><span class="p">:</span> <span class="n">server</span> <span class="k">for</span> <span class="n">server</span> <span class="ow">in</span> <span class="n">selected_servers</span><span class="p">}</span>
+            <span class="n">selected_servers</span> <span class="o">=</span> <span class="p">[</span><span class="n">by_id</span><span class="p">[</span><span class="n">item</span><span class="p">]</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">mcp_server_ids</span> <span class="k">if</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">by_id</span><span class="p">]</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">model_id</span> <span class="o">=</span> <span class="n">model_id</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">response_complexity</span> <span class="o">=</span> <span class="n">normalize_response_complexity</span><span class="p">(</span><span class="n">response_complexity</span><span class="p">)</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">selected_rag_collections_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">(</span><span class="n">_unique_ordered</span><span class="p">(</span><span class="n">rag_collections</span><span class="p">))</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">mcp_servers</span> <span class="o">=</span> <span class="n">selected_servers</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">updated_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">_serialize_thread_row</span><span class="p">(</span><span class="n">thread</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="archive_thread">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.archive_thread">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">archive_thread</span><span class="p">(</span><span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">status</span> <span class="o">=</span> <span class="n">CHAT_THREAD_STATUS_ARCHIVED</span>
+        <span class="n">_record_activity</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_THREAD</span><span class="p">,</span>
+            <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_THREAD_ARCHIVED</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+
+<div class="viewcode-block" id="restore_thread">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.restore_thread">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">restore_thread</span><span class="p">(</span><span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">status</span> <span class="o">=</span> <span class="n">CHAT_THREAD_STATUS_ACTIVE</span>
+        <span class="n">_record_activity</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_THREAD</span><span class="p">,</span>
+            <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_THREAD_RESTORED</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+
+<div class="viewcode-block" id="clear_thread">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.clear_thread">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">clear_thread</span><span class="p">(</span><span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+            <span class="n">update</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">thread_id</span> <span class="o">==</span> <span class="n">thread_id</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">values</span><span class="p">(</span><span class="n">turn_id</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">delete</span><span class="p">(</span><span class="n">ChatMessage</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatMessage</span><span class="o">.</span><span class="n">thread_id</span> <span class="o">==</span> <span class="n">thread_id</span><span class="p">))</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">delete</span><span class="p">(</span><span class="n">ChatTurn</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatTurn</span><span class="o">.</span><span class="n">thread_id</span> <span class="o">==</span> <span class="n">thread_id</span><span class="p">))</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">compaction_summary_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">({})</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+        <span class="n">_record_activity</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_THREAD</span><span class="p">,</span>
+            <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_THREAD_CLEARED</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+
+<div class="viewcode-block" id="delete_thread">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.delete_thread">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">delete_thread</span><span class="p">(</span><span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">,</span> <span class="n">thread_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="n">_record_activity</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_THREAD</span><span class="p">,</span>
+            <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_THREAD_DELETED</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">thread</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span></div>
+
+
+
+<div class="viewcode-block" id="list_activity">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.list_activity">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">list_activity</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">event_class</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">event_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">reason_code</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">200</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">stmt</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">select</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="p">,</span> <span class="n">ChatThread</span><span class="o">.</span><span class="n">title</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">,</span> <span class="n">ChatThread</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">thread_id</span><span class="p">)</span>
+            <span class="o">.</span><span class="n">order_by</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">created_at</span><span class="o">.</span><span class="n">desc</span><span class="p">())</span>
+            <span class="o">.</span><span class="n">limit</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">limit</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)))</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">event_class</span><span class="p">:</span>
+            <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">event_class</span> <span class="o">==</span> <span class="n">event_class</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">event_type</span><span class="p">:</span>
+            <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">event_type</span> <span class="o">==</span> <span class="n">event_type</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">reason_code</span><span class="p">:</span>
+            <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">reason_code</span> <span class="o">==</span> <span class="n">reason_code</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">stmt</span> <span class="o">=</span> <span class="n">stmt</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatActivityEvent</span><span class="o">.</span><span class="n">thread_id</span> <span class="o">==</span> <span class="n">thread_id</span><span class="p">)</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+        <span class="n">payload</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">event</span><span class="p">,</span> <span class="n">title</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="n">metadata</span> <span class="o">=</span> <span class="n">_safe_json_load</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">metadata_json</span><span class="p">)</span>
+            <span class="n">payload</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="s2">&quot;thread_id&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">thread_id</span><span class="p">,</span>
+                    <span class="s2">&quot;thread_title&quot;</span><span class="p">:</span> <span class="n">title</span><span class="p">,</span>
+                    <span class="s2">&quot;turn_id&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">turn_id</span><span class="p">,</span>
+                    <span class="s2">&quot;event_class&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">event_class</span><span class="p">,</span>
+                    <span class="s2">&quot;event_type&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">event_type</span><span class="p">,</span>
+                    <span class="s2">&quot;reason_code&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                    <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">message</span><span class="p">,</span>
+                    <span class="s2">&quot;metadata&quot;</span><span class="p">:</span> <span class="n">metadata</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="k">else</span> <span class="p">{},</span>
+                    <span class="s2">&quot;created_at&quot;</span><span class="p">:</span> <span class="n">event</span><span class="o">.</span><span class="n">created_at</span><span class="p">,</span>
+                <span class="p">}</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">payload</span></div>
+
+
+
+<div class="viewcode-block" id="TurnResult">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.TurnResult">[docs]</a>
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">TurnResult</span><span class="p">:</span>
+    <span class="n">ok</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">turn_id</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">request_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">reply</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">reason_code</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">error</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">rag_health_state</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">RAG_HEALTH_UNCONFIGURED</span>
+    <span class="n">selected_collections</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_prompt</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">history_block</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">retrieval_context</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">selected_mcp_server_keys</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">response_complexity</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">user_message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">normalized_complexity</span> <span class="o">=</span> <span class="n">normalize_response_complexity</span><span class="p">(</span><span class="n">response_complexity</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">normalized_complexity</span> <span class="o">==</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_LOW</span><span class="p">:</span>
+        <span class="n">complexity_instruction</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s2">&quot;Response complexity: LOW. Keep the response concise, direct, and focused &quot;</span>
+            <span class="s2">&quot;on essentials only.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="n">normalized_complexity</span> <span class="o">==</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_MEDIUM</span><span class="p">:</span>
+        <span class="n">complexity_instruction</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s2">&quot;Response complexity: MEDIUM. Start with a short summary, then provide the &quot;</span>
+            <span class="s2">&quot;key supporting details.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="n">normalized_complexity</span> <span class="o">==</span> <span class="n">CHAT_RESPONSE_COMPLEXITY_HIGH</span><span class="p">:</span>
+        <span class="n">complexity_instruction</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s2">&quot;Response complexity: HIGH. Provide a detailed, structured response with &quot;</span>
+            <span class="s2">&quot;thorough reasoning and relevant caveats.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">complexity_instruction</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="s2">&quot;Response complexity: EXTRA HIGH. Be exhaustive and completeness-focused. &quot;</span>
+            <span class="s2">&quot;When the user asks for structured data, include comprehensive Markdown &quot;</span>
+            <span class="s2">&quot;tables and ensure requested fields are not omitted.&quot;</span>
+        <span class="p">)</span>
+    <span class="n">sections</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;You are a helpful assistant in a multi-turn chat session.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Respond directly to the latest user message.&quot;</span><span class="p">,</span>
+        <span class="n">complexity_instruction</span><span class="p">,</span>
+        <span class="p">(</span>
+            <span class="s2">&quot;Use Markdown when it improves clarity (headings, lists, tables, and &quot;</span>
+            <span class="s2">&quot;fenced code blocks).&quot;</span>
+        <span class="p">),</span>
+    <span class="p">]</span>
+    <span class="k">if</span> <span class="n">history_block</span><span class="p">:</span>
+        <span class="n">sections</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">history_block</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">retrieval_context</span><span class="p">:</span>
+        <span class="n">blocks</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">text</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">text</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">retrieval_context</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">)]</span>
+        <span class="n">sections</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;Retrieved context:</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">blocks</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">selected_mcp_server_keys</span><span class="p">:</span>
+        <span class="n">sections</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="s2">&quot;Enabled MCP servers for this session: &quot;</span>
+            <span class="o">+</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">selected_mcp_server_keys</span><span class="p">)</span>
+            <span class="o">+</span> <span class="s2">&quot;.&quot;</span>
+        <span class="p">)</span>
+    <span class="n">sections</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Latest user message:</span><span class="se">\n</span><span class="si">{</span><span class="n">user_message</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sections</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="execute_turn">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.execute_turn">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">execute_turn</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">thread_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">rag_client</span><span class="p">:</span> <span class="n">RAGContractClient</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TurnResult</span><span class="p">:</span>
+    <span class="n">cleaned_message</span> <span class="o">=</span> <span class="p">(</span><span class="n">message</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cleaned_message</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Message is required.&quot;</span><span class="p">)</span>
+    <span class="n">client</span> <span class="o">=</span> <span class="n">rag_client</span> <span class="ow">or</span> <span class="n">get_rag_contract_client</span><span class="p">()</span>
+    <span class="n">settings</span> <span class="o">=</span> <span class="n">load_chat_runtime_settings</span><span class="p">()</span>
+    <span class="n">request_id</span> <span class="o">=</span> <span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">()</span><span class="o">.</span><span class="n">hex</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">thread</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+                <span class="n">select</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">)</span>
+                <span class="o">.</span><span class="n">options</span><span class="p">(</span>
+                    <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">messages</span><span class="p">),</span>
+                    <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">mcp_servers</span><span class="p">),</span>
+                    <span class="n">selectinload</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">model</span><span class="p">),</span>
+                <span class="p">)</span>
+                <span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">thread_id</span><span class="p">)</span>
+            <span class="p">)</span>
+            <span class="o">.</span><span class="n">scalars</span><span class="p">()</span>
+            <span class="o">.</span><span class="n">first</span><span class="p">()</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">thread</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Thread not found.&quot;</span><span class="p">)</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">thread</span><span class="o">.</span><span class="n">model</span>
+        <span class="k">if</span> <span class="n">model</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="n">_resolve_thread_default_model</span><span class="p">(</span><span class="n">session</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">model</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No models available for Chat.&quot;</span><span class="p">)</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">model_id</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">id</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="n">model</span>
+        <span class="n">selected_response_complexity</span> <span class="o">=</span> <span class="n">normalize_response_complexity</span><span class="p">(</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">response_complexity</span>
+        <span class="p">)</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">response_complexity</span> <span class="o">=</span> <span class="n">selected_response_complexity</span>
+
+        <span class="n">selected_rag_collections_payload</span> <span class="o">=</span> <span class="n">_safe_json_load</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">selected_rag_collections_json</span><span class="p">)</span>
+        <span class="n">selected_rag_collections</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">_unique_ordered</span><span class="p">([</span><span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">selected_rag_collections_payload</span><span class="p">])</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">selected_rag_collections_payload</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span>
+            <span class="k">else</span> <span class="p">[]</span>
+        <span class="p">)</span>
+        <span class="n">mcp_servers</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">mcp_servers</span><span class="p">)</span>
+        <span class="n">selected_mcp_keys</span> <span class="o">=</span> <span class="p">[</span><span class="n">server</span><span class="o">.</span><span class="n">server_key</span> <span class="k">for</span> <span class="n">server</span> <span class="ow">in</span> <span class="n">mcp_servers</span><span class="p">]</span>
+        <span class="n">user_message</span> <span class="o">=</span> <span class="n">ChatMessage</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">role</span><span class="o">=</span><span class="s2">&quot;user&quot;</span><span class="p">,</span>
+            <span class="n">content</span><span class="o">=</span><span class="n">cleaned_message</span><span class="p">,</span>
+            <span class="n">token_estimate</span><span class="o">=</span><span class="n">_estimate_tokens</span><span class="p">(</span><span class="n">cleaned_message</span><span class="p">),</span>
+            <span class="n">metadata_json</span><span class="o">=</span><span class="n">_safe_json_dump</span><span class="p">({}),</span>
+        <span class="p">)</span>
+        <span class="n">turn</span> <span class="o">=</span> <span class="n">ChatTurn</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+            <span class="n">model_id</span><span class="o">=</span><span class="n">model</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">user_message_id</span><span class="o">=</span><span class="n">user_message</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">status</span><span class="o">=</span><span class="n">CHAT_TURN_STATUS_FAILED</span><span class="p">,</span>
+            <span class="n">selected_rag_collections_json</span><span class="o">=</span><span class="n">_safe_json_dump</span><span class="p">(</span><span class="n">selected_rag_collections</span><span class="p">),</span>
+            <span class="n">selected_mcp_server_keys_json</span><span class="o">=</span><span class="n">_safe_json_dump</span><span class="p">(</span><span class="n">selected_mcp_keys</span><span class="p">),</span>
+            <span class="n">rag_health_state</span><span class="o">=</span><span class="n">RAG_HEALTH_UNCONFIGURED</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">_record_activity</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_TURN</span><span class="p">,</span>
+            <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_TURN_REQUESTED</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="p">{</span>
+                <span class="s2">&quot;request_id&quot;</span><span class="p">:</span> <span class="n">request_id</span><span class="p">,</span>
+                <span class="s2">&quot;model_id&quot;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="s2">&quot;response_complexity&quot;</span><span class="p">:</span> <span class="n">selected_response_complexity</span><span class="p">,</span>
+                <span class="s2">&quot;selected_collections&quot;</span><span class="p">:</span> <span class="n">selected_rag_collections</span><span class="p">,</span>
+                <span class="s2">&quot;selected_mcp_servers&quot;</span><span class="p">:</span> <span class="n">selected_mcp_keys</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">)</span>
+
+        <span class="n">rag_health</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">health</span><span class="p">()</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">rag_health_state</span> <span class="o">=</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">state</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="n">selected_rag_collections</span>
+            <span class="ow">and</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">state</span> <span class="o">!=</span> <span class="n">RAG_HEALTH_CONFIGURED_HEALTHY</span>
+        <span class="p">):</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span> <span class="o">=</span> <span class="n">RAG_REASON_UNAVAILABLE</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="s2">&quot;RAG is unavailable for selected collections.&quot;</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">runtime_metadata_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;rag_health_state&quot;</span><span class="p">:</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                    <span class="s2">&quot;selected_collections&quot;</span><span class="p">:</span> <span class="n">selected_rag_collections</span><span class="p">,</span>
+                    <span class="s2">&quot;provider&quot;</span><span class="p">:</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">provider</span><span class="p">,</span>
+                <span class="p">}</span>
+            <span class="p">)</span>
+            <span class="n">_record_activity</span><span class="p">(</span>
+                <span class="n">session</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_FAILURE</span><span class="p">,</span>
+                <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_FAILED</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">RAG_REASON_UNAVAILABLE</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                <span class="n">metadata</span><span class="o">=</span><span class="p">{</span>
+                    <span class="s2">&quot;rag_health_state&quot;</span><span class="p">:</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                    <span class="s2">&quot;selected_collections&quot;</span><span class="p">:</span> <span class="n">selected_rag_collections</span><span class="p">,</span>
+                    <span class="s2">&quot;provider&quot;</span><span class="p">:</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">provider</span><span class="p">,</span>
+                <span class="p">},</span>
+            <span class="p">)</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">TurnResult</span><span class="p">(</span>
+                <span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">RAG_REASON_UNAVAILABLE</span><span class="p">,</span>
+                <span class="n">error</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                <span class="n">rag_health_state</span><span class="o">=</span><span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                <span class="n">selected_collections</span><span class="o">=</span><span class="n">selected_rag_collections</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">retrieval_context</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">citation_records</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">retrieval_stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">selected_rag_collections</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">retrieval</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">retrieve</span><span class="p">(</span>
+                    <span class="n">RAGRetrievalRequest</span><span class="p">(</span>
+                        <span class="n">question</span><span class="o">=</span><span class="n">cleaned_message</span><span class="p">,</span>
+                        <span class="n">collections</span><span class="o">=</span><span class="n">selected_rag_collections</span><span class="p">,</span>
+                        <span class="n">top_k</span><span class="o">=</span><span class="n">settings</span><span class="o">.</span><span class="n">rag_top_k</span><span class="p">,</span>
+                        <span class="n">model_id</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">id</span><span class="p">),</span>
+                        <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+                    <span class="p">)</span>
+                <span class="p">)</span>
+            <span class="k">except</span> <span class="n">RAGContractError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span> <span class="o">=</span> <span class="n">exc</span><span class="o">.</span><span class="n">reason_code</span> <span class="ow">or</span> <span class="n">RAG_REASON_RETRIEVAL_FAILED</span>
+                <span class="n">turn</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+                <span class="n">turn</span><span class="o">.</span><span class="n">runtime_metadata_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">(</span>
+                    <span class="p">{</span>
+                        <span class="s2">&quot;metadata&quot;</span><span class="p">:</span> <span class="n">exc</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span>
+                        <span class="s2">&quot;selected_collections&quot;</span><span class="p">:</span> <span class="n">selected_rag_collections</span><span class="p">,</span>
+                    <span class="p">}</span>
+                <span class="p">)</span>
+                <span class="n">_record_activity</span><span class="p">(</span>
+                    <span class="n">session</span><span class="p">,</span>
+                    <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_FAILURE</span><span class="p">,</span>
+                    <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_FAILED</span><span class="p">,</span>
+                    <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                    <span class="n">message</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                    <span class="n">metadata</span><span class="o">=</span><span class="n">exc</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+                <span class="k">return</span> <span class="n">TurnResult</span><span class="p">(</span>
+                    <span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                    <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+                    <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                    <span class="n">error</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                    <span class="n">rag_health_state</span><span class="o">=</span><span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                    <span class="n">selected_collections</span><span class="o">=</span><span class="n">selected_rag_collections</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="n">retrieval_context</span> <span class="o">=</span> <span class="p">[</span><span class="n">item</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">retrieval</span><span class="o">.</span><span class="n">retrieval_context</span> <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+            <span class="n">citation_records</span> <span class="o">=</span> <span class="p">[</span><span class="n">item</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">retrieval</span><span class="o">.</span><span class="n">citation_records</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)]</span>
+            <span class="n">retrieval_stats</span> <span class="o">=</span> <span class="n">retrieval</span><span class="o">.</span><span class="n">retrieval_stats</span>
+            <span class="n">_record_activity</span><span class="p">(</span>
+                <span class="n">session</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_RETRIEVAL_TOOL</span><span class="p">,</span>
+                <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_RETRIEVAL_USED</span><span class="p">,</span>
+                <span class="n">metadata</span><span class="o">=</span><span class="p">{</span>
+                    <span class="s2">&quot;provider&quot;</span><span class="p">:</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">provider</span><span class="p">,</span>
+                    <span class="s2">&quot;collections&quot;</span><span class="p">:</span> <span class="n">selected_rag_collections</span><span class="p">,</span>
+                    <span class="s2">&quot;retrieval_stats&quot;</span><span class="p">:</span> <span class="n">retrieval_stats</span><span class="p">,</span>
+                    <span class="s2">&quot;citation_count&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">citation_records</span><span class="p">),</span>
+                <span class="p">},</span>
+            <span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">selected_mcp_keys</span><span class="p">:</span>
+            <span class="n">_record_activity</span><span class="p">(</span>
+                <span class="n">session</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_RETRIEVAL_TOOL</span><span class="p">,</span>
+                <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_TOOL_USED</span><span class="p">,</span>
+                <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;selected_mcp_servers&quot;</span><span class="p">:</span> <span class="n">selected_mcp_keys</span><span class="p">},</span>
+            <span class="p">)</span>
+
+        <span class="n">context_limit_tokens</span> <span class="o">=</span> <span class="n">_model_context_window_tokens</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">settings</span><span class="p">)</span>
+        <span class="n">rag_tokens</span> <span class="o">=</span> <span class="n">_estimate_tokens</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">retrieval_context</span><span class="p">))</span>
+        <span class="n">summary_text</span> <span class="o">=</span> <span class="n">_parse_summary_text</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">compaction_summary_json</span><span class="p">)</span>
+        <span class="n">history_messages</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">messages</span><span class="p">)</span>
+        <span class="n">history_without_current</span> <span class="o">=</span> <span class="p">[</span><span class="n">item</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">history_messages</span> <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">id</span> <span class="o">!=</span> <span class="n">user_message</span><span class="o">.</span><span class="n">id</span><span class="p">]</span>
+        <span class="n">keep_message_count</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">settings</span><span class="o">.</span><span class="n">preserve_recent_turns</span> <span class="o">*</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">recent_messages</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">history_without_current</span><span class="p">[</span><span class="o">-</span><span class="n">keep_message_count</span><span class="p">:]</span>
+            <span class="k">if</span> <span class="n">keep_message_count</span> <span class="o">&gt;</span> <span class="mi">0</span>
+            <span class="k">else</span> <span class="p">[]</span>
+        <span class="p">)</span>
+        <span class="n">history_block</span> <span class="o">=</span> <span class="n">_render_history_block</span><span class="p">(</span><span class="n">summary_text</span><span class="p">,</span> <span class="n">recent_messages</span><span class="p">)</span>
+        <span class="n">history_tokens</span> <span class="o">=</span> <span class="n">_estimate_tokens</span><span class="p">(</span><span class="n">history_block</span><span class="p">)</span>
+        <span class="n">user_tokens</span> <span class="o">=</span> <span class="n">_estimate_tokens</span><span class="p">(</span><span class="n">cleaned_message</span><span class="p">)</span>
+        <span class="n">mcp_tokens</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">context_usage_before</span> <span class="o">=</span> <span class="n">history_tokens</span> <span class="o">+</span> <span class="n">rag_tokens</span> <span class="o">+</span> <span class="n">mcp_tokens</span> <span class="o">+</span> <span class="n">user_tokens</span>
+        <span class="n">trigger_tokens</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span>
+            <span class="n">context_limit_tokens</span> <span class="o">*</span> <span class="p">(</span><span class="n">settings</span><span class="o">.</span><span class="n">compaction_trigger_percent</span> <span class="o">/</span> <span class="mf">100.0</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">target_tokens</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span>
+            <span class="n">context_limit_tokens</span> <span class="o">*</span> <span class="p">(</span><span class="n">settings</span><span class="o">.</span><span class="n">compaction_target_percent</span> <span class="o">/</span> <span class="mf">100.0</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">compaction_applied</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">compaction_metadata</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">context_usage_before</span> <span class="o">&gt;=</span> <span class="n">trigger_tokens</span> <span class="ow">and</span> <span class="n">history_without_current</span><span class="p">:</span>
+            <span class="n">compactable</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">history_without_current</span><span class="p">[:</span><span class="o">-</span><span class="n">keep_message_count</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">keep_message_count</span> <span class="o">&gt;</span> <span class="mi">0</span>
+                <span class="k">else</span> <span class="n">history_without_current</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">compactable</span><span class="p">:</span>
+                <span class="n">summary_text</span> <span class="o">=</span> <span class="n">_build_compaction_summary</span><span class="p">(</span>
+                    <span class="n">compactable</span><span class="p">,</span>
+                    <span class="n">summary_text</span><span class="p">,</span>
+                    <span class="n">settings</span><span class="o">.</span><span class="n">max_compaction_summary_chars</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">compaction_payload</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s2">&quot;summary_text&quot;</span><span class="p">:</span> <span class="n">summary_text</span><span class="p">,</span>
+                    <span class="s2">&quot;compacted_message_ids&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">item</span><span class="o">.</span><span class="n">id</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">compactable</span><span class="p">],</span>
+                    <span class="s2">&quot;compacted_at&quot;</span><span class="p">:</span> <span class="n">_now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+                    <span class="s2">&quot;request_id&quot;</span><span class="p">:</span> <span class="n">request_id</span><span class="p">,</span>
+                <span class="p">}</span>
+                <span class="n">thread</span><span class="o">.</span><span class="n">compaction_summary_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">(</span><span class="n">compaction_payload</span><span class="p">)</span>
+                <span class="n">recent_messages</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">history_without_current</span><span class="p">[</span><span class="o">-</span><span class="n">keep_message_count</span><span class="p">:]</span>
+                    <span class="k">if</span> <span class="n">keep_message_count</span> <span class="o">&gt;</span> <span class="mi">0</span>
+                    <span class="k">else</span> <span class="p">[]</span>
+                <span class="p">)</span>
+                <span class="n">history_block</span> <span class="o">=</span> <span class="n">_render_history_block</span><span class="p">(</span><span class="n">summary_text</span><span class="p">,</span> <span class="n">recent_messages</span><span class="p">)</span>
+                <span class="n">history_tokens</span> <span class="o">=</span> <span class="n">_estimate_tokens</span><span class="p">(</span><span class="n">history_block</span><span class="p">)</span>
+                <span class="k">while</span> <span class="p">(</span>
+                    <span class="n">recent_messages</span>
+                    <span class="ow">and</span> <span class="n">history_tokens</span> <span class="o">+</span> <span class="n">rag_tokens</span> <span class="o">+</span> <span class="n">mcp_tokens</span> <span class="o">+</span> <span class="n">user_tokens</span> <span class="o">&gt;</span> <span class="n">target_tokens</span>
+                <span class="p">):</span>
+                    <span class="n">recent_messages</span> <span class="o">=</span> <span class="n">recent_messages</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+                    <span class="n">history_block</span> <span class="o">=</span> <span class="n">_render_history_block</span><span class="p">(</span><span class="n">summary_text</span><span class="p">,</span> <span class="n">recent_messages</span><span class="p">)</span>
+                    <span class="n">history_tokens</span> <span class="o">=</span> <span class="n">_estimate_tokens</span><span class="p">(</span><span class="n">history_block</span><span class="p">)</span>
+                <span class="n">context_usage_before</span> <span class="o">=</span> <span class="n">history_tokens</span> <span class="o">+</span> <span class="n">rag_tokens</span> <span class="o">+</span> <span class="n">mcp_tokens</span> <span class="o">+</span> <span class="n">user_tokens</span>
+                <span class="n">compaction_applied</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="n">compaction_metadata</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s2">&quot;compacted_message_count&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">compactable</span><span class="p">),</span>
+                    <span class="s2">&quot;preserved_message_count&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">recent_messages</span><span class="p">),</span>
+                    <span class="s2">&quot;target_tokens&quot;</span><span class="p">:</span> <span class="n">target_tokens</span><span class="p">,</span>
+                <span class="p">}</span>
+                <span class="n">_record_activity</span><span class="p">(</span>
+                    <span class="n">session</span><span class="p">,</span>
+                    <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                    <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_COMPACTION</span><span class="p">,</span>
+                    <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_COMPACTED</span><span class="p">,</span>
+                    <span class="n">metadata</span><span class="o">=</span><span class="n">compaction_metadata</span><span class="p">,</span>
+                <span class="p">)</span>
+
+        <span class="n">prompt</span> <span class="o">=</span> <span class="n">_build_prompt</span><span class="p">(</span>
+            <span class="n">history_block</span><span class="o">=</span><span class="n">history_block</span><span class="p">,</span>
+            <span class="n">retrieval_context</span><span class="o">=</span><span class="n">retrieval_context</span><span class="p">,</span>
+            <span class="n">selected_mcp_server_keys</span><span class="o">=</span><span class="n">selected_mcp_keys</span><span class="p">,</span>
+            <span class="n">response_complexity</span><span class="o">=</span><span class="n">selected_response_complexity</span><span class="p">,</span>
+            <span class="n">user_message</span><span class="o">=</span><span class="n">cleaned_message</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">mcp_configs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">server</span> <span class="ow">in</span> <span class="n">mcp_servers</span><span class="p">:</span>
+                <span class="n">mcp_configs</span><span class="p">[</span><span class="n">server</span><span class="o">.</span><span class="n">server_key</span><span class="p">]</span> <span class="o">=</span> <span class="n">parse_mcp_config</span><span class="p">(</span>
+                    <span class="n">server</span><span class="o">.</span><span class="n">config_json</span><span class="p">,</span>
+                    <span class="n">server_key</span><span class="o">=</span><span class="n">server</span><span class="o">.</span><span class="n">server_key</span><span class="p">,</span>
+                <span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span> <span class="o">=</span> <span class="n">CHAT_REASON_MCP_FAILED</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+            <span class="n">_record_activity</span><span class="p">(</span>
+                <span class="n">session</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_FAILURE</span><span class="p">,</span>
+                <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_FAILED</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">TurnResult</span><span class="p">(</span>
+                <span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                <span class="n">error</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                <span class="n">rag_health_state</span><span class="o">=</span><span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                <span class="n">selected_collections</span><span class="o">=</span><span class="n">selected_rag_collections</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">model_config</span> <span class="o">=</span> <span class="n">_parse_model_config</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">config_json</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">llm_result</span> <span class="o">=</span> <span class="n">_run_llm</span><span class="p">(</span>
+                <span class="n">model</span><span class="o">.</span><span class="n">provider</span><span class="p">,</span>
+                <span class="n">prompt</span><span class="p">,</span>
+                <span class="n">mcp_configs</span><span class="p">,</span>
+                <span class="n">model_config</span><span class="o">=</span><span class="n">model_config</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span> <span class="o">=</span> <span class="n">CHAT_REASON_MCP_FAILED</span> <span class="k">if</span> <span class="n">selected_mcp_keys</span> <span class="k">else</span> <span class="n">CHAT_REASON_MODEL_FAILED</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+            <span class="n">_record_activity</span><span class="p">(</span>
+                <span class="n">session</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_FAILURE</span><span class="p">,</span>
+                <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_FAILED</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">TurnResult</span><span class="p">(</span>
+                <span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                <span class="n">error</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                <span class="n">rag_health_state</span><span class="o">=</span><span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                <span class="n">selected_collections</span><span class="o">=</span><span class="n">selected_rag_collections</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">reply</span> <span class="o">=</span> <span class="p">(</span><span class="n">llm_result</span><span class="o">.</span><span class="n">stdout</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">llm_result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span> <span class="o">=</span> <span class="n">CHAT_REASON_MCP_FAILED</span> <span class="k">if</span> <span class="n">selected_mcp_keys</span> <span class="k">else</span> <span class="n">CHAT_REASON_MODEL_FAILED</span>
+            <span class="n">turn</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="p">(</span><span class="n">llm_result</span><span class="o">.</span><span class="n">stderr</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;Model exited with code </span><span class="si">{</span><span class="n">llm_result</span><span class="o">.</span><span class="n">returncode</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="n">_record_activity</span><span class="p">(</span>
+                <span class="n">session</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_FAILURE</span><span class="p">,</span>
+                <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_FAILED</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                <span class="n">metadata</span><span class="o">=</span><span class="p">{</span>
+                    <span class="s2">&quot;return_code&quot;</span><span class="p">:</span> <span class="n">llm_result</span><span class="o">.</span><span class="n">returncode</span><span class="p">,</span>
+                    <span class="s2">&quot;stderr&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">llm_result</span><span class="o">.</span><span class="n">stderr</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+                <span class="p">},</span>
+            <span class="p">)</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">TurnResult</span><span class="p">(</span>
+                <span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+                <span class="n">reason_code</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span><span class="p">,</span>
+                <span class="n">error</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">error_message</span><span class="p">,</span>
+                <span class="n">rag_health_state</span><span class="o">=</span><span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                <span class="n">selected_collections</span><span class="o">=</span><span class="n">selected_rag_collections</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">assistant_message</span> <span class="o">=</span> <span class="n">ChatMessage</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">role</span><span class="o">=</span><span class="s2">&quot;assistant&quot;</span><span class="p">,</span>
+            <span class="n">content</span><span class="o">=</span><span class="n">reply</span><span class="p">,</span>
+            <span class="n">token_estimate</span><span class="o">=</span><span class="n">_estimate_tokens</span><span class="p">(</span><span class="n">reply</span><span class="p">),</span>
+            <span class="n">metadata_json</span><span class="o">=</span><span class="n">_safe_json_dump</span><span class="p">({}),</span>
+        <span class="p">)</span>
+        <span class="n">context_usage_after</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">history_tokens</span>
+            <span class="o">+</span> <span class="n">rag_tokens</span>
+            <span class="o">+</span> <span class="n">mcp_tokens</span>
+            <span class="o">+</span> <span class="n">user_tokens</span>
+            <span class="o">+</span> <span class="n">_estimate_tokens</span><span class="p">(</span><span class="n">reply</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">assistant_message_id</span> <span class="o">=</span> <span class="n">assistant_message</span><span class="o">.</span><span class="n">id</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">status</span> <span class="o">=</span> <span class="n">CHAT_TURN_STATUS_SUCCEEDED</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">reason_code</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">context_limit_tokens</span> <span class="o">=</span> <span class="n">context_limit_tokens</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">context_usage_before</span> <span class="o">=</span> <span class="n">context_usage_before</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">context_usage_after</span> <span class="o">=</span> <span class="n">context_usage_after</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">history_tokens</span> <span class="o">=</span> <span class="n">history_tokens</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">rag_tokens</span> <span class="o">=</span> <span class="n">rag_tokens</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">mcp_tokens</span> <span class="o">=</span> <span class="n">mcp_tokens</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">compaction_applied</span> <span class="o">=</span> <span class="n">compaction_applied</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">compaction_metadata_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">(</span><span class="n">compaction_metadata</span><span class="p">)</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">citation_metadata_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">(</span><span class="n">citation_records</span><span class="p">)</span>
+        <span class="n">turn</span><span class="o">.</span><span class="n">runtime_metadata_json</span> <span class="o">=</span> <span class="n">_safe_json_dump</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;rag_health_state&quot;</span><span class="p">:</span> <span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+                <span class="s2">&quot;selected_collections&quot;</span><span class="p">:</span> <span class="n">selected_rag_collections</span><span class="p">,</span>
+                <span class="s2">&quot;selected_mcp_servers&quot;</span><span class="p">:</span> <span class="n">selected_mcp_keys</span><span class="p">,</span>
+                <span class="s2">&quot;response_complexity&quot;</span><span class="p">:</span> <span class="n">selected_response_complexity</span><span class="p">,</span>
+                <span class="s2">&quot;retrieval_stats&quot;</span><span class="p">:</span> <span class="n">retrieval_stats</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+        <span class="n">_record_activity</span><span class="p">(</span>
+            <span class="n">session</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">event_class</span><span class="o">=</span><span class="n">CHAT_EVENT_CLASS_TURN</span><span class="p">,</span>
+            <span class="n">event_type</span><span class="o">=</span><span class="n">CHAT_EVENT_TYPE_TURN_RESPONDED</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="p">{</span>
+                <span class="s2">&quot;request_id&quot;</span><span class="p">:</span> <span class="n">request_id</span><span class="p">,</span>
+                <span class="s2">&quot;model_id&quot;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+                <span class="s2">&quot;context_usage_before&quot;</span><span class="p">:</span> <span class="n">context_usage_before</span><span class="p">,</span>
+                <span class="s2">&quot;context_usage_after&quot;</span><span class="p">:</span> <span class="n">context_usage_after</span><span class="p">,</span>
+                <span class="s2">&quot;context_limit_tokens&quot;</span><span class="p">:</span> <span class="n">context_limit_tokens</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">)</span>
+        <span class="n">thread</span><span class="o">.</span><span class="n">last_activity_at</span> <span class="o">=</span> <span class="n">_now</span><span class="p">()</span>
+        <span class="n">normalized_title</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">thread</span><span class="o">.</span><span class="n">title</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">casefold</span><span class="p">()</span>
+        <span class="n">default_titles</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">CHAT_DEFAULT_THREAD_TITLE</span><span class="o">.</span><span class="n">casefold</span><span class="p">(),</span>
+            <span class="n">CHAT_LEGACY_DEFAULT_THREAD_TITLE</span><span class="o">.</span><span class="n">casefold</span><span class="p">(),</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="n">normalized_title</span> <span class="ow">in</span> <span class="n">default_titles</span><span class="p">:</span>
+            <span class="n">thread</span><span class="o">.</span><span class="n">title</span> <span class="o">=</span> <span class="n">_derive_thread_title</span><span class="p">(</span><span class="n">cleaned_message</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">TurnResult</span><span class="p">(</span>
+            <span class="n">ok</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">thread_id</span><span class="o">=</span><span class="n">thread</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">turn_id</span><span class="o">=</span><span class="n">turn</span><span class="o">.</span><span class="n">id</span><span class="p">,</span>
+            <span class="n">request_id</span><span class="o">=</span><span class="n">request_id</span><span class="p">,</span>
+            <span class="n">reply</span><span class="o">=</span><span class="n">reply</span><span class="p">,</span>
+            <span class="n">rag_health_state</span><span class="o">=</span><span class="n">rag_health</span><span class="o">.</span><span class="n">state</span><span class="p">,</span>
+            <span class="n">selected_collections</span><span class="o">=</span><span class="n">selected_rag_collections</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="total_thread_count">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.total_thread_count">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">total_thread_count</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">select</span><span class="p">(</span><span class="n">func</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">id</span><span class="p">)))</span>
+            <span class="o">.</span><span class="n">scalar_one</span><span class="p">()</span>
+        <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="prune_archived_threads">
+<a class="viewcode-back" href="../../api/chat.runtime.html#chat.runtime.prune_archived_threads">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">prune_archived_threads</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">with</span> <span class="n">session_scope</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+        <span class="n">archived_ids</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+                <span class="n">select</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">id</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="n">CHAT_THREAD_STATUS_ARCHIVED</span><span class="p">)</span>
+            <span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+        <span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">archived_ids</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+            <span class="n">delete</span><span class="p">(</span><span class="n">chat_thread_mcp_servers</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span>
+                <span class="n">chat_thread_mcp_servers</span><span class="o">.</span><span class="n">c</span><span class="o">.</span><span class="n">chat_thread_id</span><span class="o">.</span><span class="n">in_</span><span class="p">(</span><span class="n">archived_ids</span><span class="p">)</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">deleted</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+            <span class="n">delete</span><span class="p">(</span><span class="n">ChatThread</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">ChatThread</span><span class="o">.</span><span class="n">id</span><span class="o">.</span><span class="n">in_</span><span class="p">(</span><span class="n">archived_ids</span><span class="p">))</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">deleted</span><span class="o">.</span><span class="n">rowcount</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

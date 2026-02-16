@@ -1,0 +1,7 @@
+rag.legacy package
+==================
+
+.. automodule:: rag.legacy
+   :members:
+   :show-inheritance:
+   :undoc-members:

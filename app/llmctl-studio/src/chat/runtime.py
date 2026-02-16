@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -37,7 +38,11 @@ from chat.contracts import (
     RAGRetrievalRequest,
 )
 from chat.rag_client import RAGContractClient, get_rag_contract_client
-from chat.settings import ChatRuntimeSettings, load_chat_runtime_settings
+from chat.settings import (
+    ChatRuntimeSettings,
+    load_chat_default_settings_payload,
+    load_chat_runtime_settings,
+)
 from core.db import session_scope, utcnow
 from core.mcp_config import parse_mcp_config
 from core.models import (
@@ -53,9 +58,100 @@ from core.models import (
     MCPServer,
     chat_thread_mcp_servers,
 )
+from services.integrations import load_integration_settings, resolve_default_model_id
 from services.tasks import _run_llm
 
 CHAT_CONTEXT_CHARS_PER_TOKEN = 4
+CHAT_DEFAULT_THREAD_TITLE = "New Chat"
+CHAT_LEGACY_DEFAULT_THREAD_TITLE = "New chat"
+CHAT_AUTO_TITLE_MAX_CHARS = 72
+CHAT_TITLE_SMALL_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "but",
+    "by",
+    "for",
+    "from",
+    "in",
+    "nor",
+    "of",
+    "on",
+    "or",
+    "per",
+    "so",
+    "the",
+    "to",
+    "via",
+    "with",
+    "yet",
+}
+CHAT_TITLE_ACRONYMS = {
+    "api",
+    "cli",
+    "cpu",
+    "css",
+    "gpu",
+    "html",
+    "http",
+    "https",
+    "json",
+    "jwt",
+    "llm",
+    "mcp",
+    "rag",
+    "sdk",
+    "sql",
+    "ssh",
+    "tcp",
+    "tls",
+    "udp",
+    "ui",
+    "url",
+    "ux",
+    "xml",
+    "yaml",
+}
+CHAT_TITLE_LEADING_PATTERNS = (
+    r"^(?:can|could|would|will)\s+you\s+",
+    r"^please\s+",
+    r"^help\s+me\s+(?:with\s+)?",
+    r"^i\s+need\s+(?:help\s+)?(?:to\s+|with\s+)?",
+    r"^i\s+want\s+to\s+",
+    r"^is\s+there\s+(?:a|an|any)\s+way\s+(?:to\s+)?",
+    r"^how\s+do\s+i\s+",
+    r"^what(?:'s|\s+is)\s+the\s+best\s+way\s+to\s+",
+    r"^we\s+could\s+",
+)
+CHAT_RESPONSE_COMPLEXITY_LOW = "low"
+CHAT_RESPONSE_COMPLEXITY_MEDIUM = "medium"
+CHAT_RESPONSE_COMPLEXITY_HIGH = "high"
+CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH = "extra_high"
+CHAT_RESPONSE_COMPLEXITY_CHOICES = (
+    CHAT_RESPONSE_COMPLEXITY_LOW,
+    CHAT_RESPONSE_COMPLEXITY_MEDIUM,
+    CHAT_RESPONSE_COMPLEXITY_HIGH,
+    CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH,
+)
+CHAT_RESPONSE_COMPLEXITY_ALIASES = {
+    "concise": CHAT_RESPONSE_COMPLEXITY_LOW,
+    "brief": CHAT_RESPONSE_COMPLEXITY_LOW,
+    "balanced": CHAT_RESPONSE_COMPLEXITY_MEDIUM,
+    "detailed": CHAT_RESPONSE_COMPLEXITY_HIGH,
+    "verbose": CHAT_RESPONSE_COMPLEXITY_HIGH,
+    "extra high": CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH,
+    "extra-high": CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH,
+    "extra": CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH,
+    "very_high": CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH,
+}
+CHAT_RESPONSE_COMPLEXITY_LABELS = {
+    CHAT_RESPONSE_COMPLEXITY_LOW: "Low",
+    CHAT_RESPONSE_COMPLEXITY_MEDIUM: "Medium",
+    CHAT_RESPONSE_COMPLEXITY_HIGH: "High",
+    CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH: "Extra High",
+}
 
 
 def _now() -> datetime:
@@ -75,11 +171,119 @@ def _safe_json_dump(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
+def normalize_response_complexity(
+    value: str | None,
+    *,
+    default: str = CHAT_RESPONSE_COMPLEXITY_MEDIUM,
+) -> str:
+    candidate = str(value or "").strip().lower()
+    candidate = candidate.replace("-", "_").replace(" ", "_")
+    candidate = CHAT_RESPONSE_COMPLEXITY_ALIASES.get(candidate, candidate)
+    if candidate in CHAT_RESPONSE_COMPLEXITY_CHOICES:
+        return candidate
+    if default in CHAT_RESPONSE_COMPLEXITY_CHOICES:
+        return default
+    return CHAT_RESPONSE_COMPLEXITY_MEDIUM
+
+
+def response_complexity_label(value: str | None) -> str:
+    normalized = normalize_response_complexity(value)
+    return CHAT_RESPONSE_COMPLEXITY_LABELS.get(
+        normalized, CHAT_RESPONSE_COMPLEXITY_LABELS[CHAT_RESPONSE_COMPLEXITY_MEDIUM]
+    )
+
+
 def _estimate_tokens(text: str) -> int:
     cleaned = (text or "").strip()
     if not cleaned:
         return 0
     return max(1, math.ceil(len(cleaned) / CHAT_CONTEXT_CHARS_PER_TOKEN))
+
+
+def _collapse_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _select_title_candidate(message: str) -> str:
+    parts = [
+        _collapse_whitespace(part)
+        for part in re.split(r"(?<=[.!?])\s+|\n+", message)
+    ]
+    candidates = [part for part in parts if part]
+    if not candidates:
+        return message
+    question = next((part for part in candidates if "?" in part), None)
+    selected = question if question else candidates[0]
+    return selected.strip().strip(".,!?")
+
+
+def _strip_prompt_prefixes(text: str) -> str:
+    value = text
+    while value:
+        updated = value
+        for pattern in CHAT_TITLE_LEADING_PATTERNS:
+            updated = re.sub(pattern, "", updated, flags=re.IGNORECASE).strip()
+        if updated == value:
+            break
+        value = updated
+    return value
+
+
+def _title_case_word(word: str, index: int, last_index: int) -> str:
+    if not word:
+        return word
+    match = re.match(r"^([^A-Za-z0-9]*)(.*?)([^A-Za-z0-9]*)$", word)
+    if not match:
+        return word
+    lead, core, tail = match.groups()
+    if not core:
+        return word
+    lower_core = core.lower()
+    if lower_core in CHAT_TITLE_ACRONYMS:
+        transformed = lower_core.upper()
+    elif any(ch.isupper() for ch in core[1:]) or any(ch.isdigit() for ch in core):
+        transformed = core
+    elif index not in (0, last_index) and lower_core in CHAT_TITLE_SMALL_WORDS:
+        transformed = lower_core
+    else:
+        transformed = lower_core.capitalize()
+    return f"{lead}{transformed}{tail}"
+
+
+def _smart_title_case(text: str) -> str:
+    words = text.split(" ")
+    if not words:
+        return text
+    last_index = len(words) - 1
+    return " ".join(
+        _title_case_word(word, idx, last_index)
+        for idx, word in enumerate(words)
+    )
+
+
+def _truncate_title(title: str, *, max_chars: int) -> str:
+    if len(title) <= max_chars:
+        return title
+    cutoff = max(1, max_chars - 3)
+    clipped = title[:cutoff].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip(" ,;:-")
+    if not clipped:
+        clipped = title[:cutoff].rstrip()
+    return f"{clipped}..."
+
+
+def _derive_thread_title(message: str) -> str:
+    cleaned = _collapse_whitespace(message)
+    if not cleaned:
+        return CHAT_DEFAULT_THREAD_TITLE
+    candidate = _select_title_candidate(cleaned)
+    candidate = _strip_prompt_prefixes(candidate)
+    candidate = _collapse_whitespace(candidate.strip(" \"'`*_"))
+    if not candidate:
+        return CHAT_DEFAULT_THREAD_TITLE
+    candidate = _smart_title_case(candidate)
+    return _truncate_title(candidate, max_chars=CHAT_AUTO_TITLE_MAX_CHARS)
 
 
 def _unique_ordered(values: list[str]) -> list[str]:
@@ -97,6 +301,29 @@ def _unique_ordered(values: list[str]) -> list[str]:
 def _parse_model_config(raw: str | None) -> dict[str, Any]:
     payload = _safe_json_load(raw)
     return payload if isinstance(payload, dict) else {}
+
+
+def _resolve_thread_default_model(session) -> LLMModel | None:
+    candidate_ids: list[int] = []
+    chat_defaults = load_chat_default_settings_payload()
+    chat_default_id = chat_defaults.get("default_model_id")
+    if isinstance(chat_default_id, int):
+        candidate_ids.append(chat_default_id)
+
+    llm_default_id = resolve_default_model_id(load_integration_settings("llm"))
+    if isinstance(llm_default_id, int) and llm_default_id not in candidate_ids:
+        candidate_ids.append(llm_default_id)
+
+    for model_id in candidate_ids:
+        model = session.get(LLMModel, model_id)
+        if model is not None:
+            return model
+
+    return (
+        session.execute(select(LLMModel).order_by(LLMModel.created_at.desc()).limit(1))
+        .scalars()
+        .first()
+    )
 
 
 def _model_context_window_tokens(
@@ -164,12 +391,15 @@ def _render_history_block(summary_text: str, messages: list[ChatMessage]) -> str
 def _serialize_thread_row(thread: ChatThread) -> dict[str, Any]:
     rag_payload = _safe_json_load(thread.selected_rag_collections_json)
     rag_collections = rag_payload if isinstance(rag_payload, list) else []
+    normalized_complexity = normalize_response_complexity(thread.response_complexity)
     return {
         "id": thread.id,
         "title": thread.title,
         "status": thread.status,
         "model_id": thread.model_id,
         "model_name": thread.model.name if thread.model is not None else None,
+        "response_complexity": normalized_complexity,
+        "response_complexity_label": response_complexity_label(normalized_complexity),
         "rag_collections": [str(item) for item in rag_collections if str(item).strip()],
         "mcp_servers": [
             {"id": server.id, "name": server.name, "server_key": server.server_key}
@@ -277,6 +507,7 @@ def create_thread(
     model_id: int | None,
     mcp_server_ids: list[int] | None = None,
     rag_collections: list[str] | None = None,
+    response_complexity: str | None = None,
 ) -> dict[str, Any]:
     with session_scope() as session:
         selected_model_id = model_id
@@ -297,9 +528,10 @@ def create_thread(
             selected_servers = [by_id[item] for item in selected_mcp_ids if item in by_id]
         thread = ChatThread.create(
             session,
-            title=(title or "").strip() or "New chat",
+            title=(title or "").strip() or CHAT_DEFAULT_THREAD_TITLE,
             status=CHAT_THREAD_STATUS_ACTIVE,
             model_id=selected_model_id,
+            response_complexity=normalize_response_complexity(response_complexity),
             selected_rag_collections_json=_safe_json_dump(
                 _unique_ordered([str(item) for item in (rag_collections or [])])
             ),
@@ -323,6 +555,7 @@ def update_thread_config(
     model_id: int | None,
     mcp_server_ids: list[int],
     rag_collections: list[str],
+    response_complexity: str | None,
 ) -> dict[str, Any]:
     with session_scope() as session:
         thread = (
@@ -350,6 +583,7 @@ def update_thread_config(
             by_id = {server.id: server for server in selected_servers}
             selected_servers = [by_id[item] for item in mcp_server_ids if item in by_id]
         thread.model_id = model_id
+        thread.response_complexity = normalize_response_complexity(response_complexity)
         thread.selected_rag_collections_json = _safe_json_dump(_unique_ordered(rag_collections))
         thread.mcp_servers = selected_servers
         thread.updated_at = _now()
@@ -488,11 +722,39 @@ def _build_prompt(
     history_block: str,
     retrieval_context: list[str],
     selected_mcp_server_keys: list[str],
+    response_complexity: str,
     user_message: str,
 ) -> str:
+    normalized_complexity = normalize_response_complexity(response_complexity)
+    if normalized_complexity == CHAT_RESPONSE_COMPLEXITY_LOW:
+        complexity_instruction = (
+            "Response complexity: LOW. Keep the response concise, direct, and focused "
+            "on essentials only."
+        )
+    elif normalized_complexity == CHAT_RESPONSE_COMPLEXITY_MEDIUM:
+        complexity_instruction = (
+            "Response complexity: MEDIUM. Start with a short summary, then provide the "
+            "key supporting details."
+        )
+    elif normalized_complexity == CHAT_RESPONSE_COMPLEXITY_HIGH:
+        complexity_instruction = (
+            "Response complexity: HIGH. Provide a detailed, structured response with "
+            "thorough reasoning and relevant caveats."
+        )
+    else:
+        complexity_instruction = (
+            "Response complexity: EXTRA HIGH. Be exhaustive and completeness-focused. "
+            "When the user asks for structured data, include comprehensive Markdown "
+            "tables and ensure requested fields are not omitted."
+        )
     sections = [
         "You are a helpful assistant in a multi-turn chat session.",
         "Respond directly to the latest user message.",
+        complexity_instruction,
+        (
+            "Use Markdown when it improves clarity (headings, lists, tables, and "
+            "fenced code blocks)."
+        ),
     ]
     if history_block:
         sections.append(history_block)
@@ -539,15 +801,15 @@ def execute_turn(
             raise ValueError("Thread not found.")
         model = thread.model
         if model is None:
-            model = (
-                session.execute(select(LLMModel).order_by(LLMModel.created_at.desc()).limit(1))
-                .scalars()
-                .first()
-            )
+            model = _resolve_thread_default_model(session)
             if model is None:
                 raise ValueError("No models available for Chat.")
             thread.model_id = model.id
             thread.model = model
+        selected_response_complexity = normalize_response_complexity(
+            thread.response_complexity
+        )
+        thread.response_complexity = selected_response_complexity
 
         selected_rag_collections_payload = _safe_json_load(thread.selected_rag_collections_json)
         selected_rag_collections = (
@@ -585,6 +847,7 @@ def execute_turn(
             metadata={
                 "request_id": request_id,
                 "model_id": model.id,
+                "response_complexity": selected_response_complexity,
                 "selected_collections": selected_rag_collections,
                 "selected_mcp_servers": selected_mcp_keys,
             },
@@ -779,6 +1042,7 @@ def execute_turn(
             history_block=history_block,
             retrieval_context=retrieval_context,
             selected_mcp_server_keys=selected_mcp_keys,
+            response_complexity=selected_response_complexity,
             user_message=cleaned_message,
         )
         mcp_configs: dict[str, dict[str, Any]] = {}
@@ -906,6 +1170,7 @@ def execute_turn(
                 "rag_health_state": rag_health.state,
                 "selected_collections": selected_rag_collections,
                 "selected_mcp_servers": selected_mcp_keys,
+                "response_complexity": selected_response_complexity,
                 "retrieval_stats": retrieval_stats,
             }
         )
@@ -924,11 +1189,13 @@ def execute_turn(
             },
         )
         thread.last_activity_at = _now()
-        if thread.title == "New chat":
-            derived = cleaned_message
-            if len(derived) > 72:
-                derived = f"{derived[:69]}..."
-            thread.title = derived
+        normalized_title = str(thread.title or "").strip().casefold()
+        default_titles = {
+            CHAT_DEFAULT_THREAD_TITLE.casefold(),
+            CHAT_LEGACY_DEFAULT_THREAD_TITLE.casefold(),
+        }
+        if normalized_title in default_titles:
+            thread.title = _derive_thread_title(cleaned_message)
         return TurnResult(
             ok=True,
             thread_id=thread.id,

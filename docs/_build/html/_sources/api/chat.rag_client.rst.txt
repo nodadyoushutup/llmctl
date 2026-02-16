@@ -1,0 +1,7 @@
+chat.rag\_client module
+=======================
+
+.. automodule:: chat.rag_client
+   :members:
+   :show-inheritance:
+   :undoc-members:

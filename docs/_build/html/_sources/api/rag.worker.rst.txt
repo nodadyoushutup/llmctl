@@ -1,0 +1,16 @@
+rag.worker package
+==================
+
+.. automodule:: rag.worker
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   rag.worker.celery_app
+   rag.worker.queues

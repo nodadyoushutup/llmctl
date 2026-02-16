@@ -1,0 +1,7 @@
+rag.domain.contracts module
+===========================
+
+.. automodule:: rag.domain.contracts
+   :members:
+   :show-inheritance:
+   :undoc-members:

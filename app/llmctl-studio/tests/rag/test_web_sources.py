@@ -40,15 +40,21 @@ class WebSourceRoutesTests(unittest.TestCase):
         self.assertIn("source_index_schedule_unit", self.source_edit_template)
         self.assertIn("source_index_schedule_mode", self.source_edit_template)
 
-    def test_sources_page_uses_row_link_and_no_index_job_actions(self) -> None:
+    def test_sources_page_uses_row_link_and_quick_run_actions(self) -> None:
         self.assertIn("table-row-link", self.sources_template)
         self.assertIn("data-href", self.sources_template)
+        self.assertIn("data-rag-quick-run", self.sources_template)
+        self.assertIn('data-rag-quick-run-mode="fresh"', self.sources_template)
+        self.assertIn('data-rag-quick-run-mode="delta"', self.sources_template)
         self.assertNotIn("index_source_page", self.sources_template)
         self.assertNotIn("pause_source_page", self.sources_template)
         self.assertNotIn("resume_source_page", self.sources_template)
         self.assertNotIn("cancel_source_page", self.sources_template)
 
-    def test_source_detail_no_legacy_index_job_links(self) -> None:
+    def test_source_detail_uses_quick_run_actions_and_no_legacy_links(self) -> None:
+        self.assertIn("data-rag-quick-run", self.source_detail_template)
+        self.assertIn('data-rag-quick-run-mode="fresh"', self.source_detail_template)
+        self.assertIn('data-rag-quick-run-mode="delta"', self.source_detail_template)
         self.assertNotIn("index_jobs_page", self.source_detail_template)
         self.assertNotIn("index_source_page", self.source_detail_template)
 

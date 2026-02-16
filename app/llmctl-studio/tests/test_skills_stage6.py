@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from flask import Flask
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, text
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
@@ -21,6 +21,7 @@ import core.db as core_db
 from core.config import Config
 from core.db import session_scope
 from core.models import (
+    Agent,
     AgentTask,
     FLOWCHART_NODE_TYPE_TASK,
     Flowchart,
@@ -28,7 +29,10 @@ from core.models import (
     LLMModel,
     Script,
     Skill,
+    SkillFile,
+    SkillVersion,
     TaskTemplate,
+    agent_skill_bindings,
     agent_task_scripts,
     flowchart_node_scripts,
     flowchart_node_skills,
@@ -257,6 +261,236 @@ class SkillsStage6Tests(StudioDbTestCase):
             ]
         assert migrated_skill is not None
         self.assertEqual([int(migrated_skill.id)], attached_skill_ids)
+
+    def test_node_skill_migration_is_idempotent_and_deterministic(self) -> None:
+        with session_scope() as session:
+            model = LLMModel.create(
+                session,
+                name="stage6-migration-model",
+                provider="codex",
+                config_json="{}",
+            )
+            primary_agent = Agent.create(
+                session,
+                name="stage6-primary-agent",
+                prompt_json=json.dumps({"instruction": "stage6"}),
+            )
+            template_agent = Agent.create(
+                session,
+                name="stage6-template-agent",
+                prompt_json=json.dumps({"instruction": "stage6"}),
+            )
+            task_template = TaskTemplate.create(
+                session,
+                name="stage6-migration-template",
+                prompt="hello",
+                model_id=model.id,
+                agent_id=template_agent.id,
+            )
+            flowchart = Flowchart.create(session, name="stage6-migration-flowchart")
+            config_bound_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                model_id=model.id,
+                config_json=json.dumps({"agent_id": primary_agent.id}, sort_keys=True),
+            )
+            template_bound_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                ref_id=task_template.id,
+                model_id=model.id,
+                config_json=json.dumps({}, sort_keys=True),
+            )
+            duplicate_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                model_id=model.id,
+                config_json=json.dumps({"agent_id": primary_agent.id}, sort_keys=True),
+            )
+
+            def _create_skill(name: str) -> int:
+                skill = Skill.create(
+                    session,
+                    name=name,
+                    display_name=name.replace("-", " ").title(),
+                    description="stage6 migration skill",
+                    status="active",
+                    source_type="ui",
+                )
+                version = SkillVersion.create(
+                    session,
+                    skill_id=skill.id,
+                    version="1.0.0",
+                    manifest_hash="",
+                )
+                skill_md = (
+                    "---\n"
+                    f"name: {name}\n"
+                    f"display_name: {name.replace('-', ' ').title()}\n"
+                    "description: stage6 migration skill\n"
+                    "version: 1.0.0\n"
+                    "status: active\n"
+                    "---\n\n"
+                    f"# {name}\n"
+                )
+                SkillFile.create(
+                    session,
+                    skill_version_id=version.id,
+                    path="SKILL.md",
+                    content=skill_md,
+                    checksum="",
+                    size_bytes=len(skill_md.encode("utf-8")),
+                )
+                return int(skill.id)
+
+            skill_alpha_id = _create_skill("stage6-alpha")
+            skill_beta_id = _create_skill("stage6-beta")
+            skill_gamma_id = _create_skill("stage6-gamma")
+
+            # Existing binding should be preserved; migration must only append new unique pairs.
+            session.execute(
+                agent_skill_bindings.insert().values(
+                    agent_id=primary_agent.id,
+                    skill_id=skill_beta_id,
+                    position=1,
+                )
+            )
+
+            session.execute(
+                flowchart_node_skills.insert().values(
+                    flowchart_node_id=config_bound_node.id,
+                    skill_id=skill_beta_id,
+                    position=1,
+                )
+            )
+            session.execute(
+                flowchart_node_skills.insert().values(
+                    flowchart_node_id=config_bound_node.id,
+                    skill_id=skill_alpha_id,
+                    position=2,
+                )
+            )
+            session.execute(
+                flowchart_node_skills.insert().values(
+                    flowchart_node_id=template_bound_node.id,
+                    skill_id=skill_gamma_id,
+                    position=1,
+                )
+            )
+            session.execute(
+                flowchart_node_skills.insert().values(
+                    flowchart_node_id=duplicate_node.id,
+                    skill_id=skill_alpha_id,
+                    position=1,
+                )
+            )
+            primary_agent_id = int(primary_agent.id)
+            template_agent_id = int(template_agent.id)
+
+        assert core_db._engine is not None
+        with core_db._engine.begin() as connection:
+            core_db._migrate_flowchart_node_skills_to_agent_bindings(connection)
+            core_db._migrate_flowchart_node_skills_to_agent_bindings(connection)
+
+        with session_scope() as session:
+            primary_rows = session.execute(
+                select(agent_skill_bindings.c.skill_id, agent_skill_bindings.c.position)
+                .where(agent_skill_bindings.c.agent_id == primary_agent_id)
+                .order_by(agent_skill_bindings.c.position.asc(), agent_skill_bindings.c.skill_id.asc())
+            ).all()
+            template_rows = session.execute(
+                select(agent_skill_bindings.c.skill_id, agent_skill_bindings.c.position)
+                .where(agent_skill_bindings.c.agent_id == template_agent_id)
+                .order_by(agent_skill_bindings.c.position.asc(), agent_skill_bindings.c.skill_id.asc())
+            ).all()
+
+        self.assertEqual(
+            [(skill_beta_id, 1), (skill_alpha_id, 2)],
+            [(int(skill_id), int(position)) for skill_id, position in primary_rows],
+        )
+        self.assertEqual(
+            [(skill_gamma_id, 1)],
+            [(int(skill_id), int(position)) for skill_id, position in template_rows],
+        )
+
+    def test_node_skill_migration_archives_unmapped_rows(self) -> None:
+        with session_scope() as session:
+            model = LLMModel.create(
+                session,
+                name="stage6-unmapped-model",
+                provider="codex",
+                config_json="{}",
+            )
+            flowchart = Flowchart.create(session, name="stage6-unmapped-flowchart")
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                model_id=model.id,
+                config_json=json.dumps({"agent_id": 999999}, sort_keys=True),
+            )
+            skill = Skill.create(
+                session,
+                name="stage6-unmapped-skill",
+                display_name="Stage6 Unmapped Skill",
+                description="stage6 unmapped migration skill",
+                status="active",
+                source_type="ui",
+            )
+            version = SkillVersion.create(
+                session,
+                skill_id=skill.id,
+                version="1.0.0",
+                manifest_hash="",
+            )
+            skill_md = (
+                "---\n"
+                "name: stage6-unmapped-skill\n"
+                "display_name: Stage6 Unmapped Skill\n"
+                "description: stage6 unmapped migration skill\n"
+                "version: 1.0.0\n"
+                "status: active\n"
+                "---\n\n"
+                "# Stage6 Unmapped Skill\n"
+            )
+            SkillFile.create(
+                session,
+                skill_version_id=version.id,
+                path="SKILL.md",
+                content=skill_md,
+                checksum="",
+                size_bytes=len(skill_md.encode("utf-8")),
+            )
+            session.execute(
+                flowchart_node_skills.insert().values(
+                    flowchart_node_id=node.id,
+                    skill_id=skill.id,
+                    position=1,
+                )
+            )
+            node_id = int(node.id)
+            skill_id = int(skill.id)
+
+        assert core_db._engine is not None
+        with core_db._engine.begin() as connection:
+            core_db._migrate_flowchart_node_skills_to_agent_bindings(connection)
+            archive_rows = connection.execute(
+                text(
+                    "SELECT flowchart_node_id, skill_id, reason "
+                    "FROM legacy_unmapped_node_skills "
+                    "WHERE flowchart_node_id = :node_id AND skill_id = :skill_id"
+                ),
+                {"node_id": node_id, "skill_id": skill_id},
+            ).fetchall()
+
+        self.assertEqual(1, len(archive_rows))
+        archived = archive_rows[0]
+        self.assertEqual(node_id, int(archived[0]))
+        self.assertEqual(skill_id, int(archived[1]))
+        self.assertEqual("node_config_agent_not_found", str(archived[2]))
 
     def test_concurrency_stress_100_runs_zero_skill_bleed(self) -> None:
         root = Path(self._tmp.name) / "skill-stress"

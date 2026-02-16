@@ -7,6 +7,7 @@ ARG APP_UID=1000
 ARG APP_GID=1000
 ARG DOCKER_GID=999
 ARG INSTALL_VLLM=true
+ARG INSTALL_CLAUDE=true
 ENV APP_UID=$APP_UID \
     APP_GID=$APP_GID \
     DOCKER_GID=$DOCKER_GID \
@@ -28,23 +29,38 @@ RUN apt-get update \
         | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list \
+    && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/google-cloud.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+        > /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /etc/apt/keyrings/google-linux.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-linux.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
+        google-chrome-stable \
+        google-cloud-cli \
         nodejs \
-    && npm install -g @openai/codex@latest @google/gemini-cli@latest @modelcontextprotocol/server-github@2025.4.8 \
+    && npm install -g @openai/codex@latest @google/gemini-cli@latest @modelcontextprotocol/server-github@2025.4.8 @google-cloud/gcloud-mcp@0.5.3 \
+    && if [ "${INSTALL_CLAUDE}" = "true" ]; then npm install -g @anthropic-ai/claude-code@latest; fi \
+    && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium-browser \
+    && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+COPY scripts/install /app/scripts/install
 COPY app/llmctl-studio/docker/scripts /app/app/llmctl-studio/docker/scripts
-RUN /app/app/llmctl-studio/docker/scripts/install-docker-cli.sh \
-    && /app/app/llmctl-studio/docker/scripts/install-kubectl.sh \
+RUN /app/scripts/install/install-docker-cli.sh \
+    && /app/scripts/install/install-kubectl.sh \
     && /app/app/llmctl-studio/docker/scripts/setup-user-groups.sh
 
 COPY app/llmctl-studio/requirements.txt /app/app/llmctl-studio/requirements.txt
 COPY app/llmctl-mcp/requirements.txt /app/app/llmctl-mcp/requirements.txt
 RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH" \
+    LLMCTL_STUDIO_USE_GUNICORN=true
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio/requirements.txt \
     && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-mcp/requirements.txt \

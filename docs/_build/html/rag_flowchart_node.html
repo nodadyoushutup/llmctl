@@ -1,0 +1,198 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Flowchart Node &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Changelog" href="changelog.html" />
+    <link rel="prev" title="Provider Runtime" href="provider_runtime.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">RAG Flowchart Node</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#runtime-modes">Runtime modes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#node-config-schema">Node config schema</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#runtime-contract">Runtime contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#integration-health-gating">Integration-health gating</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#contract-endpoints">Contract endpoints</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#manual-source-quick-runs">Manual source quick runs</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">RAG Flowchart Node</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/rag_flowchart_node.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="rag-flowchart-node">
+<h1>RAG Flowchart Node<a class="headerlink" href="#rag-flowchart-node" title="Link to this heading"></a></h1>
+<p>The RAG runtime has migrated from standalone Index Jobs to a first-class
+<code class="docutils literal notranslate"><span class="pre">rag</span></code> flowchart node.</p>
+<section id="runtime-modes">
+<h2>Runtime modes<a class="headerlink" href="#runtime-modes" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">fresh_index</span></code>: rebuild selected collection(s).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">delta_index</span></code>: incremental index for selected collection(s).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">query</span></code>: retrieval + synthesis output for downstream nodes.</p></li>
+</ul>
+</section>
+<section id="node-config-schema">
+<h2>Node config schema<a class="headerlink" href="#node-config-schema" title="Link to this heading"></a></h2>
+<p>Required keys:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">mode</span></code>: <code class="docutils literal notranslate"><span class="pre">fresh_index</span></code> | <code class="docutils literal notranslate"><span class="pre">delta_index</span></code> | <code class="docutils literal notranslate"><span class="pre">query</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">collections</span></code>: one or more selected collection ids/names</p></li>
+</ul>
+<p>Query mode keys:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">question_prompt</span></code> (required)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">top_k</span></code> (optional, default <code class="docutils literal notranslate"><span class="pre">5</span></code>)</p></li>
+</ul>
+</section>
+<section id="runtime-contract">
+<h2>Runtime contract<a class="headerlink" href="#runtime-contract" title="Link to this heading"></a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">query</span></code> mode emits normalized output payload fields:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">answer</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">retrieval_context</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">retrieval_stats</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">synthesis_error</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mode</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">collections</span></code></p></li>
+</ul>
+<p>Citation/source snippets are audit-only in v1 and are not emitted in runtime
+payload/context.</p>
+</section>
+<section id="integration-health-gating">
+<h2>Integration-health gating<a class="headerlink" href="#integration-health-gating" title="Link to this heading"></a></h2>
+<p>RAG node visibility and execution are gated by real-time RAG health:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">unconfigured</span></code>: palette hidden</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">configured_unhealthy</span></code>: palette visible but disabled</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">configured_healthy</span></code>: palette enabled</p></li>
+</ul>
+<p>Runs containing RAG nodes perform pre-run validation and fail fast when health
+is not <code class="docutils literal notranslate"><span class="pre">configured_healthy</span></code>.</p>
+</section>
+<section id="contract-endpoints">
+<h2>Contract endpoints<a class="headerlink" href="#contract-endpoints" title="Link to this heading"></a></h2>
+<p>The shared RAG contract surfaces used by Chat are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/api/rag/contract/health</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/api/rag/contract/collections</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/rag/contract/retrieve</span></code></p></li>
+</ul>
+<p>Legacy aliases remain available at <code class="docutils literal notranslate"><span class="pre">/api/rag/{health,collections,retrieve}</span></code>
+for compatibility.</p>
+</section>
+<section id="manual-source-quick-runs">
+<h2>Manual source quick runs<a class="headerlink" href="#manual-source-quick-runs" title="Link to this heading"></a></h2>
+<p>RAG indexing can also be triggered directly from the Sources UI without using a
+flowchart node:</p>
+<ul class="simple">
+<li><p>Sources list rows expose icon-only quick actions for <code class="docutils literal notranslate"><span class="pre">Index</span></code> and <code class="docutils literal notranslate"><span class="pre">Delta</span> <span class="pre">Index</span></code>.</p></li>
+<li><p>Source detail pages expose the same quick actions.</p></li>
+<li><p>Quick actions execute immediately (no confirm modal).</p></li>
+<li><p>Duplicate triggers are blocked while a source already has an active index run.</p></li>
+</ul>
+<p>Quick runs are recorded in Node Activity as <code class="docutils literal notranslate"><span class="pre">Quick</span> <span class="pre">RAG</span></code> entries (with mode
+and source context) using existing node activity metadata. They are intentionally
+excluded from the workflow <code class="docutils literal notranslate"><span class="pre">RAG</span></code> node list because that list is flowchart-node
+only.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="provider_runtime.html" class="btn btn-neutral float-left" title="Provider Runtime" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="changelog.html" class="btn btn-neutral float-right" title="Changelog" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

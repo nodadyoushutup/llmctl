@@ -909,7 +909,7 @@ def run_index_task(
                 ),
             )
             github_settings = load_integration_settings("github")
-            drive_settings = load_integration_settings("google_drive")
+            drive_settings = load_integration_settings("google_workspace")
             service_account_json = drive_settings.get("service_account_json") or ""
 
             source = get_source(source_id)

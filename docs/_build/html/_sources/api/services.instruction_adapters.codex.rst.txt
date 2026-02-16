@@ -1,0 +1,7 @@
+services.instruction\_adapters.codex module
+===========================================
+
+.. automodule:: services.instruction_adapters.codex
+   :members:
+   :show-inheritance:
+   :undoc-members:

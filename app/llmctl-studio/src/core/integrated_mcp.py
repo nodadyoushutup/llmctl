@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +21,14 @@ INTEGRATED_MCP_LLMCTL_KEY = "llmctl-mcp"
 INTEGRATED_MCP_GITHUB_KEY = "github"
 INTEGRATED_MCP_ATLASSIAN_KEY = "atlassian"
 INTEGRATED_MCP_CHROMA_KEY = "chroma"
+INTEGRATED_MCP_GOOGLE_CLOUD_KEY = "google-cloud"
+INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY = "google-workspace"
 LEGACY_ATLASSIAN_KEY = "jira"
 DOCKER_CHROMA_HOST_ALIASES = {"llmctl-chromadb", "chromadb"}
+GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE = (
+    Path(Config.DATA_DIR) / "credentials" / "google-cloud-service-account.json"
+)
+logger = logging.getLogger(__name__)
 
 
 def sync_integrated_mcp_servers() -> dict[str, int]:
@@ -56,6 +64,8 @@ def sync_integrated_mcp_servers_in_session(session: Session) -> dict[str, int]:
         INTEGRATED_MCP_GITHUB_KEY,
         INTEGRATED_MCP_ATLASSIAN_KEY,
         INTEGRATED_MCP_CHROMA_KEY,
+        INTEGRATED_MCP_GOOGLE_CLOUD_KEY,
+        INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY,
     ):
         if key in desired:
             continue
@@ -109,6 +119,10 @@ def _desired_integrated_server_payloads(
     jira = _load_provider_settings(session, "jira")
     confluence = _load_provider_settings(session, "confluence")
     chroma = _load_provider_settings(session, "chroma")
+    google_cloud = _load_provider_settings(session, "google_cloud")
+    if not google_cloud:
+        google_cloud = _load_provider_settings(session, "google_drive")
+    google_workspace = _load_provider_settings(session, "google_workspace")
 
     payload: dict[str, dict[str, Any]] = {
         INTEGRATED_MCP_LLMCTL_KEY: {
@@ -146,6 +160,41 @@ def _desired_integrated_server_payloads(
             ),
         }
 
+    google_cloud_mcp_enabled = _as_bool_default(
+        google_cloud.get("google_cloud_mcp_enabled"), default=True
+    )
+    google_cloud_project_id = _clean(google_cloud.get("google_cloud_project_id"))
+    if google_cloud_mcp_enabled:
+        credentials_path = _write_google_cloud_service_account_file(
+            google_cloud.get("service_account_json")
+        )
+        if credentials_path is not None:
+            payload[INTEGRATED_MCP_GOOGLE_CLOUD_KEY] = {
+                "name": "Google Cloud MCP",
+                "description": (
+                    "System-managed Google Cloud MCP server from Google Cloud integration settings."
+                ),
+                "config": _google_cloud_config(
+                    credentials_path=credentials_path,
+                    project_id=google_cloud_project_id,
+                ),
+            }
+    else:
+        _remove_google_cloud_service_account_file(GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE)
+
+    google_workspace_mcp_enabled = _as_bool_default(
+        google_workspace.get("google_workspace_mcp_enabled"),
+        default=False,
+    )
+    google_workspace_service_account_json = _clean(
+        google_workspace.get("service_account_json")
+    )
+    if google_workspace_mcp_enabled and google_workspace_service_account_json:
+        logger.info(
+            "Google Workspace MCP requested but runtime activation is guarded "
+            "until a supported service-account server path is finalized."
+        )
+
     return payload
 
 
@@ -166,6 +215,13 @@ def _clean(value: str | None) -> str:
 
 def _as_bool(value: str | None) -> bool:
     return _clean(value).lower() in {"1", "true", "yes", "on"}
+
+
+def _as_bool_default(value: str | None, *, default: bool) -> bool:
+    raw = _clean(value).lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _parse_port(value: str | None) -> int | None:
@@ -245,6 +301,70 @@ def _chroma_config(*, host: str, port: int, ssl: bool) -> dict[str, Any]:
             "true" if ssl else "false",
         ],
     }
+
+
+def _google_cloud_config(
+    *,
+    credentials_path: Path,
+    project_id: str,
+) -> dict[str, Any]:
+    env = {
+        "GOOGLE_APPLICATION_CREDENTIALS": str(credentials_path),
+        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE": str(credentials_path),
+    }
+    if project_id:
+        env["GOOGLE_CLOUD_PROJECT"] = project_id
+        env["GCP_PROJECT_ID"] = project_id
+        env["CLOUDSDK_CORE_PROJECT"] = project_id
+    return {
+        "command": "gcloud-mcp",
+        "env": {key: env[key] for key in sorted(env)},
+    }
+
+
+def _write_google_cloud_service_account_file(raw_json: str | None) -> Path | None:
+    cleaned = _clean(raw_json)
+    target = GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE
+    if not cleaned:
+        _remove_google_cloud_service_account_file(target)
+        return None
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        logger.warning("Google Cloud service account JSON is invalid; skipping MCP setup.")
+        _remove_google_cloud_service_account_file(target)
+        return None
+    if not isinstance(parsed, dict):
+        logger.warning(
+            "Google Cloud service account JSON must be an object; skipping MCP setup."
+        )
+        _remove_google_cloud_service_account_file(target)
+        return None
+    normalized = json.dumps(parsed, sort_keys=True, indent=2) + "\n"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(normalized, encoding="utf-8")
+        target.chmod(0o600)
+    except OSError as exc:
+        logger.warning(
+            "Unable to persist Google Cloud service account file at %s: %s",
+            target,
+            exc,
+        )
+        return None
+    return target
+
+
+def _remove_google_cloud_service_account_file(path: Path) -> None:
+    try:
+        if path.exists():
+            path.unlink()
+    except OSError as exc:
+        logger.warning(
+            "Unable to remove Google Cloud service account file at %s: %s",
+            path,
+            exc,
+        )
 
 
 def _credential_parts(api_key: str, email: str) -> tuple[str, str]:

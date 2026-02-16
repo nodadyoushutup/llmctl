@@ -1,0 +1,24 @@
+core package
+============
+
+.. automodule:: core
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   core.chroma_mcp_stdio_wrapper
+   core.config
+   core.db
+   core.mcp_config
+   core.prompt_envelope
+   core.quick_node
+   core.task_integrations
+   core.task_kinds
+   core.task_stages
+   core.vllm_models

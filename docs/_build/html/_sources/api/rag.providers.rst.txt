@@ -1,0 +1,15 @@
+rag.providers package
+=====================
+
+.. automodule:: rag.providers
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   rag.providers.adapters

@@ -1,0 +1,245 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>services.instruction_adapters.base &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+          <li class="breadcrumb-item"><a href="../instruction_adapters.html">services.instruction_adapters</a></li>
+      <li class="breadcrumb-item active">services.instruction_adapters.base</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for services.instruction_adapters.base</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Protocol</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">services.instructions.compiler</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">CompiledInstructionPackage</span><span class="p">,</span>
+    <span class="n">INSTRUCTIONS_FILENAME</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">FRONTIER_INSTRUCTION_FILENAMES</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;codex&quot;</span><span class="p">:</span> <span class="s2">&quot;AGENTS.md&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;gemini&quot;</span><span class="p">:</span> <span class="s2">&quot;GEMINI.md&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;claude&quot;</span><span class="p">:</span> <span class="s2">&quot;CLAUDE.md&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">NON_FRONTIER_DEFAULT_INSTRUCTION_FILENAME</span> <span class="o">=</span> <span class="s2">&quot;AGENT.md&quot;</span>
+<span class="n">_MARKDOWN_FILENAME_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^[A-Za-z0-9._-]+$&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="is_frontier_instruction_provider">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.is_frontier_instruction_provider">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_frontier_instruction_provider</span><span class="p">(</span><span class="n">provider</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="n">normalized</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">provider</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">normalized</span> <span class="ow">in</span> <span class="n">FRONTIER_INSTRUCTION_FILENAMES</span></div>
+
+
+
+<div class="viewcode-block" id="validate_agent_markdown_filename">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.validate_agent_markdown_filename">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">validate_agent_markdown_filename</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">cleaned</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cleaned</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Instruction markdown filename is required.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">cleaned</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Instruction markdown filename cannot start with &#39;.&#39;.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cleaned</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;.md&quot;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Instruction markdown filename must end with &#39;.md&#39;.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">_MARKDOWN_FILENAME_RE</span><span class="o">.</span><span class="n">fullmatch</span><span class="p">(</span><span class="n">cleaned</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;Instruction markdown filename may only contain A-Z, a-z, 0-9, &#39;.&#39;, &#39;_&#39;, and &#39;-&#39;.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">cleaned</span></div>
+
+
+
+<div class="viewcode-block" id="resolve_agent_markdown_filename">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.resolve_agent_markdown_filename">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">resolve_agent_markdown_filename</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">provider</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">configured_filename</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">normalized_provider</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">provider</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">fixed</span> <span class="o">=</span> <span class="n">FRONTIER_INSTRUCTION_FILENAMES</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">normalized_provider</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">fixed</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">fixed</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">configured_filename</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">candidate</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">NON_FRONTIER_DEFAULT_INSTRUCTION_FILENAME</span>
+    <span class="k">return</span> <span class="n">validate_agent_markdown_filename</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="compiled_instructions_markdown">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.compiled_instructions_markdown">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">compiled_instructions_markdown</span><span class="p">(</span><span class="n">compiled</span><span class="p">:</span> <span class="n">CompiledInstructionPackage</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">compiled</span><span class="o">.</span><span class="n">artifacts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">INSTRUCTIONS_FILENAME</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="write_compiled_instruction_file">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.write_compiled_instruction_file">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">write_compiled_instruction_file</span><span class="p">(</span>
+    <span class="n">workspace</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">file_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">compiled</span><span class="p">:</span> <span class="n">CompiledInstructionPackage</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">workspace</span> <span class="o">/</span> <span class="n">file_name</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">compiled_instructions_markdown</span><span class="p">(</span><span class="n">compiled</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">path</span></div>
+
+
+
+<div class="viewcode-block" id="InstructionAdapterDescriptor">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.InstructionAdapterDescriptor">[docs]</a>
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">InstructionAdapterDescriptor</span><span class="p">:</span>
+    <span class="n">provider</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">adapter</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">native_filename</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">supports_native</span><span class="p">:</span> <span class="nb">bool</span></div>
+
+
+
+<div class="viewcode-block" id="InstructionAdapterMaterializationResult">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.InstructionAdapterMaterializationResult">[docs]</a>
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">InstructionAdapterMaterializationResult</span><span class="p">:</span>
+    <span class="n">mode</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">adapter</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">materialized_paths</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+    <span class="n">warnings</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="InstructionAdapter">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.InstructionAdapter">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">InstructionAdapter</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<div class="viewcode-block" id="InstructionAdapter.materialize">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.InstructionAdapter.materialize">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">materialize</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">compiled</span><span class="p">:</span> <span class="n">CompiledInstructionPackage</span><span class="p">,</span>
+        <span class="o">*</span><span class="p">,</span>
+        <span class="n">workspace</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+        <span class="n">runtime_home</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+        <span class="n">codex_home</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">InstructionAdapterMaterializationResult</span><span class="p">:</span>
+        <span class="o">...</span></div>
+
+
+<div class="viewcode-block" id="InstructionAdapter.fallback_payload">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.InstructionAdapter.fallback_payload">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fallback_payload</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">compiled</span><span class="p">:</span> <span class="n">CompiledInstructionPackage</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]</span> <span class="o">|</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="o">...</span></div>
+
+
+<div class="viewcode-block" id="InstructionAdapter.describe">
+<a class="viewcode-back" href="../../../api/services.instruction_adapters.base.html#services.instruction_adapters.InstructionAdapter.describe">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">describe</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">InstructionAdapterDescriptor</span><span class="p">:</span>
+        <span class="o">...</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

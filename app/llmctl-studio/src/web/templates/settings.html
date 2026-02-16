@@ -65,14 +65,14 @@
   <div class="card">
     <div class="card-header">
       <div>
-        <h3 class="section-title">GitConfig</h3>
+        <h3 class="section-title">Git</h3>
       </div>
       <span class="status {% if gitconfig_overview.exists %}status-success{% else %}status-warning{% endif %}">
         {% if gitconfig_overview.exists %}present{% else %}missing{% endif %}
       </span>
     </div>
     <p class="muted" style="margin-top: 12px;">
-      Edit ~/.gitconfig for this host.
+      Host-level Git configuration managed in Integrations.
     </p>
     <div class="stack" style="margin-top: 20px;">
       <div class="subcard">
@@ -83,7 +83,7 @@
       </div>
     </div>
     <div style="margin-top: 18px;">
-      <a class="btn btn-secondary" href="{{ url_for('agents.settings_gitconfig') }}">
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_integrations_git') }}">
         <i class="fa-solid fa-arrow-right"></i>
         open
       </a>
@@ -143,6 +143,43 @@
             class="status {% if integration_overview.confluence.connected %}status-success{% else %}status-warning{% endif %}"
           >
             {% if integration_overview.confluence.connected %}connected{% else %}needs key{% endif %}
+          </span>
+        </div>
+      </div>
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">Google Cloud</p>
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              Project: {{ integration_overview.google_cloud.project_id }}
+            </p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              MCP: {% if integration_overview.google_cloud.mcp_enabled %}enabled{% else %}disabled{% endif %}
+            </p>
+          </div>
+          <span
+            class="status {% if integration_overview.google_cloud.connected %}status-success{% else %}status-warning{% endif %}"
+          >
+            {% if integration_overview.google_cloud.connected %}connected{% else %}needs key{% endif %}
+          </span>
+        </div>
+      </div>
+      <div class="subcard">
+        <div class="row-between">
+          <div>
+            <p class="eyebrow">Google Workspace</p>
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              Delegated user: {{ integration_overview.google_workspace.delegated_user }}
+            </p>
+            <p class="muted" style="margin-top: 6px; font-size: 12px;">
+              MCP: {% if integration_overview.google_workspace.mcp_enabled %}enabled{% else %}disabled{% endif %}
+              {% if integration_overview.google_workspace.mcp_guarded %}(guarded){% endif %}
+            </p>
+          </div>
+          <span
+            class="status {% if integration_overview.google_workspace.connected %}status-success{% else %}status-warning{% endif %}"
+          >
+            {% if integration_overview.google_workspace.connected %}connected{% else %}needs key{% endif %}
           </span>
         </div>
       </div>

@@ -1,0 +1,7 @@
+services.instruction\_adapters.base module
+==========================================
+
+.. automodule:: services.instruction_adapters.base
+   :members:
+   :show-inheritance:
+   :undoc-members:

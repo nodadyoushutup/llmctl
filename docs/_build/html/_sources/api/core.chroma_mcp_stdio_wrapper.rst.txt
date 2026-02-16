@@ -1,0 +1,7 @@
+core.chroma\_mcp\_stdio\_wrapper module
+=======================================
+
+.. automodule:: core.chroma_mcp_stdio_wrapper
+   :members:
+   :show-inheritance:
+   :undoc-members:

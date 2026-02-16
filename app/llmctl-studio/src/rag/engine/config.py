@@ -344,6 +344,7 @@ def load_config() -> RagConfig:
     rag_settings = {}
     github_settings = {}
     chroma_settings = {}
+    llm_settings = {}
     try:
         from rag.repositories.settings import load_rag_settings
 
@@ -355,9 +356,11 @@ def load_config() -> RagConfig:
 
         github_settings = load_integration_settings("github")
         chroma_settings = load_integration_settings("chroma")
+        llm_settings = load_integration_settings("llm")
     except Exception:
         github_settings = {}
         chroma_settings = {}
+        llm_settings = {}
 
     local_root = _setting("RAG_ROOT", rag_settings, "local_path", None)
     repo_root = (
@@ -473,11 +476,16 @@ def load_config() -> RagConfig:
         "openai",
     )
 
-    openai_api_key = _setting_rag_first(
-        "OPENAI_API_KEY", rag_settings, "openai_api_key", None
+    # RAG runtime auth is sourced from Provider settings first.
+    openai_api_key = (
+        (llm_settings.get("codex_api_key") or "").strip()
+        or (os.getenv("OPENAI_API_KEY") or "").strip()
+        or None
     )
-    gemini_api_key = _setting_rag_first(
-        "GEMINI_API_KEY", rag_settings, "gemini_api_key", None
+    gemini_api_key = (
+        (llm_settings.get("gemini_api_key") or "").strip()
+        or (os.getenv("GEMINI_API_KEY") or "").strip()
+        or None
     )
     if not gemini_api_key:
         gemini_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or None

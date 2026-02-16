@@ -57,16 +57,22 @@
               </td>
               <td class="table-actions-cell">
                 <div class="table-actions">
-                  <form
-                    method="post"
-                    action="{{ url_for('agents.delete_skill', skill_id=skill.id) }}"
-                    onsubmit="return confirm('Delete this skill?');"
-                  >
-                    <input type="hidden" name="next" value="{{ request.path }}" />
-                    <button type="submit" class="btn btn-danger" aria-label="Delete skill">
-                      <i class="fa-solid fa-trash"></i>
-                    </button>
-                  </form>
+                  {% if skill.is_git_read_only %}
+                    <span class="btn btn-secondary" aria-label="Git-based skill is read-only">
+                      <i class="fa-solid fa-lock"></i>
+                    </span>
+                  {% else %}
+                    <form
+                      method="post"
+                      action="{{ url_for('agents.delete_skill', skill_id=skill.id) }}"
+                      onsubmit="return confirm('Delete this skill?');"
+                    >
+                      <input type="hidden" name="next" value="{{ request.path }}" />
+                      <button type="submit" class="btn btn-danger" aria-label="Delete skill">
+                        <i class="fa-solid fa-trash"></i>
+                      </button>
+                    </form>
+                  {% endif %}
                 </div>
               </td>
             </tr>

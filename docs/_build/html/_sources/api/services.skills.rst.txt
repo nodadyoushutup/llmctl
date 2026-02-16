@@ -1,0 +1,7 @@
+services.skills module
+======================
+
+.. automodule:: services.skills
+   :members:
+   :show-inheritance:
+   :undoc-members:

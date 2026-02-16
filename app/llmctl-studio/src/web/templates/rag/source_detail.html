@@ -20,6 +20,32 @@
         <i class="fa-solid fa-trash"></i>
       </button>
     </form>
+    <button
+      type="button"
+      class="icon-button"
+      data-rag-quick-run
+      data-rag-quick-run-mode="fresh"
+      data-rag-source-id="{{ source.id }}"
+      data-rag-source-name="{{ source.name }}"
+      aria-label="Run source index"
+      title="Run source index"
+      {% if source_has_active_job %}disabled{% endif %}
+    >
+      <i class="fa-solid fa-database"></i>
+    </button>
+    <button
+      type="button"
+      class="icon-button"
+      data-rag-quick-run
+      data-rag-quick-run-mode="delta"
+      data-rag-source-id="{{ source.id }}"
+      data-rag-source-name="{{ source.name }}"
+      aria-label="Run source delta index"
+      title="Run source delta index"
+      {% if source_has_active_job %}disabled{% endif %}
+    >
+      <i class="fa-solid fa-arrows-rotate"></i>
+    </button>
     <a class="btn btn-secondary" href="{{ url_for('rag.sources_page') }}">
       <i class="fa-solid fa-arrow-left"></i>
       back
@@ -30,7 +56,9 @@
 {% block content %}
 <section class="card">
   {% set source_status = "Not indexed" %}
-  {% if source.last_error %}
+  {% if source_has_active_job %}
+    {% set source_status = "Indexing" %}
+  {% elif source.last_error %}
     {% set source_status = "Error" %}
   {% elif source.last_indexed_at %}
     {% set source_status = "Indexed" %}

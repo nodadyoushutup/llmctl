@@ -1,0 +1,622 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rag.engine.config module &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="rag.engine.doc_structures module" href="rag.engine.doc_structures.html" />
+    <link rel="prev" title="rag.engine.code_spans module" href="rag.engine.code_spans.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">Studio API Packages</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="chat.html">chat package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.html">core package</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="rag.html">rag package</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="rag.html#subpackages">Subpackages</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="rag.domain.html">rag.domain package</a></li>
+<li class="toctree-l4 current"><a class="reference internal" href="rag.engine.html">rag.engine package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.integrations.html">rag.integrations package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.legacy.html">rag.legacy package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.providers.html">rag.providers package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.worker.html">rag.worker package</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="rag.html#submodules">Submodules</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.html">services package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="storage.html">storage package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="web.html">web package</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">Studio API Packages</a></li>
+          <li class="breadcrumb-item"><a href="rag.html">rag package</a></li>
+          <li class="breadcrumb-item"><a href="rag.engine.html">rag.engine package</a></li>
+      <li class="breadcrumb-item active">rag.engine.config module</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/rag.engine.config.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-rag.engine.config">
+<span id="rag-engine-config-module"></span><h1>rag.engine.config module<a class="headerlink" href="#module-rag.engine.config" title="Link to this heading"></a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">RagConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">repo_root</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'Path'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rag_mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chroma_host</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chroma_port</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">collection</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_provider</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_provider</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">openai_api_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str</span> <span class="pre">|</span> <span class="pre">None'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gemini_api_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str</span> <span class="pre">|</span> <span class="pre">None'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">openai_embedding_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gemini_embedding_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_max_tokens_per_request</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_max_tokens_per_input</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_max_batch_items</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_min_request_interval_s</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'float'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_target_tokens_per_minute</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_rate_limit_max_retries</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">git_url</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str</span> <span class="pre">|</span> <span class="pre">None'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">git_repo</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str</span> <span class="pre">|</span> <span class="pre">None'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">git_pat</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str</span> <span class="pre">|</span> <span class="pre">None'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">git_ssh_key_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str</span> <span class="pre">|</span> <span class="pre">None'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">git_branch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">git_poll_s</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'float'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">git_dir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'Path'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">watch_enabled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'bool'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">watch_debounce_s</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'float'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_lines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_overlap_lines</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_file_bytes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_dirs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'set[str]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_globs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'list[str]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">include_globs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'list[str]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_file_bytes_by_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'dict[str,</span> <span class="pre">int]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude_globs_by_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'dict[str,</span> <span class="pre">list[str]]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_lines_by_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'dict[str,</span> <span class="pre">int]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_overlap_lines_by_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'dict[str,</span> <span class="pre">int]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">enabled_doc_types</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'set[str]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ocr_enabled</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'bool'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ocr_lang</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ocr_dpi</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ocr_timeout_s</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ocr_include_char_boxes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'bool'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">drive_sync_workers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">index_parallel_workers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pdf_page_workers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_parallel_requests</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">openai_chat_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gemini_chat_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_response_style</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_temperature</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'float'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_top_k</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_max_history</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_max_context_chars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_snippet_chars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chat_context_budget_tokens</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">web_port</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#RagConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.RagConfig" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>repo_root</strong> (<em>Path</em>)</p></li>
+<li><p><strong>rag_mode</strong> (<em>str</em>)</p></li>
+<li><p><strong>chroma_host</strong> (<em>str</em>)</p></li>
+<li><p><strong>chroma_port</strong> (<em>int</em>)</p></li>
+<li><p><strong>collection</strong> (<em>str</em>)</p></li>
+<li><p><strong>embed_provider</strong> (<em>str</em>)</p></li>
+<li><p><strong>chat_provider</strong> (<em>str</em>)</p></li>
+<li><p><strong>openai_api_key</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>gemini_api_key</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>openai_embedding_model</strong> (<em>str</em>)</p></li>
+<li><p><strong>gemini_embedding_model</strong> (<em>str</em>)</p></li>
+<li><p><strong>embed_model</strong> (<em>str</em>)</p></li>
+<li><p><strong>embed_max_tokens_per_request</strong> (<em>int</em>)</p></li>
+<li><p><strong>embed_max_tokens_per_input</strong> (<em>int</em>)</p></li>
+<li><p><strong>embed_max_batch_items</strong> (<em>int</em>)</p></li>
+<li><p><strong>embed_min_request_interval_s</strong> (<em>float</em>)</p></li>
+<li><p><strong>embed_target_tokens_per_minute</strong> (<em>int</em>)</p></li>
+<li><p><strong>embed_rate_limit_max_retries</strong> (<em>int</em>)</p></li>
+<li><p><strong>git_url</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>git_repo</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>git_pat</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>git_ssh_key_path</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>git_branch</strong> (<em>str</em>)</p></li>
+<li><p><strong>git_poll_s</strong> (<em>float</em>)</p></li>
+<li><p><strong>git_dir</strong> (<em>Path</em>)</p></li>
+<li><p><strong>watch_enabled</strong> (<em>bool</em>)</p></li>
+<li><p><strong>watch_debounce_s</strong> (<em>float</em>)</p></li>
+<li><p><strong>chunk_lines</strong> (<em>int</em>)</p></li>
+<li><p><strong>chunk_overlap_lines</strong> (<em>int</em>)</p></li>
+<li><p><strong>max_file_bytes</strong> (<em>int</em>)</p></li>
+<li><p><strong>exclude_dirs</strong> (<em>set</em><em>[</em><em>str</em><em>]</em>)</p></li>
+<li><p><strong>exclude_globs</strong> (<em>list</em><em>[</em><em>str</em><em>]</em>)</p></li>
+<li><p><strong>include_globs</strong> (<em>list</em><em>[</em><em>str</em><em>]</em>)</p></li>
+<li><p><strong>max_file_bytes_by_type</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>exclude_globs_by_type</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>list</em><em>[</em><em>str</em><em>]</em><em>]</em>)</p></li>
+<li><p><strong>chunk_lines_by_type</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>chunk_overlap_lines_by_type</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>int</em><em>]</em>)</p></li>
+<li><p><strong>enabled_doc_types</strong> (<em>set</em><em>[</em><em>str</em><em>]</em>)</p></li>
+<li><p><strong>ocr_enabled</strong> (<em>bool</em>)</p></li>
+<li><p><strong>ocr_lang</strong> (<em>str</em>)</p></li>
+<li><p><strong>ocr_dpi</strong> (<em>int</em>)</p></li>
+<li><p><strong>ocr_timeout_s</strong> (<em>int</em>)</p></li>
+<li><p><strong>ocr_include_char_boxes</strong> (<em>bool</em>)</p></li>
+<li><p><strong>drive_sync_workers</strong> (<em>int</em>)</p></li>
+<li><p><strong>index_parallel_workers</strong> (<em>int</em>)</p></li>
+<li><p><strong>pdf_page_workers</strong> (<em>int</em>)</p></li>
+<li><p><strong>embed_parallel_requests</strong> (<em>int</em>)</p></li>
+<li><p><strong>openai_chat_model</strong> (<em>str</em>)</p></li>
+<li><p><strong>gemini_chat_model</strong> (<em>str</em>)</p></li>
+<li><p><strong>chat_model</strong> (<em>str</em>)</p></li>
+<li><p><strong>chat_response_style</strong> (<em>str</em>)</p></li>
+<li><p><strong>chat_temperature</strong> (<em>float</em>)</p></li>
+<li><p><strong>chat_top_k</strong> (<em>int</em>)</p></li>
+<li><p><strong>chat_max_history</strong> (<em>int</em>)</p></li>
+<li><p><strong>chat_max_context_chars</strong> (<em>int</em>)</p></li>
+<li><p><strong>chat_snippet_chars</strong> (<em>int</em>)</p></li>
+<li><p><strong>chat_context_budget_tokens</strong> (<em>int</em>)</p></li>
+<li><p><strong>web_port</strong> (<em>int</em>)</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.repo_root">
+<span class="sig-name descname"><span class="pre">repo_root</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Path</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.repo_root" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.rag_mode">
+<span class="sig-name descname"><span class="pre">rag_mode</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.rag_mode" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chroma_host">
+<span class="sig-name descname"><span class="pre">chroma_host</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chroma_host" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chroma_port">
+<span class="sig-name descname"><span class="pre">chroma_port</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chroma_port" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.collection">
+<span class="sig-name descname"><span class="pre">collection</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.collection" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_provider">
+<span class="sig-name descname"><span class="pre">embed_provider</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_provider" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_provider">
+<span class="sig-name descname"><span class="pre">chat_provider</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_provider" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.openai_api_key">
+<span class="sig-name descname"><span class="pre">openai_api_key</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.openai_api_key" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.gemini_api_key">
+<span class="sig-name descname"><span class="pre">gemini_api_key</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.gemini_api_key" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.openai_embedding_model">
+<span class="sig-name descname"><span class="pre">openai_embedding_model</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.openai_embedding_model" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.gemini_embedding_model">
+<span class="sig-name descname"><span class="pre">gemini_embedding_model</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.gemini_embedding_model" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_model">
+<span class="sig-name descname"><span class="pre">embed_model</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_model" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_max_tokens_per_request">
+<span class="sig-name descname"><span class="pre">embed_max_tokens_per_request</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_max_tokens_per_request" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_max_tokens_per_input">
+<span class="sig-name descname"><span class="pre">embed_max_tokens_per_input</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_max_tokens_per_input" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_max_batch_items">
+<span class="sig-name descname"><span class="pre">embed_max_batch_items</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_max_batch_items" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_min_request_interval_s">
+<span class="sig-name descname"><span class="pre">embed_min_request_interval_s</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_min_request_interval_s" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_target_tokens_per_minute">
+<span class="sig-name descname"><span class="pre">embed_target_tokens_per_minute</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_target_tokens_per_minute" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_rate_limit_max_retries">
+<span class="sig-name descname"><span class="pre">embed_rate_limit_max_retries</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_rate_limit_max_retries" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.git_url">
+<span class="sig-name descname"><span class="pre">git_url</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.git_url" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.git_repo">
+<span class="sig-name descname"><span class="pre">git_repo</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.git_repo" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.git_pat">
+<span class="sig-name descname"><span class="pre">git_pat</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.git_pat" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.git_ssh_key_path">
+<span class="sig-name descname"><span class="pre">git_ssh_key_path</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.git_ssh_key_path" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.git_branch">
+<span class="sig-name descname"><span class="pre">git_branch</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.git_branch" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.git_poll_s">
+<span class="sig-name descname"><span class="pre">git_poll_s</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.git_poll_s" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.git_dir">
+<span class="sig-name descname"><span class="pre">git_dir</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Path</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.git_dir" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.watch_enabled">
+<span class="sig-name descname"><span class="pre">watch_enabled</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.watch_enabled" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.watch_debounce_s">
+<span class="sig-name descname"><span class="pre">watch_debounce_s</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.watch_debounce_s" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chunk_lines">
+<span class="sig-name descname"><span class="pre">chunk_lines</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chunk_lines" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chunk_overlap_lines">
+<span class="sig-name descname"><span class="pre">chunk_overlap_lines</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chunk_overlap_lines" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.max_file_bytes">
+<span class="sig-name descname"><span class="pre">max_file_bytes</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.max_file_bytes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.exclude_dirs">
+<span class="sig-name descname"><span class="pre">exclude_dirs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.exclude_dirs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.exclude_globs">
+<span class="sig-name descname"><span class="pre">exclude_globs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.exclude_globs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.include_globs">
+<span class="sig-name descname"><span class="pre">include_globs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.include_globs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.max_file_bytes_by_type">
+<span class="sig-name descname"><span class="pre">max_file_bytes_by_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.max_file_bytes_by_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.exclude_globs_by_type">
+<span class="sig-name descname"><span class="pre">exclude_globs_by_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.exclude_globs_by_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chunk_lines_by_type">
+<span class="sig-name descname"><span class="pre">chunk_lines_by_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chunk_lines_by_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chunk_overlap_lines_by_type">
+<span class="sig-name descname"><span class="pre">chunk_overlap_lines_by_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chunk_overlap_lines_by_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.enabled_doc_types">
+<span class="sig-name descname"><span class="pre">enabled_doc_types</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#rag.engine.config.RagConfig.enabled_doc_types" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.ocr_enabled">
+<span class="sig-name descname"><span class="pre">ocr_enabled</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.ocr_enabled" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.ocr_lang">
+<span class="sig-name descname"><span class="pre">ocr_lang</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.ocr_lang" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.ocr_dpi">
+<span class="sig-name descname"><span class="pre">ocr_dpi</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.ocr_dpi" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.ocr_timeout_s">
+<span class="sig-name descname"><span class="pre">ocr_timeout_s</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.ocr_timeout_s" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.ocr_include_char_boxes">
+<span class="sig-name descname"><span class="pre">ocr_include_char_boxes</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.ocr_include_char_boxes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.drive_sync_workers">
+<span class="sig-name descname"><span class="pre">drive_sync_workers</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.drive_sync_workers" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.index_parallel_workers">
+<span class="sig-name descname"><span class="pre">index_parallel_workers</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.index_parallel_workers" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.pdf_page_workers">
+<span class="sig-name descname"><span class="pre">pdf_page_workers</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.pdf_page_workers" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.embed_parallel_requests">
+<span class="sig-name descname"><span class="pre">embed_parallel_requests</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.embed_parallel_requests" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.openai_chat_model">
+<span class="sig-name descname"><span class="pre">openai_chat_model</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.openai_chat_model" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.gemini_chat_model">
+<span class="sig-name descname"><span class="pre">gemini_chat_model</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.gemini_chat_model" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_model">
+<span class="sig-name descname"><span class="pre">chat_model</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_model" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_response_style">
+<span class="sig-name descname"><span class="pre">chat_response_style</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_response_style" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_temperature">
+<span class="sig-name descname"><span class="pre">chat_temperature</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_temperature" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_top_k">
+<span class="sig-name descname"><span class="pre">chat_top_k</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_top_k" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_max_history">
+<span class="sig-name descname"><span class="pre">chat_max_history</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_max_history" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_max_context_chars">
+<span class="sig-name descname"><span class="pre">chat_max_context_chars</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_max_context_chars" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_snippet_chars">
+<span class="sig-name descname"><span class="pre">chat_snippet_chars</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_snippet_chars" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.chat_context_budget_tokens">
+<span class="sig-name descname"><span class="pre">chat_context_budget_tokens</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.chat_context_budget_tokens" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="rag.engine.config.RagConfig.web_port">
+<span class="sig-name descname"><span class="pre">web_port</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#rag.engine.config.RagConfig.web_port" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.build_git_url">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">build_git_url</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">repo</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pat</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ssh_key_path</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#build_git_url"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.build_git_url" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>repo</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>pat</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+<li><p><strong>ssh_key_path</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>str | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.max_file_bytes_for">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">max_file_bytes_for</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">doc_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#max_file_bytes_for"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.max_file_bytes_for" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>config</strong> (<a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a>)</p></li>
+<li><p><strong>doc_type</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.chunk_lines_for">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">chunk_lines_for</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">doc_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#chunk_lines_for"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.chunk_lines_for" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>config</strong> (<a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a>)</p></li>
+<li><p><strong>doc_type</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.chunk_overlap_lines_for">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">chunk_overlap_lines_for</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">doc_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#chunk_overlap_lines_for"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.chunk_overlap_lines_for" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>config</strong> (<a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a>)</p></li>
+<li><p><strong>doc_type</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.parser_signature">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">parser_signature</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">version</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#parser_signature"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.parser_signature" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>config</strong> (<a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a>)</p></li>
+<li><p><strong>version</strong> (<em>str</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.chunker_signature">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">chunker_signature</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">version</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#chunker_signature"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.chunker_signature" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>config</strong> (<a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a>)</p></li>
+<li><p><strong>version</strong> (<em>str</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.load_config">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">load_config</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#load_config"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.load_config" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="rag.engine.config.build_source_config">
+<span class="sig-prename descclassname"><span class="pre">rag.engine.config.</span></span><span class="sig-name descname"><span class="pre">build_source_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">base</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">github_settings</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/engine/config.html#build_source_config"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.engine.config.build_source_config" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>base</strong> (<a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a>)</p></li>
+<li><p><strong>github_settings</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#rag.engine.config.RagConfig" title="rag.engine.config.RagConfig"><em>RagConfig</em></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="rag.engine.code_spans.html" class="btn btn-neutral float-left" title="rag.engine.code_spans module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="rag.engine.doc_structures.html" class="btn btn-neutral float-right" title="rag.engine.doc_structures module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

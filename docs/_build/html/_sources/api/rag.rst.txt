@@ -1,0 +1,28 @@
+rag package
+===========
+
+.. automodule:: rag
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   rag.domain
+   rag.engine
+   rag.integrations
+   rag.legacy
+   rag.providers
+   rag.worker
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   rag.contracts

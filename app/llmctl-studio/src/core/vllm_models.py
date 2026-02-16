@@ -34,6 +34,9 @@ def discover_vllm_local_models() -> list[dict[str, str]]:
         for entry in sorted(root.iterdir(), key=lambda item: item.name.lower()):
             if not entry.is_dir():
                 continue
+            # Ignore hidden/tooling directories (for example .download-venv).
+            if entry.name.startswith("."):
+                continue
             manifest = _safe_model_manifest(entry)
             value = manifest.get("model") or str(entry)
             value = value.strip()
@@ -51,16 +54,4 @@ def discover_vllm_local_models() -> list[dict[str, str]]:
                 }
             )
             seen_values.add(value)
-    fallback_model = Config.VLLM_LOCAL_FALLBACK_MODEL.strip()
-    if fallback_model and fallback_model not in seen_values:
-        discovered.insert(
-            0,
-            {
-                "value": fallback_model,
-                "label": fallback_model,
-                "source": "custom",
-                "path": "",
-                "description": "Configured fallback local model.",
-            },
-        )
     return discovered

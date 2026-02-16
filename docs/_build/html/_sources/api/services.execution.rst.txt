@@ -1,0 +1,20 @@
+services.execution package
+==========================
+
+.. automodule:: services.execution
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   services.execution.contracts
+   services.execution.docker_executor
+   services.execution.idempotency
+   services.execution.kubernetes_executor
+   services.execution.router
+   services.execution.workspace_executor

@@ -12,6 +12,93 @@ from storage.script_storage import write_script_file
 
 _engine = None
 SessionLocal = None
+NODE_EXECUTOR_PROVIDER_ALLOWED_VALUES = ("workspace", "docker", "kubernetes")
+NODE_EXECUTOR_DISPATCH_STATUS_ALLOWED_VALUES = (
+    "dispatch_pending",
+    "dispatch_submitted",
+    "dispatch_confirmed",
+    "dispatch_failed",
+    "fallback_started",
+)
+NODE_EXECUTOR_FALLBACK_REASON_ALLOWED_VALUES = (
+    "provider_unavailable",
+    "preflight_failed",
+    "dispatch_timeout",
+    "create_failed",
+    "image_pull_failed",
+    "config_error",
+    "unknown",
+)
+NODE_EXECUTOR_API_FAILURE_CATEGORY_ALLOWED_VALUES = (
+    "socket_missing",
+    "socket_unreachable",
+    "api_unreachable",
+    "auth_error",
+    "tls_error",
+    "timeout",
+    "preflight_failed",
+    "unknown",
+)
+NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
+    (
+        "ck_node_runs_selected_provider_allowed",
+        "selected_provider IN ('workspace','docker','kubernetes')",
+    ),
+    (
+        "ck_node_runs_final_provider_allowed",
+        "final_provider IN ('workspace','docker','kubernetes')",
+    ),
+    (
+        "ck_node_runs_dispatch_status_allowed",
+        "dispatch_status IN ('dispatch_pending','dispatch_submitted','dispatch_confirmed','dispatch_failed','fallback_started')",
+    ),
+    (
+        "ck_node_runs_provider_dispatch_required",
+        "dispatch_status NOT IN ('dispatch_submitted','dispatch_confirmed') OR provider_dispatch_id IS NOT NULL",
+    ),
+    (
+        "ck_node_runs_provider_dispatch_namespace",
+        "provider_dispatch_id IS NULL "
+        "OR provider_dispatch_id LIKE 'workspace:%' "
+        "OR provider_dispatch_id LIKE 'docker:%' "
+        "OR provider_dispatch_id LIKE 'kubernetes:%'",
+    ),
+    (
+        "ck_node_runs_cli_preflight_requires_fallback",
+        "cli_fallback_used = 1 OR cli_preflight_passed IS NULL",
+    ),
+    (
+        "ck_node_runs_fallback_reason_required",
+        "dispatch_status != 'fallback_started' OR fallback_reason IS NOT NULL",
+    ),
+    (
+        "ck_node_runs_fallback_reason_consistency",
+        "fallback_attempted = 1 OR fallback_reason IS NULL",
+    ),
+    (
+        "ck_node_runs_uncertain_no_fallback",
+        "dispatch_uncertain = 0 OR (fallback_attempted = 0 AND fallback_reason IS NULL)",
+    ),
+    (
+        "ck_node_runs_fallback_terminal_provider",
+        "fallback_attempted = 0 OR final_provider = 'workspace'",
+    ),
+    (
+        "ck_node_runs_fallback_reason_allowed",
+        "fallback_reason IS NULL OR fallback_reason IN ('provider_unavailable','preflight_failed','dispatch_timeout','create_failed','image_pull_failed','config_error','unknown')",
+    ),
+    (
+        "ck_node_runs_api_failure_category_allowed",
+        "api_failure_category IS NULL OR api_failure_category IN ('socket_missing','socket_unreachable','api_unreachable','auth_error','tls_error','timeout','preflight_failed','unknown')",
+    ),
+    (
+        "ck_node_runs_workspace_identity_format",
+        "workspace_identity IS NOT NULL AND TRIM(workspace_identity) != '' "
+        "AND workspace_identity NOT LIKE '%/%' "
+        "AND workspace_identity NOT LIKE '%\\\\%' "
+        "AND workspace_identity NOT LIKE '%://%'",
+    ),
+)
 
 
 def utcnow() -> datetime:
@@ -197,6 +284,7 @@ def _ensure_schema() -> None:
         _ensure_columns(connection, "task_template_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "flowchart_node_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "flowchart_node_skills", {"position": "INTEGER"})
+        _ensure_flowchart_node_attachment_schema(connection)
         _ensure_agent_skill_binding_schema(connection)
         _migrate_flowchart_node_skills_to_agent_bindings(connection)
 
@@ -215,6 +303,7 @@ def _ensure_schema() -> None:
         _ensure_columns(connection, "milestones", milestone_columns)
         _migrate_milestone_status(connection)
 
+        existing_agent_task_columns = _table_columns(connection, "agent_tasks")
         task_columns = {
             "run_id": "INTEGER",
             "task_template_id": "INTEGER",
@@ -237,8 +326,21 @@ def _ensure_schema() -> None:
             "resolved_instruction_manifest_hash": "VARCHAR(128)",
             "instruction_adapter_mode": "VARCHAR(32)",
             "instruction_materialized_paths_json": "TEXT",
+            "selected_provider": "TEXT NOT NULL DEFAULT 'workspace'",
+            "final_provider": "TEXT NOT NULL DEFAULT 'workspace'",
+            "provider_dispatch_id": "TEXT",
+            "workspace_identity": "TEXT NOT NULL DEFAULT 'default'",
+            "dispatch_status": "TEXT NOT NULL DEFAULT 'dispatch_pending'",
+            "fallback_attempted": "BOOLEAN NOT NULL DEFAULT 0",
+            "fallback_reason": "TEXT",
+            "dispatch_uncertain": "BOOLEAN NOT NULL DEFAULT 0",
+            "api_failure_category": "TEXT",
+            "cli_fallback_used": "BOOLEAN NOT NULL DEFAULT 0",
+            "cli_preflight_passed": "BOOLEAN",
         }
         _ensure_columns(connection, "agent_tasks", task_columns)
+        _migrate_agent_task_node_executor_fields(connection, existing_agent_task_columns)
+        _ensure_agent_tasks_node_executor_checks_sqlite(connection)
         _migrate_agent_task_agent_nullable(connection)
         _migrate_agent_task_kind_values(connection)
         _drop_pipeline_schema(connection)
@@ -261,6 +363,327 @@ def _ensure_columns(connection, table: str, columns: dict[str, str]) -> None:
             continue
         connection.execute(
             text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
+        )
+
+
+def _quote_sqlite_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _in_list_sql(values: tuple[str, ...]) -> str:
+    return ", ".join(_quote_sqlite_literal(value) for value in values)
+
+
+def _sqlite_table_sql(connection, table: str) -> str:
+    if connection.dialect.name != "sqlite":
+        return ""
+    row = connection.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = :name"
+        ),
+        {"name": table},
+    ).fetchone()
+    if row is None:
+        return ""
+    return str(row[0] or "")
+
+
+def _sqlite_table_has_named_check(
+    connection,
+    table: str,
+    constraint_name: str,
+) -> bool:
+    table_sql = _sqlite_table_sql(connection, table)
+    if not table_sql:
+        return False
+    return f"constraint {constraint_name.lower()} check" in table_sql.lower()
+
+
+def _migrate_agent_task_node_executor_fields(
+    connection,
+    existing_columns_before_add: set[str],
+) -> None:
+    tables = _table_names(connection)
+    if "agent_tasks" not in tables:
+        return
+
+    provider_values = _in_list_sql(NODE_EXECUTOR_PROVIDER_ALLOWED_VALUES)
+    dispatch_values = _in_list_sql(NODE_EXECUTOR_DISPATCH_STATUS_ALLOWED_VALUES)
+    fallback_reason_values = _in_list_sql(NODE_EXECUTOR_FALLBACK_REASON_ALLOWED_VALUES)
+    api_failure_values = _in_list_sql(NODE_EXECUTOR_API_FAILURE_CATEGORY_ALLOWED_VALUES)
+
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET selected_provider = 'workspace' "
+            "WHERE selected_provider IS NULL OR selected_provider NOT IN "
+            f"({provider_values})"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET final_provider = 'workspace' "
+            "WHERE final_provider IS NULL OR final_provider NOT IN "
+            f"({provider_values})"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks "
+            "SET provider_dispatch_id = "
+            "(CASE "
+            "WHEN selected_provider IN ('workspace','docker','kubernetes') "
+            "THEN selected_provider "
+            "ELSE 'workspace' "
+            "END) || :legacy_prefix || id "
+            "WHERE provider_dispatch_id IS NOT NULL "
+            "AND provider_dispatch_id NOT LIKE 'workspace:%' "
+            "AND provider_dispatch_id NOT LIKE 'docker:%' "
+            "AND provider_dispatch_id NOT LIKE 'kubernetes:%'"
+        ),
+        {"legacy_prefix": ":legacy-"},
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET workspace_identity = 'default' "
+            "WHERE workspace_identity IS NULL OR TRIM(workspace_identity) = ''"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET workspace_identity = 'default' "
+            "WHERE workspace_identity LIKE '%/%' "
+            "OR workspace_identity LIKE '%\\\\%' "
+            "OR workspace_identity LIKE '%://%'"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET dispatch_status = 'dispatch_pending' "
+            "WHERE dispatch_status IS NULL OR dispatch_status NOT IN "
+            f"({dispatch_values})"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET fallback_attempted = 0 "
+            "WHERE fallback_attempted IS NULL"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET dispatch_uncertain = 0 "
+            "WHERE dispatch_uncertain IS NULL"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET cli_fallback_used = 0 "
+            "WHERE cli_fallback_used IS NULL"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET fallback_reason = NULL "
+            "WHERE fallback_reason IS NOT NULL AND fallback_reason NOT IN "
+            f"({fallback_reason_values})"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET api_failure_category = NULL "
+            "WHERE api_failure_category IS NOT NULL AND api_failure_category NOT IN "
+            f"({api_failure_values})"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET cli_preflight_passed = NULL "
+            "WHERE cli_fallback_used = 0"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET fallback_reason = NULL "
+            "WHERE fallback_attempted = 0"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks SET final_provider = 'workspace' "
+            "WHERE fallback_attempted = 1"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks "
+            "SET fallback_reason = 'unknown', fallback_attempted = 1, final_provider = 'workspace' "
+            "WHERE dispatch_status = 'fallback_started' "
+            "AND (fallback_reason IS NULL OR TRIM(fallback_reason) = '')"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks "
+            "SET fallback_reason = 'unknown' "
+            "WHERE fallback_attempted = 1 "
+            "AND dispatch_status = 'dispatch_failed' "
+            "AND dispatch_uncertain = 0 "
+            "AND (fallback_reason IS NULL OR TRIM(fallback_reason) = '')"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks "
+            "SET fallback_attempted = 0, fallback_reason = NULL "
+            "WHERE dispatch_uncertain = 1"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE agent_tasks "
+            "SET provider_dispatch_id = "
+            "(CASE "
+            "WHEN selected_provider IN ('workspace','docker','kubernetes') "
+            "THEN selected_provider "
+            "ELSE 'workspace' "
+            "END) || :legacy_prefix || id "
+            "WHERE dispatch_status IN ('dispatch_submitted','dispatch_confirmed') "
+            "AND provider_dispatch_id IS NULL"
+        ),
+        {"legacy_prefix": ":legacy-"},
+    )
+
+    # One-time legacy baseline backfill when new columns first land.
+    if "provider_dispatch_id" not in existing_columns_before_add:
+        connection.execute(
+            text(
+                "UPDATE agent_tasks "
+                "SET provider_dispatch_id = :legacy_workspace_prefix || id "
+                "WHERE provider_dispatch_id IS NULL"
+            ),
+            {"legacy_workspace_prefix": "workspace:legacy-workspace-"},
+        )
+    if "dispatch_status" not in existing_columns_before_add:
+        connection.execute(
+            text(
+                "UPDATE agent_tasks SET dispatch_status = 'dispatch_confirmed' "
+                "WHERE dispatch_status = 'dispatch_pending'"
+            )
+        )
+    if "selected_provider" not in existing_columns_before_add:
+        connection.execute(
+            text(
+                "UPDATE agent_tasks SET selected_provider = 'workspace' "
+                "WHERE selected_provider IS NULL OR selected_provider = ''"
+            )
+        )
+    if "final_provider" not in existing_columns_before_add:
+        connection.execute(
+            text(
+                "UPDATE agent_tasks SET final_provider = 'workspace' "
+                "WHERE final_provider IS NULL OR final_provider = ''"
+            )
+        )
+    if "workspace_identity" not in existing_columns_before_add:
+        connection.execute(
+            text(
+                "UPDATE agent_tasks SET workspace_identity = 'default' "
+                "WHERE workspace_identity IS NULL OR workspace_identity = ''"
+            )
+        )
+
+
+def _ensure_agent_tasks_node_executor_checks_sqlite(connection) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    if "agent_tasks" not in _table_names(connection):
+        return
+    if all(
+        _sqlite_table_has_named_check(connection, "agent_tasks", name)
+        for name, _expr in NODE_EXECUTOR_AGENT_TASK_CHECKS
+    ):
+        return
+
+    dependent_views = _capture_sqlite_views_for_table(connection, "agent_tasks")
+    foreign_keys_on = connection.execute(text("PRAGMA foreign_keys")).scalar()
+    connection.execute(text("PRAGMA foreign_keys=OFF"))
+    try:
+        _drop_sqlite_views(connection, dependent_views)
+        info_rows = connection.execute(
+            text("PRAGMA table_info(agent_tasks)")
+        ).fetchall()
+        column_info = []
+        pk_columns = []
+        insert_columns = []
+        for row in info_rows:
+            name = row[1]
+            col_type = row[2] or ""
+            notnull = bool(row[3])
+            default = row[4]
+            pk = row[5]
+            column_info.append(
+                {
+                    "name": name,
+                    "type": col_type,
+                    "notnull": notnull,
+                    "default": default,
+                    "pk": pk,
+                }
+            )
+            insert_columns.append(name)
+            if pk:
+                pk_columns.append(name)
+        if not column_info:
+            return
+
+        column_defs = []
+        for col in column_info:
+            col_def = f"{col['name']} {col['type']}".strip()
+            if col["notnull"]:
+                col_def += " NOT NULL"
+            if col["default"] is not None:
+                col_def += f" DEFAULT {col['default']}"
+            if len(pk_columns) == 1 and col["name"] in pk_columns:
+                col_def += " PRIMARY KEY"
+            column_defs.append(col_def)
+
+        if len(pk_columns) > 1:
+            column_defs.append(f"PRIMARY KEY ({', '.join(pk_columns)})")
+
+        foreign_keys = connection.execute(
+            text("PRAGMA foreign_key_list(agent_tasks)")
+        ).fetchall()
+        for row in foreign_keys:
+            from_col = row[3]
+            to_table = row[2]
+            to_col = row[4]
+            column_defs.append(
+                f"FOREIGN KEY({from_col}) REFERENCES {to_table} ({to_col})"
+            )
+
+        for name, expr in NODE_EXECUTOR_AGENT_TASK_CHECKS:
+            column_defs.append(f"CONSTRAINT {name} CHECK ({expr})")
+
+        connection.execute(text("DROP TABLE IF EXISTS agent_tasks_new"))
+        connection.execute(
+            text("CREATE TABLE agent_tasks_new (" + ", ".join(column_defs) + ")")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_tasks_new ("
+                + ", ".join(insert_columns)
+                + ") SELECT "
+                + ", ".join(insert_columns)
+                + " FROM agent_tasks"
+            )
+        )
+        connection.execute(text("DROP TABLE agent_tasks"))
+        connection.execute(text("ALTER TABLE agent_tasks_new RENAME TO agent_tasks"))
+    finally:
+        _restore_sqlite_views(connection, dependent_views)
+        connection.execute(
+            text(f"PRAGMA foreign_keys={'ON' if foreign_keys_on else 'OFF'}")
         )
 
 
@@ -1009,10 +1432,10 @@ def _drop_pipeline_schema(connection) -> None:
 def _migrate_agent_task_agent_nullable(connection) -> None:
     if connection.dialect.name != "sqlite":
         return
-    rows = connection.execute(text("PRAGMA table_info(agent_tasks)")).fetchall()
-    if not rows:
+    info_rows = connection.execute(text("PRAGMA table_info(agent_tasks)")).fetchall()
+    if not info_rows:
         return
-    agent_row = next((row for row in rows if row[1] == "agent_id"), None)
+    agent_row = next((row for row in info_rows if row[1] == "agent_id"), None)
     if agent_row is None:
         return
     if agent_row[3] == 0:
@@ -1023,92 +1446,73 @@ def _migrate_agent_task_agent_nullable(connection) -> None:
     connection.execute(text("PRAGMA foreign_keys=OFF"))
     try:
         _drop_sqlite_views(connection, dependent_views)
+        column_info = []
+        pk_columns = []
+        insert_columns = []
+        for row in info_rows:
+            name = row[1]
+            col_type = row[2] or ""
+            notnull = bool(row[3])
+            default = row[4]
+            pk = row[5]
+            column_info.append(
+                {
+                    "name": name,
+                    "type": col_type,
+                    "notnull": notnull,
+                    "default": default,
+                    "pk": pk,
+                }
+            )
+            insert_columns.append(name)
+            if pk:
+                pk_columns.append(name)
+
+        if not column_info:
+            return
+
+        column_defs = []
+        for col in column_info:
+            col_def = f"{col['name']} {col['type']}".strip()
+            # This migration only relaxes agent_id nullability.
+            if col["name"] != "agent_id" and col["notnull"]:
+                col_def += " NOT NULL"
+            if col["default"] is not None:
+                col_def += f" DEFAULT {col['default']}"
+            if len(pk_columns) == 1 and col["name"] in pk_columns:
+                col_def += " PRIMARY KEY"
+            column_defs.append(col_def)
+
+        if len(pk_columns) > 1:
+            column_defs.append(f"PRIMARY KEY ({', '.join(pk_columns)})")
+
+        foreign_keys = connection.execute(
+            text("PRAGMA foreign_key_list(agent_tasks)")
+        ).fetchall()
+        for row in foreign_keys:
+            from_col = row[3]
+            to_table = row[2]
+            to_col = row[4]
+            column_defs.append(
+                f"FOREIGN KEY({from_col}) REFERENCES {to_table} ({to_col})"
+            )
+
         connection.execute(text("DROP TABLE IF EXISTS agent_tasks_new"))
         connection.execute(
-            text(
-                "CREATE TABLE agent_tasks_new ("
-                "id INTEGER NOT NULL, "
-                "agent_id INTEGER, "
-                "run_id INTEGER, "
-                "run_task_id VARCHAR(255), "
-                "celery_task_id VARCHAR(255), "
-                "task_template_id INTEGER, "
-                "flowchart_id INTEGER, "
-                "flowchart_run_id INTEGER, "
-                "flowchart_node_id INTEGER, "
-                "status VARCHAR(32) NOT NULL, "
-                "kind VARCHAR(32), "
-                "prompt TEXT, "
-                "output TEXT, "
-                "error TEXT, "
-                "current_stage VARCHAR(32), "
-                "stage_logs TEXT, "
-                "started_at DATETIME, "
-                "finished_at DATETIME, "
-                "created_at DATETIME NOT NULL, "
-                "updated_at DATETIME NOT NULL, "
-                "PRIMARY KEY (id), "
-                "FOREIGN KEY(agent_id) REFERENCES agents (id), "
-                "FOREIGN KEY(run_id) REFERENCES runs (id), "
-                "FOREIGN KEY(task_template_id) REFERENCES task_templates (id), "
-                "FOREIGN KEY(flowchart_id) REFERENCES flowcharts (id), "
-                "FOREIGN KEY(flowchart_run_id) REFERENCES flowchart_runs (id), "
-                "FOREIGN KEY(flowchart_node_id) REFERENCES flowchart_nodes (id)"
-                ")"
-            )
+            text("CREATE TABLE agent_tasks_new (" + ", ".join(column_defs) + ")")
         )
         connection.execute(
             text(
                 "INSERT INTO agent_tasks_new "
-                "(id, agent_id, run_id, run_task_id, celery_task_id, task_template_id, flowchart_id, "
-                "flowchart_run_id, flowchart_node_id, status, kind, prompt, output, "
-                "error, current_stage, stage_logs, started_at, finished_at, "
-                "created_at, updated_at) "
-                "SELECT id, agent_id, run_id, run_task_id, celery_task_id, "
-                "task_template_id, flowchart_id, flowchart_run_id, flowchart_node_id, status, kind, "
-                "prompt, output, error, current_stage, stage_logs, started_at, "
-                "finished_at, "
-                "created_at, updated_at FROM agent_tasks"
+                "("
+                + ", ".join(insert_columns)
+                + ") SELECT "
+                + ", ".join(insert_columns)
+                + " FROM agent_tasks"
             )
         )
         connection.execute(text("DROP TABLE agent_tasks"))
         connection.execute(text("ALTER TABLE agent_tasks_new RENAME TO agent_tasks"))
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_agent_id ON agent_tasks (agent_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_run_id ON agent_tasks (run_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_task_template_id ON agent_tasks (task_template_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)"
-            )
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS "
-                "ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)"
-            )
-        )
     finally:
         _restore_sqlite_views(connection, dependent_views)
         connection.execute(
@@ -1341,6 +1745,44 @@ def _ensure_agent_skill_binding_schema(connection) -> None:
         )
     )
     _ensure_node_skill_binding_deprecation_triggers(connection)
+
+
+def _ensure_flowchart_node_attachment_schema(connection) -> None:
+    connection.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS flowchart_node_attachments ("
+            "flowchart_node_id INTEGER NOT NULL, "
+            "attachment_id INTEGER NOT NULL, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "PRIMARY KEY (flowchart_node_id, attachment_id), "
+            "FOREIGN KEY(flowchart_node_id) REFERENCES flowchart_nodes (id), "
+            "FOREIGN KEY(attachment_id) REFERENCES attachments (id)"
+            ")"
+        )
+    )
+    _ensure_columns(
+        connection,
+        "flowchart_node_attachments",
+        {
+            "flowchart_node_id": "INTEGER NOT NULL",
+            "attachment_id": "INTEGER NOT NULL",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_flowchart_node_attachments_flowchart_node_id "
+            "ON flowchart_node_attachments (flowchart_node_id)"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_flowchart_node_attachments_attachment_id "
+            "ON flowchart_node_attachments (attachment_id)"
+        )
+    )
 
 
 def _ensure_node_skill_binding_deprecation_triggers(connection) -> None:
@@ -1758,9 +2200,10 @@ def _ensure_chat_schema(connection) -> None:
         text(
             "CREATE TABLE IF NOT EXISTS chat_threads ("
             "id INTEGER PRIMARY KEY, "
-            "title VARCHAR(255) NOT NULL DEFAULT 'New chat', "
+            "title VARCHAR(255) NOT NULL DEFAULT 'New Chat', "
             "status VARCHAR(32) NOT NULL DEFAULT 'active', "
             "model_id INTEGER, "
+            "response_complexity VARCHAR(32) NOT NULL DEFAULT 'medium', "
             "selected_rag_collections_json TEXT, "
             "compaction_summary_json TEXT, "
             "last_activity_at DATETIME, "
@@ -1774,9 +2217,10 @@ def _ensure_chat_schema(connection) -> None:
         connection,
         "chat_threads",
         {
-            "title": "VARCHAR(255) NOT NULL DEFAULT 'New chat'",
+            "title": "VARCHAR(255) NOT NULL DEFAULT 'New Chat'",
             "status": "VARCHAR(32) NOT NULL DEFAULT 'active'",
             "model_id": "INTEGER",
+            "response_complexity": "VARCHAR(32) NOT NULL DEFAULT 'medium'",
             "selected_rag_collections_json": "TEXT",
             "compaction_summary_json": "TEXT",
             "last_activity_at": "DATETIME",
@@ -2035,15 +2479,38 @@ def _ensure_flowchart_indexes(connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)",
         "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)",
         "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_workspace_identity_created_at ON agent_tasks (workspace_identity, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_fallback_attempted_created_at ON agent_tasks (fallback_attempted, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_cli_fallback_used_created_at ON agent_tasks (cli_fallback_used, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_api_failure_category_created_at ON agent_tasks (api_failure_category, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_dispatch_status_created_at ON agent_tasks (dispatch_status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_final_provider_created_at ON agent_tasks (final_provider, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_dispatch_uncertain_created_at ON agent_tasks (dispatch_uncertain, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_tasks_fallback_reason_created_at ON agent_tasks (fallback_reason, created_at DESC)",
     ]
     for statement in statements:
         connection.execute(text(statement))
+    connection.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_tasks_provider_dispatch_id "
+            "ON agent_tasks (provider_dispatch_id) "
+            "WHERE provider_dispatch_id IS NOT NULL"
+        )
+    )
 
     if "flowchart_node_skills" in tables:
         connection.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS "
                 "ix_flowchart_node_skills_skill_id ON flowchart_node_skills (skill_id)"
+            )
+        )
+    if "flowchart_node_attachments" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_flowchart_node_attachments_attachment_id "
+                "ON flowchart_node_attachments (attachment_id)"
             )
         )
 

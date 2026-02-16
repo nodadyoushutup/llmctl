@@ -1,0 +1,7 @@
+chat.settings module
+====================
+
+.. automodule:: chat.settings
+   :members:
+   :show-inheritance:
+   :undoc-members:

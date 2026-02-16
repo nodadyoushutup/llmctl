@@ -47,6 +47,45 @@ def ensure_legacy_skill_script_writable(value: str | None) -> None:
         raise ValueError(LEGACY_SKILL_SCRIPT_WRITE_ERROR)
 
 RUN_ACTIVE_STATUSES = ("starting", "running", "stopping")
+NODE_EXECUTOR_PROVIDER_WORKSPACE = "workspace"
+NODE_EXECUTOR_PROVIDER_DOCKER = "docker"
+NODE_EXECUTOR_PROVIDER_KUBERNETES = "kubernetes"
+NODE_EXECUTOR_PROVIDER_CHOICES = (
+    NODE_EXECUTOR_PROVIDER_WORKSPACE,
+    NODE_EXECUTOR_PROVIDER_DOCKER,
+    NODE_EXECUTOR_PROVIDER_KUBERNETES,
+)
+NODE_EXECUTOR_DISPATCH_PENDING = "dispatch_pending"
+NODE_EXECUTOR_DISPATCH_SUBMITTED = "dispatch_submitted"
+NODE_EXECUTOR_DISPATCH_CONFIRMED = "dispatch_confirmed"
+NODE_EXECUTOR_DISPATCH_FAILED = "dispatch_failed"
+NODE_EXECUTOR_DISPATCH_FALLBACK_STARTED = "fallback_started"
+NODE_EXECUTOR_DISPATCH_STATUS_CHOICES = (
+    NODE_EXECUTOR_DISPATCH_PENDING,
+    NODE_EXECUTOR_DISPATCH_SUBMITTED,
+    NODE_EXECUTOR_DISPATCH_CONFIRMED,
+    NODE_EXECUTOR_DISPATCH_FAILED,
+    NODE_EXECUTOR_DISPATCH_FALLBACK_STARTED,
+)
+NODE_EXECUTOR_FALLBACK_REASON_CHOICES = (
+    "provider_unavailable",
+    "preflight_failed",
+    "dispatch_timeout",
+    "create_failed",
+    "image_pull_failed",
+    "config_error",
+    "unknown",
+)
+NODE_EXECUTOR_API_FAILURE_CATEGORY_CHOICES = (
+    "socket_missing",
+    "socket_unreachable",
+    "api_unreachable",
+    "auth_error",
+    "tls_error",
+    "timeout",
+    "preflight_failed",
+    "unknown",
+)
 
 SKILL_STATUS_DRAFT = "draft"
 SKILL_STATUS_ACTIVE = "active"
@@ -91,7 +130,14 @@ MCP_SERVER_TYPE_CHOICES = (
     MCP_SERVER_TYPE_INTEGRATED,
 )
 INTEGRATED_MCP_SERVER_KEYS = frozenset(
-    {"llmctl-mcp", "github", "atlassian", "chroma"}
+    {
+        "llmctl-mcp",
+        "github",
+        "atlassian",
+        "chroma",
+        "google-cloud",
+        "google-workspace",
+    }
 )
 LEGACY_INTEGRATED_MCP_SERVER_KEYS = frozenset({"jira"})
 SYSTEM_MANAGED_MCP_SERVER_KEYS = frozenset(
@@ -265,6 +311,13 @@ flowchart_node_skills = Table(
     Column("flowchart_node_id", ForeignKey("flowchart_nodes.id"), primary_key=True),
     Column("skill_id", ForeignKey("skills.id"), primary_key=True),
     Column("position", Integer, nullable=True),
+)
+
+flowchart_node_attachments = Table(
+    "flowchart_node_attachments",
+    Base.metadata,
+    Column("flowchart_node_id", ForeignKey("flowchart_nodes.id"), primary_key=True),
+    Column("attachment_id", ForeignKey("attachments.id"), primary_key=True),
 )
 
 agent_skill_bindings = Table(
@@ -488,6 +541,13 @@ class Attachment(BaseModel):
         secondary=task_template_attachments,
         back_populates="attachments",
     )
+    flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
+        "FlowchartNode",
+        secondary=flowchart_node_attachments,
+        back_populates="attachments",
+    )
+
+
 class Memory(BaseModel):
     __tablename__ = "memories"
 
@@ -562,12 +622,6 @@ class RAGSource(BaseModel):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    index_jobs: Mapped[list["RAGIndexJob"]] = relationship(
-        "RAGIndexJob",
-        back_populates="source",
-        cascade="all, delete-orphan",
-        order_by="RAGIndexJob.created_at.desc()",
-    )
     file_states: Mapped[list["RAGSourceFileState"]] = relationship(
         "RAGSourceFileState",
         back_populates="source",
@@ -576,54 +630,10 @@ class RAGSource(BaseModel):
     )
 
 
-class RAGIndexJob(BaseModel):
-    __tablename__ = "rag_index_jobs"
+class RAGIndexJob:
+    """Legacy compatibility placeholder for removed rag_index_jobs rows."""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kind: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=RAG_INDEX_JOB_KIND_INDEX, index=True
-    )
-    trigger_mode: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default=RAG_INDEX_TRIGGER_MANUAL,
-        server_default=text("'manual'"),
-    )
-    mode: Mapped[str] = mapped_column(
-        String(16),
-        nullable=False,
-        default=RAG_INDEX_MODE_FRESH,
-        server_default=text("'fresh'"),
-    )
-    status: Mapped[str] = mapped_column(
-        String(24),
-        nullable=False,
-        default=RAG_INDEX_JOB_STATUS_QUEUED,
-        server_default=text("'queued'"),
-        index=True,
-    )
-    source_id: Mapped[int] = mapped_column(
-        ForeignKey("rag_sources.id"), nullable=False, index=True
-    )
-    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    output: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
-    )
-
-    source: Mapped["RAGSource"] = relationship("RAGSource", back_populates="index_jobs")
+    pass
 
 
 class RAGSourceFileState(BaseModel):
@@ -913,6 +923,60 @@ class AgentTask(BaseModel):
     instruction_materialized_paths_json: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )
+    selected_provider: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=NODE_EXECUTOR_PROVIDER_WORKSPACE,
+        server_default=text("'workspace'"),
+    )
+    final_provider: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=NODE_EXECUTOR_PROVIDER_WORKSPACE,
+        server_default=text("'workspace'"),
+    )
+    provider_dispatch_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    workspace_identity: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        default="default",
+        server_default=text("'default'"),
+    )
+    dispatch_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=NODE_EXECUTOR_DISPATCH_PENDING,
+        server_default=text("'dispatch_pending'"),
+    )
+    fallback_attempted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+    )
+    fallback_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dispatch_uncertain: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+    )
+    api_failure_category: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    cli_fallback_used: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+    )
+    cli_preflight_passed: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+    )
 
     prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1074,6 +1138,11 @@ class FlowchartNode(BaseModel):
         secondary=flowchart_node_skills,
         back_populates="flowchart_nodes",
         order_by=flowchart_node_skills.c.position.asc(),
+    )
+    attachments: Mapped[list["Attachment"]] = relationship(
+        "Attachment",
+        secondary=flowchart_node_attachments,
+        back_populates="flowchart_nodes",
     )
     outgoing_edges: Mapped[list["FlowchartEdge"]] = relationship(
         "FlowchartEdge",
@@ -1348,7 +1417,7 @@ class ChatThread(BaseModel):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(
-        String(255), nullable=False, default="New chat", server_default=text("'New chat'")
+        String(255), nullable=False, default="New Chat", server_default=text("'New Chat'")
     )
     status: Mapped[str] = mapped_column(
         String(32),
@@ -1359,6 +1428,12 @@ class ChatThread(BaseModel):
     )
     model_id: Mapped[int | None] = mapped_column(
         ForeignKey("llm_models.id"), nullable=True, index=True
+    )
+    response_complexity: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="medium",
+        server_default=text("'medium'"),
     )
     selected_rag_collections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     compaction_summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)

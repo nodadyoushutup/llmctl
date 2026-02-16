@@ -1,56 +1,115 @@
 {% extends "settings_layout.html" %}
 
+{% block action_header %}
+  <button class="btn btn-primary" type="submit" form="chat-default-settings-form">
+    <i class="fa-solid fa-floppy-disk"></i>
+    save chat settings
+  </button>
+{% endblock %}
+
 {% block settings_content %}
-<section class="card">
-  <div class="card-header">
-    <h2 class="section-title">Chat Runtime Settings</h2>
-  </div>
-  <p class="muted" style="margin-top: 12px;">
-    Global context budget and compaction settings for Launch Chat sessions.
-  </p>
-  <form method="post" action="{{ url_for('agents.update_chat_runtime_settings_route') }}" style="margin-top: 16px;">
-    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
-      <label>
-        History budget %
-        <input type="number" name="history_budget_percent" value="{{ chat_runtime_settings.history_budget_percent }}" min="10" max="90" />
-      </label>
-      <label>
-        RAG budget %
-        <input type="number" name="rag_budget_percent" value="{{ chat_runtime_settings.rag_budget_percent }}" min="0" max="80" />
-      </label>
-      <label>
-        MCP budget %
-        <input type="number" name="mcp_budget_percent" value="{{ chat_runtime_settings.mcp_budget_percent }}" min="0" max="90" />
-      </label>
-      <label>
-        Compaction trigger %
-        <input type="number" name="compaction_trigger_percent" value="{{ chat_runtime_settings.compaction_trigger_percent }}" min="70" max="100" />
-      </label>
-      <label>
-        Compaction target %
-        <input type="number" name="compaction_target_percent" value="{{ chat_runtime_settings.compaction_target_percent }}" min="40" max="99" />
-      </label>
-      <label>
-        Preserve recent turns
-        <input type="number" name="preserve_recent_turns" value="{{ chat_runtime_settings.preserve_recent_turns }}" min="1" max="20" />
-      </label>
-      <label>
-        RAG top-k
-        <input type="number" name="rag_top_k" value="{{ chat_runtime_settings.rag_top_k }}" min="1" max="50" />
-      </label>
-      <label>
-        Default context tokens
-        <input type="number" name="default_context_window_tokens" value="{{ chat_runtime_settings.default_context_window_tokens }}" min="1024" max="1000000" />
-      </label>
-      <label>
-        Max summary chars
-        <input type="number" name="max_compaction_summary_chars" value="{{ chat_runtime_settings.max_compaction_summary_chars }}" min="200" max="10000" />
-      </label>
+<section class="stack">
+  <section class="card">
+    <div class="card-header">
+      <h2 class="section-title">Chat Defaults</h2>
     </div>
-    <button type="submit" class="btn btn-secondary" style="margin-top: 12px;">
-      <i class="fa-solid fa-floppy-disk"></i>
-      save chat runtime settings
-    </button>
-  </form>
+    <p class="muted" style="margin-top: 12px;">
+      Defaults here are applied when creating a new chat thread.
+    </p>
+    <p class="muted" style="margin-top: 8px;">
+      Runtime controls (compaction, context budget, retrieval) are managed in
+      <a href="{{ url_for('agents.settings_runtime_chat') }}">Settings > Runtime > Chat Runtime</a>.
+    </p>
+  </section>
+
+  <section class="card">
+    <form
+      id="chat-default-settings-form"
+      method="post"
+      action="{{ url_for('agents.update_chat_default_settings_route') }}"
+      class="form-grid"
+    >
+      <label class="label">
+        Default Model
+        <select class="input" name="default_model_id">
+          <option value="">Use provider/global default</option>
+          {% for model in models %}
+            <option
+              value="{{ model.id }}"
+              {% if chat_default_settings.default_model_id == model.id %}selected{% endif %}
+            >
+              {{ model.name }} ({{ model.provider }})
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="label">
+        Default Complexity
+        <select class="input" name="default_response_complexity">
+          <option value="low" {% if chat_default_settings.default_response_complexity == 'low' %}selected{% endif %}>Low</option>
+          <option value="medium" {% if chat_default_settings.default_response_complexity == 'medium' %}selected{% endif %}>Medium</option>
+          <option value="high" {% if chat_default_settings.default_response_complexity == 'high' %}selected{% endif %}>High</option>
+          <option value="extra_high" {% if chat_default_settings.default_response_complexity == 'extra_high' %}selected{% endif %}>Extra High</option>
+        </select>
+      </label>
+
+      <section class="subcard" style="grid-column: 1 / -1;">
+        <p class="eyebrow">default mcp servers</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          These MCP servers are pre-selected for new threads.
+        </p>
+        {% if mcp_servers %}
+          <div class="grid grid-2" style="margin-top: 12px; gap: 10px;">
+            {% for server in mcp_servers %}
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <input
+                  type="checkbox"
+                  name="default_mcp_server_ids"
+                  value="{{ server.id }}"
+                  {% if server.id in chat_default_settings.default_mcp_server_ids %}checked{% endif %}
+                />
+                <span>{{ server.name }}</span>
+                {% if (server.server_type or "custom") == "integrated" %}
+                  <span class="status status-success">integrated</span>
+                {% endif %}
+              </label>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted" style="margin-top: 10px;">No MCP servers available.</p>
+        {% endif %}
+      </section>
+
+      <section class="subcard" style="grid-column: 1 / -1;">
+        <p class="eyebrow">default rag collections</p>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Collections to pre-select for new threads when RAG is healthy.
+        </p>
+        {% if rag_health.state == 'configured_healthy' and rag_collections %}
+          <div class="grid grid-2" style="margin-top: 12px; gap: 10px;">
+            {% for collection in rag_collections %}
+              <label style="display: flex; align-items: center; gap: 8px;">
+                <input
+                  type="checkbox"
+                  name="default_rag_collections"
+                  value="{{ collection.id }}"
+                  {% if collection.id in chat_default_settings.default_rag_collections %}checked{% endif %}
+                />
+                <span>{{ collection.name }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted" style="margin-top: 10px;">
+            RAG state: {{ rag_health.state }}{% if rag_health.error %} ({{ rag_health.error }}){% endif %}
+          </p>
+        {% endif %}
+      </section>
+    </form>
+    <p class="muted" style="margin-top: 14px; font-size: 12px;">
+      Chat threads are session-scoped. Agent-level defaults are not yet part of chat thread schema.
+    </p>
+  </section>
 </section>
 {% endblock %}

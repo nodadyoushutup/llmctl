@@ -1,0 +1,319 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rag.engine package &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="rag.engine.chunkers module" href="rag.engine.chunkers.html" />
+    <link rel="prev" title="rag.domain.contracts module" href="rag.domain.contracts.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">Studio API Packages</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="chat.html">chat package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.html">core package</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="rag.html">rag package</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="rag.html#subpackages">Subpackages</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="rag.domain.html">rag.domain package</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">rag.engine package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.integrations.html">rag.integrations package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.legacy.html">rag.legacy package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.providers.html">rag.providers package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="rag.worker.html">rag.worker package</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="rag.html#submodules">Submodules</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.html">services package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="storage.html">storage package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="web.html">web package</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">Studio API Packages</a></li>
+          <li class="breadcrumb-item"><a href="rag.html">rag package</a></li>
+      <li class="breadcrumb-item active">rag.engine package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/rag.engine.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-rag.engine">
+<span id="rag-engine-package"></span><h1>rag.engine package<a class="headerlink" href="#module-rag.engine" title="Link to this heading"></a></h1>
+<p>RAG parsing, chunking, indexing, and retrieval engine modules.</p>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.chunkers.html">rag.engine.chunkers module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.chunkers.html#rag.engine.chunkers.line_chunker"><code class="docutils literal notranslate"><span class="pre">line_chunker()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.chunkers.html#rag.engine.chunkers.token_chunker"><code class="docutils literal notranslate"><span class="pre">token_chunker()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.chunkers.html#rag.engine.chunkers.structure_chunker"><code class="docutils literal notranslate"><span class="pre">structure_chunker()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.chunkers.html#rag.engine.chunkers.pdf_chunker"><code class="docutils literal notranslate"><span class="pre">pdf_chunker()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.chunkers.html#rag.engine.chunkers.build_chunker_registry"><code class="docutils literal notranslate"><span class="pre">build_chunker_registry()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.code_spans.html">rag.engine.code_spans module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.code_spans.html#rag.engine.code_spans.python_spans"><code class="docutils literal notranslate"><span class="pre">python_spans()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.code_spans.html#rag.engine.code_spans.js_ts_spans"><code class="docutils literal notranslate"><span class="pre">js_ts_spans()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.code_spans.html#rag.engine.code_spans.bash_spans"><code class="docutils literal notranslate"><span class="pre">bash_spans()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.code_spans.html#rag.engine.code_spans.detect_language"><code class="docutils literal notranslate"><span class="pre">detect_language()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.code_spans.html#rag.engine.code_spans.spans_for_language"><code class="docutils literal notranslate"><span class="pre">spans_for_language()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.config.html">rag.engine.config module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig"><code class="docutils literal notranslate"><span class="pre">RagConfig</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.repo_root"><code class="docutils literal notranslate"><span class="pre">RagConfig.repo_root</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.rag_mode"><code class="docutils literal notranslate"><span class="pre">RagConfig.rag_mode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chroma_host"><code class="docutils literal notranslate"><span class="pre">RagConfig.chroma_host</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chroma_port"><code class="docutils literal notranslate"><span class="pre">RagConfig.chroma_port</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.collection"><code class="docutils literal notranslate"><span class="pre">RagConfig.collection</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_provider"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_provider"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.openai_api_key"><code class="docutils literal notranslate"><span class="pre">RagConfig.openai_api_key</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.gemini_api_key"><code class="docutils literal notranslate"><span class="pre">RagConfig.gemini_api_key</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.openai_embedding_model"><code class="docutils literal notranslate"><span class="pre">RagConfig.openai_embedding_model</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.gemini_embedding_model"><code class="docutils literal notranslate"><span class="pre">RagConfig.gemini_embedding_model</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_model"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_model</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_max_tokens_per_request"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_max_tokens_per_request</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_max_tokens_per_input"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_max_tokens_per_input</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_max_batch_items"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_max_batch_items</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_min_request_interval_s"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_min_request_interval_s</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_target_tokens_per_minute"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_target_tokens_per_minute</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_rate_limit_max_retries"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_rate_limit_max_retries</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.git_url"><code class="docutils literal notranslate"><span class="pre">RagConfig.git_url</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.git_repo"><code class="docutils literal notranslate"><span class="pre">RagConfig.git_repo</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.git_pat"><code class="docutils literal notranslate"><span class="pre">RagConfig.git_pat</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.git_ssh_key_path"><code class="docutils literal notranslate"><span class="pre">RagConfig.git_ssh_key_path</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.git_branch"><code class="docutils literal notranslate"><span class="pre">RagConfig.git_branch</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.git_poll_s"><code class="docutils literal notranslate"><span class="pre">RagConfig.git_poll_s</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.git_dir"><code class="docutils literal notranslate"><span class="pre">RagConfig.git_dir</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.watch_enabled"><code class="docutils literal notranslate"><span class="pre">RagConfig.watch_enabled</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.watch_debounce_s"><code class="docutils literal notranslate"><span class="pre">RagConfig.watch_debounce_s</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chunk_lines"><code class="docutils literal notranslate"><span class="pre">RagConfig.chunk_lines</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chunk_overlap_lines"><code class="docutils literal notranslate"><span class="pre">RagConfig.chunk_overlap_lines</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.max_file_bytes"><code class="docutils literal notranslate"><span class="pre">RagConfig.max_file_bytes</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.exclude_dirs"><code class="docutils literal notranslate"><span class="pre">RagConfig.exclude_dirs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.exclude_globs"><code class="docutils literal notranslate"><span class="pre">RagConfig.exclude_globs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.include_globs"><code class="docutils literal notranslate"><span class="pre">RagConfig.include_globs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.max_file_bytes_by_type"><code class="docutils literal notranslate"><span class="pre">RagConfig.max_file_bytes_by_type</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.exclude_globs_by_type"><code class="docutils literal notranslate"><span class="pre">RagConfig.exclude_globs_by_type</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chunk_lines_by_type"><code class="docutils literal notranslate"><span class="pre">RagConfig.chunk_lines_by_type</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chunk_overlap_lines_by_type"><code class="docutils literal notranslate"><span class="pre">RagConfig.chunk_overlap_lines_by_type</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.enabled_doc_types"><code class="docutils literal notranslate"><span class="pre">RagConfig.enabled_doc_types</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.ocr_enabled"><code class="docutils literal notranslate"><span class="pre">RagConfig.ocr_enabled</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.ocr_lang"><code class="docutils literal notranslate"><span class="pre">RagConfig.ocr_lang</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.ocr_dpi"><code class="docutils literal notranslate"><span class="pre">RagConfig.ocr_dpi</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.ocr_timeout_s"><code class="docutils literal notranslate"><span class="pre">RagConfig.ocr_timeout_s</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.ocr_include_char_boxes"><code class="docutils literal notranslate"><span class="pre">RagConfig.ocr_include_char_boxes</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.drive_sync_workers"><code class="docutils literal notranslate"><span class="pre">RagConfig.drive_sync_workers</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.index_parallel_workers"><code class="docutils literal notranslate"><span class="pre">RagConfig.index_parallel_workers</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.pdf_page_workers"><code class="docutils literal notranslate"><span class="pre">RagConfig.pdf_page_workers</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.embed_parallel_requests"><code class="docutils literal notranslate"><span class="pre">RagConfig.embed_parallel_requests</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.openai_chat_model"><code class="docutils literal notranslate"><span class="pre">RagConfig.openai_chat_model</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.gemini_chat_model"><code class="docutils literal notranslate"><span class="pre">RagConfig.gemini_chat_model</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_model"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_model</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_response_style"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_response_style</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_temperature"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_temperature</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_top_k"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_top_k</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_max_history"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_max_history</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_max_context_chars"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_max_context_chars</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_snippet_chars"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_snippet_chars</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.chat_context_budget_tokens"><code class="docutils literal notranslate"><span class="pre">RagConfig.chat_context_budget_tokens</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.RagConfig.web_port"><code class="docutils literal notranslate"><span class="pre">RagConfig.web_port</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.build_git_url"><code class="docutils literal notranslate"><span class="pre">build_git_url()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.max_file_bytes_for"><code class="docutils literal notranslate"><span class="pre">max_file_bytes_for()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.chunk_lines_for"><code class="docutils literal notranslate"><span class="pre">chunk_lines_for()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.chunk_overlap_lines_for"><code class="docutils literal notranslate"><span class="pre">chunk_overlap_lines_for()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.parser_signature"><code class="docutils literal notranslate"><span class="pre">parser_signature()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.chunker_signature"><code class="docutils literal notranslate"><span class="pre">chunker_signature()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.load_config"><code class="docutils literal notranslate"><span class="pre">load_config()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.config.html#rag.engine.config.build_source_config"><code class="docutils literal notranslate"><span class="pre">build_source_config()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.doc_structures.html">rag.engine.doc_structures module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.doc_structures.html#rag.engine.doc_structures.markdown_spans"><code class="docutils literal notranslate"><span class="pre">markdown_spans()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.doc_structures.html#rag.engine.doc_structures.html_spans"><code class="docutils literal notranslate"><span class="pre">html_spans()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.logging_utils.html">rag.engine.logging_utils module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.logging_utils.html#rag.engine.logging_utils.log_sink"><code class="docutils literal notranslate"><span class="pre">log_sink()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.logging_utils.html#rag.engine.logging_utils.log_event"><code class="docutils literal notranslate"><span class="pre">log_event()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.logging_utils.html#rag.engine.logging_utils.submit_with_log_context"><code class="docutils literal notranslate"><span class="pre">submit_with_log_context()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.office_parsers.html">rag.engine.office_parsers module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.office_parsers.html#rag.engine.office_parsers.parse_docx"><code class="docutils literal notranslate"><span class="pre">parse_docx()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.office_parsers.html#rag.engine.office_parsers.parse_pptx"><code class="docutils literal notranslate"><span class="pre">parse_pptx()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.office_parsers.html#rag.engine.office_parsers.parse_xlsx"><code class="docutils literal notranslate"><span class="pre">parse_xlsx()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.parsers.html">rag.engine.parsers module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.parsers.html#rag.engine.parsers.build_parser_registry"><code class="docutils literal notranslate"><span class="pre">build_parser_registry()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.parsers.html#rag.engine.parsers.is_doc_type_enabled"><code class="docutils literal notranslate"><span class="pre">is_doc_type_enabled()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.parsers.html#rag.engine.parsers.guess_doc_type"><code class="docutils literal notranslate"><span class="pre">guess_doc_type()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.pdf_pipeline.html">rag.engine.pdf_pipeline module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pdf_pipeline.html#rag.engine.pdf_pipeline.parse_pdf"><code class="docutils literal notranslate"><span class="pre">parse_pdf()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.pipeline.html">rag.engine.pipeline module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParsedDocument"><code class="docutils literal notranslate"><span class="pre">ParsedDocument</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParsedDocument.content"><code class="docutils literal notranslate"><span class="pre">ParsedDocument.content</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParsedDocument.doc_type"><code class="docutils literal notranslate"><span class="pre">ParsedDocument.doc_type</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParsedDocument.language"><code class="docutils literal notranslate"><span class="pre">ParsedDocument.language</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParsedDocument.source"><code class="docutils literal notranslate"><span class="pre">ParsedDocument.source</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParsedDocument.structural_hints"><code class="docutils literal notranslate"><span class="pre">ParsedDocument.structural_hints</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk"><code class="docutils literal notranslate"><span class="pre">Chunk</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.text"><code class="docutils literal notranslate"><span class="pre">Chunk.text</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.metadata"><code class="docutils literal notranslate"><span class="pre">Chunk.metadata</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.start_line"><code class="docutils literal notranslate"><span class="pre">Chunk.start_line</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.end_line"><code class="docutils literal notranslate"><span class="pre">Chunk.end_line</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.start_offset"><code class="docutils literal notranslate"><span class="pre">Chunk.start_offset</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.end_offset"><code class="docutils literal notranslate"><span class="pre">Chunk.end_offset</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.source"><code class="docutils literal notranslate"><span class="pre">Chunk.source</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunk.doc_group_id"><code class="docutils literal notranslate"><span class="pre">Chunk.doc_group_id</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Parser"><code class="docutils literal notranslate"><span class="pre">Parser</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.Chunker"><code class="docutils literal notranslate"><span class="pre">Chunker</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParserRegistry"><code class="docutils literal notranslate"><span class="pre">ParserRegistry</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParserRegistry.register"><code class="docutils literal notranslate"><span class="pre">ParserRegistry.register()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParserRegistry.register_fallback"><code class="docutils literal notranslate"><span class="pre">ParserRegistry.register_fallback()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ParserRegistry.resolve"><code class="docutils literal notranslate"><span class="pre">ParserRegistry.resolve()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ChunkerRegistry"><code class="docutils literal notranslate"><span class="pre">ChunkerRegistry</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ChunkerRegistry.register"><code class="docutils literal notranslate"><span class="pre">ChunkerRegistry.register()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ChunkerRegistry.register_fallback"><code class="docutils literal notranslate"><span class="pre">ChunkerRegistry.register_fallback()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.ChunkerRegistry.resolve"><code class="docutils literal notranslate"><span class="pre">ChunkerRegistry.resolve()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.make_doc_group_id"><code class="docutils literal notranslate"><span class="pre">make_doc_group_id()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.pipeline.html#rag.engine.pipeline.make_chunk_id"><code class="docutils literal notranslate"><span class="pre">make_chunk_id()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.retrieval.html">rag.engine.retrieval module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.retrieval.html#rag.engine.retrieval.get_collections"><code class="docutils literal notranslate"><span class="pre">get_collections()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.retrieval.html#rag.engine.retrieval.query_collections"><code class="docutils literal notranslate"><span class="pre">query_collections()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.retrieval.html#rag.engine.retrieval.build_query_text"><code class="docutils literal notranslate"><span class="pre">build_query_text()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.retrieval.html#rag.engine.retrieval.trim_history"><code class="docutils literal notranslate"><span class="pre">trim_history()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.retrieval.html#rag.engine.retrieval.build_context"><code class="docutils literal notranslate"><span class="pre">build_context()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.retrieval.html#rag.engine.retrieval.format_label"><code class="docutils literal notranslate"><span class="pre">format_label()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.retrieval.html#rag.engine.retrieval.truncate"><code class="docutils literal notranslate"><span class="pre">truncate()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.token_utils.html">rag.engine.token_utils module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rag.engine.token_utils.html#rag.engine.token_utils.TokenCounter"><code class="docutils literal notranslate"><span class="pre">TokenCounter</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.token_utils.html#rag.engine.token_utils.TokenCounter.model_name"><code class="docutils literal notranslate"><span class="pre">TokenCounter.model_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.token_utils.html#rag.engine.token_utils.TokenCounter.count"><code class="docutils literal notranslate"><span class="pre">TokenCounter.count()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.token_utils.html#rag.engine.token_utils.TokenCounter.split"><code class="docutils literal notranslate"><span class="pre">TokenCounter.split()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="rag.engine.versions.html">rag.engine.versions module</a></li>
+</ul>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="rag.domain.contracts.html" class="btn btn-neutral float-left" title="rag.domain.contracts module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="rag.engine.chunkers.html" class="btn btn-neutral float-right" title="rag.engine.chunkers module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

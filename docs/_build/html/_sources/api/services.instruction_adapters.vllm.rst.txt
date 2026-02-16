@@ -1,0 +1,7 @@
+services.instruction\_adapters.vllm module
+==========================================
+
+.. automodule:: services.instruction_adapters.vllm
+   :members:
+   :show-inheritance:
+   :undoc-members:

@@ -1,0 +1,7 @@
+core.prompt\_envelope module
+============================
+
+.. automodule:: core.prompt_envelope
+   :members:
+   :show-inheritance:
+   :undoc-members:

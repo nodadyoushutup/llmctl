@@ -1,0 +1,16 @@
+services.instructions package
+=============================
+
+.. automodule:: services.instructions
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   services.instructions.compiler
+   services.instructions.package

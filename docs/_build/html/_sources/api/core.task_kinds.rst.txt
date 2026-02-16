@@ -1,0 +1,7 @@
+core.task\_kinds module
+=======================
+
+.. automodule:: core.task_kinds
+   :members:
+   :show-inheritance:
+   :undoc-members:

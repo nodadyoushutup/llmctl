@@ -1,0 +1,7 @@
+core.mcp\_config module
+=======================
+
+.. automodule:: core.mcp_config
+   :members:
+   :show-inheritance:
+   :undoc-members:

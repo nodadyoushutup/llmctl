@@ -1,0 +1,514 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>services package &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="services.execution package" href="services.execution.html" />
+    <link rel="prev" title="rag.contracts module" href="rag.contracts.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">Studio API Packages</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="chat.html">chat package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.html">core package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.html">rag package</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">services package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#subpackages">Subpackages</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.html">services.execution package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.html">services.instruction_adapters package</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instructions.html">services.instructions package</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#submodules">Submodules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.celery_app.html">services.celery_app module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.huggingface_downloads.html">services.huggingface_downloads module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.realtime_events.html">services.realtime_events module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.skill_adapters.html">services.skill_adapters module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.skills.html">services.skills module</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="storage.html">storage package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="web.html">web package</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">Studio API Packages</a></li>
+      <li class="breadcrumb-item active">services package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/services.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-services">
+<span id="services-package"></span><h1>services package<a class="headerlink" href="#module-services" title="Link to this heading"></a></h1>
+<section id="subpackages">
+<h2>Subpackages<a class="headerlink" href="#subpackages" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="services.execution.html">services.execution package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="services.execution.html#services.execution.DockerExecutor"><code class="docutils literal notranslate"><span class="pre">DockerExecutor</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.DockerExecutor.execute"><code class="docutils literal notranslate"><span class="pre">DockerExecutor.execute()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.DockerExecutor.provider"><code class="docutils literal notranslate"><span class="pre">DockerExecutor.provider</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.execution.html#services.execution.KubernetesExecutor"><code class="docutils literal notranslate"><span class="pre">KubernetesExecutor</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.KubernetesExecutor.execute"><code class="docutils literal notranslate"><span class="pre">KubernetesExecutor.execute()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.KubernetesExecutor.provider"><code class="docutils literal notranslate"><span class="pre">KubernetesExecutor.provider</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.api_failure_category"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.api_failure_category</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.cli_fallback_used"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.cli_fallback_used</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.cli_preflight_passed"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.cli_preflight_passed</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.dispatch_status"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.dispatch_status</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.dispatch_uncertain"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.dispatch_uncertain</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.fallback_attempted"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.fallback_attempted</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.fallback_reason"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.fallback_reason</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.final_provider"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.final_provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.provider_dispatch_id"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.provider_dispatch_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.run_metadata_payload"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.run_metadata_payload()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.selected_provider"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.selected_provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.workspace_identity"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.workspace_identity</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.node_id"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.node_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.node_type"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.node_type</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.node_ref_id"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.node_ref_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.node_config"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.node_config</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.input_context"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.input_context</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.execution_id"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.execution_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.execution_task_id"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.execution_task_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.execution_index"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.execution_index</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.enabled_providers"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.enabled_providers</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.default_model_id"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.default_model_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRequest.mcp_server_keys"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest.mcp_server_keys</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult"><code class="docutils literal notranslate"><span class="pre">ExecutionResult</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.artifacts"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.artifacts</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.metrics"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.metrics</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.usage"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.usage</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.warnings"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.warnings</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.contract_version"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.contract_version</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.status"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.status</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.exit_code"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.exit_code</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.started_at"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.started_at</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.finished_at"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.finished_at</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.stdout"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.stdout</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.stderr"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.stderr</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.error"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.error</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.provider_metadata"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.provider_metadata</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.output_state"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.output_state</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.routing_state"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.routing_state</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionResult.run_metadata"><code class="docutils literal notranslate"><span class="pre">ExecutionResult.run_metadata</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRouter"><code class="docutils literal notranslate"><span class="pre">ExecutionRouter</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRouter.execute"><code class="docutils literal notranslate"><span class="pre">ExecutionRouter.execute()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRouter.execute_routed"><code class="docutils literal notranslate"><span class="pre">ExecutionRouter.execute_routed()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.ExecutionRouter.route_request"><code class="docutils literal notranslate"><span class="pre">ExecutionRouter.route_request()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.execution.html#services.execution.WorkspaceExecutor"><code class="docutils literal notranslate"><span class="pre">WorkspaceExecutor</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.WorkspaceExecutor.execute"><code class="docutils literal notranslate"><span class="pre">WorkspaceExecutor.execute()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.html#services.execution.WorkspaceExecutor.provider"><code class="docutils literal notranslate"><span class="pre">WorkspaceExecutor.provider</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.execution.html#submodules">Submodules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.contracts.html">services.execution.contracts module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.contracts.html#services.execution.contracts.ExecutionRequest"><code class="docutils literal notranslate"><span class="pre">ExecutionRequest</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.contracts.html#services.execution.contracts.ExecutionResult"><code class="docutils literal notranslate"><span class="pre">ExecutionResult</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.docker_executor.html">services.execution.docker_executor module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.docker_executor.html#services.execution.docker_executor.DockerExecutor"><code class="docutils literal notranslate"><span class="pre">DockerExecutor</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.docker_executor.html#services.execution.docker_executor.stat_is_socket"><code class="docutils literal notranslate"><span class="pre">stat_is_socket()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.idempotency.html">services.execution.idempotency module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.idempotency.html#services.execution.idempotency.register_dispatch_key"><code class="docutils literal notranslate"><span class="pre">register_dispatch_key()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.idempotency.html#services.execution.idempotency.clear_dispatch_registry"><code class="docutils literal notranslate"><span class="pre">clear_dispatch_registry()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.kubernetes_executor.html">services.execution.kubernetes_executor module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.kubernetes_executor.html#services.execution.kubernetes_executor.KubernetesExecutor"><code class="docutils literal notranslate"><span class="pre">KubernetesExecutor</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.router.html">services.execution.router module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.router.html#services.execution.router.ExecutionRouter"><code class="docutils literal notranslate"><span class="pre">ExecutionRouter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.execution.workspace_executor.html">services.execution.workspace_executor module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.execution.workspace_executor.html#services.execution.workspace_executor.WorkspaceExecutor"><code class="docutils literal notranslate"><span class="pre">WorkspaceExecutor</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="services.instruction_adapters.html">services.instruction_adapters package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapter"><code class="docutils literal notranslate"><span class="pre">InstructionAdapter</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapter.describe"><code class="docutils literal notranslate"><span class="pre">InstructionAdapter.describe()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapter.fallback_payload"><code class="docutils literal notranslate"><span class="pre">InstructionAdapter.fallback_payload()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapter.materialize"><code class="docutils literal notranslate"><span class="pre">InstructionAdapter.materialize()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterDescriptor"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterDescriptor</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterDescriptor.provider"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterDescriptor.provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterDescriptor.adapter"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterDescriptor.adapter</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterDescriptor.native_filename"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterDescriptor.native_filename</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterDescriptor.supports_native"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterDescriptor.supports_native</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterMaterializationResult"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterMaterializationResult</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterMaterializationResult.warnings"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterMaterializationResult.warnings</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterMaterializationResult.mode"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterMaterializationResult.mode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterMaterializationResult.adapter"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterMaterializationResult.adapter</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.InstructionAdapterMaterializationResult.materialized_paths"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterMaterializationResult.materialized_paths</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.ClaudeInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.ClaudeInstructionAdapter.adapter_name"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter.adapter_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.ClaudeInstructionAdapter.describe"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter.describe()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.ClaudeInstructionAdapter.fallback_payload"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter.fallback_payload()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.ClaudeInstructionAdapter.file_name"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter.file_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.ClaudeInstructionAdapter.materialize"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter.materialize()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.ClaudeInstructionAdapter.provider"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter.provider</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.CodexInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.CodexInstructionAdapter.adapter_name"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter.adapter_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.CodexInstructionAdapter.describe"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter.describe()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.CodexInstructionAdapter.fallback_payload"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter.fallback_payload()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.CodexInstructionAdapter.file_name"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter.file_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.CodexInstructionAdapter.materialize"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter.materialize()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.CodexInstructionAdapter.provider"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter.provider</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.GeminiInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.GeminiInstructionAdapter.adapter_name"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter.adapter_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.GeminiInstructionAdapter.describe"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter.describe()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.GeminiInstructionAdapter.fallback_payload"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter.fallback_payload()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.GeminiInstructionAdapter.file_name"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter.file_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.GeminiInstructionAdapter.materialize"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter.materialize()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.GeminiInstructionAdapter.provider"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter.provider</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.VLLMInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">VLLMInstructionAdapter</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.VLLMInstructionAdapter.adapter_name"><code class="docutils literal notranslate"><span class="pre">VLLMInstructionAdapter.adapter_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.VLLMInstructionAdapter.describe"><code class="docutils literal notranslate"><span class="pre">VLLMInstructionAdapter.describe()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.VLLMInstructionAdapter.fallback_payload"><code class="docutils literal notranslate"><span class="pre">VLLMInstructionAdapter.fallback_payload()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.VLLMInstructionAdapter.materialize"><code class="docutils literal notranslate"><span class="pre">VLLMInstructionAdapter.materialize()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.is_frontier_instruction_provider"><code class="docutils literal notranslate"><span class="pre">is_frontier_instruction_provider()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.resolve_agent_markdown_filename"><code class="docutils literal notranslate"><span class="pre">resolve_agent_markdown_filename()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.resolve_instruction_adapter"><code class="docutils literal notranslate"><span class="pre">resolve_instruction_adapter()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#services.instruction_adapters.validate_agent_markdown_filename"><code class="docutils literal notranslate"><span class="pre">validate_agent_markdown_filename()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.instruction_adapters.html#submodules">Submodules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.base.html">services.instruction_adapters.base module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.is_frontier_instruction_provider"><code class="docutils literal notranslate"><span class="pre">is_frontier_instruction_provider()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.validate_agent_markdown_filename"><code class="docutils literal notranslate"><span class="pre">validate_agent_markdown_filename()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.resolve_agent_markdown_filename"><code class="docutils literal notranslate"><span class="pre">resolve_agent_markdown_filename()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.compiled_instructions_markdown"><code class="docutils literal notranslate"><span class="pre">compiled_instructions_markdown()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.write_compiled_instruction_file"><code class="docutils literal notranslate"><span class="pre">write_compiled_instruction_file()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.InstructionAdapterDescriptor"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterDescriptor</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.InstructionAdapterMaterializationResult"><code class="docutils literal notranslate"><span class="pre">InstructionAdapterMaterializationResult</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.base.html#services.instruction_adapters.base.InstructionAdapter"><code class="docutils literal notranslate"><span class="pre">InstructionAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.claude.html">services.instruction_adapters.claude module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.claude.html#services.instruction_adapters.claude.ClaudeInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">ClaudeInstructionAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.codex.html">services.instruction_adapters.codex module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.codex.html#services.instruction_adapters.codex.CodexInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">CodexInstructionAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.gemini.html">services.instruction_adapters.gemini module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.gemini.html#services.instruction_adapters.gemini.GeminiInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">GeminiInstructionAdapter</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.instruction_adapters.vllm.html">services.instruction_adapters.vllm module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.instruction_adapters.vllm.html#services.instruction_adapters.vllm.VLLMInstructionAdapter"><code class="docutils literal notranslate"><span class="pre">VLLMInstructionAdapter</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="services.instructions.html">services.instructions package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="services.instructions.html#services.instructions.CompiledInstructionPackage"><code class="docutils literal notranslate"><span class="pre">CompiledInstructionPackage</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.CompiledInstructionPackage.run_mode"><code class="docutils literal notranslate"><span class="pre">CompiledInstructionPackage.run_mode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.CompiledInstructionPackage.provider"><code class="docutils literal notranslate"><span class="pre">CompiledInstructionPackage.provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.CompiledInstructionPackage.artifacts"><code class="docutils literal notranslate"><span class="pre">CompiledInstructionPackage.artifacts</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.CompiledInstructionPackage.manifest"><code class="docutils literal notranslate"><span class="pre">CompiledInstructionPackage.manifest</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.CompiledInstructionPackage.manifest_hash"><code class="docutils literal notranslate"><span class="pre">CompiledInstructionPackage.manifest_hash</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.agent_markdown"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.agent_markdown</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.generated_at"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.generated_at</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.priorities"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.priorities</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.provider_header"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.provider_header</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.provider_suffix"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.provider_suffix</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.role_markdown"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.role_markdown</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.runtime_overrides"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.runtime_overrides</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.run_mode"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.run_mode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.provider"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.source_ids"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.source_ids</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.InstructionCompileInput.source_versions"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput.source_versions</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instructions.html#services.instructions.MaterializedInstructionPackage"><code class="docutils literal notranslate"><span class="pre">MaterializedInstructionPackage</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.MaterializedInstructionPackage.package_dir"><code class="docutils literal notranslate"><span class="pre">MaterializedInstructionPackage.package_dir</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.MaterializedInstructionPackage.manifest_hash"><code class="docutils literal notranslate"><span class="pre">MaterializedInstructionPackage.manifest_hash</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.MaterializedInstructionPackage.artifact_paths"><code class="docutils literal notranslate"><span class="pre">MaterializedInstructionPackage.artifact_paths</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.html#services.instructions.MaterializedInstructionPackage.materialized_paths"><code class="docutils literal notranslate"><span class="pre">MaterializedInstructionPackage.materialized_paths</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.instructions.html#services.instructions.compile_instruction_package"><code class="docutils literal notranslate"><span class="pre">compile_instruction_package()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.instructions.html#services.instructions.materialize_instruction_package"><code class="docutils literal notranslate"><span class="pre">materialize_instruction_package()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.instructions.html#submodules">Submodules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.compiler.html">services.instructions.compiler module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.instructions.compiler.html#services.instructions.compiler.InstructionCompileInput"><code class="docutils literal notranslate"><span class="pre">InstructionCompileInput</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instructions.compiler.html#services.instructions.compiler.CompiledInstructionPackage"><code class="docutils literal notranslate"><span class="pre">CompiledInstructionPackage</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instructions.compiler.html#services.instructions.compiler.compile_instruction_package"><code class="docutils literal notranslate"><span class="pre">compile_instruction_package()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="services.instructions.package.html">services.instructions.package module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="services.instructions.package.html#services.instructions.package.MaterializedInstructionPackage"><code class="docutils literal notranslate"><span class="pre">MaterializedInstructionPackage</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.instructions.package.html#services.instructions.package.materialize_instruction_package"><code class="docutils literal notranslate"><span class="pre">materialize_instruction_package()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="services.celery_app.html">services.celery_app module</a></li>
+<li class="toctree-l1"><a class="reference internal" href="services.huggingface_downloads.html">services.huggingface_downloads module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="services.huggingface_downloads.html#services.huggingface_downloads.parse_huggingface_progress_percent"><code class="docutils literal notranslate"><span class="pre">parse_huggingface_progress_percent()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.huggingface_downloads.html#services.huggingface_downloads.vllm_local_model_container_path"><code class="docutils literal notranslate"><span class="pre">vllm_local_model_container_path()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.huggingface_downloads.html#services.huggingface_downloads.vllm_local_model_directory"><code class="docutils literal notranslate"><span class="pre">vllm_local_model_directory()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.huggingface_downloads.html#services.huggingface_downloads.model_directory_has_downloaded_contents"><code class="docutils literal notranslate"><span class="pre">model_directory_has_downloaded_contents()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.huggingface_downloads.html#services.huggingface_downloads.run_huggingface_model_download"><code class="docutils literal notranslate"><span class="pre">run_huggingface_model_download()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.huggingface_downloads.html#services.huggingface_downloads.summarize_subprocess_error"><code class="docutils literal notranslate"><span class="pre">summarize_subprocess_error()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="services.realtime_events.html">services.realtime_events module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.combine_room_keys"><code class="docutils literal notranslate"><span class="pre">combine_room_keys()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.room_key"><code class="docutils literal notranslate"><span class="pre">room_key()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.task_scope_rooms"><code class="docutils literal notranslate"><span class="pre">task_scope_rooms()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.flowchart_scope_rooms"><code class="docutils literal notranslate"><span class="pre">flowchart_scope_rooms()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.thread_scope_rooms"><code class="docutils literal notranslate"><span class="pre">thread_scope_rooms()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.download_scope_rooms"><code class="docutils literal notranslate"><span class="pre">download_scope_rooms()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.normalize_runtime_metadata"><code class="docutils literal notranslate"><span class="pre">normalize_runtime_metadata()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.build_event_envelope"><code class="docutils literal notranslate"><span class="pre">build_event_envelope()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.realtime_events.html#services.realtime_events.emit_contract_event"><code class="docutils literal notranslate"><span class="pre">emit_contract_event()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="services.skill_adapters.html">services.skill_adapters module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillFile"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillFile</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillFile.path"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillFile.path</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillFile.content"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillFile.content</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillFile.checksum"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillFile.checksum</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillFile.size_bytes"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillFile.size_bytes</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.skill_id"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.skill_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.name"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.display_name"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.display_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.description"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.description</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.version_id"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.version_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.version"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.version</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.manifest_hash"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.manifest_hash</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkill.files"><code class="docutils literal notranslate"><span class="pre">ResolvedSkill.files</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillSet"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillSet</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillSet.skills"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillSet.skills</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.ResolvedSkillSet.manifest_hash"><code class="docutils literal notranslate"><span class="pre">ResolvedSkillSet.manifest_hash</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.SkillAdapterResult"><code class="docutils literal notranslate"><span class="pre">SkillAdapterResult</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.SkillAdapterResult.mode"><code class="docutils literal notranslate"><span class="pre">SkillAdapterResult.mode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.SkillAdapterResult.adapter"><code class="docutils literal notranslate"><span class="pre">SkillAdapterResult.adapter</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.SkillAdapterResult.materialized_paths"><code class="docutils literal notranslate"><span class="pre">SkillAdapterResult.materialized_paths</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.SkillAdapterResult.fallback_entries"><code class="docutils literal notranslate"><span class="pre">SkillAdapterResult.fallback_entries</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.resolve_agent_skills"><code class="docutils literal notranslate"><span class="pre">resolve_agent_skills()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.resolve_flowchart_node_skills"><code class="docutils literal notranslate"><span class="pre">resolve_flowchart_node_skills()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.select_skill_adapter"><code class="docutils literal notranslate"><span class="pre">select_skill_adapter()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.materialize_skill_set"><code class="docutils literal notranslate"><span class="pre">materialize_skill_set()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.build_skill_fallback_entries"><code class="docutils literal notranslate"><span class="pre">build_skill_fallback_entries()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.skill_ids_payload"><code class="docutils literal notranslate"><span class="pre">skill_ids_payload()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skill_adapters.html#services.skill_adapters.skill_versions_payload"><code class="docutils literal notranslate"><span class="pre">skill_versions_payload()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="services.skills.html">services.skills module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.SkillValidationError"><code class="docutils literal notranslate"><span class="pre">SkillValidationError</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillValidationError.code"><code class="docutils literal notranslate"><span class="pre">SkillValidationError.code</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillValidationError.message"><code class="docutils literal notranslate"><span class="pre">SkillValidationError.message</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillValidationError.path"><code class="docutils literal notranslate"><span class="pre">SkillValidationError.path</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillValidationError.field"><code class="docutils literal notranslate"><span class="pre">SkillValidationError.field</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillValidationError.as_dict"><code class="docutils literal notranslate"><span class="pre">SkillValidationError.as_dict()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageValidationError"><code class="docutils literal notranslate"><span class="pre">SkillPackageValidationError</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageMetadata"><code class="docutils literal notranslate"><span class="pre">SkillPackageMetadata</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageMetadata.name"><code class="docutils literal notranslate"><span class="pre">SkillPackageMetadata.name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageMetadata.display_name"><code class="docutils literal notranslate"><span class="pre">SkillPackageMetadata.display_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageMetadata.description"><code class="docutils literal notranslate"><span class="pre">SkillPackageMetadata.description</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageMetadata.version"><code class="docutils literal notranslate"><span class="pre">SkillPackageMetadata.version</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageMetadata.status"><code class="docutils literal notranslate"><span class="pre">SkillPackageMetadata.status</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageFile"><code class="docutils literal notranslate"><span class="pre">SkillPackageFile</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageFile.path"><code class="docutils literal notranslate"><span class="pre">SkillPackageFile.path</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageFile.content"><code class="docutils literal notranslate"><span class="pre">SkillPackageFile.content</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageFile.checksum"><code class="docutils literal notranslate"><span class="pre">SkillPackageFile.checksum</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackageFile.size_bytes"><code class="docutils literal notranslate"><span class="pre">SkillPackageFile.size_bytes</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.SkillPackage"><code class="docutils literal notranslate"><span class="pre">SkillPackage</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackage.metadata"><code class="docutils literal notranslate"><span class="pre">SkillPackage.metadata</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackage.files"><code class="docutils literal notranslate"><span class="pre">SkillPackage.files</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackage.manifest"><code class="docutils literal notranslate"><span class="pre">SkillPackage.manifest</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillPackage.manifest_hash"><code class="docutils literal notranslate"><span class="pre">SkillPackage.manifest_hash</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.SkillImportResult"><code class="docutils literal notranslate"><span class="pre">SkillImportResult</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillImportResult.skill_id"><code class="docutils literal notranslate"><span class="pre">SkillImportResult.skill_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillImportResult.skill_name"><code class="docutils literal notranslate"><span class="pre">SkillImportResult.skill_name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillImportResult.version_id"><code class="docutils literal notranslate"><span class="pre">SkillImportResult.version_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillImportResult.version"><code class="docutils literal notranslate"><span class="pre">SkillImportResult.version</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="services.skills.html#services.skills.SkillImportResult.file_count"><code class="docutils literal notranslate"><span class="pre">SkillImportResult.file_count</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.is_binary_skill_content"><code class="docutils literal notranslate"><span class="pre">is_binary_skill_content()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.encode_binary_skill_content"><code class="docutils literal notranslate"><span class="pre">encode_binary_skill_content()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.decode_skill_file_content_bytes"><code class="docutils literal notranslate"><span class="pre">decode_skill_file_content_bytes()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.skill_file_content_size_bytes"><code class="docutils literal notranslate"><span class="pre">skill_file_content_size_bytes()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.skill_file_content_checksum"><code class="docutils literal notranslate"><span class="pre">skill_file_content_checksum()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.normalize_skill_slug"><code class="docutils literal notranslate"><span class="pre">normalize_skill_slug()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.normalize_skill_display_name"><code class="docutils literal notranslate"><span class="pre">normalize_skill_display_name()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.normalize_skill_description"><code class="docutils literal notranslate"><span class="pre">normalize_skill_description()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.normalize_skill_version"><code class="docutils literal notranslate"><span class="pre">normalize_skill_version()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.normalize_skill_status"><code class="docutils literal notranslate"><span class="pre">normalize_skill_status()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.format_validation_errors"><code class="docutils literal notranslate"><span class="pre">format_validation_errors()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.build_skill_package"><code class="docutils literal notranslate"><span class="pre">build_skill_package()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.build_skill_package_from_directory"><code class="docutils literal notranslate"><span class="pre">build_skill_package_from_directory()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.serialize_skill_bundle"><code class="docutils literal notranslate"><span class="pre">serialize_skill_bundle()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.load_skill_bundle"><code class="docutils literal notranslate"><span class="pre">load_skill_bundle()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.export_skill_package_from_db"><code class="docutils literal notranslate"><span class="pre">export_skill_package_from_db()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.skills.html#services.skills.import_skill_package_to_db"><code class="docutils literal notranslate"><span class="pre">import_skill_package_to_db()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="rag.contracts.html" class="btn btn-neutral float-left" title="rag.contracts module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="services.execution.html" class="btn btn-neutral float-right" title="services.execution package" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,253 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>chat package &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="chat.contracts module" href="chat.contracts.html" />
+    <link rel="prev" title="Studio API Packages" href="modules.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">Studio API Packages</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">chat package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#submodules">Submodules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="chat.contracts.html">chat.contracts module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="chat.rag_client.html">chat.rag_client module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="chat.runtime.html">chat.runtime module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="chat.settings.html">chat.settings module</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="core.html">core package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag.html">rag package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.html">services package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="storage.html">storage package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="web.html">web package</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">Studio API Packages</a></li>
+      <li class="breadcrumb-item active">chat package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/chat.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-chat">
+<span id="chat-package"></span><h1>chat package<a class="headerlink" href="#module-chat" title="Link to this heading"></a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="chat.contracts.html">chat.contracts module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGHealth"><code class="docutils literal notranslate"><span class="pre">RAGHealth</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGHealth.state"><code class="docutils literal notranslate"><span class="pre">RAGHealth.state</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGHealth.provider"><code class="docutils literal notranslate"><span class="pre">RAGHealth.provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGHealth.error"><code class="docutils literal notranslate"><span class="pre">RAGHealth.error</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGCollection"><code class="docutils literal notranslate"><span class="pre">RAGCollection</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGCollection.id"><code class="docutils literal notranslate"><span class="pre">RAGCollection.id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGCollection.name"><code class="docutils literal notranslate"><span class="pre">RAGCollection.name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGCollection.provider"><code class="docutils literal notranslate"><span class="pre">RAGCollection.provider</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGCollection.status"><code class="docutils literal notranslate"><span class="pre">RAGCollection.status</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalRequest"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalRequest</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalRequest.question"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalRequest.question</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalRequest.collections"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalRequest.collections</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalRequest.top_k"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalRequest.top_k</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalRequest.model_id"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalRequest.model_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalRequest.request_id"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalRequest.request_id</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse.answer"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse.answer</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse.retrieval_context"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse.retrieval_context</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse.retrieval_stats"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse.retrieval_stats</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse.synthesis_error"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse.synthesis_error</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse.mode"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse.mode</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse.collections"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse.collections</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGRetrievalResponse.citation_records"><code class="docutils literal notranslate"><span class="pre">RAGRetrievalResponse.citation_records</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.contracts.html#chat.contracts.RAGContractError"><code class="docutils literal notranslate"><span class="pre">RAGContractError</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chat.rag_client.html">chat.rag_client module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.RAGContractClient"><code class="docutils literal notranslate"><span class="pre">RAGContractClient</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.RAGContractClient.health"><code class="docutils literal notranslate"><span class="pre">RAGContractClient.health()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.RAGContractClient.list_collections"><code class="docutils literal notranslate"><span class="pre">RAGContractClient.list_collections()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.RAGContractClient.retrieve"><code class="docutils literal notranslate"><span class="pre">RAGContractClient.retrieve()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.StubRAGContractClient"><code class="docutils literal notranslate"><span class="pre">StubRAGContractClient</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.StubRAGContractClient.health_result"><code class="docutils literal notranslate"><span class="pre">StubRAGContractClient.health_result</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.StubRAGContractClient.collections"><code class="docutils literal notranslate"><span class="pre">StubRAGContractClient.collections</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.StubRAGContractClient.retrieval_response"><code class="docutils literal notranslate"><span class="pre">StubRAGContractClient.retrieval_response</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.StubRAGContractClient.health"><code class="docutils literal notranslate"><span class="pre">StubRAGContractClient.health()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.StubRAGContractClient.list_collections"><code class="docutils literal notranslate"><span class="pre">StubRAGContractClient.list_collections()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.StubRAGContractClient.retrieve"><code class="docutils literal notranslate"><span class="pre">StubRAGContractClient.retrieve()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.HttpRAGContractClient"><code class="docutils literal notranslate"><span class="pre">HttpRAGContractClient</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.HttpRAGContractClient.base_url"><code class="docutils literal notranslate"><span class="pre">HttpRAGContractClient.base_url</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.HttpRAGContractClient.timeout_seconds"><code class="docutils literal notranslate"><span class="pre">HttpRAGContractClient.timeout_seconds</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.HttpRAGContractClient.health"><code class="docutils literal notranslate"><span class="pre">HttpRAGContractClient.health()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.HttpRAGContractClient.list_collections"><code class="docutils literal notranslate"><span class="pre">HttpRAGContractClient.list_collections()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.HttpRAGContractClient.retrieve"><code class="docutils literal notranslate"><span class="pre">HttpRAGContractClient.retrieve()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.set_rag_contract_client"><code class="docutils literal notranslate"><span class="pre">set_rag_contract_client()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.rag_client.html#chat.rag_client.get_rag_contract_client"><code class="docutils literal notranslate"><span class="pre">get_rag_contract_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chat.runtime.html">chat.runtime module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.normalize_response_complexity"><code class="docutils literal notranslate"><span class="pre">normalize_response_complexity()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.response_complexity_label"><code class="docutils literal notranslate"><span class="pre">response_complexity_label()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.list_threads"><code class="docutils literal notranslate"><span class="pre">list_threads()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.get_thread"><code class="docutils literal notranslate"><span class="pre">get_thread()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.create_thread"><code class="docutils literal notranslate"><span class="pre">create_thread()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.update_thread_config"><code class="docutils literal notranslate"><span class="pre">update_thread_config()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.archive_thread"><code class="docutils literal notranslate"><span class="pre">archive_thread()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.restore_thread"><code class="docutils literal notranslate"><span class="pre">restore_thread()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.clear_thread"><code class="docutils literal notranslate"><span class="pre">clear_thread()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.delete_thread"><code class="docutils literal notranslate"><span class="pre">delete_thread()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.list_activity"><code class="docutils literal notranslate"><span class="pre">list_activity()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult"><code class="docutils literal notranslate"><span class="pre">TurnResult</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.ok"><code class="docutils literal notranslate"><span class="pre">TurnResult.ok</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.thread_id"><code class="docutils literal notranslate"><span class="pre">TurnResult.thread_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.turn_id"><code class="docutils literal notranslate"><span class="pre">TurnResult.turn_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.request_id"><code class="docutils literal notranslate"><span class="pre">TurnResult.request_id</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.reply"><code class="docutils literal notranslate"><span class="pre">TurnResult.reply</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.reason_code"><code class="docutils literal notranslate"><span class="pre">TurnResult.reason_code</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.error"><code class="docutils literal notranslate"><span class="pre">TurnResult.error</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.rag_health_state"><code class="docutils literal notranslate"><span class="pre">TurnResult.rag_health_state</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.runtime.html#chat.runtime.TurnResult.selected_collections"><code class="docutils literal notranslate"><span class="pre">TurnResult.selected_collections</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.execute_turn"><code class="docutils literal notranslate"><span class="pre">execute_turn()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.total_thread_count"><code class="docutils literal notranslate"><span class="pre">total_thread_count()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.runtime.html#chat.runtime.prune_archived_threads"><code class="docutils literal notranslate"><span class="pre">prune_archived_threads()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chat.settings.html">chat.settings module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.history_budget_percent"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.history_budget_percent</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.rag_budget_percent"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.rag_budget_percent</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.mcp_budget_percent"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.mcp_budget_percent</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.compaction_trigger_percent"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.compaction_trigger_percent</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.compaction_target_percent"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.compaction_target_percent</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.preserve_recent_turns"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.preserve_recent_turns</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.rag_top_k"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.rag_top_k</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.default_context_window_tokens"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.default_context_window_tokens</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="chat.settings.html#chat.settings.ChatRuntimeSettings.max_compaction_summary_chars"><code class="docutils literal notranslate"><span class="pre">ChatRuntimeSettings.max_compaction_summary_chars</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="chat.settings.html#chat.settings.load_chat_runtime_settings"><code class="docutils literal notranslate"><span class="pre">load_chat_runtime_settings()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.settings.html#chat.settings.load_chat_default_settings_payload"><code class="docutils literal notranslate"><span class="pre">load_chat_default_settings_payload()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.settings.html#chat.settings.load_chat_runtime_settings_payload"><code class="docutils literal notranslate"><span class="pre">load_chat_runtime_settings_payload()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.settings.html#chat.settings.save_chat_runtime_settings"><code class="docutils literal notranslate"><span class="pre">save_chat_runtime_settings()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chat.settings.html#chat.settings.save_chat_default_settings"><code class="docutils literal notranslate"><span class="pre">save_chat_default_settings()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modules.html" class="btn btn-neutral float-left" title="Studio API Packages" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="chat.contracts.html" class="btn btn-neutral float-right" title="chat.contracts module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

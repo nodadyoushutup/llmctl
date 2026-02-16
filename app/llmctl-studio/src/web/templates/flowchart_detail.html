@@ -923,15 +923,15 @@
     const addableNodeTypes = nodeTypes.filter((nodeType) => nodeType !== START_NODE_TYPE);
     const activeRunStatuses = new Set(["queued", "running", "stopping"]);
     const compatibility = {
-      start: { model: false, mcp: false, scripts: false, skills: false },
-      end: { model: false, mcp: false, scripts: false, skills: false },
-      flowchart: { model: false, mcp: false, scripts: false, skills: false },
-      task: { model: true, mcp: true, scripts: true, skills: false },
-      plan: { model: true, mcp: true, scripts: true, skills: false },
-      milestone: { model: true, mcp: true, scripts: true, skills: false },
-      memory: { model: true, mcp: true, scripts: true, skills: false },
-      decision: { model: false, mcp: true, scripts: true, skills: false },
-      rag: { model: true, mcp: false, scripts: false, skills: false },
+      start: { model: false, mcp: false, scripts: false, skills: false, attachments: false },
+      end: { model: false, mcp: false, scripts: false, skills: false, attachments: false },
+      flowchart: { model: false, mcp: false, scripts: false, skills: false, attachments: false },
+      task: { model: true, mcp: true, scripts: true, skills: false, attachments: true },
+      plan: { model: true, mcp: true, scripts: true, skills: false, attachments: true },
+      milestone: { model: true, mcp: true, scripts: true, skills: false, attachments: true },
+      memory: { model: true, mcp: true, scripts: true, skills: false, attachments: true },
+      decision: { model: false, mcp: true, scripts: true, skills: false, attachments: false },
+      rag: { model: true, mcp: false, scripts: false, skills: false, attachments: false },
     };
     const scriptTypeLabels = {
       pre_init: "Pre-Init Script",
@@ -1199,6 +1199,8 @@
       runningNodeIds: new Set(),
       activeRunId: Number.isInteger(initialActiveRunId) && initialActiveRunId > 0 ? initialActiveRunId : null,
       runPollTimer: null,
+      runtimePollingEnabled: false,
+      runtimeSocketController: null,
       runActionPending: false,
       inspectorPanelOpen: new Map(),
     };
@@ -2257,6 +2259,9 @@
           script_ids: Array.isArray(rawNode.script_ids)
             ? rawNode.script_ids.map((value) => Number(value))
             : [],
+          attachment_ids: Array.isArray(rawNode.attachment_ids)
+            ? rawNode.attachment_ids.map((value) => Number(value))
+            : [],
           runtime_status: String(rawNode.runtime_status || "").trim().toLowerCase(),
         };
         if (!node.title) {
@@ -2325,6 +2330,7 @@
           model_id: node.model_id,
           mcp_server_ids: node.mcp_server_ids,
           script_ids: node.script_ids,
+          attachment_ids: node.attachment_ids,
         })),
         edges: state.edges.map((edge) => ({
           source_node_id: edge.source_node_id,
@@ -2402,6 +2408,7 @@
         model_id: null,
         mcp_server_ids: [],
         script_ids: [],
+        attachment_ids: [],
       };
       state.nodes.push(node);
       state.selectedNodeToken = nodeToken(node);
@@ -2992,6 +2999,7 @@
         mcp: false,
         scripts: false,
         skills: false,
+        attachments: false,
       };
       const isTaskNode = node.node_type === "task";
       const refOptions = refOptionsFor(node.node_type);
@@ -3156,6 +3164,27 @@
           `;
         })
         .join("");
+      const attachmentItems = (catalog.attachments || [])
+        .slice()
+        .sort((left, right) =>
+          String(left.file_name || "").localeCompare(String(right.file_name || ""), undefined, {
+            sensitivity: "base",
+          })
+        )
+        .map((attachment) => {
+          const checked = node.attachment_ids.includes(Number(attachment.id)) ? "checked" : "";
+          const contentType = String(attachment.content_type || "").trim();
+          return `
+            <label class="flow-checkbox-item">
+              <input type="checkbox" value="${Number(attachment.id)}" data-role="node-attachment" ${checked} ${nodeCompat.attachments ? "" : "disabled"} />
+              <span class="flow-checkbox-label">
+                <span class="flow-checkbox-name" title="${escapeHtml(attachment.file_name)}">${escapeHtml(attachment.file_name)}</span>
+                <span class="flow-inline-meta">${escapeHtml(contentType || "attachment")}</span>
+              </span>
+            </label>
+          `;
+        })
+        .join("");
 
       const referenceLabel = `reference${refRequired ? " (required)" : ""}`;
       const metadataPanelOpen = isInspectorPanelOpen(node, "metadata");
@@ -3163,6 +3192,7 @@
       const mcpPanelOpen = isInspectorPanelOpen(node, "mcp");
       const integrationPanelOpen = isInspectorPanelOpen(node, "integration");
       const stagesPanelOpen = isInspectorPanelOpen(node, "stages");
+      const attachmentsPanelOpen = isInspectorPanelOpen(node, "attachments");
 
       const referenceFieldHtml = showReferenceField
         ? `
@@ -3219,6 +3249,12 @@
       const stagesPanelBody = nodeCompat.scripts
         ? `<div class="flow-stage-script-sections">${stageScriptSectionsHtml || '<span class="muted">No scripts available.</span>'}</div>`
         : '<p class="muted" style="margin-top: 8px;">Stage scripts are not supported by this node type.</p>';
+      const attachmentsPanelBody = nodeCompat.attachments
+        ? `
+            <div class="flow-checkbox-list">${attachmentItems || '<span class="muted">No attachments available.</span>'}</div>
+            <p class="muted" style="margin-top: 8px;">Manage files in Node Resources -> Attachments.</p>
+          `
+        : '<p class="muted" style="margin-top: 8px;">Attachments are not supported by this node type.</p>';
 
       return `
         <p class="eyebrow">node inspector</p>
@@ -3300,6 +3336,16 @@
           </summary>
           <div class="flow-inspector-panel-body">
             ${stagesPanelBody}
+          </div>
+        </details>
+
+        <details class="flow-inspector-panel" data-panel-key="attachments" ${attachmentsPanelOpen ? "open" : ""}>
+          <summary class="collapse-summary flow-inspector-panel-summary">
+            <i class="fa-solid fa-chevron-right collapse-icon" aria-hidden="true"></i>
+            Attachments
+          </summary>
+          <div class="flow-inspector-panel-body">
+            ${attachmentsPanelBody}
           </div>
         </details>
       `;
@@ -3437,6 +3483,7 @@
               mcp: false,
               scripts: false,
               skills: false,
+              attachments: false,
             };
             if (!nextCompat.model) {
               selectedNode.model_id = null;
@@ -3446,6 +3493,9 @@
             }
             if (!nextCompat.scripts) {
               selectedNode.script_ids = [];
+            }
+            if (!nextCompat.attachments) {
+              selectedNode.attachment_ids = [];
             }
             if (!selectedNode.title) {
               selectedNode.title = defaultNodeTitle(nextType);
@@ -3538,6 +3588,16 @@
           });
         });
 
+        inspectorEl.querySelectorAll("input[data-role='node-attachment']").forEach((input) => {
+          input.addEventListener("change", () => {
+            const selected = Array.from(
+              inspectorEl.querySelectorAll("input[data-role='node-attachment']:checked")
+            ).map((item) => Number(item.value));
+            selectedNode.attachment_ids = selected;
+            setDirty(true);
+          });
+        });
+
         if (deleteButton) {
           deleteButton.addEventListener("click", () => {
             removeSelectedNode();
@@ -3592,7 +3652,7 @@
         <p class="eyebrow">inspector</p>
         <h3 class="section-title" style="margin-top: 6px;">Nothing selected</h3>
         <p class="muted" style="margin-top: 10px;">
-          Select a node to edit node name, type, refs, settings, model, MCP servers, integrations, and stage scripts.
+          Select a node to edit node name, type, refs, settings, model, MCP servers, integrations, stage scripts, and attachments.
           Select an edge to edit connection mode, condition keys, and labels.
         </p>
       `;
@@ -3787,6 +3847,22 @@
       }
     }
 
+    function enableRunPollingFallback(reason = "") {
+      if (state.runtimePollingEnabled) {
+        return;
+      }
+      state.runtimePollingEnabled = true;
+      if (reason) {
+        setMessage(`Realtime unavailable (${reason}). Using polling fallback.`, "error");
+      }
+      startRunPolling(state.activeRunId);
+    }
+
+    function disableRunPollingFallback() {
+      state.runtimePollingEnabled = false;
+      stopRunPolling();
+    }
+
     function applyRuntimePayload(payload) {
       const nextActiveRunId = Number(payload && payload.active_run_id);
       state.activeRunId =
@@ -3830,6 +3906,9 @@
     }
 
     async function pollFlowchartRuntime() {
+      if (!state.runtimePollingEnabled) {
+        return;
+      }
       try {
         await syncFlowchartRuntime();
         const delay = state.activeRunId ? 250 : 900;
@@ -3850,9 +3929,82 @@
           state.activeRunId = numericRunId;
         }
       }
+      if (!state.runtimePollingEnabled) {
+        updateRunActionButtons();
+        return;
+      }
       stopRunPolling();
       updateRunActionButtons();
       pollFlowchartRuntime();
+    }
+
+    function applyRealtimeRuntimeEnvelope(eventName, envelope) {
+      const data = envelope && typeof envelope === "object" ? envelope : {};
+      const eventType = String(data.event_type || eventName || "").trim();
+      if (!eventType.startsWith("flowchart.")) {
+        return;
+      }
+      const payload = data.payload && typeof data.payload === "object" ? data.payload : {};
+      const payloadFlowchartId = Number(payload.flowchart_id || "0");
+      if (payloadFlowchartId !== flowchartId) {
+        return;
+      }
+      if (eventType === "flowchart.run.updated") {
+        const runId = Number(payload.flowchart_run_id || "0");
+        const runStatus = String(payload.status || "").trim().toLowerCase();
+        if (
+          Number.isInteger(runId) &&
+          runId > 0 &&
+          activeRunStatuses.has(runStatus)
+        ) {
+          state.activeRunId = runId;
+          if (state.runtimeSocketController) {
+            state.runtimeSocketController.updateRooms([
+              `flowchart:${flowchartId}`,
+              `flowchart_run:${runId}`,
+            ]);
+          }
+        } else if (state.runtimeSocketController) {
+          state.runtimeSocketController.updateRooms([`flowchart:${flowchartId}`]);
+        }
+      }
+      syncFlowchartRuntime().catch(() => {
+        if (state.runtimePollingEnabled) {
+          return;
+        }
+      });
+    }
+
+    function startFlowchartRealtime() {
+      if (
+        !window.llmctlRealtime ||
+        typeof window.llmctlRealtime.connect !== "function"
+      ) {
+        enableRunPollingFallback("helper unavailable");
+        return;
+      }
+      const baseRooms = [`flowchart:${flowchartId}`];
+      if (Number.isInteger(state.activeRunId) && state.activeRunId > 0) {
+        baseRooms.push(`flowchart_run:${state.activeRunId}`);
+      }
+      state.runtimeSocketController = window.llmctlRealtime.connect({
+        roomKeys: baseRooms,
+        onSocketReady: () => {
+          disableRunPollingFallback();
+          syncFlowchartRuntime().catch(() => {
+            // Realtime events will continue to drive updates.
+          });
+        },
+        onSocketFailure: (reason) => {
+          enableRunPollingFallback(String(reason || "socket failure"));
+        },
+        onEvent: (eventName, envelope) => {
+          applyRealtimeRuntimeEnvelope(eventName, envelope);
+        },
+      });
+      if (!state.runtimeSocketController) {
+        enableRunPollingFallback("socket unavailable");
+      }
     }
 
     async function stopFlowchart(force = false) {
@@ -3934,6 +4086,12 @@
         const run = payload.flowchart_run;
         if (run) {
           setMessage(`Flowchart run ${run.id} queued. See history for details.`, "success");
+          if (state.runtimeSocketController) {
+            state.runtimeSocketController.updateRooms([
+              `flowchart:${flowchartId}`,
+              `flowchart_run:${run.id}`,
+            ]);
+          }
           startRunPolling(run.id);
         }
       } catch (error) {
@@ -4083,8 +4241,17 @@
     renderValidation();
     setMessage("");
     updateRunActionButtons();
-    startRunPolling(state.activeRunId);
-    window.addEventListener("beforeunload", stopRunPolling);
+    syncFlowchartRuntime().catch(() => {
+      // Realtime/polling will continue attempts.
+    });
+    startFlowchartRealtime();
+    window.addEventListener("beforeunload", () => {
+      stopRunPolling();
+      if (state.runtimeSocketController) {
+        state.runtimeSocketController.disconnect();
+        state.runtimeSocketController = null;
+      }
+    });
   })();
 </script>
 {% endblock %}

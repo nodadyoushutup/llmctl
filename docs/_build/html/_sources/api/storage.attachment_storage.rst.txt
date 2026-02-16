@@ -1,0 +1,7 @@
+storage.attachment\_storage module
+==================================
+
+.. automodule:: storage.attachment_storage
+   :members:
+   :show-inheritance:
+   :undoc-members:

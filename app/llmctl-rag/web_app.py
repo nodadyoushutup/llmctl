@@ -188,7 +188,7 @@ def create_app() -> Flask:
     def index() -> str:
         config = load_config()
         github_settings = load_integration_settings("github")
-        google_drive_settings = load_integration_settings("google_drive")
+        google_drive_settings = load_integration_settings("google_workspace")
         rag_settings = load_integration_settings("rag")
         active_view = request.args.get("view", "chat").strip().lower()
         if active_view not in {"chat", "settings"}:
@@ -211,12 +211,12 @@ def create_app() -> Flask:
         elif notice == "google_drive_saved":
             settings_notice = {
                 "type": "success",
-                "message": "Google Drive settings updated.",
+                "message": "Google Workspace settings updated.",
             }
         elif notice == "google_drive_error":
             settings_notice = {
                 "type": "error",
-                "message": "Google Drive settings update failed.",
+                "message": "Google Workspace settings update failed.",
             }
         chroma_host = rag_settings.get("chroma_host") or config.chroma_host
         chroma_port = rag_settings.get("chroma_port") or config.chroma_port
@@ -372,7 +372,7 @@ def create_app() -> Flask:
     @app.get("/sources/new")
     def sources_new() -> str:
         github_settings = load_integration_settings("github")
-        google_drive_settings = load_integration_settings("google_drive")
+        google_drive_settings = load_integration_settings("google_workspace")
         service_account_json = (
             google_drive_settings.get("service_account_json") or ""
         )
@@ -556,7 +556,7 @@ def create_app() -> Flask:
         if not source:
             return redirect(url_for("sources_index", notice="source_error"))
         github_settings = load_integration_settings("github")
-        google_drive_settings = load_integration_settings("google_drive")
+        google_drive_settings = load_integration_settings("google_workspace")
         service_account_json = (
             google_drive_settings.get("service_account_json") or ""
         )
@@ -895,7 +895,7 @@ def create_app() -> Flask:
             trimmed = service_account_json.strip()
             if trimmed:
                 service_account_email(trimmed)
-            save_integration_settings("google_drive", payload)
+            save_integration_settings("google_workspace", payload)
         except Exception:
             return redirect(
                 url_for("index", view="settings", notice="google_drive_error")
@@ -1065,14 +1065,14 @@ def create_app() -> Flask:
 
         service_account_json = str(payload.get("service_account_json") or "").strip()
         if not service_account_json:
-            settings = load_integration_settings("google_drive")
+            settings = load_integration_settings("google_workspace")
             service_account_json = (settings.get("service_account_json") or "").strip()
         if not service_account_json:
             return (
                 jsonify(
                     {
                         "ok": False,
-                        "error": "Google Drive service account JSON is not configured.",
+                        "error": "Google Workspace service account JSON is not configured.",
                     }
                 ),
                 400,

@@ -1,0 +1,979 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rag.engine.config &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">rag.engine.config</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for rag.engine.config</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">replace</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+
+<span class="n">_DEFAULT_EXCLUDE_DIRS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;.git&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;.idea&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;.mypy_cache&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;.pytest_cache&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;.ruff_cache&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;.venv&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;.vscode&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;__pycache__&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;build&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;data&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;dist&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;node_modules&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;out&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;target&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;venv&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">_DEFAULT_EXCLUDE_GLOBS</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;*.png&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.jpg&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.jpeg&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.gif&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.svg&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.zip&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.tar&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.gz&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.tgz&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.lock&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.mp4&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.mov&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.sqlite&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.db&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;*.bin&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">_DEFAULT_MAX_FILE_BYTES_BY_TYPE</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;pdf&quot;</span><span class="p">:</span> <span class="mi">1_000_000_000</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">_DOCKER_CHROMA_HOST_ALIASES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;llmctl-chromadb&quot;</span><span class="p">,</span> <span class="s2">&quot;chromadb&quot;</span><span class="p">}</span>
+<span class="n">_SUPPORTED_MODEL_PROVIDERS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;openai&quot;</span><span class="p">,</span> <span class="s2">&quot;gemini&quot;</span><span class="p">}</span>
+<span class="n">_SUPPORTED_CHAT_RESPONSE_STYLES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;low&quot;</span><span class="p">,</span> <span class="s2">&quot;medium&quot;</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">}</span>
+<span class="n">_CHAT_RESPONSE_STYLE_ALIASES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;concise&quot;</span><span class="p">:</span> <span class="s2">&quot;low&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;brief&quot;</span><span class="p">:</span> <span class="s2">&quot;low&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;balanced&quot;</span><span class="p">:</span> <span class="s2">&quot;medium&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;detailed&quot;</span><span class="p">:</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;verbose&quot;</span><span class="p">:</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_split_csv</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">item</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_split_map_list</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+    <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">pair</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;;&quot;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">pair</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="s2">&quot;=&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">pair</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">key</span><span class="p">,</span> <span class="n">raw</span> <span class="o">=</span> <span class="n">pair</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">key</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">item</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[|,]&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">)</span> <span class="k">if</span> <span class="n">item</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+        <span class="k">if</span> <span class="n">parts</span><span class="p">:</span>
+            <span class="n">result</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">parts</span>
+    <span class="k">return</span> <span class="n">result</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_split_map_int</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+    <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">pair</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;;&quot;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">pair</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="s2">&quot;=&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">pair</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">key</span><span class="p">,</span> <span class="n">raw</span> <span class="o">=</span> <span class="n">pair</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="n">raw</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">key</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">raw</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">result</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">continue</span>
+    <span class="k">return</span> <span class="n">result</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_find_repo_root</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="n">here</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">parent</span> <span class="ow">in</span> <span class="p">[</span><span class="n">here</span><span class="o">.</span><span class="n">parent</span><span class="p">]</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">here</span><span class="o">.</span><span class="n">parents</span><span class="p">):</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;.git&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">parent</span>
+    <span class="c1"># Fallback to repo root estimate from app/llmctl-studio/src/rag/engine.</span>
+    <span class="k">return</span> <span class="n">here</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="RagConfig">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.RagConfig">[docs]</a>
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">RagConfig</span><span class="p">:</span>
+    <span class="n">repo_root</span><span class="p">:</span> <span class="n">Path</span>
+    <span class="n">rag_mode</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">chroma_host</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">chroma_port</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">collection</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">embed_provider</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">chat_provider</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">openai_api_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">gemini_api_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">openai_embedding_model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">gemini_embedding_model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">embed_model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">embed_max_tokens_per_request</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">embed_max_tokens_per_input</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">embed_max_batch_items</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">embed_min_request_interval_s</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">embed_target_tokens_per_minute</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">embed_rate_limit_max_retries</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">git_url</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">git_repo</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">git_pat</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">git_ssh_key_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">git_branch</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">git_poll_s</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">git_dir</span><span class="p">:</span> <span class="n">Path</span>
+    <span class="n">watch_enabled</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">watch_debounce_s</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">chunk_lines</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">chunk_overlap_lines</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">max_file_bytes</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">exclude_dirs</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">exclude_globs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">include_globs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">max_file_bytes_by_type</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span>
+    <span class="n">exclude_globs_by_type</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span>
+    <span class="n">chunk_lines_by_type</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span>
+    <span class="n">chunk_overlap_lines_by_type</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span>
+    <span class="n">enabled_doc_types</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">ocr_enabled</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">ocr_lang</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">ocr_dpi</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">ocr_timeout_s</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">ocr_include_char_boxes</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">drive_sync_workers</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">index_parallel_workers</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">pdf_page_workers</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">embed_parallel_requests</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">openai_chat_model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">gemini_chat_model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">chat_model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">chat_response_style</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">chat_temperature</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">chat_top_k</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">chat_max_history</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">chat_max_context_chars</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">chat_snippet_chars</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">chat_context_budget_tokens</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">web_port</span><span class="p">:</span> <span class="nb">int</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_as_bool</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">default</span>
+    <span class="k">return</span> <span class="n">value</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;1&quot;</span><span class="p">,</span> <span class="s2">&quot;true&quot;</span><span class="p">,</span> <span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;on&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_as_float</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">default</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">default</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_as_int</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">default</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">default</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_as_int_range</span><span class="p">(</span>
+    <span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">default</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">minimum</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">maximum</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">parsed</span> <span class="o">=</span> <span class="n">_as_int</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">minimum</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">parsed</span> <span class="o">&lt;</span> <span class="n">minimum</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">minimum</span>
+    <span class="k">if</span> <span class="n">maximum</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">parsed</span> <span class="o">&gt;</span> <span class="n">maximum</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">maximum</span>
+    <span class="k">return</span> <span class="n">parsed</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalize_chroma_target</span><span class="p">(</span><span class="n">host</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">port</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+    <span class="n">host_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">host</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">host_value</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="n">_DOCKER_CHROMA_HOST_ALIASES</span> <span class="ow">and</span> <span class="n">port</span> <span class="o">!=</span> <span class="mi">8000</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;llmctl-chromadb&quot;</span><span class="p">,</span> <span class="mi">8000</span>
+    <span class="k">if</span> <span class="n">host_value</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="n">_DOCKER_CHROMA_HOST_ALIASES</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;llmctl-chromadb&quot;</span><span class="p">,</span> <span class="n">port</span>
+    <span class="k">return</span> <span class="n">host_value</span><span class="p">,</span> <span class="n">port</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_parse_chroma_port</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">value</span> <span class="o">=</span> <span class="n">_as_int</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
+    <span class="k">if</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="n">value</span> <span class="o">&lt;=</span> <span class="mi">65535</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">value</span>
+    <span class="k">return</span> <span class="n">default</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_setting</span><span class="p">(</span>
+    <span class="n">env_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">rag_settings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+    <span class="n">rag_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">default</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">env_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="n">env_key</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">env_value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">env_value</span>
+    <span class="n">rag_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">rag_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">rag_key</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">rag_value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">rag_value</span>
+    <span class="k">return</span> <span class="n">default</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_setting_rag_first</span><span class="p">(</span>
+    <span class="n">env_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">rag_settings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+    <span class="n">rag_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">default</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">rag_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">rag_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">rag_key</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">rag_value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">rag_value</span>
+    <span class="n">env_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="n">env_key</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">env_value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">env_value</span>
+    <span class="k">return</span> <span class="n">default</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalize_provider</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;openai&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="p">(</span><span class="n">value</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="n">_SUPPORTED_MODEL_PROVIDERS</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">candidate</span>
+    <span class="k">return</span> <span class="n">default</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalize_chat_response_style</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;high&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="p">(</span><span class="n">value</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">_CHAT_RESPONSE_STYLE_ALIASES</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">candidate</span><span class="p">,</span> <span class="n">candidate</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="n">_SUPPORTED_CHAT_RESPONSE_STYLES</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">candidate</span>
+    <span class="k">return</span> <span class="n">default</span>
+
+
+<div class="viewcode-block" id="build_git_url">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.build_git_url">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">build_git_url</span><span class="p">(</span>
+    <span class="n">repo</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">pat</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ssh_key_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">repo_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">repo</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">repo_value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">ssh_key_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">ssh_key_path</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">ssh_key_value</span> <span class="ow">and</span> <span class="n">shutil</span><span class="o">.</span><span class="n">which</span><span class="p">(</span><span class="s2">&quot;ssh&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;git@github.com:</span><span class="si">{</span><span class="n">repo_value</span><span class="si">}</span><span class="s2">.git&quot;</span>
+    <span class="n">pat_value</span> <span class="o">=</span> <span class="p">(</span><span class="n">pat</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">pat_value</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;https://x-access-token:</span><span class="si">{</span><span class="n">pat_value</span><span class="si">}</span><span class="s2">@github.com/</span><span class="si">{</span><span class="n">repo_value</span><span class="si">}</span><span class="s2">.git&quot;</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;https://github.com/</span><span class="si">{</span><span class="n">repo_value</span><span class="si">}</span><span class="s2">.git&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="max_file_bytes_for">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.max_file_bytes_for">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">max_file_bytes_for</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">,</span> <span class="n">doc_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">doc_type</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">config</span><span class="o">.</span><span class="n">max_file_bytes</span>
+    <span class="k">return</span> <span class="n">config</span><span class="o">.</span><span class="n">max_file_bytes_by_type</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">doc_type</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">max_file_bytes</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="chunk_lines_for">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.chunk_lines_for">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">chunk_lines_for</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">,</span> <span class="n">doc_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">doc_type</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_lines</span>
+    <span class="k">return</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_lines_by_type</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">doc_type</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_lines</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="chunk_overlap_lines_for">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.chunk_overlap_lines_for">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">chunk_overlap_lines_for</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">,</span> <span class="n">doc_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">doc_type</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_overlap_lines</span>
+    <span class="k">return</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_overlap_lines_by_type</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">doc_type</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_overlap_lines</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_signature_payload</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">sort_keys</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">separators</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="s2">&quot;:&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha1</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="parser_signature">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.parser_signature">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">parser_signature</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">,</span> <span class="n">version</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="n">version</span><span class="p">,</span>
+        <span class="s2">&quot;max_file_bytes_by_type&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">max_file_bytes_by_type</span><span class="p">,</span>
+        <span class="s2">&quot;exclude_globs_by_type&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">exclude_globs_by_type</span><span class="p">,</span>
+        <span class="s2">&quot;enabled_doc_types&quot;</span><span class="p">:</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">enabled_doc_types</span><span class="p">),</span>
+        <span class="s2">&quot;ocr_enabled&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">ocr_enabled</span><span class="p">,</span>
+        <span class="s2">&quot;ocr_lang&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">ocr_lang</span><span class="p">,</span>
+        <span class="s2">&quot;ocr_dpi&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">ocr_dpi</span><span class="p">,</span>
+        <span class="s2">&quot;ocr_timeout_s&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">ocr_timeout_s</span><span class="p">,</span>
+        <span class="s2">&quot;ocr_include_char_boxes&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">ocr_include_char_boxes</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">_signature_payload</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="chunker_signature">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.chunker_signature">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">chunker_signature</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">,</span> <span class="n">version</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;version&quot;</span><span class="p">:</span> <span class="n">version</span><span class="p">,</span>
+        <span class="s2">&quot;chunk_lines&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_lines</span><span class="p">,</span>
+        <span class="s2">&quot;chunk_overlap_lines&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_overlap_lines</span><span class="p">,</span>
+        <span class="s2">&quot;chunk_lines_by_type&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_lines_by_type</span><span class="p">,</span>
+        <span class="s2">&quot;chunk_overlap_lines_by_type&quot;</span><span class="p">:</span> <span class="n">config</span><span class="o">.</span><span class="n">chunk_overlap_lines_by_type</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">_signature_payload</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="load_config">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.load_config">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_config</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">RagConfig</span><span class="p">:</span>
+    <span class="n">rag_settings</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">github_settings</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">chroma_settings</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">llm_settings</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">rag.repositories.settings</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_rag_settings</span>
+
+        <span class="n">rag_settings</span> <span class="o">=</span> <span class="n">load_rag_settings</span><span class="p">(</span><span class="s2">&quot;rag&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">rag_settings</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">services.integrations</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_integration_settings</span>
+
+        <span class="n">github_settings</span> <span class="o">=</span> <span class="n">load_integration_settings</span><span class="p">(</span><span class="s2">&quot;github&quot;</span><span class="p">)</span>
+        <span class="n">chroma_settings</span> <span class="o">=</span> <span class="n">load_integration_settings</span><span class="p">(</span><span class="s2">&quot;chroma&quot;</span><span class="p">)</span>
+        <span class="n">llm_settings</span> <span class="o">=</span> <span class="n">load_integration_settings</span><span class="p">(</span><span class="s2">&quot;llm&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">github_settings</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">chroma_settings</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">llm_settings</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="n">local_root</span> <span class="o">=</span> <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_ROOT&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;local_path&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">repo_root</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">Path</span><span class="p">(</span><span class="n">local_root</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">local_root</span>
+        <span class="k">else</span> <span class="n">_find_repo_root</span><span class="p">()</span>
+    <span class="p">)</span>
+
+    <span class="n">rag_mode</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_MODE&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;mode&quot;</span><span class="p">,</span> <span class="s2">&quot;local&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;local&quot;</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">git_dir_raw</span> <span class="o">=</span> <span class="n">_setting</span><span class="p">(</span>
+        <span class="s2">&quot;RAG_GIT_DIR&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;git_dir&quot;</span><span class="p">,</span> <span class="s2">&quot;/tmp/llmctl-studio-rag-repo&quot;</span>
+    <span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;/tmp/llmctl-studio-rag-repo&quot;</span>
+    <span class="n">git_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">git_dir_raw</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">rag_mode</span> <span class="o">==</span> <span class="s2">&quot;git&quot;</span><span class="p">:</span>
+        <span class="n">repo_root</span> <span class="o">=</span> <span class="n">git_dir</span>
+
+    <span class="n">git_repo</span> <span class="o">=</span> <span class="p">(</span><span class="n">github_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;repo&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+    <span class="n">git_pat</span> <span class="o">=</span> <span class="p">(</span><span class="n">github_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pat&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+    <span class="n">git_ssh_key_path</span> <span class="o">=</span> <span class="p">(</span><span class="n">github_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ssh_key_path&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+    <span class="n">git_url</span> <span class="o">=</span> <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_GIT_URL&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;git_url&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">git_url</span><span class="p">:</span>
+        <span class="n">git_url</span> <span class="o">=</span> <span class="n">build_git_url</span><span class="p">(</span><span class="n">git_repo</span><span class="p">,</span> <span class="n">git_pat</span><span class="p">,</span> <span class="n">git_ssh_key_path</span><span class="p">)</span>
+
+    <span class="n">exclude_dirs</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">_DEFAULT_EXCLUDE_DIRS</span><span class="p">)</span>
+    <span class="n">exclude_dirs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span>
+        <span class="n">_split_csv</span><span class="p">(</span><span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_EXCLUDE_DIRS&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;exclude_dirs&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+    <span class="p">)</span>
+
+    <span class="n">exclude_globs</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">_DEFAULT_EXCLUDE_GLOBS</span><span class="p">)</span>
+    <span class="n">exclude_globs</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+        <span class="n">_split_csv</span><span class="p">(</span><span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_EXCLUDE_GLOBS&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;exclude_globs&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+    <span class="p">)</span>
+
+    <span class="n">include_globs</span> <span class="o">=</span> <span class="n">_split_csv</span><span class="p">(</span>
+        <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_INCLUDE_GLOBS&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;include_globs&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">max_file_bytes_by_type</span> <span class="o">=</span> <span class="n">_split_map_int</span><span class="p">(</span>
+        <span class="n">_setting</span><span class="p">(</span>
+            <span class="s2">&quot;RAG_MAX_FILE_BYTES_BY_TYPE&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;max_file_bytes_by_type&quot;</span><span class="p">,</span>
+            <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">exclude_globs_by_type</span> <span class="o">=</span> <span class="n">_split_map_list</span><span class="p">(</span>
+        <span class="n">_setting</span><span class="p">(</span>
+            <span class="s2">&quot;RAG_EXCLUDE_GLOBS_BY_TYPE&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;exclude_globs_by_type&quot;</span><span class="p">,</span>
+            <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">chunk_lines_by_type</span> <span class="o">=</span> <span class="n">_split_map_int</span><span class="p">(</span>
+        <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_CHUNK_LINES_BY_TYPE&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;chunk_lines_by_type&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">chunk_overlap_lines_by_type</span> <span class="o">=</span> <span class="n">_split_map_int</span><span class="p">(</span>
+        <span class="n">_setting</span><span class="p">(</span>
+            <span class="s2">&quot;RAG_CHUNK_OVERLAP_LINES_BY_TYPE&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;chunk_overlap_lines_by_type&quot;</span><span class="p">,</span>
+            <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">enabled_doc_types</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">item</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">_split_csv</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_ENABLED_DOC_TYPES&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;enabled_doc_types&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="p">)</span>
+    <span class="p">}</span>
+    <span class="n">ocr_enabled_raw</span> <span class="o">=</span> <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_OCR_ENABLED&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;ocr_enabled&quot;</span><span class="p">,</span> <span class="s2">&quot;true&quot;</span><span class="p">)</span>
+    <span class="n">ocr_enabled</span> <span class="o">=</span> <span class="p">(</span><span class="n">ocr_enabled_raw</span> <span class="ow">or</span> <span class="s2">&quot;true&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">{</span>
+        <span class="s2">&quot;0&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;false&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;no&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="n">ocr_lang</span> <span class="o">=</span> <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_OCR_LANG&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;ocr_lang&quot;</span><span class="p">,</span> <span class="s2">&quot;eng&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;eng&quot;</span>
+    <span class="n">ocr_dpi</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span>
+        <span class="mi">72</span><span class="p">,</span>
+        <span class="n">_as_int</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_OCR_DPI&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;ocr_dpi&quot;</span><span class="p">,</span> <span class="s2">&quot;150&quot;</span><span class="p">),</span>
+            <span class="mi">150</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+    <span class="n">ocr_timeout_s</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span>
+        <span class="mi">0</span><span class="p">,</span>
+        <span class="n">_as_int</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_OCR_TIMEOUT_S&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;ocr_timeout_s&quot;</span><span class="p">,</span> <span class="s2">&quot;45&quot;</span><span class="p">),</span>
+            <span class="mi">45</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+    <span class="n">ocr_include_char_boxes</span> <span class="o">=</span> <span class="n">_as_bool</span><span class="p">(</span>
+        <span class="n">_setting</span><span class="p">(</span>
+            <span class="s2">&quot;RAG_OCR_INCLUDE_CHAR_BOXES&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;ocr_include_char_boxes&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;false&quot;</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">embed_provider</span> <span class="o">=</span> <span class="n">_normalize_provider</span><span class="p">(</span>
+        <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;RAG_EMBED_PROVIDER&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;embed_provider&quot;</span><span class="p">,</span> <span class="s2">&quot;openai&quot;</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;openai&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">chat_provider</span> <span class="o">=</span> <span class="n">_normalize_provider</span><span class="p">(</span>
+        <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;RAG_CHAT_PROVIDER&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;chat_provider&quot;</span><span class="p">,</span> <span class="s2">&quot;openai&quot;</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;openai&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># RAG runtime auth is sourced from Provider settings first.</span>
+    <span class="n">openai_api_key</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="p">(</span><span class="n">llm_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;codex_api_key&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;OPENAI_API_KEY&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="kc">None</span>
+    <span class="p">)</span>
+    <span class="n">gemini_api_key</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="p">(</span><span class="n">llm_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;gemini_api_key&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;GEMINI_API_KEY&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="kc">None</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">gemini_api_key</span><span class="p">:</span>
+        <span class="n">gemini_api_key</span> <span class="o">=</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;GOOGLE_API_KEY&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+
+    <span class="n">openai_embedding_model</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;OPENAI_EMBED_MODEL&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;openai_embed_model&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;text-embedding-3-small&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="ow">or</span> <span class="s2">&quot;text-embedding-3-small&quot;</span>
+    <span class="p">)</span>
+    <span class="n">gemini_embedding_model</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;GEMINI_EMBED_MODEL&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;gemini_embed_model&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;models/gemini-embedding-001&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="ow">or</span> <span class="s2">&quot;models/gemini-embedding-001&quot;</span>
+    <span class="p">)</span>
+    <span class="n">embed_model</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">gemini_embedding_model</span>
+        <span class="k">if</span> <span class="n">embed_provider</span> <span class="o">==</span> <span class="s2">&quot;gemini&quot;</span>
+        <span class="k">else</span> <span class="n">openai_embedding_model</span>
+    <span class="p">)</span>
+
+    <span class="n">openai_chat_model</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;OPENAI_CHAT_MODEL&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;openai_chat_model&quot;</span><span class="p">,</span> <span class="s2">&quot;gpt-4o-mini&quot;</span>
+        <span class="p">)</span>
+        <span class="ow">or</span> <span class="s2">&quot;gpt-4o-mini&quot;</span>
+    <span class="p">)</span>
+    <span class="n">gemini_chat_model</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;GEMINI_CHAT_MODEL&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;gemini_chat_model&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;gemini-2.5-flash&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="ow">or</span> <span class="s2">&quot;gemini-2.5-flash&quot;</span>
+    <span class="p">)</span>
+    <span class="n">chat_model</span> <span class="o">=</span> <span class="n">gemini_chat_model</span> <span class="k">if</span> <span class="n">chat_provider</span> <span class="o">==</span> <span class="s2">&quot;gemini&quot;</span> <span class="k">else</span> <span class="n">openai_chat_model</span>
+    <span class="n">chat_response_style</span> <span class="o">=</span> <span class="n">_normalize_chat_response_style</span><span class="p">(</span>
+        <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;RAG_CHAT_RESPONSE_STYLE&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;chat_response_style&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;high&quot;</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="s2">&quot;high&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">chat_temperature_raw</span> <span class="o">=</span> <span class="n">_setting_rag_first</span><span class="p">(</span>
+        <span class="s2">&quot;RAG_CHAT_TEMPERATURE&quot;</span><span class="p">,</span>
+        <span class="n">rag_settings</span><span class="p">,</span>
+        <span class="s2">&quot;chat_temperature&quot;</span><span class="p">,</span>
+        <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">chat_temperature_raw</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">chat_temperature_raw</span> <span class="o">=</span> <span class="n">_setting_rag_first</span><span class="p">(</span>
+            <span class="s2">&quot;OPENAI_CHAT_TEMPERATURE&quot;</span><span class="p">,</span>
+            <span class="n">rag_settings</span><span class="p">,</span>
+            <span class="s2">&quot;openai_chat_temperature&quot;</span><span class="p">,</span>
+            <span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="n">chroma_host</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="p">(</span><span class="n">chroma_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;host&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;CHROMA_HOST&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="p">(</span><span class="n">rag_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;chroma_host&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="s2">&quot;llmctl-chromadb&quot;</span>
+    <span class="p">)</span>
+    <span class="n">chroma_port</span> <span class="o">=</span> <span class="n">_parse_chroma_port</span><span class="p">(</span>
+        <span class="p">(</span><span class="n">chroma_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;port&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;CHROMA_PORT&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="ow">or</span> <span class="p">(</span><span class="n">rag_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;chroma_port&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="mi">8000</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">chroma_host</span><span class="p">,</span> <span class="n">chroma_port</span> <span class="o">=</span> <span class="n">_normalize_chroma_target</span><span class="p">(</span><span class="n">chroma_host</span><span class="p">,</span> <span class="n">chroma_port</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">RagConfig</span><span class="p">(</span>
+        <span class="n">repo_root</span><span class="o">=</span><span class="n">repo_root</span><span class="p">,</span>
+        <span class="n">rag_mode</span><span class="o">=</span><span class="n">rag_mode</span><span class="p">,</span>
+        <span class="n">chroma_host</span><span class="o">=</span><span class="n">chroma_host</span><span class="p">,</span>
+        <span class="n">chroma_port</span><span class="o">=</span><span class="n">chroma_port</span><span class="p">,</span>
+        <span class="n">collection</span><span class="o">=</span><span class="n">_setting</span><span class="p">(</span>
+            <span class="s2">&quot;CHROMA_COLLECTION&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;chroma_collection&quot;</span><span class="p">,</span> <span class="s2">&quot;llmctl_repo&quot;</span>
+        <span class="p">)</span>
+        <span class="ow">or</span> <span class="s2">&quot;llmctl_repo&quot;</span><span class="p">,</span>
+        <span class="n">embed_provider</span><span class="o">=</span><span class="n">embed_provider</span><span class="p">,</span>
+        <span class="n">chat_provider</span><span class="o">=</span><span class="n">chat_provider</span><span class="p">,</span>
+        <span class="n">openai_api_key</span><span class="o">=</span><span class="n">openai_api_key</span><span class="p">,</span>
+        <span class="n">gemini_api_key</span><span class="o">=</span><span class="n">gemini_api_key</span><span class="p">,</span>
+        <span class="n">openai_embedding_model</span><span class="o">=</span><span class="n">openai_embedding_model</span><span class="p">,</span>
+        <span class="n">gemini_embedding_model</span><span class="o">=</span><span class="n">gemini_embedding_model</span><span class="p">,</span>
+        <span class="n">embed_model</span><span class="o">=</span><span class="n">embed_model</span><span class="p">,</span>
+        <span class="n">embed_max_tokens_per_request</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_EMBED_MAX_TOKENS_PER_REQUEST&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;embed_max_tokens_per_request&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;300000&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">300000</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">embed_max_tokens_per_input</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_EMBED_MAX_TOKENS_PER_INPUT&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;embed_max_tokens_per_input&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;8192&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">8192</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">embed_max_batch_items</span><span class="o">=</span><span class="n">_as_int</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_EMBED_MAX_BATCH_ITEMS&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;embed_max_batch_items&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;100&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">100</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">embed_min_request_interval_s</span><span class="o">=</span><span class="n">_as_float</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_EMBED_MIN_REQUEST_INTERVAL_S&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;embed_min_request_interval_s&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;0&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mf">0.0</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">embed_target_tokens_per_minute</span><span class="o">=</span><span class="n">_as_int</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_EMBED_TARGET_TOKENS_PER_MINUTE&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;embed_target_tokens_per_minute&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;0&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">0</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">embed_rate_limit_max_retries</span><span class="o">=</span><span class="n">_as_int</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_EMBED_RATE_LIMIT_MAX_RETRIES&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;embed_rate_limit_max_retries&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;6&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">6</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">git_url</span><span class="o">=</span><span class="n">git_url</span><span class="p">,</span>
+        <span class="n">git_repo</span><span class="o">=</span><span class="n">git_repo</span><span class="p">,</span>
+        <span class="n">git_pat</span><span class="o">=</span><span class="n">git_pat</span><span class="p">,</span>
+        <span class="n">git_ssh_key_path</span><span class="o">=</span><span class="n">git_ssh_key_path</span><span class="p">,</span>
+        <span class="n">git_branch</span><span class="o">=</span><span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_GIT_BRANCH&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;git_branch&quot;</span><span class="p">,</span> <span class="s2">&quot;main&quot;</span><span class="p">)</span>
+        <span class="ow">or</span> <span class="s2">&quot;main&quot;</span><span class="p">,</span>
+        <span class="n">git_poll_s</span><span class="o">=</span><span class="n">_as_float</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_GIT_POLL_S&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;git_poll_s&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span> <span class="mf">300.0</span>
+        <span class="p">),</span>
+        <span class="n">git_dir</span><span class="o">=</span><span class="n">git_dir</span><span class="p">,</span>
+        <span class="n">watch_enabled</span><span class="o">=</span><span class="n">_as_bool</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_WATCH_ENABLED&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;watch_enabled&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="n">_as_bool</span><span class="p">(</span><span class="n">rag_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;watch_enabled&quot;</span><span class="p">),</span> <span class="kc">True</span><span class="p">),</span>
+        <span class="p">),</span>
+        <span class="n">watch_debounce_s</span><span class="o">=</span><span class="n">_as_float</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_WATCH_DEBOUNCE_S&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;watch_debounce_s&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="mf">1.0</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">chunk_lines</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_CHUNK_LINES&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;chunk_lines&quot;</span><span class="p">,</span> <span class="s2">&quot;120&quot;</span><span class="p">),</span>
+            <span class="mi">120</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">chunk_overlap_lines</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_CHUNK_OVERLAP_LINES&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;chunk_overlap_lines&quot;</span><span class="p">,</span> <span class="s2">&quot;20&quot;</span><span class="p">),</span>
+            <span class="mi">20</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">max_file_bytes</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_MAX_FILE_BYTES&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;max_file_bytes&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="mi">1_000_000</span><span class="p">)</span>
+            <span class="p">),</span>
+            <span class="mi">1_000_000</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">exclude_dirs</span><span class="o">=</span><span class="n">exclude_dirs</span><span class="p">,</span>
+        <span class="n">exclude_globs</span><span class="o">=</span><span class="n">exclude_globs</span><span class="p">,</span>
+        <span class="n">include_globs</span><span class="o">=</span><span class="n">include_globs</span><span class="p">,</span>
+        <span class="n">max_file_bytes_by_type</span><span class="o">=</span><span class="p">{</span>
+            <span class="o">**</span><span class="n">_DEFAULT_MAX_FILE_BYTES_BY_TYPE</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">max_file_bytes_by_type</span><span class="p">,</span>
+        <span class="p">},</span>
+        <span class="n">exclude_globs_by_type</span><span class="o">=</span><span class="n">exclude_globs_by_type</span><span class="p">,</span>
+        <span class="n">chunk_lines_by_type</span><span class="o">=</span><span class="n">chunk_lines_by_type</span><span class="p">,</span>
+        <span class="n">chunk_overlap_lines_by_type</span><span class="o">=</span><span class="n">chunk_overlap_lines_by_type</span><span class="p">,</span>
+        <span class="n">enabled_doc_types</span><span class="o">=</span><span class="n">enabled_doc_types</span><span class="p">,</span>
+        <span class="n">ocr_enabled</span><span class="o">=</span><span class="n">ocr_enabled</span><span class="p">,</span>
+        <span class="n">ocr_lang</span><span class="o">=</span><span class="n">ocr_lang</span><span class="p">,</span>
+        <span class="n">ocr_dpi</span><span class="o">=</span><span class="n">ocr_dpi</span><span class="p">,</span>
+        <span class="n">ocr_timeout_s</span><span class="o">=</span><span class="n">ocr_timeout_s</span><span class="p">,</span>
+        <span class="n">ocr_include_char_boxes</span><span class="o">=</span><span class="n">ocr_include_char_boxes</span><span class="p">,</span>
+        <span class="n">drive_sync_workers</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="n">_as_int</span><span class="p">(</span>
+                <span class="n">_setting</span><span class="p">(</span>
+                    <span class="s2">&quot;RAG_DRIVE_SYNC_WORKERS&quot;</span><span class="p">,</span>
+                    <span class="n">rag_settings</span><span class="p">,</span>
+                    <span class="s2">&quot;drive_sync_workers&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;4&quot;</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="mi">4</span><span class="p">,</span>
+            <span class="p">),</span>
+        <span class="p">),</span>
+        <span class="n">index_parallel_workers</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="n">_as_int</span><span class="p">(</span>
+                <span class="n">_setting</span><span class="p">(</span>
+                    <span class="s2">&quot;RAG_INDEX_PARALLEL_WORKERS&quot;</span><span class="p">,</span>
+                    <span class="n">rag_settings</span><span class="p">,</span>
+                    <span class="s2">&quot;index_parallel_workers&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;1&quot;</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="mi">1</span><span class="p">,</span>
+            <span class="p">),</span>
+        <span class="p">),</span>
+        <span class="n">pdf_page_workers</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="n">_as_int</span><span class="p">(</span>
+                <span class="n">_setting</span><span class="p">(</span>
+                    <span class="s2">&quot;RAG_PDF_PAGE_WORKERS&quot;</span><span class="p">,</span>
+                    <span class="n">rag_settings</span><span class="p">,</span>
+                    <span class="s2">&quot;pdf_page_workers&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;1&quot;</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="mi">1</span><span class="p">,</span>
+            <span class="p">),</span>
+        <span class="p">),</span>
+        <span class="n">embed_parallel_requests</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="n">_as_int</span><span class="p">(</span>
+                <span class="n">_setting</span><span class="p">(</span>
+                    <span class="s2">&quot;RAG_EMBED_PARALLEL_REQUESTS&quot;</span><span class="p">,</span>
+                    <span class="n">rag_settings</span><span class="p">,</span>
+                    <span class="s2">&quot;embed_parallel_requests&quot;</span><span class="p">,</span>
+                    <span class="n">_setting</span><span class="p">(</span>
+                        <span class="s2">&quot;CELERY_WORKER_CONCURRENCY&quot;</span><span class="p">,</span>
+                        <span class="n">rag_settings</span><span class="p">,</span>
+                        <span class="s2">&quot;celery_worker_concurrency&quot;</span><span class="p">,</span>
+                        <span class="s2">&quot;6&quot;</span><span class="p">,</span>
+                    <span class="p">)</span>
+                    <span class="ow">or</span> <span class="s2">&quot;6&quot;</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="mi">6</span><span class="p">,</span>
+            <span class="p">),</span>
+        <span class="p">),</span>
+        <span class="n">openai_chat_model</span><span class="o">=</span><span class="n">openai_chat_model</span><span class="p">,</span>
+        <span class="n">gemini_chat_model</span><span class="o">=</span><span class="n">gemini_chat_model</span><span class="p">,</span>
+        <span class="n">chat_model</span><span class="o">=</span><span class="n">chat_model</span><span class="p">,</span>
+        <span class="n">chat_response_style</span><span class="o">=</span><span class="n">chat_response_style</span><span class="p">,</span>
+        <span class="n">chat_temperature</span><span class="o">=</span><span class="n">_as_float</span><span class="p">(</span><span class="n">chat_temperature_raw</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">),</span>
+        <span class="n">chat_top_k</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_CHAT_TOP_K&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;chat_top_k&quot;</span><span class="p">,</span> <span class="s2">&quot;5&quot;</span><span class="p">),</span>
+            <span class="mi">5</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">maximum</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">chat_max_history</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_CHAT_MAX_HISTORY&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;chat_max_history&quot;</span><span class="p">,</span> <span class="s2">&quot;8&quot;</span><span class="p">),</span>
+            <span class="mi">8</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">maximum</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">chat_max_context_chars</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_CHAT_MAX_CONTEXT_CHARS&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;chat_max_context_chars&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;12000&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">12000</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">chat_snippet_chars</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_CHAT_SNIPPET_CHARS&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;chat_snippet_chars&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;600&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">600</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">chat_context_budget_tokens</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span>
+                <span class="s2">&quot;RAG_CHAT_CONTEXT_BUDGET_TOKENS&quot;</span><span class="p">,</span>
+                <span class="n">rag_settings</span><span class="p">,</span>
+                <span class="s2">&quot;chat_context_budget_tokens&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;8000&quot;</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="mi">8000</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span>
+        <span class="p">),</span>
+        <span class="n">web_port</span><span class="o">=</span><span class="n">_as_int_range</span><span class="p">(</span>
+            <span class="n">_setting</span><span class="p">(</span><span class="s2">&quot;RAG_WEB_PORT&quot;</span><span class="p">,</span> <span class="n">rag_settings</span><span class="p">,</span> <span class="s2">&quot;web_port&quot;</span><span class="p">,</span> <span class="s2">&quot;5050&quot;</span><span class="p">),</span>
+            <span class="mi">5050</span><span class="p">,</span>
+            <span class="n">minimum</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">maximum</span><span class="o">=</span><span class="mi">65535</span><span class="p">,</span>
+        <span class="p">),</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="build_source_config">
+<a class="viewcode-back" href="../../../api/rag.engine.config.html#rag.engine.config.build_source_config">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">build_source_config</span><span class="p">(</span><span class="n">base</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">github_settings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">RagConfig</span><span class="p">:</span>
+    <span class="n">kind</span> <span class="o">=</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">rag_mode</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">rag_mode</span>
+    <span class="n">repo_root</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">repo_root</span>
+    <span class="n">git_url</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">git_url</span>
+    <span class="n">git_dir</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">git_dir</span>
+    <span class="n">git_branch</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">git_branch</span>
+    <span class="n">git_repo</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">git_pat</span> <span class="o">=</span> <span class="p">(</span><span class="n">github_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pat&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+    <span class="n">git_ssh_key_path</span> <span class="o">=</span> <span class="p">(</span><span class="n">github_settings</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ssh_key_path&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="n">kind</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;local&quot;</span><span class="p">,</span> <span class="s2">&quot;google_drive&quot;</span><span class="p">}:</span>
+        <span class="n">rag_mode</span> <span class="o">=</span> <span class="s2">&quot;local&quot;</span>
+        <span class="n">local_path</span> <span class="o">=</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="s2">&quot;local_path&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">local_path</span><span class="p">:</span>
+            <span class="n">repo_root</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">local_path</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+    <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;github&quot;</span><span class="p">:</span>
+        <span class="n">rag_mode</span> <span class="o">=</span> <span class="s2">&quot;git&quot;</span>
+        <span class="n">git_repo</span> <span class="o">=</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="s2">&quot;git_repo&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+        <span class="n">source_branch</span> <span class="o">=</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="s2">&quot;git_branch&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+        <span class="n">source_git_dir</span> <span class="o">=</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="s2">&quot;git_dir&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">source_git_dir</span><span class="p">:</span>
+            <span class="n">git_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">source_git_dir</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+            <span class="n">repo_root</span> <span class="o">=</span> <span class="n">git_dir</span>
+        <span class="k">if</span> <span class="n">source_branch</span><span class="p">:</span>
+            <span class="n">git_branch</span> <span class="o">=</span> <span class="n">source_branch</span>
+        <span class="n">git_url</span> <span class="o">=</span> <span class="n">build_git_url</span><span class="p">(</span><span class="n">git_repo</span><span class="p">,</span> <span class="n">git_pat</span><span class="p">,</span> <span class="n">git_ssh_key_path</span><span class="p">)</span>
+        <span class="n">repo_root</span> <span class="o">=</span> <span class="n">git_dir</span>
+
+    <span class="k">return</span> <span class="n">replace</span><span class="p">(</span>
+        <span class="n">base</span><span class="p">,</span>
+        <span class="n">rag_mode</span><span class="o">=</span><span class="n">rag_mode</span><span class="p">,</span>
+        <span class="n">repo_root</span><span class="o">=</span><span class="n">repo_root</span><span class="p">,</span>
+        <span class="n">collection</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="s2">&quot;collection&quot;</span><span class="p">,</span> <span class="n">base</span><span class="o">.</span><span class="n">collection</span><span class="p">),</span>
+        <span class="n">git_url</span><span class="o">=</span><span class="n">git_url</span><span class="p">,</span>
+        <span class="n">git_repo</span><span class="o">=</span><span class="n">git_repo</span><span class="p">,</span>
+        <span class="n">git_pat</span><span class="o">=</span><span class="n">git_pat</span><span class="p">,</span>
+        <span class="n">git_ssh_key_path</span><span class="o">=</span><span class="n">git_ssh_key_path</span><span class="p">,</span>
+        <span class="n">git_branch</span><span class="o">=</span><span class="n">git_branch</span><span class="p">,</span>
+        <span class="n">git_dir</span><span class="o">=</span><span class="n">git_dir</span><span class="p">,</span>
+    <span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

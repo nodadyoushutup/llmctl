@@ -1,0 +1,7 @@
+chat.contracts module
+=====================
+
+.. automodule:: chat.contracts
+   :members:
+   :show-inheritance:
+   :undoc-members:

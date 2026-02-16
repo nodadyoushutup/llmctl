@@ -1,0 +1,7 @@
+rag.worker.celery\_app module
+=============================
+
+.. automodule:: rag.worker.celery_app
+   :members:
+   :show-inheritance:
+   :undoc-members:

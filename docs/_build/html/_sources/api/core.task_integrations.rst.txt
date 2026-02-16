@@ -1,0 +1,7 @@
+core.task\_integrations module
+==============================
+
+.. automodule:: core.task_integrations
+   :members:
+   :show-inheritance:
+   :undoc-members:

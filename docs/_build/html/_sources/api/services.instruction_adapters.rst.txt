@@ -1,0 +1,19 @@
+services.instruction\_adapters package
+======================================
+
+.. automodule:: services.instruction_adapters
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   services.instruction_adapters.base
+   services.instruction_adapters.claude
+   services.instruction_adapters.codex
+   services.instruction_adapters.gemini
+   services.instruction_adapters.vllm

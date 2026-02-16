@@ -94,6 +94,8 @@
             <th>Node</th>
             <th>Status</th>
             <th>Execution</th>
+            <th>Runtime</th>
+            <th>Dispatch / Fallback</th>
             <th>Triggered By (Solid)</th>
             <th>Pulled Context (Dotted)</th>
             <th>Node task</th>
@@ -127,6 +129,40 @@
                 <span class="status {{ status_class(node_run.status) }}">{{ node_run.status }}</span>
               </td>
               <td class="muted">{{ node_run.execution_index }}</td>
+              <td>
+                <p class="muted" style="margin: 0; font-size: 12px;">
+                  {{ node_run.provider_route or "-" }}
+                </p>
+                <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                  dispatch id: {{ node_run.provider_dispatch_id or "-" }}
+                </p>
+                <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                  workspace: {{ node_run.workspace_identity or "-" }}
+                </p>
+              </td>
+              <td>
+                <p class="muted" style="margin: 0; font-size: 12px;">
+                  {{ node_run.dispatch_status or "-" }}
+                  {% if node_run.dispatch_uncertain %}
+                    (uncertain)
+                  {% endif %}
+                </p>
+                {% if node_run.fallback_attempted %}
+                  <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                    fallback: {{ node_run.fallback_reason or "unknown" }}
+                  </p>
+                {% endif %}
+                {% if node_run.api_failure_category %}
+                  <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                    api failure: {{ node_run.api_failure_category }}
+                  </p>
+                {% endif %}
+                {% if node_run.cli_fallback_used %}
+                  <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                    cli fallback: {{ "preflight ok" if node_run.cli_preflight_passed else "preflight unknown" }}
+                  </p>
+                {% endif %}
+              </td>
               <td>
                 {% if node_run.trigger_sources %}
                   {% for source in node_run.trigger_sources %}
@@ -178,9 +214,92 @@
 
 {% if flowchart_run.status in ["queued", "running", "stopping"] %}
   <script>
-    setTimeout(() => {
-      window.location.reload();
-    }, 4000);
+    (() => {
+      const flowchartId = Number("{{ flowchart.id }}");
+      const runId = Number("{{ flowchart_run.id }}");
+      const fallbackDelayMs = 4000;
+      let fallbackTimer = null;
+      let fallbackEnabled = false;
+      let reloadPending = false;
+      let realtimeController = null;
+
+      const scheduleReload = (delayMs = 120) => {
+        if (reloadPending) {
+          return;
+        }
+        reloadPending = true;
+        window.setTimeout(() => {
+          window.location.reload();
+        }, delayMs);
+      };
+
+      const scheduleFallbackReload = () => {
+        if (!fallbackEnabled) {
+          return;
+        }
+        fallbackTimer = window.setTimeout(() => {
+          scheduleReload(0);
+        }, fallbackDelayMs);
+      };
+
+      const startFallback = () => {
+        if (fallbackEnabled) {
+          return;
+        }
+        fallbackEnabled = true;
+        scheduleFallbackReload();
+      };
+
+      const stopFallback = () => {
+        fallbackEnabled = false;
+        if (fallbackTimer) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+      };
+
+      if (!window.llmctlRealtime || typeof window.llmctlRealtime.connect !== "function") {
+        startFallback();
+        return;
+      }
+
+      realtimeController = window.llmctlRealtime.connect({
+        roomKeys: [`flowchart:${flowchartId}`, `flowchart_run:${runId}`],
+        onSocketReady: () => {
+          stopFallback();
+        },
+        onSocketFailure: () => {
+          startFallback();
+        },
+        onEvent: (eventName, envelope) => {
+          const data = envelope && typeof envelope === "object" ? envelope : {};
+          const eventType = String(data.event_type || eventName || "").trim();
+          if (!eventType.startsWith("flowchart.")) {
+            return;
+          }
+          const payload = data.payload && typeof data.payload === "object" ? data.payload : {};
+          const payloadFlowchartId = Number(payload.flowchart_id || "0");
+          const payloadRunId = Number(payload.flowchart_run_id || "0");
+          if (payloadFlowchartId !== flowchartId || payloadRunId !== runId) {
+            return;
+          }
+          scheduleReload();
+        },
+      });
+
+      if (!realtimeController) {
+        startFallback();
+        return;
+      }
+
+      window.addEventListener("beforeunload", () => {
+        stopFallback();
+        if (realtimeController) {
+          realtimeController.disconnect();
+          realtimeController = null;
+        }
+      });
+    })();
   </script>
 {% endif %}
 

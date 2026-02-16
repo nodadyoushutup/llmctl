@@ -1,0 +1,12 @@
+Studio API Packages
+===================
+
+.. toctree::
+   :maxdepth: 3
+
+   chat
+   core
+   rag
+   services
+   storage
+   web

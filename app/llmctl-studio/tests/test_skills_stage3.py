@@ -140,7 +140,7 @@ class SkillsStage3Tests(StudioDbTestCase):
             return node.id, model.id, skill.id, version.id, agent.id
 
     def _execute_node(self, provider: str) -> tuple[dict[str, object], dict[str, str]]:
-        node_id, model_id, _skill_id, _version_id, _agent_id = self._create_task_node_with_skill(
+        node_id, model_id, _skill_id, _version_id, agent_id = self._create_task_node_with_skill(
             provider
         )
         captured: dict[str, str] = {}
@@ -173,7 +173,10 @@ class SkillsStage3Tests(StudioDbTestCase):
             output_state, routing_state = studio_tasks._execute_flowchart_task_node(
                 node_id=node_id,
                 node_ref_id=None,
-                node_config={"task_prompt": "Summarize this skill usage."},
+                node_config={
+                    "agent_id": agent_id,
+                    "task_prompt": "Summarize this skill usage.",
+                },
                 input_context={"flowchart": {"id": 1}},
                 execution_id=321,
                 execution_task_id=None,
@@ -384,6 +387,7 @@ class SkillsStage3Tests(StudioDbTestCase):
             node_id = node.id
             model_id = model.id
             agent_skill_id = agent_skill.id
+            selected_agent_id = agent.id
 
         with patch.object(
             studio_tasks,
@@ -398,7 +402,10 @@ class SkillsStage3Tests(StudioDbTestCase):
             output_state, routing_state = studio_tasks._execute_flowchart_task_node(
                 node_id=node_id,
                 node_ref_id=None,
-                node_config={"task_prompt": "Ignore legacy node skills."},
+                node_config={
+                    "agent_id": selected_agent_id,
+                    "task_prompt": "Ignore legacy node skills.",
+                },
                 input_context={"flowchart": {"id": 1}},
                 execution_id=321,
                 execution_task_id=None,

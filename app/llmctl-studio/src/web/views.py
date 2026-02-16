@@ -4,8 +4,13 @@ import base64
 from io import BytesIO
 import json
 import logging
+import os
 import re
-from pathlib import Path
+import shutil
+import subprocess
+import threading
+import uuid
+from pathlib import Path, PurePosixPath
 from datetime import datetime, timezone
 from html import unescape
 from urllib.error import HTTPError, URLError
@@ -25,7 +30,7 @@ from flask import (
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
-from services.celery_app import celery_app
+from services.celery_app import HUGGINGFACE_DOWNLOAD_QUEUE, celery_app
 from services.code_review import (
     CODE_REVIEW_FAIL_EMOJI,
     CODE_REVIEW_PASS_EMOJI,
@@ -43,11 +48,14 @@ from chat.contracts import (
 )
 from chat.rag_client import get_rag_contract_client
 from chat.runtime import (
+    CHAT_DEFAULT_THREAD_TITLE,
+    CHAT_RESPONSE_COMPLEXITY_MEDIUM as CHAT_RESPONSE_COMPLEXITY_DEFAULT,
     archive_thread as archive_chat_thread,
     clear_thread as clear_chat_thread,
     create_thread as create_chat_thread,
     delete_thread as delete_chat_thread,
     execute_turn as execute_chat_turn,
+    normalize_response_complexity as normalize_chat_response_complexity,
     get_thread as get_chat_thread,
     list_activity as list_chat_activity,
     list_threads as list_chat_threads,
@@ -55,17 +63,34 @@ from chat.runtime import (
     update_thread_config as update_chat_thread_config,
 )
 from chat.settings import (
+    load_chat_default_settings_payload,
     load_chat_runtime_settings_payload,
+    save_chat_default_settings,
     save_chat_runtime_settings,
 )
 from services.integrations import (
+    GOOGLE_CLOUD_PROVIDER,
+    GOOGLE_WORKSPACE_PROVIDER,
     LLM_PROVIDER_LABELS,
     LLM_PROVIDERS,
+    NODE_EXECUTOR_DOCKER_API_STALL_SECONDS_CHOICES,
+    NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES,
+    NODE_EXECUTOR_FALLBACK_PROVIDER_CHOICES,
+    NODE_EXECUTOR_PROVIDER_CHOICES,
+    NODE_SKILL_BINDING_MODE_CHOICES,
+    NODE_SKILL_BINDING_MODE_REJECT,
+    NODE_SKILL_BINDING_MODE_WARN,
     integration_overview as _integration_overview,
     load_integration_settings as _load_integration_settings,
+    load_node_executor_settings,
+    node_executor_effective_config_summary,
+    migrate_legacy_google_integration_settings,
+    normalize_node_skill_binding_mode,
     resolve_default_model_id,
     resolve_enabled_llm_providers,
     resolve_llm_provider,
+    resolve_node_skill_binding_mode,
+    save_node_executor_settings,
     save_integration_settings as _save_integration_settings,
 )
 from services.instruction_adapters import (
@@ -125,6 +150,7 @@ from core.models import (
     agent_task_scripts,
     ensure_legacy_skill_script_writable,
     flowchart_node_mcp_servers,
+    flowchart_node_attachments,
     flowchart_node_skills,
     flowchart_node_scripts,
     is_legacy_skill_script_type,
@@ -181,23 +207,42 @@ from rag.repositories.settings import (
 from storage.script_storage import read_script_file, remove_script_file, write_script_file
 from storage.attachment_storage import remove_attachment_file, write_attachment_file
 from core.task_stages import TASK_STAGE_ORDER
-from core.task_kinds import QUICK_TASK_KIND, is_quick_task_kind, task_kind_label
+from core.task_kinds import (
+    QUICK_TASK_KIND,
+    RAG_QUICK_DELTA_TASK_KIND,
+    RAG_QUICK_INDEX_TASK_KIND,
+    is_quick_rag_task_kind,
+    is_quick_task_kind,
+    task_kind_label,
+)
 from services.skills import (
+    MAX_SKILL_FILE_BYTES,
     SkillPackage,
     SkillPackageValidationError,
     build_skill_package,
     build_skill_package_from_directory,
+    encode_binary_skill_content,
     export_skill_package_from_db,
     format_validation_errors,
     import_skill_package_to_db,
+    is_binary_skill_content,
     load_skill_bundle,
     serialize_skill_bundle,
 )
 from services.tasks import (
     build_one_off_output_contract,
+    claude_runtime_diagnostics,
     run_agent,
     run_agent_task,
     run_flowchart,
+    run_huggingface_download_task,
+)
+from services.huggingface_downloads import (
+    model_directory_has_downloaded_contents as _shared_model_directory_has_downloaded_contents,
+    run_huggingface_model_download as _shared_run_huggingface_model_download,
+    summarize_subprocess_error as _shared_summarize_subprocess_error,
+    vllm_local_model_container_path as _shared_vllm_local_model_container_path,
+    vllm_local_model_directory as _shared_vllm_local_model_directory,
 )
 
 bp = Blueprint("agents", __name__, template_folder="templates")
@@ -226,6 +271,22 @@ GEMINI_MODEL_OPTIONS = (
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
 )
+CLAUDE_MODEL_OPTIONS = (
+    "claude-sonnet-4-5",
+    "claude-opus-4-1",
+    "claude-3-7-sonnet-latest",
+    "claude-3-5-haiku-latest",
+)
+QWEN_DEFAULT_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+QWEN_DEFAULT_MODEL_DIR_NAME = "qwen2.5-0.5b-instruct"
+HUGGINGFACE_REPO_ID_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+)
+HUGGINGFACE_DOWNLOAD_JOB_STATUS_ACTIVE = {"queued", "running"}
+HUGGINGFACE_DOWNLOAD_JOB_TTL_SECONDS = 6 * 60 * 60
+HUGGINGFACE_DOWNLOAD_JOB_MAX_RECORDS = 64
+_huggingface_download_jobs_lock = threading.Lock()
+_huggingface_download_jobs: dict[str, dict[str, object]] = {}
 IMAGE_ATTACHMENT_EXTENSIONS = {
     ".bmp",
     ".gif",
@@ -250,6 +311,99 @@ SCRIPT_TYPE_WRITE_CHOICES = tuple(
 )
 RAG_DB_PROVIDER_CHOICES = ("chroma",)
 RAG_MODEL_PROVIDER_CHOICES = ("openai", "gemini")
+SKILL_UPLOAD_MAX_FILE_BYTES = MAX_SKILL_FILE_BYTES
+SKILL_UPLOAD_ALLOWED_EXTENSIONS = {
+    ".bat",
+    ".bash",
+    ".cfg",
+    ".conf",
+    ".css",
+    ".csv",
+    ".docx",
+    ".env",
+    ".gif",
+    ".html",
+    ".ini",
+    ".ipynb",
+    ".java",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".json",
+    ".log",
+    ".md",
+    ".pdf",
+    ".png",
+    ".pptx",
+    ".ps1",
+    ".py",
+    ".rb",
+    ".rst",
+    ".scss",
+    ".sh",
+    ".sql",
+    ".svg",
+    ".toml",
+    ".ts",
+    ".tsv",
+    ".tsx",
+    ".txt",
+    ".webp",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".zsh",
+}
+SKILL_UPLOAD_BINARY_EXTENSIONS = {
+    ".docx",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".pdf",
+    ".png",
+    ".pptx",
+    ".webp",
+}
+SKILL_UPLOAD_ALLOWED_BASENAMES = {
+    ".env",
+    ".gitignore",
+    "dockerfile",
+    "license",
+    "makefile",
+    "notice",
+    "readme",
+}
+SKILL_UPLOAD_BLOCKED_EXTENSIONS = {
+    ".apk",
+    ".appimage",
+    ".bin",
+    ".com",
+    ".dll",
+    ".dmg",
+    ".exe",
+    ".iso",
+    ".jar",
+    ".msi",
+    ".scr",
+    ".so",
+}
+SKILL_UPLOAD_CONFLICT_MODES = {"ask", "replace", "keep_both", "skip"}
+SKILL_MUTABLE_SOURCE_TYPES = {"ui", "import", "local", "path", "upload", "legacy_skill_script"}
+RAG_OPENAI_EMBED_MODEL_OPTIONS = (
+    "text-embedding-3-small",
+    "text-embedding-3-large",
+)
+RAG_OPENAI_CHAT_MODEL_OPTIONS = (
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+)
+RAG_GEMINI_EMBED_MODEL_OPTIONS = (
+    "models/gemini-embedding-001",
+    "models/text-embedding-004",
+)
+RAG_GEMINI_CHAT_MODEL_OPTIONS = GEMINI_MODEL_OPTIONS
 RAG_CHAT_RESPONSE_STYLE_CHOICES = ("low", "medium", "high")
 RAG_CHAT_RESPONSE_STYLE_ALIASES = {
     "concise": "low",
@@ -260,6 +414,9 @@ RAG_CHAT_RESPONSE_STYLE_ALIASES = {
 }
 NODE_SKILL_BINDING_WRITE_ERROR = (
     "Node-level skill binding is disabled. Assign skills on the Agent instead."
+)
+NODE_SKILL_BINDING_WRITE_WARNING = (
+    "Node-level skill payloads are deprecated and ignored. Assign skills on the Agent."
 )
 
 MILESTONE_STATUS_LABELS = {
@@ -323,15 +480,69 @@ FLOWCHART_NODE_TYPE_REQUIRES_REF = {
     FLOWCHART_NODE_TYPE_MILESTONE,
 }
 FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
-    FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False, "skills": False},
-    FLOWCHART_NODE_TYPE_END: {"model": False, "mcp": False, "scripts": False, "skills": False},
-    FLOWCHART_NODE_TYPE_FLOWCHART: {"model": False, "mcp": False, "scripts": False, "skills": False},
-    FLOWCHART_NODE_TYPE_TASK: {"model": True, "mcp": True, "scripts": True, "skills": True},
-    FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True, "skills": True},
-    FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True, "skills": True},
-    FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True, "skills": True},
-    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True, "skills": True},
-    FLOWCHART_NODE_TYPE_RAG: {"model": True, "mcp": False, "scripts": False, "skills": False},
+    FLOWCHART_NODE_TYPE_START: {
+        "model": False,
+        "mcp": False,
+        "scripts": False,
+        "skills": False,
+        "attachments": False,
+    },
+    FLOWCHART_NODE_TYPE_END: {
+        "model": False,
+        "mcp": False,
+        "scripts": False,
+        "skills": False,
+        "attachments": False,
+    },
+    FLOWCHART_NODE_TYPE_FLOWCHART: {
+        "model": False,
+        "mcp": False,
+        "scripts": False,
+        "skills": False,
+        "attachments": False,
+    },
+    FLOWCHART_NODE_TYPE_TASK: {
+        "model": True,
+        "mcp": True,
+        "scripts": True,
+        "skills": True,
+        "attachments": True,
+    },
+    FLOWCHART_NODE_TYPE_PLAN: {
+        "model": True,
+        "mcp": True,
+        "scripts": True,
+        "skills": True,
+        "attachments": True,
+    },
+    FLOWCHART_NODE_TYPE_MILESTONE: {
+        "model": True,
+        "mcp": True,
+        "scripts": True,
+        "skills": True,
+        "attachments": True,
+    },
+    FLOWCHART_NODE_TYPE_MEMORY: {
+        "model": True,
+        "mcp": True,
+        "scripts": True,
+        "skills": True,
+        "attachments": True,
+    },
+    FLOWCHART_NODE_TYPE_DECISION: {
+        "model": False,
+        "mcp": True,
+        "scripts": True,
+        "skills": True,
+        "attachments": False,
+    },
+    FLOWCHART_NODE_TYPE_RAG: {
+        "model": True,
+        "mcp": False,
+        "scripts": False,
+        "skills": False,
+        "attachments": False,
+    },
 }
 FLOWCHART_END_MAX_OUTGOING_EDGES = 0
 FLOWCHART_DEFAULT_START_X = 280.0
@@ -371,6 +582,33 @@ def _parse_task_prompt(raw_prompt: str | None) -> tuple[str | None, str | None]:
         return raw_prompt, None
     formatted = json.dumps(payload, indent=2, sort_keys=True)
     return prompt_text or None, formatted
+
+
+def _quick_rag_task_context(task: AgentTask) -> dict[str, object]:
+    _prompt_text, payload = parse_prompt_input(task.prompt)
+    if not isinstance(payload, dict):
+        return {}
+    task_context = payload.get("task_context")
+    if not isinstance(task_context, dict):
+        return {}
+    quick_context = task_context.get("rag_quick_run")
+    if not isinstance(quick_context, dict):
+        return {}
+    return quick_context
+
+
+def _quick_rag_task_display_name(task: AgentTask) -> str:
+    base_label = task_kind_label(task.kind)
+    quick_context = _quick_rag_task_context(task)
+    source_name = str(quick_context.get("source_name") or "").strip()
+    if source_name:
+        return f"{base_label} ({source_name})"
+    return base_label
+
+
+def _sync_quick_rag_task_from_index_job(_session, _task: AgentTask) -> None:
+    # Legacy RAG index jobs were removed; quick RAG activity now relies on node state.
+    return
 
 
 def _parse_role_details(raw_json: str) -> str:
@@ -449,6 +687,13 @@ def _attachment_in_use(session, attachment_id: int) -> bool:
     ).scalar_one()
     if template_refs:
         return True
+    flowchart_node_refs = session.execute(
+        select(func.count())
+        .select_from(flowchart_node_attachments)
+        .where(flowchart_node_attachments.c.attachment_id == attachment_id)
+    ).scalar_one()
+    if flowchart_node_refs:
+        return True
     return False
 
 
@@ -461,6 +706,11 @@ def _unlink_attachment(session, attachment_id: int) -> None:
     session.execute(
         delete(task_template_attachments).where(
             task_template_attachments.c.attachment_id == attachment_id
+        )
+    )
+    session.execute(
+        delete(flowchart_node_attachments).where(
+            flowchart_node_attachments.c.attachment_id == attachment_id
         )
     )
 
@@ -727,6 +977,28 @@ def _set_flowchart_node_skills(
     session.execute(flowchart_node_skills.insert(), rows)
 
 
+def _set_flowchart_node_attachments(
+    session,
+    node_id: int,
+    attachment_ids: list[int],
+) -> None:
+    session.execute(
+        delete(flowchart_node_attachments).where(
+            flowchart_node_attachments.c.flowchart_node_id == node_id
+        )
+    )
+    if not attachment_ids:
+        return
+    rows = [
+        {
+            "flowchart_node_id": node_id,
+            "attachment_id": attachment_id,
+        }
+        for attachment_id in attachment_ids
+    ]
+    session.execute(flowchart_node_attachments.insert(), rows)
+
+
 def _set_agent_skills(
     session,
     agent_id: int,
@@ -750,11 +1022,54 @@ def _ordered_agent_skills(agent: Agent) -> list[Skill]:
     return list(agent.skills or [])
 
 
-def _node_skill_binding_write_rejected() -> tuple[dict[str, object], int]:
+def _node_skill_binding_mode(settings: dict[str, str] | None = None) -> str:
+    return resolve_node_skill_binding_mode(settings or _load_integration_settings("llm"))
+
+
+def _node_skill_binding_write_rejected(*, mode: str | None = None) -> tuple[dict[str, object], int]:
+    normalized_mode = normalize_node_skill_binding_mode(mode)
     return {
         "error": NODE_SKILL_BINDING_WRITE_ERROR,
         "deprecated": True,
+        "node_skill_binding_mode": normalized_mode,
     }, 400
+
+
+def _node_skill_binding_deprecation_warning(*, mode: str | None = None) -> dict[str, object]:
+    normalized_mode = normalize_node_skill_binding_mode(mode)
+    return {
+        "deprecated": True,
+        "ignored": True,
+        "warning": NODE_SKILL_BINDING_WRITE_WARNING,
+        "node_skill_binding_mode": normalized_mode,
+    }
+
+
+def _log_node_skill_binding_deprecation_event(
+    *,
+    source: str,
+    mode: str,
+    flowchart_id: int | None = None,
+    node_id: int | None = None,
+    extra: dict[str, object] | None = None,
+) -> None:
+    event: dict[str, object] = {
+        "event": "deprecated_node_skill_binding_payload",
+        "source": source,
+        "mode": normalize_node_skill_binding_mode(mode),
+        "path": request.path,
+        "method": request.method,
+    }
+    if flowchart_id is not None:
+        event["flowchart_id"] = flowchart_id
+    if node_id is not None:
+        event["flowchart_node_id"] = node_id
+    if extra:
+        event.update(extra)
+    logger.warning(
+        "Deprecated node-level skill payload encountered: %s",
+        json.dumps(event, sort_keys=True, default=str),
+    )
 
 
 def _assert_flowchart_node_owner(session, *, flowchart_id: int, node_id: int) -> None:
@@ -827,6 +1142,268 @@ def _parse_skill_extra_files(raw_payload: str) -> tuple[list[tuple[str, str]], s
             return [], f"extra_files_json[{index}].content must be a string."
         files.append((path.strip(), content))
     return files, None
+
+
+def _normalize_skill_relative_path(raw_path: str) -> str:
+    posix_value = str(raw_path or "").replace("\\", "/")
+    rel = PurePosixPath(posix_value)
+    if rel.is_absolute():
+        return ""
+    normalized_parts: list[str] = []
+    for part in rel.parts:
+        if part in {"", ".", ".."}:
+            return ""
+        normalized_parts.append(part)
+    return "/".join(normalized_parts)
+
+
+def _is_git_based_skill(skill: Skill) -> bool:
+    source_type = str(skill.source_type or "").strip().lower()
+    return source_type == "git"
+
+
+def _skill_upload_path_error(path: str) -> str | None:
+    normalized = _normalize_skill_relative_path(path)
+    if not normalized:
+        return "Upload target paths must be relative and path-safe."
+    if normalized == "SKILL.md":
+        return "SKILL.md must be edited in the SKILL.md field, not uploaded."
+    file_name = PurePosixPath(normalized).name.lower()
+    extension = PurePosixPath(normalized).suffix.lower()
+    if extension in SKILL_UPLOAD_BLOCKED_EXTENSIONS:
+        return f"File extension '{extension}' is blocked."
+    if extension in SKILL_UPLOAD_ALLOWED_EXTENSIONS:
+        return None
+    root_dir = normalized.split("/", 1)[0].lower()
+    if not extension and root_dir in {"scripts", "references"}:
+        return None
+    if not extension and file_name in SKILL_UPLOAD_ALLOWED_BASENAMES:
+        return None
+    return (
+        "Upload file type is not allowed. Allowed files include text/code/docs plus "
+        "images, data files, PDF, DOCX, and PPTX."
+    )
+
+
+def _is_skill_upload_binary_path(path: str) -> bool:
+    extension = PurePosixPath(path).suffix.lower()
+    return extension in SKILL_UPLOAD_BINARY_EXTENSIONS
+
+
+def _next_skill_keep_both_path(path: str, occupied_paths: set[str]) -> str:
+    normalized = _normalize_skill_relative_path(path)
+    parent = PurePosixPath(normalized).parent.as_posix()
+    if parent == ".":
+        parent = ""
+    name = PurePosixPath(normalized).name
+    suffixes = PurePosixPath(name).suffixes
+    suffix = "".join(suffixes)
+    stem = name[: -len(suffix)] if suffix else name
+    index = 1
+    while True:
+        candidate_name = f"{stem} ({index}){suffix}"
+        candidate_path = f"{parent}/{candidate_name}" if parent else candidate_name
+        if candidate_path not in occupied_paths:
+            return candidate_path
+        index += 1
+
+
+def _parse_skill_existing_files_draft(
+    raw_payload: str,
+    *,
+    existing_paths: set[str],
+) -> tuple[list[dict[str, object]], str | None]:
+    if not existing_paths:
+        return [], None
+    stripped = (raw_payload or "").strip()
+    if not stripped:
+        return [
+            {"original_path": path, "path": path, "delete": False}
+            for path in sorted(existing_paths)
+        ], None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return [], "Existing files draft payload must be valid JSON."
+    if not isinstance(payload, list):
+        return [], "Existing files draft payload must be a JSON array."
+
+    parsed: list[dict[str, object]] = []
+    seen_paths: set[str] = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            return [], f"existing_files_json[{index}] must be an object."
+        original_raw = str(item.get("original_path") or "")
+        original_path = _normalize_skill_relative_path(original_raw)
+        if not original_path or original_path not in existing_paths:
+            return [], f"existing_files_json[{index}].original_path is invalid."
+        if original_path in seen_paths:
+            return [], f"existing_files_json[{index}].original_path is duplicated."
+        seen_paths.add(original_path)
+
+        delete_value = item.get("delete")
+        delete_flag = bool(delete_value is True or str(delete_value).strip().lower() in {"1", "true", "yes", "on"})
+        target_raw = str(item.get("path") or "")
+        target_path = _normalize_skill_relative_path(target_raw) if not delete_flag else ""
+        if not delete_flag:
+            if not target_path:
+                return [], f"existing_files_json[{index}].path is required."
+            if target_path == "SKILL.md":
+                return [], "Non-SKILL files cannot be renamed to SKILL.md."
+        parsed.append(
+            {
+                "original_path": original_path,
+                "path": target_path,
+                "delete": delete_flag,
+            }
+        )
+
+    missing = existing_paths - seen_paths
+    if missing:
+        return [], "Existing files draft payload is incomplete."
+    return parsed, None
+
+
+def _parse_skill_upload_specs(
+    raw_payload: str,
+    *,
+    upload_count: int,
+) -> tuple[list[dict[str, object]], str | None]:
+    stripped = (raw_payload or "").strip()
+    if upload_count == 0:
+        return [], None
+    if not stripped:
+        return [], "Upload path mapping is required for uploaded files."
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return [], "Upload path mapping must be valid JSON."
+    if not isinstance(payload, list):
+        return [], "Upload path mapping must be a JSON array."
+
+    specs: list[dict[str, object]] = []
+    seen_indexes: set[int] = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            return [], f"upload_specs_json[{index}] must be an object."
+        upload_index_raw = item.get("index")
+        if not isinstance(upload_index_raw, int):
+            return [], f"upload_specs_json[{index}].index must be an integer."
+        if upload_index_raw < 0 or upload_index_raw >= upload_count:
+            return [], f"upload_specs_json[{index}].index is out of range."
+        if upload_index_raw in seen_indexes:
+            return [], f"upload_specs_json[{index}].index is duplicated."
+        seen_indexes.add(upload_index_raw)
+
+        raw_path = str(item.get("path") or "")
+        normalized_path = _normalize_skill_relative_path(raw_path)
+        if not normalized_path:
+            return [], f"upload_specs_json[{index}].path is required."
+        path_error = _skill_upload_path_error(normalized_path)
+        if path_error:
+            return [], path_error
+
+        conflict_mode = str(item.get("conflict") or "ask").strip().lower()
+        if conflict_mode not in SKILL_UPLOAD_CONFLICT_MODES:
+            return [], f"upload_specs_json[{index}].conflict must be one of ask/replace/keep_both/skip."
+
+        specs.append(
+            {
+                "index": upload_index_raw,
+                "path": normalized_path,
+                "conflict": conflict_mode,
+            }
+        )
+
+    if len(seen_indexes) != upload_count:
+        return [], "Upload path mapping must include each uploaded file exactly once."
+    specs.sort(key=lambda item: int(item["index"]))
+    return specs, None
+
+
+def _read_skill_upload_content(path: str, payload: bytes) -> tuple[str | None, str | None]:
+    if len(payload) > SKILL_UPLOAD_MAX_FILE_BYTES:
+        return None, f"Uploaded file '{path}' exceeds the 10 MB limit."
+    if _is_skill_upload_binary_path(path):
+        return encode_binary_skill_content(payload), None
+    try:
+        return payload.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, f"Uploaded file '{path}' must be UTF-8 text for this file type."
+
+
+def _collect_skill_upload_entries() -> tuple[list[dict[str, object]], str | None]:
+    uploaded_files = [
+        upload
+        for upload in request.files.getlist("upload_files")
+        if upload is not None and str(upload.filename or "").strip()
+    ]
+    specs, parse_error = _parse_skill_upload_specs(
+        request.form.get("upload_specs_json", ""),
+        upload_count=len(uploaded_files),
+    )
+    if parse_error:
+        return [], parse_error
+    if not specs:
+        return [], None
+
+    entries: list[dict[str, object]] = []
+    for spec in specs:
+        index = int(spec["index"])
+        upload = uploaded_files[index]
+        target_path = str(spec["path"])
+        payload = upload.read()
+        content, content_error = _read_skill_upload_content(target_path, payload)
+        if content_error:
+            return [], content_error
+        assert content is not None
+        entries.append(
+            {
+                "path": target_path,
+                "content": content,
+                "conflict": str(spec["conflict"]),
+                "file_name": str(upload.filename or "").strip(),
+            }
+        )
+    return entries, None
+
+
+def _apply_skill_upload_conflicts(
+    file_map: dict[str, str],
+    upload_entries: list[dict[str, object]],
+) -> tuple[dict[str, str], str | None]:
+    occupied = set(file_map.keys())
+    for entry in upload_entries:
+        path = str(entry["path"])
+        content = str(entry["content"])
+        conflict = str(entry["conflict"] or "ask").strip().lower()
+        exists = path in occupied
+        if exists:
+            if conflict == "replace":
+                file_map[path] = content
+                continue
+            if conflict == "keep_both":
+                keep_both_path = _next_skill_keep_both_path(path, occupied)
+                file_map[keep_both_path] = content
+                occupied.add(keep_both_path)
+                continue
+            if conflict == "skip":
+                continue
+            return {}, (
+                "Upload conflict requires a choice. Select replace, keep both, or skip "
+                f"for '{path}'."
+            )
+        file_map[path] = content
+        occupied.add(path)
+    return file_map, None
+
+
+def _skill_file_preview_content(content: str) -> str:
+    if is_binary_skill_content(content):
+        return "[Binary file content hidden]"
+    if len(content or "") > 5000:
+        return content[:5000] + "\n... (truncated)"
+    return content or ""
 
 
 def _build_skill_preview(package: SkillPackage) -> dict[str, object]:
@@ -1248,7 +1825,7 @@ def _list_collection_names(collections: object) -> list[str]:
     return sorted(names, key=str.lower)
 
 
-def _google_drive_service_email(settings: dict[str, str]) -> str | None:
+def _google_service_account_email(settings: dict[str, str]) -> str | None:
     raw = (settings.get("service_account_json") or "").strip()
     if not raw:
         return None
@@ -1457,7 +2034,7 @@ def _provider_model(provider: str | None, settings: dict[str, str] | None = None
     if provider == "gemini":
         return Config.GEMINI_MODEL or "default"
     if provider == "claude":
-        return Config.CLAUDE_MODEL or "default"
+        return Config.CLAUDE_MODEL or _claude_default_model()
     if provider == "vllm_local":
         settings = settings or _load_integration_settings("llm")
         model = (settings.get("vllm_local_model") or "").strip()
@@ -1679,7 +2256,7 @@ def _vllm_local_default_model(models: list[dict[str, str]] | None = None) -> str
     entries = models or discover_vllm_local_models()
     if entries:
         return entries[0]["value"]
-    return Config.VLLM_LOCAL_FALLBACK_MODEL or ""
+    return ""
 
 
 def _vllm_remote_default_model() -> str:
@@ -1791,6 +2368,27 @@ def _ordered_gemini_models(options: set[str]) -> list[str]:
     return ordered
 
 
+def _claude_default_model(options: list[str] | None = None) -> str:
+    if options:
+        for model in CLAUDE_MODEL_OPTIONS:
+            if model in options:
+                return model
+        return options[0]
+    return CLAUDE_MODEL_OPTIONS[0]
+
+
+def _ordered_claude_models(options: set[str]) -> list[str]:
+    ordered = []
+    seen = set()
+    for model in CLAUDE_MODEL_OPTIONS:
+        if model in options:
+            ordered.append(model)
+            seen.add(model)
+    remainder = sorted([model for model in options if model not in seen], key=str.lower)
+    ordered.extend(remainder)
+    return ordered
+
+
 def _provider_default_model(
     provider: str,
     settings: dict[str, str] | None = None,
@@ -1800,7 +2398,7 @@ def _provider_default_model(
     if provider == "gemini":
         return Config.GEMINI_MODEL or ""
     if provider == "claude":
-        return Config.CLAUDE_MODEL or ""
+        return Config.CLAUDE_MODEL or _claude_default_model()
     if provider == "vllm_local":
         settings = settings or _load_integration_settings("llm")
         configured = (settings.get("vllm_local_model") or "").strip()
@@ -1824,6 +2422,8 @@ def _provider_model_options(
         options["codex"].update(CODEX_MODEL_PREFERENCE)
     if "gemini" in options:
         options["gemini"].update(GEMINI_MODEL_OPTIONS)
+    if "claude" in options:
+        options["claude"].update(CLAUDE_MODEL_OPTIONS)
     if "vllm_local" in options:
         options["vllm_local"].update(item["value"] for item in local_vllm_models)
     if "vllm_remote" in options:
@@ -1851,6 +2451,8 @@ def _provider_model_options(
             ordered[provider] = _ordered_codex_models(values)
         elif provider == "gemini":
             ordered[provider] = _ordered_gemini_models(values)
+        elif provider == "claude":
+            ordered[provider] = _ordered_claude_models(values)
         else:
             ordered[provider] = sorted(values, key=str.lower)
     return ordered
@@ -1959,8 +2561,10 @@ def _gemini_settings_payload(settings: dict[str, str]) -> dict[str, object]:
 
 
 def _claude_settings_payload(settings: dict[str, str]) -> dict[str, object]:
+    runtime = claude_runtime_diagnostics()
     return {
         "api_key": settings.get("claude_api_key") or "",
+        "runtime": runtime,
     }
 
 
@@ -1970,12 +2574,425 @@ def _vllm_local_settings_payload(settings: dict[str, str]) -> dict[str, object]:
         (settings.get("vllm_local_model") or "").strip()
         or _vllm_local_default_model(local_models)
     )
+    huggingface_token = _vllm_local_huggingface_token(settings)
+    downloaded_models = _downloaded_vllm_local_models_payload(local_models)
     return {
         "command": Config.VLLM_LOCAL_CMD,
         "models": local_models,
         "model": local_default,
         "custom_dir": Config.VLLM_LOCAL_CUSTOM_MODELS_DIR,
+        "qwen": _qwen_action_payload(),
+        "huggingface": {
+            "token": huggingface_token,
+            "configured": bool(huggingface_token),
+            "downloaded_models": downloaded_models,
+        },
+        "download_job": _active_huggingface_download_job_payload(),
     }
+
+
+def _vllm_local_huggingface_token(settings: dict[str, str] | None = None) -> str:
+    settings = settings or _load_integration_settings("llm")
+    return (settings.get("vllm_local_hf_token") or "").strip()
+
+
+def _download_job_timestamp() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _parse_download_job_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _clamp_download_percent(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(100.0, numeric))
+
+
+def _prune_huggingface_download_jobs_locked() -> None:
+    _sync_huggingface_download_jobs_locked()
+    now = datetime.now(timezone.utc)
+    stale_ids: list[str] = []
+    for job_id, job in _huggingface_download_jobs.items():
+        status = str(job.get("status") or "")
+        if status in HUGGINGFACE_DOWNLOAD_JOB_STATUS_ACTIVE:
+            continue
+        finished_at = _parse_download_job_timestamp(job.get("finished_at"))
+        if finished_at is None:
+            continue
+        if (now - finished_at).total_seconds() > HUGGINGFACE_DOWNLOAD_JOB_TTL_SECONDS:
+            stale_ids.append(job_id)
+    for job_id in stale_ids:
+        _huggingface_download_jobs.pop(job_id, None)
+
+    if len(_huggingface_download_jobs) <= HUGGINGFACE_DOWNLOAD_JOB_MAX_RECORDS:
+        return
+    ordered_ids = sorted(
+        _huggingface_download_jobs.keys(),
+        key=lambda item: (
+            _parse_download_job_timestamp(_huggingface_download_jobs[item].get("started_at"))
+            or datetime.min.replace(tzinfo=timezone.utc)
+        ),
+    )
+    keep_ids = set(ordered_ids[-HUGGINGFACE_DOWNLOAD_JOB_MAX_RECORDS :])
+    for job_id in ordered_ids:
+        if job_id not in keep_ids:
+            _huggingface_download_jobs.pop(job_id, None)
+
+
+def _map_celery_download_state(state: str) -> tuple[str, str]:
+    normalized = (state or "").strip().upper()
+    if normalized in {"PENDING", "RECEIVED"}:
+        return "queued", "queued"
+    if normalized in {"STARTED", "PROGRESS", "RETRY"}:
+        return "running", "running"
+    if normalized == "SUCCESS":
+        return "succeeded", "succeeded"
+    if normalized in {"FAILURE", "REVOKED"}:
+        return "failed", "failed"
+    return "running", "running"
+
+
+def _sync_huggingface_download_jobs_locked() -> None:
+    now = _download_job_timestamp()
+    for job in _huggingface_download_jobs.values():
+        job_id = str(job.get("id") or "")
+        if not job_id:
+            continue
+        try:
+            async_result = celery_app.AsyncResult(job_id)
+            raw_state = str(async_result.state or "")
+            raw_info = async_result.info
+        except Exception:
+            continue
+        status, default_phase = _map_celery_download_state(raw_state)
+        info = raw_info if isinstance(raw_info, dict) else {}
+
+        job["status"] = status
+        job["phase"] = str(info.get("phase") or default_phase)
+        if info.get("kind") is not None:
+            job["kind"] = str(info.get("kind") or job.get("kind") or "")
+        if info.get("model_id") is not None:
+            job["model_id"] = str(info.get("model_id") or job.get("model_id") or "")
+        if info.get("target_dir") is not None:
+            job["target_dir"] = str(info.get("target_dir") or job.get("target_dir") or "")
+        if info.get("summary"):
+            job["summary"] = str(info.get("summary") or "")
+        if info.get("percent") is not None:
+            job["percent"] = _clamp_download_percent(info.get("percent"))
+        elif status == "succeeded":
+            job["percent"] = 100.0
+        log_lines = info.get("log_lines")
+        if isinstance(log_lines, list):
+            job["log_lines"] = [str(line)[:240] for line in log_lines][-24:]
+        if status == "failed":
+            error_detail = ""
+            if isinstance(raw_info, BaseException):
+                error_detail = str(raw_info)
+            elif isinstance(raw_info, dict):
+                error_detail = str(raw_info.get("error") or raw_info.get("summary") or "")
+            else:
+                error_detail = str(raw_info or "")
+            error_detail = error_detail.strip()
+            if error_detail:
+                job["error"] = error_detail
+                if not str(job.get("summary") or "").strip():
+                    job["summary"] = error_detail
+        if status == "succeeded" and not str(job.get("summary") or "").strip():
+            job["summary"] = f"Downloaded {job.get('model_id') or 'model'}."
+        if status == "queued" and not str(job.get("summary") or "").strip():
+            job["summary"] = "Queued download."
+        job["updated_at"] = now
+        if status in {"succeeded", "failed"} and not str(job.get("finished_at") or "").strip():
+            job["finished_at"] = now
+
+
+def _serialize_huggingface_download_job(job: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": str(job.get("id") or ""),
+        "kind": str(job.get("kind") or ""),
+        "status": str(job.get("status") or ""),
+        "phase": str(job.get("phase") or ""),
+        "model_id": str(job.get("model_id") or ""),
+        "target_dir": str(job.get("target_dir") or ""),
+        "summary": str(job.get("summary") or ""),
+        "error": str(job.get("error") or ""),
+        "percent": _clamp_download_percent(job.get("percent")),
+        "log_lines": list(job.get("log_lines") or []),
+        "started_at": str(job.get("started_at") or ""),
+        "updated_at": str(job.get("updated_at") or ""),
+        "finished_at": str(job.get("finished_at") or ""),
+    }
+
+
+def _active_huggingface_download_job_payload() -> dict[str, object] | None:
+    with _huggingface_download_jobs_lock:
+        _prune_huggingface_download_jobs_locked()
+        active_jobs = [
+            _serialize_huggingface_download_job(job)
+            for job in _huggingface_download_jobs.values()
+            if str(job.get("status") or "") in HUGGINGFACE_DOWNLOAD_JOB_STATUS_ACTIVE
+        ]
+    if not active_jobs:
+        return None
+    active_jobs.sort(key=lambda item: str(item.get("started_at") or ""), reverse=True)
+    return active_jobs[0]
+
+
+def _find_active_huggingface_download_job_for_target(target_dir: str) -> dict[str, object] | None:
+    with _huggingface_download_jobs_lock:
+        _prune_huggingface_download_jobs_locked()
+        active_jobs = [
+            _serialize_huggingface_download_job(job)
+            for job in _huggingface_download_jobs.values()
+            if str(job.get("target_dir") or "") == target_dir
+            and str(job.get("status") or "") in HUGGINGFACE_DOWNLOAD_JOB_STATUS_ACTIVE
+        ]
+    if not active_jobs:
+        return None
+    active_jobs.sort(key=lambda item: str(item.get("started_at") or ""), reverse=True)
+    return active_jobs[0]
+
+
+def _get_huggingface_download_job(job_id: str) -> dict[str, object] | None:
+    with _huggingface_download_jobs_lock:
+        _prune_huggingface_download_jobs_locked()
+        job = _huggingface_download_jobs.get(job_id)
+        if job is None:
+            return None
+        return _serialize_huggingface_download_job(job)
+
+
+def _start_huggingface_download_job(
+    *,
+    kind: str,
+    model_id: str,
+    model_dir_name: str,
+    token: str,
+    model_container_path: str,
+) -> tuple[dict[str, object], bool]:
+    target_dir = str(_vllm_local_model_directory(model_dir_name))
+    existing = _find_active_huggingface_download_job_for_target(target_dir)
+    if existing is not None:
+        return existing, False
+
+    timestamp = _download_job_timestamp()
+    result = run_huggingface_download_task.apply_async(
+        kwargs={
+            "kind": kind,
+            "model_id": model_id,
+            "model_dir_name": model_dir_name,
+            "token": token,
+            "model_container_path": model_container_path,
+        },
+        queue=HUGGINGFACE_DOWNLOAD_QUEUE,
+    )
+    job_id = str(result.id or uuid.uuid4().hex)
+    with _huggingface_download_jobs_lock:
+        _huggingface_download_jobs[job_id] = {
+            "id": job_id,
+            "kind": kind,
+            "status": "queued",
+            "phase": "queued",
+            "model_id": model_id,
+            "target_dir": target_dir,
+            "summary": "Queued download.",
+            "error": "",
+            "percent": 0.0,
+            "log_lines": [],
+            "started_at": timestamp,
+            "updated_at": timestamp,
+            "finished_at": "",
+        }
+        _prune_huggingface_download_jobs_locked()
+    snapshot = _get_huggingface_download_job(job_id)
+    if snapshot is None:
+        raise RuntimeError("Failed to initialize HuggingFace download job.")
+    return snapshot, True
+
+
+def _vllm_local_model_container_path(model_dir_name: str) -> str:
+    return _shared_vllm_local_model_container_path(model_dir_name)
+
+
+def _normalize_vllm_local_model_dir_name(value: str | None) -> str:
+    dir_name = (value or "").strip().strip("/")
+    if not dir_name:
+        return ""
+    if Path(dir_name).name != dir_name:
+        return ""
+    if "\\" in dir_name:
+        return ""
+    return dir_name
+
+
+def _vllm_local_model_directory(model_dir_name: str) -> Path:
+    return _shared_vllm_local_model_directory(model_dir_name)
+
+
+def _downloaded_vllm_local_models_payload(
+    local_models: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    entries = local_models if local_models is not None else discover_vllm_local_models()
+    custom_root = Path(Config.VLLM_LOCAL_CUSTOM_MODELS_DIR).resolve()
+    payload: list[dict[str, str]] = []
+    for item in entries:
+        path_text = str(item.get("path") or "").strip()
+        if not path_text:
+            continue
+        model_dir = Path(path_text).resolve()
+        try:
+            model_dir.relative_to(custom_root)
+        except ValueError:
+            continue
+        dir_name = _normalize_vllm_local_model_dir_name(model_dir.name)
+        if not dir_name:
+            continue
+        payload.append(
+            {
+                "dir_name": dir_name,
+                "label": str(item.get("label") or dir_name),
+                "value": str(item.get("value") or "").strip(),
+                "target_dir": str(model_dir),
+                "container_path": _vllm_local_model_container_path(dir_name),
+                "status": "Downloaded",
+            }
+        )
+    return payload
+
+
+def _find_downloaded_vllm_local_model(model_dir_name: str) -> dict[str, str] | None:
+    normalized_dir_name = _normalize_vllm_local_model_dir_name(model_dir_name)
+    if not normalized_dir_name:
+        return None
+    for item in _downloaded_vllm_local_models_payload():
+        if item.get("dir_name") == normalized_dir_name:
+            return item
+    return None
+
+
+def _remove_vllm_local_model_directory(model_dir_name: str) -> bool:
+    normalized_dir_name = _normalize_vllm_local_model_dir_name(model_dir_name)
+    if not normalized_dir_name:
+        raise ValueError("Model directory name is invalid.")
+    custom_root = Path(Config.VLLM_LOCAL_CUSTOM_MODELS_DIR).resolve()
+    model_dir = _vllm_local_model_directory(normalized_dir_name)
+    try:
+        model_dir.relative_to(custom_root)
+    except ValueError as exc:
+        raise ValueError("Model directory is outside configured custom models root.") from exc
+    if not model_dir.exists():
+        return False
+    shutil.rmtree(model_dir)
+    return True
+
+
+def _model_directory_has_downloaded_contents(model_dir: Path) -> bool:
+    return _shared_model_directory_has_downloaded_contents(model_dir)
+
+
+def _normalize_huggingface_repo_id(value: str | None) -> str:
+    model_id = (value or "").strip()
+    if not HUGGINGFACE_REPO_ID_PATTERN.fullmatch(model_id):
+        return ""
+    return model_id
+
+
+def _huggingface_model_dir_name(model_id: str) -> str:
+    raw_name = (model_id.rsplit("/", 1)[-1] if "/" in model_id else model_id).strip()
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", raw_name).strip("._-").lower()
+    return cleaned or "huggingface-model"
+
+
+def _qwen_model_id() -> str:
+    model_id = (os.getenv("QWEN_MODEL_ID") or QWEN_DEFAULT_MODEL_ID).strip()
+    return model_id or QWEN_DEFAULT_MODEL_ID
+
+
+def _qwen_model_dir_name() -> str:
+    dir_name = (os.getenv("QWEN_MODEL_DIR_NAME") or QWEN_DEFAULT_MODEL_DIR_NAME).strip()
+    dir_name = dir_name.strip("/").strip()
+    return dir_name or QWEN_DEFAULT_MODEL_DIR_NAME
+
+
+def _qwen_model_container_path() -> str:
+    return _vllm_local_model_container_path(_qwen_model_dir_name())
+
+
+def _qwen_model_directory() -> Path:
+    return _vllm_local_model_directory(_qwen_model_dir_name())
+
+
+def _qwen_model_downloaded() -> bool:
+    return _model_directory_has_downloaded_contents(_qwen_model_directory())
+
+
+def _qwen_action_payload() -> dict[str, str | bool]:
+    installed = _qwen_model_downloaded()
+    return {
+        "installed": installed,
+        "action": "remove" if installed else "download",
+        "model_id": _qwen_model_id(),
+        "model_dir_name": _qwen_model_dir_name(),
+        "target_dir": str(_qwen_model_directory()),
+        "model_container_path": _qwen_model_container_path(),
+    }
+
+
+def _run_huggingface_model_download(
+    model_id: str,
+    model_dir_name: str,
+    *,
+    token: str = "",
+    model_container_path: str,
+    progress_callback=None,
+) -> None:
+    _shared_run_huggingface_model_download(
+        model_id,
+        model_dir_name,
+        token=token,
+        model_container_path=model_container_path,
+        progress_callback=progress_callback,
+    )
+
+
+def _run_qwen_download(*, token: str = "") -> None:
+    _run_huggingface_model_download(
+        _qwen_model_id(),
+        _qwen_model_dir_name(),
+        token=token,
+        model_container_path=_qwen_model_container_path(),
+    )
+
+
+def _summarize_subprocess_error(exc: subprocess.CalledProcessError) -> str:
+    return _shared_summarize_subprocess_error(exc)
+
+
+def _remove_qwen_model_directory() -> bool:
+    custom_root = Path(Config.VLLM_LOCAL_CUSTOM_MODELS_DIR).resolve()
+    model_dir = _qwen_model_directory()
+    try:
+        model_dir.relative_to(custom_root)
+    except ValueError as exc:
+        raise ValueError("Qwen model directory is outside configured custom models root.") from exc
+    if not model_dir.exists():
+        return False
+    shutil.rmtree(model_dir)
+    return True
 
 
 def _vllm_remote_settings_payload(settings: dict[str, str]) -> dict[str, object]:
@@ -2370,14 +3387,32 @@ def _coerce_rag_float_str(
     return text or str(default)
 
 
+def _coerce_rag_model_choice(
+    value: str | None,
+    *,
+    default: str,
+    choices: tuple[str, ...],
+) -> str:
+    candidate = (value or "").strip()
+    if candidate in choices:
+        return candidate
+    return default
+
+
+def _rag_model_option_entries(
+    choices: tuple[str, ...],
+    selected: str | None,
+) -> list[dict[str, str]]:
+    base_options = [{"value": option, "label": option} for option in choices]
+    return _merge_selected_option(base_options, selected)
+
+
 def _rag_default_settings() -> dict[str, str]:
     config = load_rag_config()
     return {
         "db_provider": "chroma",
         "embed_provider": _normalize_rag_model_provider(config.embed_provider),
         "chat_provider": _normalize_rag_model_provider(config.chat_provider),
-        "openai_api_key": config.openai_api_key or "",
-        "gemini_api_key": config.gemini_api_key or "",
         "openai_embed_model": config.openai_embedding_model or "text-embedding-3-small",
         "gemini_embed_model": config.gemini_embedding_model or "models/gemini-embedding-001",
         "openai_chat_model": config.openai_chat_model or "gpt-4o-mini",
@@ -2466,26 +3501,45 @@ def _effective_rag_settings() -> dict[str, str]:
     settings["gemini_embed_model"] = (settings.get("gemini_embed_model") or "").strip() or defaults["gemini_embed_model"]
     settings["openai_chat_model"] = (settings.get("openai_chat_model") or "").strip() or defaults["openai_chat_model"]
     settings["gemini_chat_model"] = (settings.get("gemini_chat_model") or "").strip() or defaults["gemini_chat_model"]
-    settings["openai_api_key"] = (settings.get("openai_api_key") or "").strip()
-    settings["gemini_api_key"] = (settings.get("gemini_api_key") or "").strip()
     return settings
 
 
 def _settings_integrations_context(
     *,
+    integration_section: str | None = None,
+    gitconfig_content: str | None = None,
     github_repo_options: list[str] | None = None,
     jira_project_options: list[dict[str, str]] | None = None,
     jira_board_options: list[dict[str, str]] | None = None,
     confluence_space_options: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
+    migrate_legacy_google_integration_settings()
     summary = _settings_summary()
+    llm_settings = _load_integration_settings("llm")
     github_settings = _load_integration_settings("github")
     jira_settings = _load_integration_settings("jira")
     confluence_settings = _load_integration_settings("confluence")
-    google_drive_settings = _load_integration_settings("google_drive")
-    google_drive_service_email = _google_drive_service_email(google_drive_settings)
+    google_cloud_settings = _load_integration_settings(GOOGLE_CLOUD_PROVIDER)
+    google_workspace_settings = _load_integration_settings(GOOGLE_WORKSPACE_PROVIDER)
+    vllm_local_settings = _vllm_local_settings_payload(llm_settings)
+    google_cloud_service_email = _google_service_account_email(google_cloud_settings)
+    google_workspace_service_email = _google_service_account_email(
+        google_workspace_settings
+    )
     chroma_settings = _resolved_chroma_settings()
     rag_settings = _effective_rag_settings()
+    gitconfig_path = _gitconfig_path()
+    gitconfig_exists = gitconfig_path.exists()
+    resolved_gitconfig_content = gitconfig_content
+    if resolved_gitconfig_content is None:
+        resolved_gitconfig_content = ""
+        if integration_section == "git" and gitconfig_exists:
+            try:
+                resolved_gitconfig_content = gitconfig_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError as exc:
+                flash(f"Unable to read {gitconfig_path}: {exc}", "error")
 
     if github_repo_options is None:
         github_repo_options = []
@@ -2514,14 +3568,20 @@ def _settings_integrations_context(
     rag_chroma_ready = rag_settings.get("db_provider") != "chroma" or chroma_connected
 
     return {
+        "vllm_local_settings": vllm_local_settings,
         "github_settings": github_settings,
         "jira_settings": jira_settings,
         "confluence_settings": confluence_settings,
-        "google_drive_settings": google_drive_settings,
-        "google_drive_connected": bool(
-            (google_drive_settings.get("service_account_json") or "").strip()
+        "google_cloud_settings": google_cloud_settings,
+        "google_cloud_connected": bool(
+            (google_cloud_settings.get("service_account_json") or "").strip()
         ),
-        "google_drive_service_email": google_drive_service_email,
+        "google_cloud_service_email": google_cloud_service_email,
+        "google_workspace_settings": google_workspace_settings,
+        "google_workspace_connected": bool(
+            (google_workspace_settings.get("service_account_json") or "").strip()
+        ),
+        "google_workspace_service_email": google_workspace_service_email,
         "chroma_settings": chroma_settings,
         "rag_settings": rag_settings,
         "github_repo_options": github_repo_options,
@@ -2539,13 +3599,75 @@ def _settings_integrations_context(
         "rag_db_provider_choices": RAG_DB_PROVIDER_CHOICES,
         "rag_model_provider_choices": RAG_MODEL_PROVIDER_CHOICES,
         "rag_chat_response_style_choices": RAG_CHAT_RESPONSE_STYLE_CHOICES,
+        "gitconfig_path": str(gitconfig_path),
+        "gitconfig_exists": gitconfig_exists,
+        "gitconfig_content": resolved_gitconfig_content,
         "summary": summary,
-        "page_title": "Settings - Integrations",
         "active_page": "settings_integrations",
-        "settings_title": "Settings",
-        "settings_subtitle": "Integrations",
-        "settings_section": "integrations",
     }
+
+
+INTEGRATION_SETTINGS_SECTIONS: dict[str, dict[str, str]] = {
+    "git": {
+        "label": "Git",
+        "endpoint": "agents.settings_integrations_git",
+    },
+    "github": {
+        "label": "GitHub",
+        "endpoint": "agents.settings_integrations_github",
+    },
+    "jira": {
+        "label": "Jira",
+        "endpoint": "agents.settings_integrations_jira",
+    },
+    "confluence": {
+        "label": "Confluence",
+        "endpoint": "agents.settings_integrations_confluence",
+    },
+    "google_cloud": {
+        "label": "Google Cloud",
+        "endpoint": "agents.settings_integrations_google_cloud",
+    },
+    "google_workspace": {
+        "label": "Google Workspace",
+        "endpoint": "agents.settings_integrations_google_workspace",
+    },
+    "huggingface": {
+        "label": "Hugging Face",
+        "endpoint": "agents.settings_integrations_huggingface",
+    },
+    "chroma": {
+        "label": "ChromaDB",
+        "endpoint": "agents.settings_integrations_chroma",
+    },
+}
+
+
+def _render_settings_integrations_page(
+    section: str,
+    *,
+    gitconfig_content: str | None = None,
+    github_repo_options: list[str] | None = None,
+    jira_project_options: list[dict[str, str]] | None = None,
+    jira_board_options: list[dict[str, str]] | None = None,
+    confluence_space_options: list[dict[str, str]] | None = None,
+):
+    section_meta = INTEGRATION_SETTINGS_SECTIONS.get(section)
+    if section_meta is None:
+        abort(404)
+    return render_template(
+        "settings_integrations.html",
+        integration_section=section,
+        page_title=f"Settings - Integrations - {section_meta['label']}",
+        **_settings_integrations_context(
+            integration_section=section,
+            gitconfig_content=gitconfig_content,
+            github_repo_options=github_repo_options,
+            jira_project_options=jira_project_options,
+            jira_board_options=jira_board_options,
+            confluence_space_options=confluence_space_options,
+        ),
+    )
 
 
 def _strip_confluence_html(value: str | None) -> str:
@@ -4167,12 +5289,20 @@ def _load_tasks_page(
             filters.append(AgentTask.agent_id == agent_id)
         if node_type:
             flowchart_kind = f"flowchart_{node_type}"
+            kind_filters = [AgentTask.kind == flowchart_kind]
+            if node_type == FLOWCHART_NODE_TYPE_RAG:
+                kind_filters.extend(
+                    [
+                        AgentTask.kind == RAG_QUICK_INDEX_TASK_KIND,
+                        AgentTask.kind == RAG_QUICK_DELTA_TASK_KIND,
+                    ]
+                )
             filters.append(
                 or_(
                     AgentTask.flowchart_node_id.in_(
                         select(FlowchartNode.id).where(FlowchartNode.node_type == node_type)
                     ),
-                    AgentTask.kind == flowchart_kind,
+                    *kind_filters,
                 )
             )
         if status:
@@ -4197,6 +5327,8 @@ def _load_tasks_page(
             if filters:
                 stmt = stmt.where(*filters)
             tasks = session.execute(stmt).scalars().all()
+            for task in tasks:
+                _sync_quick_rag_task_from_index_job(session, task)
         return tasks, total_tasks, page, total_pages
 
 
@@ -4417,6 +5549,53 @@ def _chat_rag_health_payload() -> tuple[dict[str, object], list[dict[str, str]]]
     return health_payload, collection_payload
 
 
+def _resolved_chat_default_settings(
+    *,
+    models: list[LLMModel],
+    mcp_servers: list[MCPServer],
+    rag_collections: list[dict[str, str]],
+) -> dict[str, object]:
+    settings = load_chat_default_settings_payload()
+    llm_settings = _load_integration_settings("llm")
+    model_ids = {model.id for model in models}
+    mcp_ids = {server.id for server in mcp_servers}
+    rag_ids = {
+        str(item.get("id") or "").strip()
+        for item in rag_collections
+        if str(item.get("id") or "").strip()
+    }
+    default_model_id = settings.get("default_model_id")
+    llm_default_model_id = resolve_default_model_id(llm_settings)
+    resolved_model_id = (
+        default_model_id
+        if isinstance(default_model_id, int) and default_model_id in model_ids
+        else (
+            llm_default_model_id
+            if isinstance(llm_default_model_id, int) and llm_default_model_id in model_ids
+            else None
+        )
+    )
+    resolved_mcp_server_ids: list[int] = []
+    for raw_id in settings.get("default_mcp_server_ids", []):
+        if isinstance(raw_id, int) and raw_id in mcp_ids and raw_id not in resolved_mcp_server_ids:
+            resolved_mcp_server_ids.append(raw_id)
+    resolved_rag_collections: list[str] = []
+    for raw_collection in settings.get("default_rag_collections", []):
+        cleaned = str(raw_collection or "").strip()
+        if not cleaned or cleaned not in rag_ids or cleaned in resolved_rag_collections:
+            continue
+        resolved_rag_collections.append(cleaned)
+    return {
+        "default_model_id": resolved_model_id,
+        "default_response_complexity": normalize_chat_response_complexity(
+            settings.get("default_response_complexity"),
+            default=CHAT_RESPONSE_COMPLEXITY_DEFAULT,
+        ),
+        "default_mcp_server_ids": resolved_mcp_server_ids,
+        "default_rag_collections": resolved_rag_collections,
+    }
+
+
 def _split_mcp_servers_by_type(
     mcp_servers: list[MCPServer],
 ) -> tuple[list[MCPServer], list[MCPServer]]:
@@ -4475,6 +5654,7 @@ def _load_attachments() -> list[Attachment]:
                 .options(
                     selectinload(Attachment.tasks),
                     selectinload(Attachment.templates),
+                    selectinload(Attachment.flowchart_nodes),
                 )
                 .order_by(Attachment.created_at.desc())
             )
@@ -4527,6 +5707,16 @@ def _flowchart_as_bool(value: object) -> bool:
 
 
 def _flowchart_wants_json() -> bool:
+    if (request.args.get("format") or "").strip().lower() == "json":
+        return True
+    accepted = request.accept_mimetypes
+    return (
+        accepted["application/json"] > 0
+        and accepted["application/json"] >= accepted["text/html"]
+    )
+
+
+def _run_wants_json() -> bool:
     if (request.args.get("format") or "").strip().lower() == "json":
         return True
     accepted = request.accept_mimetypes
@@ -4599,7 +5789,13 @@ def _coerce_flowchart_edge_mode(value: object, *, field_name: str) -> str:
 def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
     return FLOWCHART_NODE_UTILITY_COMPATIBILITY.get(
         node_type,
-        {"model": False, "mcp": False, "scripts": False, "skills": False},
+        {
+            "model": False,
+            "mcp": False,
+            "scripts": False,
+            "skills": False,
+            "attachments": False,
+        },
     )
 
 
@@ -4610,6 +5806,7 @@ def _validate_flowchart_utility_compatibility(
     mcp_server_ids: list[int] | None = None,
     script_ids: list[int] | None = None,
     skill_ids: list[int] | None = None,
+    attachment_ids: list[int] | None = None,
 ) -> list[str]:
     compatibility = _flowchart_node_compatibility(node_type)
     errors: list[str] = []
@@ -4621,6 +5818,8 @@ def _validate_flowchart_utility_compatibility(
         errors.append(f"Node type '{node_type}' does not support scripts.")
     if skill_ids and not compatibility["skills"]:
         errors.append(f"Node type '{node_type}' does not support skills.")
+    if attachment_ids and not compatibility["attachments"]:
+        errors.append(f"Node type '{node_type}' does not support attachments.")
     return errors
 
 
@@ -4650,6 +5849,7 @@ def _serialize_flowchart_node(node: FlowchartNode) -> dict[str, object]:
         "model_id": node.model_id,
         "mcp_server_ids": [server.id for server in node.mcp_servers],
         "script_ids": [script.id for script in node.scripts],
+        "attachment_ids": [attachment.id for attachment in node.attachments],
         "compatibility": _flowchart_node_compatibility(node.node_type),
         "created_at": _human_time(node.created_at),
         "updated_at": _human_time(node.updated_at),
@@ -4712,6 +5912,84 @@ def _serialize_flowchart_run(run: FlowchartRun) -> dict[str, object]:
         "started_at": _human_time(run.started_at),
         "finished_at": _human_time(run.finished_at),
         "updated_at": _human_time(run.updated_at),
+    }
+
+
+def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, object]:
+    if task is None:
+        return {
+            "selected_provider": "",
+            "final_provider": "",
+            "provider_dispatch_id": "",
+            "workspace_identity": "",
+            "dispatch_status": "",
+            "fallback_attempted": False,
+            "fallback_reason": "",
+            "dispatch_uncertain": False,
+            "api_failure_category": "",
+            "cli_fallback_used": False,
+            "cli_preflight_passed": None,
+            "provider_route": "",
+            "dispatch_timeline": [],
+        }
+    selected_provider = str(task.selected_provider or "").strip()
+    final_provider = str(task.final_provider or "").strip()
+    provider_dispatch_id = str(task.provider_dispatch_id or "").strip()
+    workspace_identity = str(task.workspace_identity or "").strip()
+    dispatch_status = str(task.dispatch_status or "").strip()
+    fallback_attempted = bool(task.fallback_attempted)
+    fallback_reason = str(task.fallback_reason or "").strip()
+    dispatch_uncertain = bool(task.dispatch_uncertain)
+    api_failure_category = str(task.api_failure_category or "").strip()
+    cli_fallback_used = bool(task.cli_fallback_used)
+    cli_preflight_passed = (
+        None if task.cli_preflight_passed is None else bool(task.cli_preflight_passed)
+    )
+    timeline: list[str] = []
+    if selected_provider:
+        timeline.append(f"selected={selected_provider}")
+    if provider_dispatch_id:
+        timeline.append(f"dispatch_id={provider_dispatch_id}")
+    if dispatch_status:
+        timeline.append(f"dispatch={dispatch_status}")
+    if fallback_attempted:
+        timeline.append(f"fallback={fallback_reason or 'unknown'}")
+    if dispatch_uncertain:
+        timeline.append("dispatch_uncertain=true")
+    if final_provider:
+        timeline.append(f"final={final_provider}")
+    provider_route = ""
+    if selected_provider and final_provider:
+        provider_route = f"{selected_provider} -> {final_provider}"
+    elif selected_provider:
+        provider_route = selected_provider
+    elif final_provider:
+        provider_route = final_provider
+    return {
+        "selected_provider": selected_provider,
+        "final_provider": final_provider,
+        "provider_dispatch_id": provider_dispatch_id,
+        "workspace_identity": workspace_identity,
+        "dispatch_status": dispatch_status,
+        "fallback_attempted": fallback_attempted,
+        "fallback_reason": fallback_reason,
+        "dispatch_uncertain": dispatch_uncertain,
+        "api_failure_category": api_failure_category,
+        "cli_fallback_used": cli_fallback_used,
+        "cli_preflight_passed": cli_preflight_passed,
+        "provider_route": provider_route,
+        "dispatch_timeline": timeline,
+    }
+
+
+def _serialize_run_task(task: AgentTask) -> dict[str, object]:
+    metadata = _serialize_node_executor_metadata(task)
+    return {
+        "id": task.id,
+        "status": task.status,
+        "started_at": _human_time(task.started_at),
+        "finished_at": _human_time(task.finished_at),
+        **metadata,
     }
 
 
@@ -4801,11 +6079,15 @@ def _flowchart_run_node_context_trace(
     return trigger_sources, pulled_dotted_sources
 
 
-def _serialize_flowchart_run_node(node_run: FlowchartRunNode) -> dict[str, object]:
+def _serialize_flowchart_run_node(
+    node_run: FlowchartRunNode,
+    task: AgentTask | None = None,
+) -> dict[str, object]:
     input_context = _parse_json_dict(node_run.input_context_json)
     trigger_sources, pulled_dotted_sources = _flowchart_run_node_context_trace(
         input_context
     )
+    run_metadata = _serialize_node_executor_metadata(task)
     return {
         "id": node_run.id,
         "flowchart_run_id": node_run.flowchart_run_id,
@@ -4825,6 +6107,7 @@ def _serialize_flowchart_run_node(node_run: FlowchartRunNode) -> dict[str, objec
         "started_at": _human_time(node_run.started_at),
         "finished_at": _human_time(node_run.finished_at),
         "updated_at": _human_time(node_run.updated_at),
+        **run_metadata,
     }
 
 
@@ -4946,6 +6229,11 @@ def _flowchart_catalog(session) -> dict[str, object]:
         .scalars()
         .all()
     )
+    attachments = (
+        session.execute(select(Attachment).order_by(Attachment.created_at.desc()))
+        .scalars()
+        .all()
+    )
     scripts = [
         script for script in scripts if not is_legacy_skill_script_type(script.script_type)
     ]
@@ -5004,6 +6292,15 @@ def _flowchart_catalog(session) -> dict[str, object]:
         "scripts": [
             {"id": script.id, "file_name": script.file_name, "script_type": script.script_type}
             for script in scripts
+        ],
+        "attachments": [
+            {
+                "id": attachment.id,
+                "file_name": attachment.file_name,
+                "content_type": attachment.content_type,
+                "size_bytes": attachment.size_bytes,
+            }
+            for attachment in attachments
         ],
         "task_integrations": [
             {
@@ -5208,6 +6505,9 @@ def _validate_flowchart_graph_snapshot(
         skill_ids = node.get("skill_ids") or []
         if skill_ids and not compatibility["skills"]:
             errors.append(f"Node {node_id} ({node_type}) does not support skills.")
+        attachment_ids = node.get("attachment_ids") or []
+        if attachment_ids and not compatibility["attachments"]:
+            errors.append(f"Node {node_id} ({node_type}) does not support attachments.")
 
     start_nodes = [node for node in nodes if node.get("node_type") == FLOWCHART_NODE_TYPE_START]
     if len(start_nodes) != 1:
@@ -5343,6 +6643,7 @@ def _flowchart_graph_state(
             "model_id": node.model_id,
             "mcp_server_ids": [server.id for server in node.mcp_servers],
             "script_ids": [script.id for script in node.scripts],
+            "attachment_ids": [attachment.id for attachment in node.attachments],
         }
         for node in flowchart_nodes
     ]
@@ -6100,38 +7401,97 @@ def view_run(run_id: int):
                 .limit(1)
             ).scalar_one_or_none()
         run_tasks: list[AgentTask] = []
+        provider_filter = (request.args.get("provider") or "").strip().lower()
+        dispatch_status_filter = (
+            request.args.get("dispatch_status") or ""
+        ).strip().lower()
+        fallback_filter = (request.args.get("fallback_attempted") or "").strip().lower()
+        fallback_filter_value: bool | None = None
+        if fallback_filter in {"true", "1", "yes", "on"}:
+            fallback_filter_value = True
+        elif fallback_filter in {"false", "0", "no", "off"}:
+            fallback_filter_value = False
         loops_completed = 0
         if run_task_id:
-            run_tasks = (
-                session.execute(
-                    select(AgentTask)
-                    .where(
-                        AgentTask.run_task_id == run_task_id,
-                        AgentTask.run_id == run_id,
-                    )
-                    .order_by(AgentTask.created_at.desc())
-                    .limit(50)
+            task_query = select(AgentTask).where(
+                AgentTask.run_task_id == run_task_id,
+                AgentTask.run_id == run_id,
+            )
+            count_query = select(func.count(AgentTask.id)).where(
+                AgentTask.run_task_id == run_task_id,
+                AgentTask.run_id == run_id,
+            )
+            if provider_filter in {"workspace", "docker", "kubernetes"}:
+                task_query = task_query.where(AgentTask.final_provider == provider_filter)
+                count_query = count_query.where(AgentTask.final_provider == provider_filter)
+            if dispatch_status_filter in {
+                "dispatch_pending",
+                "dispatch_submitted",
+                "dispatch_confirmed",
+                "dispatch_failed",
+                "fallback_started",
+            }:
+                task_query = task_query.where(AgentTask.dispatch_status == dispatch_status_filter)
+                count_query = count_query.where(AgentTask.dispatch_status == dispatch_status_filter)
+            if fallback_filter_value is not None:
+                task_query = task_query.where(
+                    AgentTask.fallback_attempted.is_(fallback_filter_value)
                 )
+                count_query = count_query.where(
+                    AgentTask.fallback_attempted.is_(fallback_filter_value)
+                )
+            run_tasks = (
+                session.execute(task_query.order_by(AgentTask.created_at.desc()).limit(50))
                 .scalars()
                 .all()
             )
-            loops_completed = session.execute(
-                select(func.count(AgentTask.id)).where(
-                    AgentTask.run_task_id == run_task_id,
-                    AgentTask.run_id == run_id,
-                )
-            ).scalar_one()
+            loops_completed = session.execute(count_query).scalar_one()
     run_max_loops = run.run_max_loops or 0
     run_is_forever = run_max_loops < 1
     loops_remaining = (
         None if run_is_forever else max(run_max_loops - loops_completed, 0)
     )
+    run_tasks_payload = [_serialize_run_task(task) for task in run_tasks]
+    if _run_wants_json():
+        return {
+            "run": {
+                "id": run.id,
+                "agent_id": run.agent_id,
+                "name": run.name,
+                "status": run.status,
+                "task_id": run.task_id,
+                "last_run_task_id": run.last_run_task_id,
+                "run_max_loops": run_max_loops,
+                "created_at": _human_time(run.created_at),
+                "last_started_at": _human_time(run.last_started_at),
+                "last_stopped_at": _human_time(run.last_stopped_at),
+                "updated_at": _human_time(run.updated_at),
+            },
+            "agent": {
+                "id": agent.id,
+                "name": agent.name,
+            },
+            "run_task_id": run_task_id,
+            "loops_completed": int(loops_completed),
+            "loops_remaining": loops_remaining,
+            "run_is_forever": run_is_forever,
+            "run_tasks": run_tasks_payload,
+            "filters": {
+                "provider": provider_filter,
+                "dispatch_status": dispatch_status_filter,
+                "fallback_attempted": (
+                    ""
+                    if fallback_filter_value is None
+                    else ("true" if fallback_filter_value else "false")
+                ),
+            },
+        }
     return render_template(
         "run_detail.html",
         run=run,
         agent=agent,
         run_task_id=run_task_id,
-        run_tasks=run_tasks,
+        run_tasks=run_tasks_payload,
         loops_completed=loops_completed,
         loops_remaining=loops_remaining,
         run_is_forever=run_is_forever,
@@ -6240,6 +7600,7 @@ def quick_task():
         summary=summary,
         page_title="Quick Node",
         active_page="quick",
+        fixed_list_page=True,
     )
 
 
@@ -6250,7 +7611,7 @@ def chat_page():
     _, summary = _agent_rollup(agents)
     models = _load_llm_models()
     mcp_servers = _load_mcp_servers()
-    threads = list_chat_threads(include_archived=True)
+    threads = list_chat_threads()
     try:
         selected_thread_id = _coerce_optional_int(
             request.args.get("thread_id"),
@@ -6262,13 +7623,20 @@ def chat_page():
     selected_thread = None
     if selected_thread_id is not None:
         selected_thread = get_chat_thread(selected_thread_id)
+    if selected_thread is not None and str(selected_thread.get("status") or "") != "active":
+        selected_thread = None
     if selected_thread is None and threads:
         selected_thread = get_chat_thread(int(threads[0]["id"]))
     rag_health, rag_collections = _chat_rag_health_payload()
+    chat_default_settings = _resolved_chat_default_settings(
+        models=models,
+        mcp_servers=mcp_servers,
+        rag_collections=rag_collections,
+    )
     return render_template(
         "chat_runtime.html",
         summary=summary,
-        page_title="Launch Chat",
+        page_title="Live Chat",
         active_page="chat",
         models=models,
         mcp_servers=mcp_servers,
@@ -6276,7 +7644,9 @@ def chat_page():
         selected_thread=selected_thread,
         rag_health=rag_health,
         rag_collections=rag_collections,
+        chat_default_settings=chat_default_settings,
         chat_settings=load_chat_runtime_settings_payload(),
+        fixed_list_page=True,
     )
 
 
@@ -6319,24 +7689,55 @@ def chat_activity():
 @bp.post("/chat/threads")
 def create_chat_thread_route():
     try:
-        title = (request.form.get("title") or "").strip() or "New chat"
-        model_id = _coerce_optional_int(
-            request.form.get("model_id"),
-            field_name="model_id",
-            minimum=1,
+        title = (request.form.get("title") or "").strip() or CHAT_DEFAULT_THREAD_TITLE
+        default_settings = load_chat_default_settings_payload()
+        default_response_complexity = normalize_chat_response_complexity(
+            default_settings.get("default_response_complexity"),
+            default=CHAT_RESPONSE_COMPLEXITY_DEFAULT,
         )
+        response_complexity = normalize_chat_response_complexity(
+            request.form.get("response_complexity"),
+            default=default_response_complexity,
+        )
+        model_id_raw = request.form.get("model_id")
+        if model_id_raw is None or not str(model_id_raw).strip():
+            default_model_id = default_settings.get("default_model_id")
+            if isinstance(default_model_id, int):
+                model_id = default_model_id
+            else:
+                model_id = resolve_default_model_id(_load_integration_settings("llm"))
+        else:
+            model_id = _coerce_optional_int(
+                model_id_raw,
+                field_name="model_id",
+                minimum=1,
+            )
+        mcp_values = request.form.getlist("mcp_server_ids")
+        if not mcp_values and request.form.get("mcp_selection_present") is None:
+            mcp_values = [
+                str(value)
+                for value in default_settings.get("default_mcp_server_ids", [])
+                if isinstance(value, int)
+            ]
         mcp_server_ids = _coerce_chat_id_list(
-            request.form.getlist("mcp_server_ids"),
+            mcp_values,
             field_name="mcp_server_id",
         )
+        rag_values = request.form.getlist("rag_collections")
+        if not rag_values and request.form.get("rag_selection_present") is None:
+            rag_values = [
+                str(value)
+                for value in default_settings.get("default_rag_collections", [])
+            ]
         rag_collections = _coerce_chat_collection_list(
-            request.form.getlist("rag_collections")
+            rag_values
         )
         thread = create_chat_thread(
             title=title,
             model_id=model_id,
             mcp_server_ids=mcp_server_ids,
             rag_collections=rag_collections,
+            response_complexity=response_complexity,
         )
     except ValueError as exc:
         flash(str(exc), "error")
@@ -6348,11 +7749,24 @@ def create_chat_thread_route():
 @bp.post("/chat/threads/<int:thread_id>/config")
 def update_chat_thread_route(thread_id: int):
     try:
-        model_id = _coerce_optional_int(
-            request.form.get("model_id"),
-            field_name="model_id",
-            minimum=1,
+        response_complexity = normalize_chat_response_complexity(
+            request.form.get("response_complexity"),
+            default=CHAT_RESPONSE_COMPLEXITY_DEFAULT,
         )
+        model_id_raw = request.form.get("model_id")
+        if model_id_raw is None:
+            existing_thread = get_chat_thread(thread_id)
+            model_id = _coerce_optional_int(
+                None if existing_thread is None else existing_thread.get("model_id"),
+                field_name="model_id",
+                minimum=1,
+            )
+        else:
+            model_id = _coerce_optional_int(
+                model_id_raw,
+                field_name="model_id",
+                minimum=1,
+            )
         mcp_server_ids = _coerce_chat_id_list(
             request.form.getlist("mcp_server_ids"),
             field_name="mcp_server_id",
@@ -6365,6 +7779,7 @@ def update_chat_thread_route(thread_id: int):
             model_id=model_id,
             mcp_server_ids=mcp_server_ids,
             rag_collections=rag_collections,
+            response_complexity=response_complexity,
         )
     except ValueError as exc:
         flash(str(exc), "error")
@@ -6578,10 +7993,13 @@ def api_chat_activity():
 @bp.post("/api/chat/threads/<int:thread_id>/turn")
 def api_chat_turn(thread_id: int):
     payload = request.get_json(silent=True) or {}
-    for key in ("model_id", "mcp_server_ids", "rag_collections"):
+    for key in ("model_id", "mcp_server_ids", "rag_collections", "response_complexity"):
         if key in payload:
             return {
-                "error": "Model, MCP, and RAG selectors are session-scoped only.",
+                "error": (
+                    "Model, response complexity, MCP, and RAG selectors "
+                    "are session-scoped only."
+                ),
                 "reason_code": CHAT_REASON_SELECTOR_SCOPE,
             }, 400
     message = str(payload.get("message") or "").strip()
@@ -6783,13 +8201,18 @@ def list_nodes():
             if task.flowchart_node_id is not None
             else None
         )
-        task_node_types[task.id] = flowchart_node_type or _flowchart_node_type_from_task_kind(
+        resolved_node_type = flowchart_node_type or _flowchart_node_type_from_task_kind(
             task.kind
         )
+        if not resolved_node_type and is_quick_rag_task_kind(task.kind):
+            resolved_node_type = FLOWCHART_NODE_TYPE_RAG
+        task_node_types[task.id] = resolved_node_type
         if task.flowchart_node_id is not None:
             task_node_names[task.id] = flowchart_node_names_by_id.get(
                 task.flowchart_node_id, f"Node {task.flowchart_node_id}"
             )
+        elif is_quick_rag_task_kind(task.kind):
+            task_node_names[task.id] = _quick_rag_task_display_name(task)
         elif is_quick_task_kind(task.kind):
             task_node_names[task.id] = "Quick node"
         else:
@@ -6812,6 +8235,10 @@ def list_nodes():
         agent_filter_options=agent_filter_options,
         node_type_options=node_type_options,
         task_status_options=task_status_options,
+        quick_rag_task_kinds=[
+            RAG_QUICK_INDEX_TASK_KIND,
+            RAG_QUICK_DELTA_TASK_KIND,
+        ],
         agent_filter=agent_filter,
         node_type_filter=node_type_filter,
         status_filter=status_filter,
@@ -6845,6 +8272,7 @@ def view_node(task_id: int):
         )
         if task is None:
             abort(404)
+        _sync_quick_rag_task_from_index_job(session, task)
         agent = None
         if task.agent_id is not None:
             agent = (
@@ -6881,6 +8309,8 @@ def view_node(task_id: int):
         task=task,
         task_output=task_output,
         is_quick_task=is_quick_task_kind(task.kind),
+        is_quick_rag_task=is_quick_rag_task_kind(task.kind),
+        quick_rag_task_context=_quick_rag_task_context(task),
         agent=agent,
         template=template,
         stage_entries=stage_entries,
@@ -6936,6 +8366,7 @@ def node_status(task_id: int):
         task = session.get(AgentTask, task_id)
         if task is None:
             abort(404)
+        _sync_quick_rag_task_from_index_job(session, task)
         return {
             "id": task.id,
             "status": task.status,
@@ -7898,6 +9329,7 @@ def view_flowchart(flowchart_id: int):
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.attachments),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -8102,6 +9534,23 @@ def view_flowchart_history_run(flowchart_id: int, run_id: int):
             )
             .all()
         )
+        node_task_ids = sorted(
+            {
+                int(node_run.agent_task_id)
+                for node_run, _node in node_run_rows
+                if node_run.agent_task_id is not None
+            }
+        )
+        node_task_map: dict[int, AgentTask] = {}
+        if node_task_ids:
+            tasks = (
+                session.execute(
+                    select(AgentTask).where(AgentTask.id.in_(node_task_ids))
+                )
+                .scalars()
+                .all()
+            )
+            node_task_map = {int(task.id): task for task in tasks}
 
     flowchart_payload = _serialize_flowchart(flowchart)
     run_payload = _serialize_flowchart_run(flowchart_run)
@@ -8115,7 +9564,10 @@ def view_flowchart_history_run(flowchart_id: int, run_id: int):
             cycle_index = 1
         node_runs_payload.append(
             {
-                **_serialize_flowchart_run_node(node_run),
+                **_serialize_flowchart_run_node(
+                    node_run,
+                    node_task_map.get(int(node_run.agent_task_id or 0)),
+                ),
                 "node_title": node.title or f"{node.node_type} node",
                 "node_type": node.node_type,
                 "cycle_index": cycle_index,
@@ -8300,6 +9752,11 @@ def delete_flowchart(flowchart_id: int):
                     flowchart_node_skills.c.flowchart_node_id.in_(node_ids)
                 )
             )
+            session.execute(
+                delete(flowchart_node_attachments).where(
+                    flowchart_node_attachments.c.flowchart_node_id.in_(node_ids)
+                )
+            )
 
         session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
         if node_ids:
@@ -8336,6 +9793,7 @@ def get_flowchart_graph(flowchart_id: int):
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.attachments),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -8383,6 +9841,8 @@ def upsert_flowchart_graph(flowchart_id: int):
     if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
         return {"error": "Graph payload must contain nodes[] and edges[] arrays."}, 400
 
+    node_skill_binding_mode = _node_skill_binding_mode()
+    node_skill_warnings: list[str] = []
     validation_errors: list[str] = []
     try:
         with session_scope() as session:
@@ -8397,6 +9857,7 @@ def upsert_flowchart_graph(flowchart_id: int):
                         selectinload(FlowchartNode.mcp_servers),
                         selectinload(FlowchartNode.scripts),
                         selectinload(FlowchartNode.skills),
+                        selectinload(FlowchartNode.attachments),
                     )
                     .where(FlowchartNode.flowchart_id == flowchart_id)
                 )
@@ -8404,6 +9865,14 @@ def upsert_flowchart_graph(flowchart_id: int):
                 .all()
             )
             existing_nodes_by_id = {node.id: node for node in existing_nodes}
+            existing_start_node = next(
+                (
+                    node
+                    for node in existing_nodes
+                    if node.node_type == FLOWCHART_NODE_TYPE_START
+                ),
+                None,
+            )
             keep_node_ids: set[int] = set()
             token_to_node_id: dict[str, int] = {}
 
@@ -8491,6 +9960,12 @@ def upsert_flowchart_graph(flowchart_id: int):
                 flowchart_node = (
                     existing_nodes_by_id.get(node_id) if node_id is not None else None
                 )
+                if (
+                    flowchart_node is None
+                    and node_type == FLOWCHART_NODE_TYPE_START
+                    and existing_start_node is not None
+                ):
+                    flowchart_node = existing_start_node
                 if flowchart_node is None:
                     flowchart_node = FlowchartNode.create(
                         session,
@@ -8596,9 +10071,74 @@ def upsert_flowchart_graph(flowchart_id: int):
                         )
                     _set_flowchart_node_scripts(session, flowchart_node.id, script_ids)
 
+                if "attachment_ids" in raw_node:
+                    attachment_ids_raw = raw_node.get("attachment_ids")
+                    if not isinstance(attachment_ids_raw, list):
+                        raise ValueError(f"nodes[{index}].attachment_ids must be an array.")
+                    attachment_ids: list[int] = []
+                    for attachment_index, attachment_id_raw in enumerate(attachment_ids_raw):
+                        attachment_id = _coerce_optional_int(
+                            attachment_id_raw,
+                            field_name=f"nodes[{index}].attachment_ids[{attachment_index}]",
+                            minimum=1,
+                        )
+                        if attachment_id is None:
+                            raise ValueError(
+                                f"nodes[{index}].attachment_ids[{attachment_index}] is invalid."
+                            )
+                        attachment_ids.append(attachment_id)
+                    if len(attachment_ids) != len(set(attachment_ids)):
+                        raise ValueError(f"nodes[{index}].attachment_ids cannot contain duplicates.")
+                    compatibility_errors = _validate_flowchart_utility_compatibility(
+                        node_type,
+                        model_id=None,
+                        attachment_ids=attachment_ids,
+                    )
+                    if compatibility_errors:
+                        raise ValueError(compatibility_errors[0])
+                    selected_attachments = (
+                        session.execute(select(Attachment).where(Attachment.id.in_(attachment_ids)))
+                        .scalars()
+                        .all()
+                    )
+                    if len(selected_attachments) != len(set(attachment_ids)):
+                        raise ValueError(f"nodes[{index}] contains unknown attachment IDs.")
+                    _set_flowchart_node_attachments(session, flowchart_node.id, attachment_ids)
+
                 if "skill_ids" in raw_node:
-                    raise ValueError(
-                        f"nodes[{index}].skill_ids is no longer writable; assign skills on the Agent."
+                    if node_skill_binding_mode == NODE_SKILL_BINDING_MODE_REJECT:
+                        raise ValueError(
+                            f"nodes[{index}].skill_ids is no longer writable; assign skills on the Agent."
+                        )
+                    skill_ids_raw = raw_node.get("skill_ids")
+                    if not isinstance(skill_ids_raw, list):
+                        raise ValueError(f"nodes[{index}].skill_ids must be an array.")
+                    skill_ids: list[int] = []
+                    for skill_index, skill_id_raw in enumerate(skill_ids_raw):
+                        skill_id = _coerce_optional_int(
+                            skill_id_raw,
+                            field_name=f"nodes[{index}].skill_ids[{skill_index}]",
+                            minimum=1,
+                        )
+                        if skill_id is None:
+                            raise ValueError(
+                                f"nodes[{index}].skill_ids[{skill_index}] is invalid."
+                            )
+                        skill_ids.append(skill_id)
+                    if len(skill_ids) != len(set(skill_ids)):
+                        raise ValueError(f"nodes[{index}].skill_ids cannot contain duplicates.")
+                    _log_node_skill_binding_deprecation_event(
+                        source="flowchart_graph_upsert",
+                        mode=node_skill_binding_mode,
+                        flowchart_id=flowchart_id,
+                        node_id=flowchart_node.id,
+                        extra={
+                            "field": f"nodes[{index}].skill_ids",
+                            "skill_id_count": len(skill_ids),
+                        },
+                    )
+                    node_skill_warnings.append(
+                        f"nodes[{index}].skill_ids was ignored; assign skills on the Agent."
                     )
 
                 keep_node_ids.add(flowchart_node.id)
@@ -8671,6 +10211,11 @@ def upsert_flowchart_graph(flowchart_id: int):
                     )
                 )
                 session.execute(
+                    delete(flowchart_node_attachments).where(
+                        flowchart_node_attachments.c.flowchart_node_id.in_(removed_node_ids)
+                    )
+                )
+                session.execute(
                     delete(FlowchartNode).where(FlowchartNode.id.in_(removed_node_ids))
                 )
 
@@ -8681,6 +10226,7 @@ def upsert_flowchart_graph(flowchart_id: int):
                         selectinload(FlowchartNode.mcp_servers),
                         selectinload(FlowchartNode.scripts),
                         selectinload(FlowchartNode.skills),
+                        selectinload(FlowchartNode.attachments),
                     )
                     .where(FlowchartNode.flowchart_id == flowchart_id)
                     .order_by(FlowchartNode.id.asc())
@@ -8721,7 +10267,13 @@ def upsert_flowchart_graph(flowchart_id: int):
             }, 400
         return {"error": str(exc)}, 400
 
-    return get_flowchart_graph(flowchart_id)
+    response_payload = get_flowchart_graph(flowchart_id)
+    if node_skill_warnings:
+        response_payload.update(
+            _node_skill_binding_deprecation_warning(mode=node_skill_binding_mode)
+        )
+        response_payload["warnings"] = sorted(set(node_skill_warnings))
+    return response_payload
 
 
 @bp.get("/flowcharts/<int:flowchart_id>/validate")
@@ -8734,6 +10286,7 @@ def validate_flowchart(flowchart_id: int):
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.attachments),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -8775,6 +10328,7 @@ def run_flowchart_route(flowchart_id: int):
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.mcp_servers),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.scripts),
                     selectinload(Flowchart.nodes).selectinload(FlowchartNode.skills),
+                    selectinload(Flowchart.nodes).selectinload(FlowchartNode.attachments),
                     selectinload(Flowchart.edges),
                 )
                 .where(Flowchart.id == flowchart_id)
@@ -9051,6 +10605,7 @@ def get_flowchart_node_utilities(flowchart_id: int, node_id: int):
                 .options(
                     selectinload(FlowchartNode.mcp_servers),
                     selectinload(FlowchartNode.scripts),
+                    selectinload(FlowchartNode.attachments),
                 )
                 .where(FlowchartNode.id == node_id)
             )
@@ -9064,6 +10619,7 @@ def get_flowchart_node_utilities(flowchart_id: int, node_id: int):
             model_id=flowchart_node.model_id,
             mcp_server_ids=[server.id for server in flowchart_node.mcp_servers],
             script_ids=[script.id for script in flowchart_node.scripts],
+            attachment_ids=[attachment.id for attachment in flowchart_node.attachments],
         )
         return {
             "node": _serialize_flowchart_node(flowchart_node),
@@ -9351,24 +10907,133 @@ def reorder_flowchart_node_scripts(flowchart_id: int, node_id: int):
 
 @bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills")
 def attach_flowchart_node_skill(flowchart_id: int, node_id: int):
+    payload = _flowchart_request_payload()
+    skill_id_raw = payload.get("skill_id") if payload else request.form.get("skill_id")
+    try:
+        skill_id = _coerce_optional_int(skill_id_raw, field_name="skill_id", minimum=1)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    if skill_id is None:
+        return {"error": "skill_id is required."}, 400
+    mode = _node_skill_binding_mode()
+    if mode == NODE_SKILL_BINDING_MODE_REJECT:
+        return _node_skill_binding_write_rejected(mode=mode)
     with session_scope() as session:
-        _assert_flowchart_node_owner(session, flowchart_id=flowchart_id, node_id=node_id)
-    return _node_skill_binding_write_rejected()
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.scripts),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        _log_node_skill_binding_deprecation_event(
+            source="flowchart_node_skill_attach",
+            mode=mode,
+            flowchart_id=flowchart_id,
+            node_id=node_id,
+            extra={"skill_id": skill_id},
+        )
+        response_payload = {
+            "node": _serialize_flowchart_node(flowchart_node),
+        }
+        response_payload.update(_node_skill_binding_deprecation_warning(mode=mode))
+        return response_payload
 
 
 @bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills/<int:skill_id>/delete")
 def detach_flowchart_node_skill(flowchart_id: int, node_id: int, skill_id: int):
-    del skill_id
+    mode = _node_skill_binding_mode()
+    if mode == NODE_SKILL_BINDING_MODE_REJECT:
+        return _node_skill_binding_write_rejected(mode=mode)
     with session_scope() as session:
-        _assert_flowchart_node_owner(session, flowchart_id=flowchart_id, node_id=node_id)
-    return _node_skill_binding_write_rejected()
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.scripts),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        _log_node_skill_binding_deprecation_event(
+            source="flowchart_node_skill_detach",
+            mode=mode,
+            flowchart_id=flowchart_id,
+            node_id=node_id,
+            extra={"skill_id": skill_id},
+        )
+        response_payload = {
+            "node": _serialize_flowchart_node(flowchart_node),
+        }
+        response_payload.update(_node_skill_binding_deprecation_warning(mode=mode))
+        return response_payload
 
 
 @bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills/reorder")
 def reorder_flowchart_node_skills(flowchart_id: int, node_id: int):
+    payload = _flowchart_request_payload()
+    skill_ids_raw = payload.get("skill_ids")
+    if skill_ids_raw is None:
+        skill_ids_raw = [value.strip() for value in request.form.getlist("skill_ids")]
+    if not isinstance(skill_ids_raw, list):
+        return {"error": "skill_ids must be an array."}, 400
+    skill_ids: list[int] = []
+    for index, skill_id_raw in enumerate(skill_ids_raw):
+        try:
+            skill_id = _coerce_optional_int(
+                skill_id_raw,
+                field_name=f"skill_ids[{index}]",
+                minimum=1,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        if skill_id is None:
+            return {"error": f"skill_ids[{index}] is invalid."}, 400
+        skill_ids.append(skill_id)
+    if len(skill_ids) != len(set(skill_ids)):
+        return {"error": "skill_ids cannot contain duplicates."}, 400
+    mode = _node_skill_binding_mode()
+    if mode == NODE_SKILL_BINDING_MODE_REJECT:
+        return _node_skill_binding_write_rejected(mode=mode)
     with session_scope() as session:
-        _assert_flowchart_node_owner(session, flowchart_id=flowchart_id, node_id=node_id)
-    return _node_skill_binding_write_rejected()
+        flowchart_node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.scripts),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
+            abort(404)
+        _log_node_skill_binding_deprecation_event(
+            source="flowchart_node_skill_reorder",
+            mode=mode,
+            flowchart_id=flowchart_id,
+            node_id=node_id,
+            extra={"skill_id_count": len(skill_ids)},
+        )
+        response_payload = {
+            "node": _serialize_flowchart_node(flowchart_node),
+        }
+        response_payload.update(_node_skill_binding_deprecation_warning(mode=mode))
+        return response_payload
 
 
 @bp.get("/mcps")
@@ -9966,6 +11631,8 @@ def list_skills():
                 "display_name": skill.display_name,
                 "description": skill.description or "",
                 "status": skill.status,
+                "source_type": skill.source_type,
+                "is_git_read_only": _is_git_based_skill(skill),
                 "version_count": len(skill.versions or []),
                 "latest_version": latest_version.version if latest_version is not None else None,
                 "binding_count": len(skill.agents or []),
@@ -9987,6 +11654,8 @@ def new_skill():
     return render_template(
         "skill_new.html",
         skill_status_options=SKILL_STATUS_OPTIONS,
+        upload_conflict_options=["ask", "replace", "keep_both", "skip"],
+        max_upload_bytes=SKILL_UPLOAD_MAX_FILE_BYTES,
         page_title="Create Skill",
         active_page="skills",
     )
@@ -10007,6 +11676,10 @@ def create_skill():
     if parse_error:
         flash(parse_error, "error")
         return redirect(url_for("agents.new_skill"))
+    upload_entries, upload_error = _collect_skill_upload_entries()
+    if upload_error:
+        flash(upload_error, "error")
+        return redirect(url_for("agents.new_skill"))
 
     if not skill_md.strip():
         skill_md = _default_skill_markdown(
@@ -10017,7 +11690,26 @@ def create_skill():
             status=status or SKILL_STATUS_ACTIVE,
         )
 
-    files = [("SKILL.md", skill_md), *extra_files]
+    draft_file_map: dict[str, str] = {"SKILL.md": skill_md}
+    for raw_path, content in extra_files:
+        normalized_path = _normalize_skill_relative_path(raw_path)
+        if not normalized_path:
+            flash("Extra file paths must be relative and path-safe.", "error")
+            return redirect(url_for("agents.new_skill"))
+        path_error = _skill_upload_path_error(normalized_path)
+        if path_error:
+            flash(path_error, "error")
+            return redirect(url_for("agents.new_skill"))
+        if normalized_path in draft_file_map:
+            flash(f"Duplicate file path in extra files: {normalized_path}", "error")
+            return redirect(url_for("agents.new_skill"))
+        draft_file_map[normalized_path] = content
+    draft_file_map, conflict_error = _apply_skill_upload_conflicts(draft_file_map, upload_entries)
+    if conflict_error:
+        flash(conflict_error, "error")
+        return redirect(url_for("agents.new_skill"))
+
+    files = list(draft_file_map.items())
     metadata_overrides = {
         "name": name,
         "display_name": display_name,
@@ -10194,11 +11886,8 @@ def view_skill(skill_id: int):
                     "path": entry.path,
                     "size_bytes": entry.size_bytes,
                     "checksum": entry.checksum,
-                    "content_preview": (
-                        entry.content[:5000] + "\n... (truncated)"
-                        if len(entry.content or "") > 5000
-                        else (entry.content or "")
-                    ),
+                    "is_binary": is_binary_skill_content(entry.content or ""),
+                    "content_preview": _skill_file_preview_content(entry.content or ""),
                 }
                 for entry in sorted(list(selected_version.files or []), key=lambda item: item.path)
             ],
@@ -10212,6 +11901,7 @@ def view_skill(skill_id: int):
         selected_version=selected_version,
         preview=preview,
         attached_agents=attached_agents,
+        skill_is_git_read_only=_is_git_based_skill(skill),
         human_time=_human_time,
         page_title=f"Skill - {skill.display_name}",
         active_page="skills",
@@ -10232,13 +11922,31 @@ def edit_skill(skill_id: int):
         )
         if skill is None:
             abort(404)
+        if _is_git_based_skill(skill):
+            flash("Git-based skills are read-only in Studio. Edit the source repo instead.", "info")
+            return redirect(url_for("agents.view_skill", skill_id=skill_id))
         latest_version = _latest_skill_version(skill)
+        latest_non_skill_files = []
+        if latest_version is not None:
+            for entry in sorted(list(latest_version.files or []), key=lambda item: item.path):
+                if entry.path == "SKILL.md":
+                    continue
+                latest_non_skill_files.append(
+                    {
+                        "path": entry.path,
+                        "size_bytes": entry.size_bytes,
+                        "is_binary": is_binary_skill_content(entry.content or ""),
+                    }
+                )
     return render_template(
         "skill_edit.html",
         skill=skill,
         latest_version=latest_version,
         latest_skill_md=_skill_file_content(latest_version, "SKILL.md"),
+        latest_non_skill_files=latest_non_skill_files,
         skill_status_options=SKILL_STATUS_OPTIONS,
+        upload_conflict_options=["ask", "replace", "keep_both", "skip"],
+        max_upload_bytes=SKILL_UPLOAD_MAX_FILE_BYTES,
         page_title=f"Edit Skill - {skill.display_name}",
         active_page="skills",
     )
@@ -10251,6 +11959,7 @@ def update_skill(skill_id: int):
     status = request.form.get("status", "").strip().lower()
     new_version = request.form.get("new_version", "").strip()
     new_skill_md = request.form.get("new_skill_md", "")
+    existing_files_json = request.form.get("existing_files_json", "")
     extra_files_json = request.form.get("extra_files_json", "")
     source_ref = request.form.get("source_ref", "").strip()
 
@@ -10261,6 +11970,10 @@ def update_skill(skill_id: int):
     extra_files, parse_error = _parse_skill_extra_files(extra_files_json)
     if parse_error:
         flash(parse_error, "error")
+        return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+    upload_entries, upload_error = _collect_skill_upload_entries()
+    if upload_error:
+        flash(upload_error, "error")
         return redirect(url_for("agents.edit_skill", skill_id=skill_id))
 
     try:
@@ -10276,6 +11989,9 @@ def update_skill(skill_id: int):
             )
             if skill is None:
                 abort(404)
+            if _is_git_based_skill(skill):
+                flash("Git-based skills are read-only in Studio. Edit the source repo instead.", "error")
+                return redirect(url_for("agents.view_skill", skill_id=skill_id))
 
             if not display_name:
                 flash("Display name is required.", "error")
@@ -10284,21 +12000,89 @@ def update_skill(skill_id: int):
                 flash("Description is required.", "error")
                 return redirect(url_for("agents.edit_skill", skill_id=skill_id))
 
-            skill.display_name = display_name
-            skill.description = description
-            skill.status = status
-            skill.updated_by = None
+            latest_version = _latest_skill_version(skill)
+            latest_skill_md = _skill_file_content(latest_version, "SKILL.md")
+            latest_non_skill_map: dict[str, str] = {}
+            if latest_version is not None:
+                latest_non_skill_map = {
+                    str(entry.path): str(entry.content or "")
+                    for entry in sorted(list(latest_version.files or []), key=lambda item: item.path)
+                    if str(entry.path) != "SKILL.md"
+                }
+            existing_actions, existing_error = _parse_skill_existing_files_draft(
+                existing_files_json,
+                existing_paths=set(latest_non_skill_map.keys()),
+            )
+            if existing_error:
+                flash(existing_error, "error")
+                return redirect(url_for("agents.edit_skill", skill_id=skill_id))
 
+            draft_non_skill_map: dict[str, str] = {}
+            occupied_paths: set[str] = set()
+            existing_changed = False
+            for action in existing_actions:
+                original_path = str(action["original_path"])
+                delete_flag = bool(action["delete"])
+                if delete_flag:
+                    existing_changed = True
+                    continue
+                target_path = str(action["path"])
+                if target_path in occupied_paths:
+                    flash(f"Duplicate target path in existing file draft: {target_path}", "error")
+                    return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+                if target_path != original_path:
+                    existing_changed = True
+                    rename_path_error = _skill_upload_path_error(target_path)
+                    if rename_path_error:
+                        flash(rename_path_error, "error")
+                        return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+                occupied_paths.add(target_path)
+                draft_non_skill_map[target_path] = latest_non_skill_map[original_path]
+
+            legacy_extra_changed = False
+            for raw_path, content in extra_files:
+                normalized_path = _normalize_skill_relative_path(raw_path)
+                if not normalized_path:
+                    flash("Extra file paths must be relative and path-safe.", "error")
+                    return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+                path_error = _skill_upload_path_error(normalized_path)
+                if path_error:
+                    flash(path_error, "error")
+                    return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+                if normalized_path in draft_non_skill_map:
+                    flash(f"Duplicate file path: {normalized_path}", "error")
+                    return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+                legacy_extra_changed = True
+                draft_non_skill_map[normalized_path] = content
+
+            pre_upload_map = dict(draft_non_skill_map)
+            draft_non_skill_map, conflict_error = _apply_skill_upload_conflicts(
+                draft_non_skill_map,
+                upload_entries,
+            )
+            if conflict_error:
+                flash(conflict_error, "error")
+                return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+            upload_changed = draft_non_skill_map != pre_upload_map
+
+            staged_skill_md = new_skill_md
             if new_version:
-                if not new_skill_md.strip():
-                    new_skill_md = _default_skill_markdown(
-                        name=skill.name,
-                        display_name=display_name,
-                        description=description,
-                        version=new_version,
-                        status=status,
+                if not staged_skill_md.strip():
+                    staged_skill_md = (
+                        latest_skill_md
+                        or _default_skill_markdown(
+                            name=skill.name,
+                            display_name=display_name,
+                            description=description,
+                            version=new_version,
+                            status=status,
+                        )
                     )
-                files = [("SKILL.md", new_skill_md), *extra_files]
+                skill.display_name = display_name
+                skill.description = description
+                skill.status = status
+                skill.updated_by = None
+                files = [("SKILL.md", staged_skill_md), *list(draft_non_skill_map.items())]
                 package = build_skill_package(
                     files,
                     metadata_overrides={
@@ -10312,10 +12096,39 @@ def update_skill(skill_id: int):
                 import_skill_package_to_db(
                     session,
                     package,
-                    source_type="ui",
-                    source_ref=source_ref or f"web:skill:{skill_id}",
+                    source_type=(
+                        skill.source_type
+                        if (skill.source_type or "").strip().lower() in SKILL_MUTABLE_SOURCE_TYPES
+                        else "ui"
+                    ),
+                    source_ref=source_ref or skill.source_ref or f"web:skill:{skill_id}",
                     actor=None,
                 )
+            else:
+                staged_skill_md = staged_skill_md or latest_skill_md
+                changed_non_skill_paths = set(draft_non_skill_map.keys()) != set(latest_non_skill_map.keys())
+                changed_non_skill_content = any(
+                    draft_non_skill_map.get(path) != latest_non_skill_map.get(path)
+                    for path in set(draft_non_skill_map.keys()) | set(latest_non_skill_map.keys())
+                )
+                has_file_changes = (
+                    existing_changed
+                    or changed_non_skill_paths
+                    or changed_non_skill_content
+                    or upload_changed
+                    or legacy_extra_changed
+                    or (staged_skill_md != latest_skill_md)
+                )
+                if has_file_changes:
+                    flash(
+                        "New version is required to publish SKILL.md or file changes.",
+                        "error",
+                    )
+                    return redirect(url_for("agents.edit_skill", skill_id=skill_id))
+                skill.display_name = display_name
+                skill.description = description
+                skill.status = status
+                skill.updated_by = None
     except SkillPackageValidationError as exc:
         errors = format_validation_errors(exc.errors)
         message = str(errors[0].get("message") or "Skill package validation failed.")
@@ -10371,6 +12184,9 @@ def delete_skill(skill_id: int):
         )
         if skill is None:
             abort(404)
+        if _is_git_based_skill(skill):
+            flash("Git-based skills are read-only in Studio and cannot be deleted here.", "error")
+            return redirect(url_for("agents.view_skill", skill_id=skill_id))
         attached_nodes = list(skill.flowchart_nodes or [])
         attached_agents = list(skill.agents or [])
         if attached_nodes:
@@ -10409,6 +12225,7 @@ def view_attachment(attachment_id: int):
                 .options(
                     selectinload(Attachment.tasks),
                     selectinload(Attachment.templates),
+                    selectinload(Attachment.flowchart_nodes),
                 )
                 .where(Attachment.id == attachment_id)
             )
@@ -10419,12 +12236,19 @@ def view_attachment(attachment_id: int):
             abort(404)
         tasks = list(attachment.tasks)
         templates = list(attachment.templates)
+        flowchart_nodes = list(attachment.flowchart_nodes)
 
         tasks.sort(key=lambda item: item.created_at or datetime.min, reverse=True)
         templates.sort(key=lambda item: item.created_at or datetime.min, reverse=True)
+        flowchart_nodes.sort(key=lambda item: item.updated_at or datetime.min, reverse=True)
 
         agent_ids = {task.agent_id for task in tasks if task.agent_id is not None}
         template_ids = {task.task_template_id for task in tasks if task.task_template_id}
+        flowchart_ids = {
+            int(node.flowchart_id)
+            for node in flowchart_nodes
+            if node.flowchart_id is not None
+        }
 
         agents_by_id: dict[int, str] = {}
         if agent_ids:
@@ -10442,6 +12266,15 @@ def view_attachment(attachment_id: int):
             ).all()
             templates_by_id = {row[0]: row[1] for row in rows}
 
+        flowcharts_by_id: dict[int, str] = {}
+        if flowchart_ids:
+            rows = session.execute(
+                select(Flowchart.id, Flowchart.name).where(
+                    Flowchart.id.in_(flowchart_ids)
+                )
+            ).all()
+            flowcharts_by_id = {row[0]: row[1] for row in rows}
+
     is_image_attachment = _is_image_attachment(attachment)
     attachment_preview_url = None
     if is_image_attachment and attachment.file_path:
@@ -10456,8 +12289,10 @@ def view_attachment(attachment_id: int):
         is_image_attachment=is_image_attachment,
         tasks=tasks,
         templates=templates,
+        flowchart_nodes=flowchart_nodes,
         agents_by_id=agents_by_id,
         templates_by_id=templates_by_id,
+        flowcharts_by_id=flowcharts_by_id,
         human_time=_human_time,
         format_bytes=_format_bytes,
         page_title=f"Attachment - {attachment.file_name}",
@@ -11261,7 +13096,7 @@ def chroma_collections():
     chroma_settings = _resolved_chroma_settings()
     if not _chroma_connected(chroma_settings):
         flash("Configure ChromaDB host and port in Integrations first.", "error")
-        return redirect(url_for("agents.settings_integrations"))
+        return redirect(url_for("agents.settings_integrations_chroma"))
 
     client, host, port, normalized_hint, error = _chroma_http_client(chroma_settings)
     collections: list[dict[str, object]] = []
@@ -11338,7 +13173,7 @@ def chroma_collection_detail():
     chroma_settings = _resolved_chroma_settings()
     if not _chroma_connected(chroma_settings):
         flash("Configure ChromaDB host and port in Integrations first.", "error")
-        return redirect(url_for("agents.settings_integrations"))
+        return redirect(url_for("agents.settings_integrations_chroma"))
 
     client, host, port, normalized_hint, error = _chroma_http_client(chroma_settings)
     if error or client is None:
@@ -11385,7 +13220,7 @@ def delete_chroma_collection():
     chroma_settings = _resolved_chroma_settings()
     if not _chroma_connected(chroma_settings):
         flash("Configure ChromaDB host and port in Integrations first.", "error")
-        return redirect(url_for("agents.settings_integrations"))
+        return redirect(url_for("agents.settings_integrations_chroma"))
 
     client, host, port, _, error = _chroma_http_client(chroma_settings)
     if error or client is None:
@@ -11563,9 +13398,6 @@ def settings():
         summary=summary,
         page_title="Settings",
         active_page="settings_overview",
-        settings_title="Settings",
-        settings_subtitle="Choose a section to configure.",
-        settings_section="overview",
     )
 
 
@@ -11728,14 +13560,44 @@ def settings_core():
         summary=summary,
         page_title="Settings - Core",
         active_page="settings_core",
-        settings_title="Settings",
-        settings_subtitle="Core Configuration",
-        settings_section="core",
     )
 
 
 @bp.get("/settings/provider")
+@bp.get("/settings/provider/controls")
 def settings_provider():
+    return _render_settings_provider_page("controls")
+
+
+PROVIDER_SETTINGS_SECTIONS: dict[str, dict[str, str]] = {
+    "controls": {
+        "label": "Controls",
+        "endpoint": "agents.settings_provider",
+    },
+    "codex": {
+        "label": "Codex Auth",
+        "endpoint": "agents.settings_provider_codex",
+    },
+    "gemini": {
+        "label": "Gemini Auth",
+        "endpoint": "agents.settings_provider_gemini",
+    },
+    "claude": {
+        "label": "Claude Auth",
+        "endpoint": "agents.settings_provider_claude",
+    },
+    "vllm_local": {
+        "label": "vLLM Local",
+        "endpoint": "agents.settings_provider_vllm_local",
+    },
+    "vllm_remote": {
+        "label": "vLLM Remote",
+        "endpoint": "agents.settings_provider_vllm_remote",
+    },
+}
+
+
+def _settings_provider_context() -> dict[str, object]:
     summary = _settings_summary()
     llm_settings = _load_integration_settings("llm")
     enabled_providers = resolve_enabled_llm_providers(llm_settings)
@@ -11760,23 +13622,55 @@ def settings_provider():
                 "is_default": provider == provider_summary["provider"],
             }
         )
+    return {
+        "provider_summary": provider_summary,
+        "provider_details": provider_details,
+        "default_model_summary": default_model_summary,
+        "codex_settings": codex_settings,
+        "gemini_settings": gemini_settings,
+        "claude_settings": claude_settings,
+        "vllm_local_settings": vllm_local_settings,
+        "vllm_remote_settings": vllm_remote_settings,
+        "summary": summary,
+        "active_page": "settings_provider",
+    }
+
+
+def _render_settings_provider_page(section: str):
+    section_meta = PROVIDER_SETTINGS_SECTIONS.get(section)
+    if section_meta is None:
+        abort(404)
     return render_template(
         "settings_provider.html",
-        provider_summary=provider_summary,
-        provider_details=provider_details,
-        default_model_summary=default_model_summary,
-        codex_settings=codex_settings,
-        gemini_settings=gemini_settings,
-        claude_settings=claude_settings,
-        vllm_local_settings=vllm_local_settings,
-        vllm_remote_settings=vllm_remote_settings,
-        summary=summary,
-        page_title="Settings - Provider",
-        active_page="settings_provider",
-        settings_title="Settings",
-        settings_subtitle="Provider Defaults & Auth",
-        settings_section="provider",
+        provider_section=section,
+        page_title=f"Settings - Providers - {section_meta['label']}",
+        **_settings_provider_context(),
     )
+
+
+@bp.get("/settings/provider/codex")
+def settings_provider_codex():
+    return _render_settings_provider_page("codex")
+
+
+@bp.get("/settings/provider/gemini")
+def settings_provider_gemini():
+    return _render_settings_provider_page("gemini")
+
+
+@bp.get("/settings/provider/claude")
+def settings_provider_claude():
+    return _render_settings_provider_page("claude")
+
+
+@bp.get("/settings/provider/vllm-local")
+def settings_provider_vllm_local():
+    return _render_settings_provider_page("vllm_local")
+
+
+@bp.get("/settings/provider/vllm-remote")
+def settings_provider_vllm_remote():
+    return _render_settings_provider_page("vllm_remote")
 
 
 @bp.post("/settings/provider")
@@ -11811,7 +13705,7 @@ def update_codex_settings():
     }
     _save_integration_settings("llm", payload)
     flash("Codex auth settings updated.", "success")
-    return redirect(url_for("agents.settings_provider"))
+    return redirect(url_for("agents.settings_provider_codex"))
 
 
 @bp.post("/settings/provider/gemini")
@@ -11822,7 +13716,7 @@ def update_gemini_settings():
     }
     _save_integration_settings("llm", payload)
     flash("Gemini auth settings updated.", "success")
-    return redirect(url_for("agents.settings_provider"))
+    return redirect(url_for("agents.settings_provider_gemini"))
 
 
 @bp.post("/settings/provider/claude")
@@ -11833,7 +13727,7 @@ def update_claude_settings():
     }
     _save_integration_settings("llm", payload)
     flash("Claude auth settings updated.", "success")
-    return redirect(url_for("agents.settings_provider"))
+    return redirect(url_for("agents.settings_provider_claude"))
 
 
 @bp.post("/settings/provider/vllm-local")
@@ -11843,16 +13737,250 @@ def update_vllm_local_settings():
     local_model_clean = local_model.strip()
     if local_model_clean and local_model_clean not in discovered_local_values:
         flash("vLLM local model must be selected from discovered local models.", "error")
-        return redirect(url_for("agents.settings_provider"))
+        return redirect(url_for("agents.settings_provider_vllm_local"))
     payload = {
         "vllm_local_model": local_model_clean,
         # Local provider runs in-container through CLI; clear deprecated HTTP fields.
         "vllm_local_base_url": "",
         "vllm_local_api_key": "",
     }
+    if "vllm_local_hf_token" in request.form:
+        payload["vllm_local_hf_token"] = request.form.get("vllm_local_hf_token", "")
     _save_integration_settings("llm", payload)
     flash("vLLM Local settings updated.", "success")
-    return redirect(url_for("agents.settings_provider"))
+    return redirect(url_for("agents.settings_provider_vllm_local"))
+
+
+@bp.post("/settings/provider/vllm-local/qwen/start")
+def start_vllm_local_qwen_download():
+    llm_settings = _load_integration_settings("llm")
+    huggingface_token = _vllm_local_huggingface_token(llm_settings)
+    if _qwen_model_downloaded():
+        return {
+            "ok": False,
+            "error": "Qwen model is already downloaded. Use remove to delete it first.",
+        }, 409
+
+    job, created = _start_huggingface_download_job(
+        kind="qwen",
+        model_id=_qwen_model_id(),
+        model_dir_name=_qwen_model_dir_name(),
+        token=huggingface_token,
+        model_container_path=_qwen_model_container_path(),
+    )
+    return {
+        "ok": True,
+        "created": created,
+        "message": "Qwen download started." if created else "Qwen download already in progress.",
+        "download_job": job,
+        "status_url": url_for(
+            "agents.vllm_local_huggingface_download_status",
+            job_id=str(job.get("id") or ""),
+        ),
+    }, 202
+
+
+@bp.post("/settings/provider/vllm-local/huggingface/start")
+def start_vllm_local_huggingface_download():
+    llm_settings = _load_integration_settings("llm")
+    huggingface_token = _vllm_local_huggingface_token(llm_settings)
+    if not huggingface_token:
+        return {
+            "ok": False,
+            "error": "Set and save a HuggingFace token before downloading arbitrary models.",
+        }, 400
+
+    model_id = _normalize_huggingface_repo_id(
+        request.form.get("vllm_local_hf_model_id", "")
+    )
+    if not model_id:
+        return {
+            "ok": False,
+            "error": "HuggingFace model ID must use owner/model format.",
+        }, 400
+
+    model_dir_name = _huggingface_model_dir_name(model_id)
+    model_directory = _vllm_local_model_directory(model_dir_name)
+    if _model_directory_has_downloaded_contents(model_directory):
+        model_container_path = _vllm_local_model_container_path(model_dir_name)
+        return {
+            "ok": False,
+            "error": f"{model_id} already exists at {model_directory} ({model_container_path}).",
+        }, 409
+
+    job, created = _start_huggingface_download_job(
+        kind="huggingface",
+        model_id=model_id,
+        model_dir_name=model_dir_name,
+        token=huggingface_token,
+        model_container_path=_vllm_local_model_container_path(model_dir_name),
+    )
+    return {
+        "ok": True,
+        "created": created,
+        "message": (
+            f"{model_id} download started."
+            if created
+            else f"{model_id} download already in progress."
+        ),
+        "download_job": job,
+        "status_url": url_for(
+            "agents.vllm_local_huggingface_download_status",
+            job_id=str(job.get("id") or ""),
+        ),
+    }, 202
+
+
+@bp.get("/settings/provider/vllm-local/downloads/<job_id>")
+def vllm_local_huggingface_download_status(job_id: str):
+    job = _get_huggingface_download_job(job_id.strip())
+    if job is None:
+        abort(404)
+    return {"download_job": job}
+
+
+@bp.post("/settings/provider/vllm-local/qwen")
+def toggle_vllm_local_qwen_model():
+    llm_settings = _load_integration_settings("llm")
+    huggingface_token = _vllm_local_huggingface_token(llm_settings)
+    action = (request.form.get("qwen_action") or "").strip().lower()
+    if action not in {"download", "remove"}:
+        flash("Unknown Qwen action.", "error")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+    if action == "download":
+        if _qwen_model_downloaded():
+            flash("Qwen model is already downloaded.", "info")
+            return redirect(url_for("agents.settings_integrations_huggingface"))
+        try:
+            job, created = _start_huggingface_download_job(
+                kind="qwen",
+                model_id=_qwen_model_id(),
+                model_dir_name=_qwen_model_dir_name(),
+                token=huggingface_token,
+                model_container_path=_qwen_model_container_path(),
+            )
+        except Exception:
+            logger.exception("Failed to queue Qwen download.")
+            flash("Failed to queue Qwen download.", "error")
+        else:
+            if created:
+                flash(
+                    f"Qwen download queued in background (job {job.get('id')}).",
+                    "success",
+                )
+            else:
+                flash("Qwen download is already in progress.", "info")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    try:
+        removed = _remove_qwen_model_directory()
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+    except OSError as exc:
+        logger.exception("Failed to remove Qwen directory.")
+        flash(f"Failed to remove Qwen model files: {exc}", "error")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    if removed:
+        configured_model = (llm_settings.get("vllm_local_model") or "").strip()
+        if configured_model in {str(_qwen_model_directory()), _qwen_model_container_path()}:
+            _save_integration_settings("llm", {"vllm_local_model": ""})
+        flash("Qwen model removed.", "success")
+    else:
+        flash("Qwen model directory is already absent.", "info")
+    return redirect(url_for("agents.settings_integrations_huggingface"))
+
+
+@bp.post("/settings/provider/vllm-local/huggingface")
+def download_vllm_local_huggingface_model():
+    llm_settings = _load_integration_settings("llm")
+    huggingface_token = _vllm_local_huggingface_token(llm_settings)
+    if not huggingface_token:
+        flash(
+            "Set and save a HuggingFace token before downloading arbitrary HuggingFace models.",
+            "error",
+        )
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    model_id = _normalize_huggingface_repo_id(
+        request.form.get("vllm_local_hf_model_id", "")
+    )
+    if not model_id:
+        flash("HuggingFace model ID must use owner/model format.", "error")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    model_dir_name = _huggingface_model_dir_name(model_id)
+    model_directory = _vllm_local_model_directory(model_dir_name)
+    model_container_path = _vllm_local_model_container_path(model_dir_name)
+    if _model_directory_has_downloaded_contents(model_directory):
+        flash(
+            f"{model_id} already exists at {model_directory} ({model_container_path}).",
+            "info",
+        )
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    try:
+        job, created = _start_huggingface_download_job(
+            kind="huggingface",
+            model_id=model_id,
+            model_dir_name=model_dir_name,
+            token=huggingface_token,
+            model_container_path=model_container_path,
+        )
+    except Exception:
+        logger.exception("Failed to queue HuggingFace model download.")
+        flash("Failed to queue HuggingFace model download.", "error")
+    else:
+        if created:
+            flash(f"{model_id} download queued in background (job {job.get('id')}).", "success")
+        else:
+            flash(f"{model_id} download is already in progress.", "info")
+    return redirect(url_for("agents.settings_integrations_huggingface"))
+
+
+@bp.post("/settings/provider/vllm-local/huggingface/delete")
+def delete_vllm_local_huggingface_model():
+    model_dir_name = _normalize_vllm_local_model_dir_name(
+        request.form.get("model_dir_name")
+    )
+    if not model_dir_name:
+        flash("Model directory name is required.", "error")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    model_entry = _find_downloaded_vllm_local_model(model_dir_name)
+    if model_entry is None:
+        flash("Model directory is already absent.", "info")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    try:
+        removed = _remove_vllm_local_model_directory(model_dir_name)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+    except OSError as exc:
+        logger.exception("Failed to remove HuggingFace model directory.")
+        flash(f"Failed to remove downloaded model files: {exc}", "error")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    if not removed:
+        flash("Model directory is already absent.", "info")
+        return redirect(url_for("agents.settings_integrations_huggingface"))
+
+    llm_settings = _load_integration_settings("llm")
+    configured_model = (llm_settings.get("vllm_local_model") or "").strip()
+    configured_matches = {
+        str(model_entry.get("value") or "").strip(),
+        str(model_entry.get("target_dir") or "").strip(),
+        str(model_entry.get("container_path") or "").strip(),
+    }
+    configured_matches.discard("")
+    if configured_model and configured_model in configured_matches:
+        _save_integration_settings("llm", {"vllm_local_model": ""})
+
+    label = str(model_entry.get("label") or model_dir_name).strip() or model_dir_name
+    flash(f"Removed downloaded model: {label}.", "success")
+    return redirect(url_for("agents.settings_integrations_huggingface"))
 
 
 @bp.post("/settings/provider/vllm-remote")
@@ -11869,7 +13997,7 @@ def update_vllm_remote_settings():
     }
     _save_integration_settings("llm", payload)
     flash("vLLM Remote settings updated.", "success")
-    return redirect(url_for("agents.settings_provider"))
+    return redirect(url_for("agents.settings_provider_vllm_remote"))
 
 
 @bp.get("/settings/celery")
@@ -11888,14 +14016,75 @@ def settings_celery():
         summary=summary,
         page_title="Settings - Celery",
         active_page="settings_celery",
-        settings_title="Settings",
-        settings_subtitle="Celery Configuration",
-        settings_section="celery",
     )
 
 
 @bp.get("/settings/runtime")
+@bp.get("/settings/runtime/node")
 def settings_runtime():
+    return _render_settings_runtime_page("node")
+
+
+RUNTIME_SETTINGS_SECTIONS: dict[str, dict[str, str]] = {
+    "node": {
+        "label": "Node Runtime",
+        "endpoint": "agents.settings_runtime",
+    },
+    "rag": {
+        "label": "RAG Runtime",
+        "endpoint": "agents.settings_runtime_rag",
+    },
+    "chat": {
+        "label": "Chat Runtime",
+        "endpoint": "agents.settings_runtime_chat",
+    },
+}
+
+
+def _node_executor_settings_options() -> dict[str, list[dict[str, str]]]:
+    provider_options = [
+        {"value": "workspace", "label": "Workspace"},
+        {"value": "docker", "label": "Docker"},
+        {"value": "kubernetes", "label": "Kubernetes"},
+    ]
+    fallback_provider_options = [
+        {"value": "workspace", "label": "Workspace"}
+    ]
+    docker_pull_policy_options = [
+        {"value": "always", "label": "Always"},
+        {"value": "if_not_present", "label": "If Not Present"},
+        {"value": "never", "label": "Never"},
+    ]
+    docker_api_stall_seconds_options = [
+        {"value": "5", "label": "5 seconds"},
+        {"value": "10", "label": "10 seconds"},
+        {"value": "15", "label": "15 seconds"},
+    ]
+    return {
+        "provider_options": [
+            option
+            for option in provider_options
+            if option["value"] in set(NODE_EXECUTOR_PROVIDER_CHOICES)
+        ],
+        "fallback_provider_options": [
+            option
+            for option in fallback_provider_options
+            if option["value"] in set(NODE_EXECUTOR_FALLBACK_PROVIDER_CHOICES)
+        ],
+        "docker_pull_policy_options": [
+            option
+            for option in docker_pull_policy_options
+            if option["value"] in set(NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES)
+        ],
+        "docker_api_stall_seconds_options": [
+            option
+            for option in docker_api_stall_seconds_options
+            if option["value"] in set(NODE_EXECUTOR_DOCKER_API_STALL_SECONDS_CHOICES)
+        ],
+    }
+
+
+def _settings_runtime_context() -> dict[str, object]:
     summary = _settings_summary()
     config = {
         "AGENT_POLL_SECONDS": Config.AGENT_POLL_SECONDS,
@@ -11907,33 +14096,165 @@ def settings_runtime():
         settings=llm_settings, enabled_providers=enabled_providers
     )
     instruction_runtime_flags = _instruction_runtime_flags(llm_settings)
+    node_skill_binding_mode = _node_skill_binding_mode(llm_settings)
+    node_executor_settings = load_node_executor_settings()
+    node_executor_options = _node_executor_settings_options()
+    node_skill_binding_modes = [
+        {
+            "value": NODE_SKILL_BINDING_MODE_WARN,
+            "label": "warn",
+            "description": "Accept legacy node skill payloads, ignore writes, and emit warnings.",
+        },
+        {
+            "value": NODE_SKILL_BINDING_MODE_REJECT,
+            "label": "reject",
+            "description": "Reject legacy node skill payloads with validation errors.",
+        },
+    ]
+    rag_settings = _effective_rag_settings()
+    openai_auth_configured = bool((llm_settings.get("codex_api_key") or "").strip())
+    gemini_auth_configured = bool((llm_settings.get("gemini_api_key") or "").strip())
+    rag_chroma_ready = rag_settings.get("db_provider") != "chroma" or _chroma_connected(
+        _resolved_chroma_settings()
+    )
+    return {
+        "config": config,
+        "llm_config": llm_config,
+        "instruction_runtime_flags": instruction_runtime_flags,
+        "node_skill_binding_mode": node_skill_binding_mode,
+        "node_skill_binding_modes": node_skill_binding_modes,
+        "node_executor_settings": node_executor_settings,
+        "node_executor_options": node_executor_options,
+        "rag_settings": rag_settings,
+        "rag_chroma_ready": rag_chroma_ready,
+        "rag_db_provider_choices": RAG_DB_PROVIDER_CHOICES,
+        "rag_model_provider_choices": RAG_MODEL_PROVIDER_CHOICES,
+        "rag_openai_embed_model_options": _rag_model_option_entries(
+            RAG_OPENAI_EMBED_MODEL_OPTIONS,
+            rag_settings.get("openai_embed_model"),
+        ),
+        "rag_gemini_embed_model_options": _rag_model_option_entries(
+            RAG_GEMINI_EMBED_MODEL_OPTIONS,
+            rag_settings.get("gemini_embed_model"),
+        ),
+        "rag_openai_chat_model_options": _rag_model_option_entries(
+            RAG_OPENAI_CHAT_MODEL_OPTIONS,
+            rag_settings.get("openai_chat_model"),
+        ),
+        "rag_gemini_chat_model_options": _rag_model_option_entries(
+            RAG_GEMINI_CHAT_MODEL_OPTIONS,
+            rag_settings.get("gemini_chat_model"),
+        ),
+        "rag_chat_response_style_choices": RAG_CHAT_RESPONSE_STYLE_CHOICES,
+        "rag_openai_auth_configured": openai_auth_configured,
+        "rag_gemini_auth_configured": gemini_auth_configured,
+        "chat_runtime_settings": load_chat_runtime_settings_payload(),
+        "summary": summary,
+        "active_page": "settings_runtime",
+    }
+
+
+def _render_settings_runtime_page(section: str):
+    section_meta = RUNTIME_SETTINGS_SECTIONS.get(section)
+    if section_meta is None:
+        abort(404)
     return render_template(
         "settings_runtime.html",
-        config=config,
-        llm_config=llm_config,
-        instruction_runtime_flags=instruction_runtime_flags,
-        summary=summary,
-        page_title="Settings - Runtime",
-        active_page="settings_runtime",
-        settings_title="Settings",
-        settings_subtitle="Runtime Hints",
-        settings_section="runtime",
+        runtime_section=section,
+        page_title=f"Settings - Runtime - {section_meta['label']}",
+        **_settings_runtime_context(),
     )
+
+
+@bp.get("/settings/runtime/rag")
+def settings_runtime_rag():
+    return _render_settings_runtime_page("rag")
+
+
+@bp.get("/settings/runtime/chat")
+def settings_runtime_chat():
+    return _render_settings_runtime_page("chat")
 
 
 @bp.get("/settings/chat")
 def settings_chat():
     summary = _settings_summary()
+    models = _load_llm_models()
+    mcp_servers = _load_mcp_servers()
+    rag_health, rag_collections = _chat_rag_health_payload()
+    chat_default_settings = _resolved_chat_default_settings(
+        models=models,
+        mcp_servers=mcp_servers,
+        rag_collections=rag_collections,
+    )
     return render_template(
         "settings_chat.html",
+        models=models,
+        mcp_servers=mcp_servers,
+        rag_health=rag_health,
+        rag_collections=rag_collections,
+        chat_default_settings=chat_default_settings,
         chat_runtime_settings=load_chat_runtime_settings_payload(),
         summary=summary,
         page_title="Settings - Chat",
         active_page="settings_chat",
-        settings_title="Settings",
-        settings_subtitle="Chat Runtime",
-        settings_section="chat",
     )
+
+
+@bp.post("/settings/chat/defaults")
+def update_chat_default_settings_route():
+    models = _load_llm_models()
+    mcp_servers = _load_mcp_servers()
+    model_ids = {model.id for model in models}
+    mcp_ids = {server.id for server in mcp_servers}
+    selected_model_id = _coerce_optional_int(
+        request.form.get("default_model_id"),
+        field_name="default_model_id",
+        minimum=1,
+    )
+    if selected_model_id is not None and selected_model_id not in model_ids:
+        flash("Default model selection is invalid.", "error")
+        return redirect(url_for("agents.settings_chat"))
+    selected_mcp_server_ids = _coerce_chat_id_list(
+        request.form.getlist("default_mcp_server_ids"),
+        field_name="default_mcp_server_id",
+    )
+    if any(server_id not in mcp_ids for server_id in selected_mcp_server_ids):
+        flash("Default MCP server selection is invalid.", "error")
+        return redirect(url_for("agents.settings_chat"))
+    rag_health, rag_collections = _chat_rag_health_payload()
+    available_rag_ids = {
+        str(item.get("id") or "").strip()
+        for item in rag_collections
+        if str(item.get("id") or "").strip()
+    }
+    selected_rag_collections = _coerce_chat_collection_list(
+        request.form.getlist("default_rag_collections")
+    )
+    if selected_rag_collections and (
+        rag_health.get("state") != "configured_healthy" or not available_rag_ids
+    ):
+        flash("RAG defaults are unavailable until RAG is healthy.", "error")
+        return redirect(url_for("agents.settings_chat"))
+    if any(collection_id not in available_rag_ids for collection_id in selected_rag_collections):
+        flash("Default RAG collection selection is invalid.", "error")
+        return redirect(url_for("agents.settings_chat"))
+    selected_default_response_complexity = normalize_chat_response_complexity(
+        request.form.get("default_response_complexity"),
+        default=CHAT_RESPONSE_COMPLEXITY_DEFAULT,
+    )
+    save_chat_default_settings(
+        {
+            "default_model_id": str(selected_model_id or ""),
+            "default_response_complexity": selected_default_response_complexity,
+            "default_mcp_server_ids": [
+                str(server_id) for server_id in selected_mcp_server_ids
+            ],
+            "default_rag_collections": selected_rag_collections,
+        }
+    )
+    flash("Chat default settings updated.", "success")
+    return redirect(url_for("agents.settings_chat"))
 
 
 @bp.post("/settings/runtime/chat")
@@ -11957,6 +14278,8 @@ def update_chat_runtime_settings_route():
     }
     save_chat_runtime_settings(payload)
     flash("Chat runtime settings updated.", "success")
+    if (request.form.get("return_to") or "").strip().lower() == "runtime":
+        return redirect(url_for("agents.settings_runtime_chat"))
     return redirect(url_for("agents.settings_chat"))
 
 
@@ -11975,65 +14298,170 @@ def update_instruction_runtime_settings_route():
     return redirect(url_for("agents.settings_runtime"))
 
 
+@bp.post("/settings/runtime/node-skill-binding")
+def update_node_skill_binding_mode_route():
+    raw_mode = (request.form.get("node_skill_binding_mode") or "").strip().lower()
+    if raw_mode and raw_mode not in NODE_SKILL_BINDING_MODE_CHOICES:
+        flash("Node skill compatibility mode is invalid.", "error")
+        return redirect(url_for("agents.settings_runtime"))
+    selected_mode = normalize_node_skill_binding_mode(raw_mode)
+    _save_integration_settings(
+        "llm", {"node_skill_binding_mode": selected_mode}
+    )
+    flash(
+        f"Node skill compatibility mode set to {selected_mode}.",
+        "success",
+    )
+    return redirect(url_for("agents.settings_runtime"))
+
+
+@bp.post("/settings/runtime/node-executor")
+def update_node_executor_runtime_settings_route():
+    # Auth is not available yet. Once RBAC ships, limit this endpoint to admins.
+    kubeconfig_value = request.form.get("k8s_kubeconfig", "")
+    kubeconfig_clear = _as_bool(request.form.get("k8s_kubeconfig_clear"))
+    payload = {
+        "provider": request.form.get("provider", ""),
+        "fallback_provider": request.form.get("fallback_provider", ""),
+        "fallback_enabled": "true" if _as_bool(request.form.get("fallback_enabled")) else "false",
+        "fallback_on_dispatch_error": (
+            "true" if _as_bool(request.form.get("fallback_on_dispatch_error")) else "false"
+        ),
+        "dispatch_timeout_seconds": request.form.get("dispatch_timeout_seconds", ""),
+        "execution_timeout_seconds": request.form.get("execution_timeout_seconds", ""),
+        "log_collection_timeout_seconds": request.form.get(
+            "log_collection_timeout_seconds",
+            "",
+        ),
+        "cancel_grace_timeout_seconds": request.form.get(
+            "cancel_grace_timeout_seconds",
+            "",
+        ),
+        "cancel_force_kill_enabled": (
+            "true" if _as_bool(request.form.get("cancel_force_kill_enabled")) else "false"
+        ),
+        "workspace_root": request.form.get("workspace_root", ""),
+        "workspace_identity_key": request.form.get("workspace_identity_key", ""),
+        "docker_host": request.form.get("docker_host", ""),
+        "docker_image": request.form.get("docker_image", ""),
+        "docker_network": request.form.get("docker_network", ""),
+        "docker_pull_policy": request.form.get("docker_pull_policy", ""),
+        "docker_env_json": request.form.get("docker_env_json", ""),
+        "docker_api_stall_seconds": request.form.get("docker_api_stall_seconds", ""),
+        "k8s_namespace": request.form.get("k8s_namespace", ""),
+        "k8s_image": request.form.get("k8s_image", ""),
+        "k8s_in_cluster": "true" if _as_bool(request.form.get("k8s_in_cluster")) else "false",
+        "k8s_service_account": request.form.get("k8s_service_account", ""),
+        "k8s_image_pull_secrets_json": request.form.get(
+            "k8s_image_pull_secrets_json",
+            "",
+        ),
+    }
+    if kubeconfig_clear:
+        payload["k8s_kubeconfig"] = ""
+    elif kubeconfig_value.strip():
+        payload["k8s_kubeconfig"] = kubeconfig_value
+    try:
+        save_node_executor_settings(payload)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("agents.settings_runtime"))
+    flash("Node executor runtime settings updated.", "success")
+    return redirect(url_for("agents.settings_runtime"))
+
+
+@bp.get("/settings/runtime/node-executor/effective")
+def node_executor_runtime_effective_config_route():
+    return {"node_executor": node_executor_effective_config_summary()}
+
+
 @bp.get("/settings/gitconfig")
 def settings_gitconfig():
-    summary = _settings_summary()
-    gitconfig_path = _gitconfig_path()
-    gitconfig_content = ""
-    gitconfig_exists = gitconfig_path.exists()
-    if gitconfig_exists:
-        try:
-            gitconfig_content = gitconfig_path.read_text(
-                encoding="utf-8", errors="replace"
-            )
-        except OSError as exc:
-            flash(f"Unable to read {gitconfig_path}: {exc}", "error")
-    return render_template(
-        "settings_gitconfig.html",
-        gitconfig_content=gitconfig_content,
-        gitconfig_exists=gitconfig_exists,
-        gitconfig_path=str(gitconfig_path),
-        summary=summary,
-        page_title="Settings - GitConfig",
-        active_page="settings_gitconfig",
-        settings_title="Settings",
-        settings_subtitle="Git Config",
-        settings_section="gitconfig",
-    )
+    return redirect(url_for("agents.settings_integrations_git"))
 
 
 @bp.post("/settings/gitconfig")
 def update_gitconfig():
+    return update_integrations_gitconfig()
+
+
+@bp.get("/settings/integrations/git")
+def settings_integrations_git():
+    sync_integrated_mcp_servers()
+    return _render_settings_integrations_page("git")
+
+
+@bp.post("/settings/integrations/git")
+def update_integrations_gitconfig():
     gitconfig_path = _gitconfig_path()
     gitconfig_content = request.form.get("gitconfig_content", "")
     try:
         gitconfig_path.write_text(gitconfig_content, encoding="utf-8")
     except OSError as exc:
-        summary = _settings_summary()
         flash(f"Unable to write {gitconfig_path}: {exc}", "error")
-        return render_template(
-            "settings_gitconfig.html",
+        return _render_settings_integrations_page(
+            "git",
             gitconfig_content=gitconfig_content,
-            gitconfig_exists=gitconfig_path.exists(),
-            gitconfig_path=str(gitconfig_path),
-            summary=summary,
-            page_title="Settings - GitConfig",
-            active_page="settings_gitconfig",
-            settings_title="Settings",
-            settings_subtitle="Git Config",
-            settings_section="gitconfig",
         )
     flash("Git config saved.", "success")
-    return redirect(url_for("agents.settings_gitconfig"))
+    return redirect(url_for("agents.settings_integrations_git"))
 
 
 @bp.get("/settings/integrations")
 def settings_integrations():
+    return redirect(url_for("agents.settings_integrations_git"))
+
+
+@bp.get("/settings/integrations/github")
+def settings_integrations_github():
     sync_integrated_mcp_servers()
-    return render_template(
-        "settings_integrations.html",
-        **_settings_integrations_context(),
-    )
+    return _render_settings_integrations_page("github")
+
+
+@bp.get("/settings/integrations/jira")
+def settings_integrations_jira():
+    sync_integrated_mcp_servers()
+    return _render_settings_integrations_page("jira")
+
+
+@bp.get("/settings/integrations/confluence")
+def settings_integrations_confluence():
+    sync_integrated_mcp_servers()
+    return _render_settings_integrations_page("confluence")
+
+
+@bp.get("/settings/integrations/google-drive")
+def settings_integrations_google_drive():
+    return redirect(url_for("agents.settings_integrations_google_cloud"))
+
+
+@bp.get("/settings/integrations/google-cloud")
+def settings_integrations_google_cloud():
+    sync_integrated_mcp_servers()
+    return _render_settings_integrations_page("google_cloud")
+
+
+@bp.get("/settings/integrations/google-workspace")
+def settings_integrations_google_workspace():
+    sync_integrated_mcp_servers()
+    return _render_settings_integrations_page("google_workspace")
+
+
+@bp.get("/settings/integrations/huggingface")
+def settings_integrations_huggingface():
+    sync_integrated_mcp_servers()
+    return _render_settings_integrations_page("huggingface")
+
+
+@bp.get("/settings/integrations/chroma")
+def settings_integrations_chroma():
+    sync_integrated_mcp_servers()
+    return _render_settings_integrations_page("chroma")
+
+
+@bp.get("/settings/integrations/rag")
+def settings_integrations_rag():
+    return redirect(url_for("agents.settings_runtime_rag"))
 
 
 @bp.post("/settings/integrations/github")
@@ -12098,34 +14526,107 @@ def update_github_settings():
         else:
             logger.info("GitHub refresh: missing PAT")
             flash("GitHub PAT is required to refresh repositories.", "error")
-        return render_template(
-            "settings_integrations.html",
-            **_settings_integrations_context(github_repo_options=repo_options),
+        return _render_settings_integrations_page(
+            "github",
+            github_repo_options=repo_options,
         )
     flash("GitHub settings updated.", "success")
-    return redirect(url_for("agents.settings_integrations"))
+    return redirect(url_for("agents.settings_integrations_github"))
 
 
 @bp.post("/settings/integrations/google-drive")
 def update_google_drive_settings():
+    return update_google_cloud_settings()
+
+
+@bp.post("/settings/integrations/google-cloud")
+def update_google_cloud_settings():
     service_account_json = request.form.get(
-        "google_drive_service_account_json", ""
+        "google_cloud_service_account_json", ""
     ).strip()
+    if not service_account_json:
+        service_account_json = request.form.get(
+            "google_drive_service_account_json", ""
+        ).strip()
+    google_cloud_project_id = request.form.get("google_cloud_project_id", "").strip()
+    raw_google_cloud_mcp_enabled = request.form.get("google_cloud_mcp_enabled")
+    if raw_google_cloud_mcp_enabled is None:
+        google_cloud_mcp_enabled = "true"
+    else:
+        google_cloud_mcp_enabled = (
+            "true" if _as_bool(raw_google_cloud_mcp_enabled) else "false"
+        )
+
+    if google_cloud_project_id and any(char.isspace() for char in google_cloud_project_id):
+        flash("Google Cloud project ID cannot contain spaces.", "error")
+        return redirect(url_for("agents.settings_integrations_google_cloud"))
 
     if service_account_json:
         try:
             _google_drive_service_account_email(service_account_json)
         except ValueError as exc:
             flash(str(exc), "error")
-            return redirect(url_for("agents.settings_integrations"))
+            return redirect(url_for("agents.settings_integrations_google_cloud"))
 
     _save_integration_settings(
-        "google_drive",
-        {"service_account_json": service_account_json},
+        GOOGLE_CLOUD_PROVIDER,
+        {
+            "service_account_json": service_account_json,
+            "google_cloud_project_id": google_cloud_project_id,
+            "google_cloud_mcp_enabled": google_cloud_mcp_enabled,
+        },
     )
     sync_integrated_mcp_servers()
-    flash("Google Drive settings updated.", "success")
-    return redirect(url_for("agents.settings_integrations"))
+    flash("Google Cloud settings updated.", "success")
+    return redirect(url_for("agents.settings_integrations_google_cloud"))
+
+
+@bp.post("/settings/integrations/google-workspace")
+def update_google_workspace_settings():
+    service_account_json = request.form.get(
+        "workspace_service_account_json", ""
+    ).strip()
+    delegated_user_email = request.form.get(
+        "workspace_delegated_user_email", ""
+    ).strip()
+    raw_google_workspace_mcp_enabled = request.form.get("google_workspace_mcp_enabled")
+    if raw_google_workspace_mcp_enabled is None:
+        google_workspace_mcp_enabled = "false"
+    else:
+        google_workspace_mcp_enabled = (
+            "true" if _as_bool(raw_google_workspace_mcp_enabled) else "false"
+        )
+
+    if delegated_user_email and any(char.isspace() for char in delegated_user_email):
+        flash("Workspace delegated user email cannot contain spaces.", "error")
+        return redirect(url_for("agents.settings_integrations_google_workspace"))
+
+    if service_account_json:
+        try:
+            _google_drive_service_account_email(service_account_json)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("agents.settings_integrations_google_workspace"))
+
+    _save_integration_settings(
+        GOOGLE_WORKSPACE_PROVIDER,
+        {
+            "service_account_json": service_account_json,
+            "workspace_delegated_user_email": delegated_user_email,
+            "google_workspace_mcp_enabled": google_workspace_mcp_enabled,
+        },
+    )
+    sync_integrated_mcp_servers()
+    flash("Google Workspace settings updated.", "success")
+    return redirect(url_for("agents.settings_integrations_google_workspace"))
+
+
+@bp.post("/settings/integrations/huggingface")
+def update_huggingface_settings():
+    token = request.form.get("vllm_local_hf_token", "")
+    _save_integration_settings("llm", {"vllm_local_hf_token": token})
+    flash("HuggingFace settings updated.", "success")
+    return redirect(url_for("agents.settings_integrations_huggingface"))
 
 
 @bp.post("/settings/integrations/chroma")
@@ -12139,10 +14640,10 @@ def update_chroma_settings():
             parsed_port = int(port)
         except ValueError:
             flash("Chroma port must be a number between 1 and 65535.", "error")
-            return redirect(url_for("agents.settings_integrations"))
+            return redirect(url_for("agents.settings_integrations_chroma"))
         if parsed_port < 1 or parsed_port > 65535:
             flash("Chroma port must be a number between 1 and 65535.", "error")
-            return redirect(url_for("agents.settings_integrations"))
+            return redirect(url_for("agents.settings_integrations_chroma"))
         if host:
             host, parsed_port, normalized_hint = _normalize_chroma_target(host, parsed_port)
         port = str(parsed_port)
@@ -12158,9 +14659,10 @@ def update_chroma_settings():
     if normalized_hint:
         flash(normalized_hint, "info")
     flash("ChromaDB settings updated.", "success")
-    return redirect(url_for("agents.settings_integrations"))
+    return redirect(url_for("agents.settings_integrations_chroma"))
 
 
+@bp.post("/settings/runtime/rag")
 @bp.post("/settings/integrations/rag")
 def update_rag_settings():
     defaults = _rag_default_settings()
@@ -12176,28 +14678,37 @@ def update_rag_settings():
         minimum=0.0,
         maximum=2.0,
     )
+    openai_embed_model = _coerce_rag_model_choice(
+        request.form.get("rag_openai_embed_model"),
+        default=defaults["openai_embed_model"],
+        choices=RAG_OPENAI_EMBED_MODEL_OPTIONS,
+    )
+    gemini_embed_model = _coerce_rag_model_choice(
+        request.form.get("rag_gemini_embed_model"),
+        default=defaults["gemini_embed_model"],
+        choices=RAG_GEMINI_EMBED_MODEL_OPTIONS,
+    )
+    openai_chat_model = _coerce_rag_model_choice(
+        request.form.get("rag_openai_chat_model"),
+        default=defaults["openai_chat_model"],
+        choices=RAG_OPENAI_CHAT_MODEL_OPTIONS,
+    )
+    gemini_chat_model = _coerce_rag_model_choice(
+        request.form.get("rag_gemini_chat_model"),
+        default=defaults["gemini_chat_model"],
+        choices=RAG_GEMINI_CHAT_MODEL_OPTIONS,
+    )
     payload = {
         "db_provider": db_provider,
         "embed_provider": embed_provider,
         "chat_provider": chat_provider,
-        "openai_api_key": (request.form.get("rag_openai_api_key") or "").strip(),
-        "gemini_api_key": (request.form.get("rag_gemini_api_key") or "").strip(),
-        "openai_embed_model": (
-            (request.form.get("rag_openai_embed_model") or "").strip()
-            or defaults["openai_embed_model"]
-        ),
-        "gemini_embed_model": (
-            (request.form.get("rag_gemini_embed_model") or "").strip()
-            or defaults["gemini_embed_model"]
-        ),
-        "openai_chat_model": (
-            (request.form.get("rag_openai_chat_model") or "").strip()
-            or defaults["openai_chat_model"]
-        ),
-        "gemini_chat_model": (
-            (request.form.get("rag_gemini_chat_model") or "").strip()
-            or defaults["gemini_chat_model"]
-        ),
+        # RAG runtime auth uses Provider settings as source-of-truth.
+        "openai_api_key": "",
+        "gemini_api_key": "",
+        "openai_embed_model": openai_embed_model,
+        "gemini_embed_model": gemini_embed_model,
+        "openai_chat_model": openai_chat_model,
+        "gemini_chat_model": gemini_chat_model,
         "chat_temperature": chat_temperature,
         "openai_chat_temperature": chat_temperature,
         "chat_response_style": chat_response_style,
@@ -12254,7 +14765,7 @@ def update_rag_settings():
         )
     else:
         flash("RAG settings updated.", "success")
-    return redirect(url_for("agents.settings_integrations"))
+    return redirect(url_for("agents.settings_runtime_rag"))
 
 
 @bp.post("/settings/integrations/jira")
@@ -12356,15 +14867,13 @@ def update_jira_settings():
             project_options.insert(
                 0, {"value": project_key, "label": project_key}
             )
-        return render_template(
-            "settings_integrations.html",
-            **_settings_integrations_context(
-                jira_project_options=project_options,
-                jira_board_options=board_options,
-            ),
+        return _render_settings_integrations_page(
+            "jira",
+            jira_project_options=project_options,
+            jira_board_options=board_options,
         )
     flash("Jira settings updated.", "success")
-    return redirect(url_for("agents.settings_integrations"))
+    return redirect(url_for("agents.settings_integrations_jira"))
 
 
 @bp.post("/settings/integrations/confluence")
@@ -12465,11 +14974,9 @@ def update_confluence_settings():
             space_options = _merge_selected_option(
                 space_options, confluence_settings.get("space")
             )
-        return render_template(
-            "settings_integrations.html",
-            **_settings_integrations_context(
-                confluence_space_options=space_options,
-            ),
+        return _render_settings_integrations_page(
+            "confluence",
+            confluence_space_options=space_options,
         )
     flash("Confluence settings updated.", "success")
-    return redirect(url_for("agents.settings_integrations"))
+    return redirect(url_for("agents.settings_integrations_confluence"))

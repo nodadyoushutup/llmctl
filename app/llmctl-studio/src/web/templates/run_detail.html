@@ -99,7 +99,7 @@
   {% endif %}
   {% if run.status in ["running", "starting", "stopping"] %}
     <p class="muted" style="margin-top: 12px;">
-      Auto-refreshing every 5 seconds while the autorun is active.
+      Realtime updates active. Timed reload fallback starts only if socket connectivity fails.
     </p>
   {% endif %}
 </section>
@@ -115,6 +115,8 @@
           <tr>
             <th>Node</th>
             <th>Status</th>
+            <th>Runtime</th>
+            <th>Dispatch / Fallback</th>
             <th>Started</th>
             <th>Finished</th>
           </tr>
@@ -145,8 +147,42 @@
                   <span class="status status-idle">{{ task.status }}</span>
                 {% endif %}
               </td>
-              <td class="muted">{{ human_time(task.started_at) }}</td>
-              <td class="muted">{{ human_time(task.finished_at) }}</td>
+              <td>
+                <p class="muted" style="margin: 0; font-size: 12px;">
+                  {{ task.provider_route or "-" }}
+                </p>
+                <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                  dispatch id: {{ task.provider_dispatch_id or "-" }}
+                </p>
+                <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                  workspace: {{ task.workspace_identity or "-" }}
+                </p>
+              </td>
+              <td>
+                <p class="muted" style="margin: 0; font-size: 12px;">
+                  {{ task.dispatch_status or "-" }}
+                  {% if task.dispatch_uncertain %}
+                    (uncertain)
+                  {% endif %}
+                </p>
+                {% if task.fallback_attempted %}
+                  <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                    fallback: {{ task.fallback_reason or "unknown" }}
+                  </p>
+                {% endif %}
+                {% if task.api_failure_category %}
+                  <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                    api failure: {{ task.api_failure_category }}
+                  </p>
+                {% endif %}
+                {% if task.cli_fallback_used %}
+                  <p class="muted" style="margin: 4px 0 0; font-size: 12px;">
+                    cli fallback: {{ "preflight ok" if task.cli_preflight_passed else "preflight unknown" }}
+                  </p>
+                {% endif %}
+              </td>
+              <td class="muted">{{ task.started_at or "-" }}</td>
+              <td class="muted">{{ task.finished_at or "-" }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -159,9 +195,89 @@
 
 {% if run.status in ["running", "starting", "stopping"] %}
   <script>
-    setTimeout(() => {
-      window.location.reload();
-    }, 5000);
+    (() => {
+      const runId = Number("{{ run.id }}");
+      const fallbackDelayMs = 5000;
+      let fallbackTimer = null;
+      let fallbackEnabled = false;
+      let reloadPending = false;
+      let realtimeController = null;
+
+      const scheduleReload = (delayMs = 120) => {
+        if (reloadPending) {
+          return;
+        }
+        reloadPending = true;
+        window.setTimeout(() => {
+          window.location.reload();
+        }, delayMs);
+      };
+
+      const scheduleFallbackReload = () => {
+        if (!fallbackEnabled) {
+          return;
+        }
+        fallbackTimer = window.setTimeout(() => {
+          scheduleReload(0);
+        }, fallbackDelayMs);
+      };
+
+      const startFallback = () => {
+        if (fallbackEnabled) {
+          return;
+        }
+        fallbackEnabled = true;
+        scheduleFallbackReload();
+      };
+
+      const stopFallback = () => {
+        fallbackEnabled = false;
+        if (fallbackTimer) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
+      };
+
+      if (!window.llmctlRealtime || typeof window.llmctlRealtime.connect !== "function") {
+        startFallback();
+        return;
+      }
+
+      realtimeController = window.llmctlRealtime.connect({
+        roomKeys: [`run:${runId}`],
+        onSocketReady: () => {
+          stopFallback();
+        },
+        onSocketFailure: () => {
+          startFallback();
+        },
+        onEvent: (eventName, envelope) => {
+          const data = envelope && typeof envelope === "object" ? envelope : {};
+          const eventType = String(data.event_type || eventName || "").trim();
+          if (!eventType.startsWith("node.task.")) {
+            return;
+          }
+          const rooms = Array.isArray(data.room_keys) ? data.room_keys : [];
+          if (!rooms.includes(`run:${runId}`)) {
+            return;
+          }
+          scheduleReload();
+        },
+      });
+
+      if (!realtimeController) {
+        startFallback();
+        return;
+      }
+
+      window.addEventListener("beforeunload", () => {
+        stopFallback();
+        if (realtimeController) {
+          realtimeController.disconnect();
+          realtimeController = null;
+        }
+      });
+    })();
   </script>
 {% endif %}
 

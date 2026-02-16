@@ -18,6 +18,11 @@ from core.models import (
     agent_skill_bindings,
     flowchart_node_skills,
 )
+from services.skills import (
+    decode_skill_file_content_bytes,
+    skill_file_content_checksum,
+    skill_file_content_size_bytes,
+)
 
 SKILL_FALLBACK_MAX_PER_SKILL_CHARS = 12_000
 SKILL_FALLBACK_MAX_TOTAL_CHARS = 32_000
@@ -97,8 +102,8 @@ def _resolve_skill_files(version: SkillVersion) -> tuple[ResolvedSkillFile, ...]
     for entry in sorted(list(version.files or []), key=lambda item: item.path):
         safe_path = _safe_skill_relative_path(entry.path)
         content = entry.content or ""
-        checksum = (entry.checksum or "").strip() or _sha256_text(content)
-        size_bytes = int(entry.size_bytes or len(content.encode("utf-8")))
+        checksum = (entry.checksum or "").strip() or skill_file_content_checksum(content)
+        size_bytes = int(entry.size_bytes or skill_file_content_size_bytes(content))
         files.append(
             ResolvedSkillFile(
                 path=safe_path,
@@ -290,7 +295,7 @@ def _materialization_root(
 
 def _write_read_only_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path.write_bytes(decode_skill_file_content_bytes(content))
     try:
         path.chmod(0o444)
     except OSError:

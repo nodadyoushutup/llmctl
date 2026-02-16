@@ -1,0 +1,7 @@
+web.gunicorn\_config module
+===========================
+
+.. automodule:: web.gunicorn_config
+   :members:
+   :show-inheritance:
+   :undoc-members:

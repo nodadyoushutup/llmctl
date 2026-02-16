@@ -1,0 +1,7 @@
+core.task\_stages module
+========================
+
+.. automodule:: core.task_stages
+   :members:
+   :show-inheritance:
+   :undoc-members:

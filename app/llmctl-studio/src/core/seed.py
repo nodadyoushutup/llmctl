@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from sqlalchemy import select
 
+from core.config import REPO_ROOT
 from core.db import session_scope
 from core.mcp_config import format_mcp_config
 from core.models import (
@@ -14,8 +16,11 @@ from core.models import (
     MCPServer,
     Role,
     Script,
+    Skill,
+    SkillVersion,
     TaskTemplate,
 )
+from services.skills import build_skill_package_from_directory, import_skill_package_to_db
 from storage.script_storage import ensure_script_file
 
 ROLE_SEEDS = [
@@ -1359,6 +1364,14 @@ TASK_TEMPLATE_SEEDS = [
     },
 ]
 
+SKILL_PACKAGE_SEEDS = [
+    {
+        "path": REPO_ROOT / "app" / "llmctl-studio" / "seed-skills" / "chromium-screenshot",
+        "source_ref": "app/llmctl-studio/seed-skills/chromium-screenshot",
+        "actor": "system:seed",
+    },
+]
+
 
 def seed_defaults() -> None:
     with session_scope() as session:
@@ -1367,6 +1380,7 @@ def seed_defaults() -> None:
         _seed_models(session)
         _seed_agents(session)
         _seed_scripts(session)
+        _seed_skills(session)
         _seed_task_templates(session)
 
 
@@ -1626,3 +1640,41 @@ def _seed_task_templates(session) -> None:
             template.prompt = prompt
         elif isinstance(append_if_missing, str):
             template.prompt = _append_prompt_once(template.prompt, append_if_missing)
+
+
+def _seed_skills(session) -> None:
+    for payload in SKILL_PACKAGE_SEEDS:
+        package_dir_raw = payload.get("path")
+        package_dir = (
+            Path(package_dir_raw)
+            if isinstance(package_dir_raw, (str, Path))
+            else None
+        )
+        if package_dir is None:
+            continue
+        if not package_dir.is_dir():
+            raise FileNotFoundError(f"Seed skill package directory not found: {package_dir}")
+
+        package = build_skill_package_from_directory(package_dir)
+        existing_version = (
+            session.execute(
+                select(SkillVersion.id)
+                .join(Skill, Skill.id == SkillVersion.skill_id)
+                .where(
+                    Skill.name == package.metadata.name,
+                    SkillVersion.version == package.metadata.version,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing_version is not None:
+            continue
+
+        import_skill_package_to_db(
+            session,
+            package,
+            source_type="seed",
+            source_ref=payload.get("source_ref"),
+            actor=payload.get("actor"),
+        )

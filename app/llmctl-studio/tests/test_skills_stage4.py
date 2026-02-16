@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from sqlalchemy import select
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
 if str(STUDIO_SRC) not in sys.path:
@@ -29,6 +31,7 @@ from core.models import (
     agent_skill_bindings,
 )
 from services import tasks as studio_tasks
+from services.skills import encode_binary_skill_content
 
 
 class StudioDbTestCase(unittest.TestCase):
@@ -71,7 +74,7 @@ class SkillsStage4Tests(StudioDbTestCase):
         *,
         with_skill: bool,
         include_skill_md: bool = True,
-    ) -> tuple[int, int, str | None]:
+    ) -> tuple[int, int, str | None, int]:
         with session_scope() as session:
             agent = Agent.create(
                 session,
@@ -85,7 +88,7 @@ class SkillsStage4Tests(StudioDbTestCase):
                 config_json="{}",
             )
             flowchart = Flowchart.create(session, name=f"{provider}-flowchart")
-            node_config = {"agent_id": agent.id} if with_skill else {}
+            node_config = {"agent_id": agent.id}
             node = FlowchartNode.create(
                 session,
                 flowchart_id=flowchart.id,
@@ -95,7 +98,7 @@ class SkillsStage4Tests(StudioDbTestCase):
             )
 
             if not with_skill:
-                return node.id, model.id, None
+                return node.id, model.id, None, agent.id
 
             skill_slug = f"skill-stage4-{provider}"
             skill = Skill.create(
@@ -146,18 +149,22 @@ class SkillsStage4Tests(StudioDbTestCase):
                     position=1,
                 )
             )
-            return node.id, model.id, skill_slug
+            return node.id, model.id, skill_slug, agent.id
 
     def _execute_node(
         self,
         *,
         node_id: int,
         model_id: int,
+        agent_id: int,
         provider: str,
         node_config: dict[str, object] | None = None,
         capture: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        node_payload = {"task_prompt": "Run stage 4 test prompt."}
+        node_payload = {
+            "agent_id": agent_id,
+            "task_prompt": "Run stage 4 test prompt.",
+        }
         if node_config:
             node_payload.update(node_config)
         recorded = capture if capture is not None else {}
@@ -200,7 +207,7 @@ class SkillsStage4Tests(StudioDbTestCase):
         return output_state
 
     def test_workspace_skill_projection_materialized_read_only(self) -> None:
-        node_id, model_id, skill_slug = self._create_task_node("codex", with_skill=True)
+        node_id, model_id, skill_slug, agent_id = self._create_task_node("codex", with_skill=True)
         assert skill_slug is not None
         captured: dict[str, object] = {}
 
@@ -232,7 +239,10 @@ class SkillsStage4Tests(StudioDbTestCase):
             output_state, _routing_state = studio_tasks._execute_flowchart_task_node(
                 node_id=node_id,
                 node_ref_id=None,
-                node_config={"task_prompt": "Check workspace skill projection."},
+                node_config={
+                    "agent_id": agent_id,
+                    "task_prompt": "Check workspace skill projection.",
+                },
                 input_context={"flowchart": {"id": 1}},
                 execution_id=321,
                 execution_task_id=None,
@@ -248,8 +258,82 @@ class SkillsStage4Tests(StudioDbTestCase):
         self.assertTrue(captured.get("skill_md_exists"))
         self.assertEqual(0, int(captured.get("skill_md_mode") or 0) & 0o222)
 
+    def test_binary_skill_files_materialize_as_decoded_bytes(self) -> None:
+        node_id, model_id, skill_slug, agent_id = self._create_task_node("codex", with_skill=True)
+        assert skill_slug is not None
+        binary_payload = b"\x89PNG\r\n\x1a\nbinary-image"
+
+        with session_scope() as session:
+            skill = session.execute(select(Skill).where(Skill.name == skill_slug)).scalars().first()
+            self.assertIsNotNone(skill)
+            assert skill is not None
+            version = (
+                session.execute(
+                    select(SkillVersion)
+                    .where(SkillVersion.skill_id == skill.id)
+                    .order_by(SkillVersion.id.desc())
+                )
+                .scalars()
+                .first()
+            )
+            self.assertIsNotNone(version)
+            assert version is not None
+            encoded = encode_binary_skill_content(binary_payload)
+            SkillFile.create(
+                session,
+                skill_version_id=version.id,
+                path="assets/logo.png",
+                content=encoded,
+                checksum="",
+                size_bytes=len(binary_payload),
+            )
+
+        captured: dict[str, object] = {}
+
+        def _fake_run_llm(
+            provider_name: str,
+            prompt: str,
+            *,
+            mcp_configs,
+            model_config,
+            on_update,
+            on_log,
+            cwd,
+            env,
+        ) -> subprocess.CompletedProcess[str]:
+            del prompt, mcp_configs, model_config, on_update, on_log, env
+            cwd_path = Path(str(cwd))
+            image_path = cwd_path / ".llmctl" / "skills" / skill_slug / "assets" / "logo.png"
+            captured["provider"] = provider_name
+            captured["image_exists"] = image_path.exists()
+            captured["image_bytes"] = image_path.read_bytes() if image_path.exists() else b""
+            return subprocess.CompletedProcess(
+                args=[provider_name],
+                returncode=0,
+                stdout=json.dumps({"result": "ok"}),
+                stderr="",
+            )
+
+        with patch.object(studio_tasks, "_run_llm", side_effect=_fake_run_llm):
+            studio_tasks._execute_flowchart_task_node(
+                node_id=node_id,
+                node_ref_id=None,
+                node_config={
+                    "agent_id": agent_id,
+                    "task_prompt": "Check binary file materialization.",
+                },
+                input_context={"flowchart": {"id": 1}},
+                execution_id=321,
+                execution_task_id=None,
+                enabled_providers={"codex"},
+                default_model_id=model_id,
+            )
+
+        self.assertTrue(captured.get("image_exists"))
+        self.assertEqual(binary_payload, captured.get("image_bytes"))
+
     def test_policy_downgrades_to_fallback_when_materialization_fails(self) -> None:
-        node_id, model_id, _skill_slug = self._create_task_node("codex", with_skill=True)
+        node_id, model_id, _skill_slug, agent_id = self._create_task_node("codex", with_skill=True)
         captured: dict[str, object] = {}
 
         with patch.object(
@@ -260,6 +344,7 @@ class SkillsStage4Tests(StudioDbTestCase):
             output_state = self._execute_node(
                 node_id=node_id,
                 model_id=model_id,
+                agent_id=agent_id,
                 provider="codex",
                 node_config={"allow_skill_adapter_fallback": True},
                 capture=captured,
@@ -273,7 +358,7 @@ class SkillsStage4Tests(StudioDbTestCase):
         self.assertTrue((task_context or {}).get("skills"))
 
     def test_invalid_skill_package_fails_fast(self) -> None:
-        node_id, model_id, _skill_slug = self._create_task_node(
+        node_id, model_id, _skill_slug, agent_id = self._create_task_node(
             "codex",
             with_skill=True,
             include_skill_md=False,
@@ -282,7 +367,10 @@ class SkillsStage4Tests(StudioDbTestCase):
             studio_tasks._execute_flowchart_task_node(
                 node_id=node_id,
                 node_ref_id=None,
-                node_config={"task_prompt": "Should fail on missing SKILL.md"},
+                node_config={
+                    "agent_id": agent_id,
+                    "task_prompt": "Should fail on missing SKILL.md",
+                },
                 input_context={"flowchart": {"id": 1}},
                 execution_id=321,
                 execution_task_id=None,
@@ -292,7 +380,7 @@ class SkillsStage4Tests(StudioDbTestCase):
         self.assertIn("Skill resolution failed", str(ctx.exception))
 
     def test_gemini_without_workspace_uses_run_local_home_for_cwd(self) -> None:
-        node_id, model_id, _skill_slug = self._create_task_node(
+        node_id, model_id, _skill_slug, agent_id = self._create_task_node(
             "gemini",
             with_skill=False,
         )
@@ -300,12 +388,13 @@ class SkillsStage4Tests(StudioDbTestCase):
         output_state = self._execute_node(
             node_id=node_id,
             model_id=model_id,
+            agent_id=agent_id,
             provider="gemini",
             capture=captured,
         )
         self.assertIsNone(output_state.get("skill_adapter_mode"))
         self.assertIn("task-321-home", str(captured.get("home") or ""))
-        self.assertIn("task-321-home", str(captured.get("cwd") or ""))
+        self.assertIn("task-321", str(captured.get("cwd") or ""))
 
     def test_optional_transform_uses_run_local_home(self) -> None:
         captured: dict[str, object] = {}

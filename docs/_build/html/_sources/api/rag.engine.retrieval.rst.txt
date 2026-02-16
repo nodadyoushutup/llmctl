@@ -1,0 +1,7 @@
+rag.engine.retrieval module
+===========================
+
+.. automodule:: rag.engine.retrieval
+   :members:
+   :show-inheritance:
+   :undoc-members:

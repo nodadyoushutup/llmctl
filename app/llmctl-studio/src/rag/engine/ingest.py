@@ -739,7 +739,7 @@ def main() -> int:
         sources = list_sources()
         if sources:
             github_settings = load_integration_settings("github")
-            drive_settings = load_integration_settings("google_drive")
+            drive_settings = load_integration_settings("google_workspace")
             service_account_json = drive_settings.get("service_account_json") or ""
             for source in sources:
                 source_config = build_source_config(config, source, github_settings)

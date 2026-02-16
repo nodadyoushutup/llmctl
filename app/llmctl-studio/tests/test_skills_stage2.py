@@ -19,6 +19,7 @@ from services.skills import (
     SkillPackageValidationError,
     build_skill_package,
     build_skill_package_from_directory,
+    encode_binary_skill_content,
     export_skill_package_from_db,
     format_validation_errors,
     import_skill_package_to_db,
@@ -213,6 +214,59 @@ class SkillsStage2Tests(StudioDbTestCase):
 
         bundle = json.loads(serialize_skill_bundle(package))
         self.assertEqual("db-skill", bundle["metadata"]["name"])
+
+    def test_build_package_supports_binary_envelope_files(self) -> None:
+        binary_payload = b"%PDF-1.7\nbinary payload\n"
+        package = build_skill_package(
+            [
+                (
+                    "SKILL.md",
+                    (
+                        "---\n"
+                        "name: binary-skill\n"
+                        "display_name: Binary Skill\n"
+                        "description: Includes binary files.\n"
+                        "version: 1.0.0\n"
+                        "status: active\n"
+                        "---\n\n"
+                        "# Binary Skill\n"
+                    ),
+                ),
+                ("assets/guide.pdf", encode_binary_skill_content(binary_payload)),
+            ]
+        )
+
+        self.assertEqual(2, len(package.files))
+        binary_file = next(item for item in package.files if item.path == "assets/guide.pdf")
+        self.assertEqual(len(binary_payload), binary_file.size_bytes)
+        self.assertTrue(binary_file.checksum)
+
+        loaded = load_skill_bundle(serialize_skill_bundle(package))
+        self.assertEqual(package.manifest_hash, loaded.manifest_hash)
+
+    def test_build_package_rejects_invalid_binary_envelope_payload(self) -> None:
+        with self.assertRaises(SkillPackageValidationError) as exc_info:
+            build_skill_package(
+                [
+                    (
+                        "SKILL.md",
+                        (
+                            "---\n"
+                            "name: bad-binary\n"
+                            "display_name: Bad Binary\n"
+                            "description: invalid binary envelope.\n"
+                            "version: 1.0.0\n"
+                            "status: active\n"
+                            "---\n"
+                        ),
+                    ),
+                    ("assets/image.png", "__LLMCTL_BINARY_BASE64__:!!!not-base64!!!"),
+                ]
+            )
+
+        errors = format_validation_errors(exc_info.exception.errors)
+        codes = {str(entry["code"]) for entry in errors}
+        self.assertIn("invalid_binary_payload", codes)
 
 
 if __name__ == "__main__":

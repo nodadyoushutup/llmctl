@@ -1,0 +1,711 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rag.engine.pdf_pipeline &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">rag.engine.pdf_pipeline</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for rag.engine.pdf_pipeline</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">concurrent.futures</span><span class="w"> </span><span class="kn">import</span> <span class="n">ThreadPoolExecutor</span><span class="p">,</span> <span class="n">as_completed</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">rag.engine.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">RagConfig</span><span class="p">,</span> <span class="n">max_file_bytes_for</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rag.engine.logging_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">log_event</span><span class="p">,</span> <span class="n">submit_with_log_context</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rag.engine.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">ParsedDocument</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">fitz</span>  <span class="c1"># PyMuPDF</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="n">fitz</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">pytesseract</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">pytesseract</span><span class="w"> </span><span class="kn">import</span> <span class="n">Output</span> <span class="k">as</span> <span class="n">TesseractOutput</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="n">pytesseract</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">TesseractOutput</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="n">Image</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<span class="n">_UNIT_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+    <span class="sa">r</span><span class="s2">&quot;(?P&lt;value&gt;\d+(?:\.\d+)?)\s*(?P&lt;unit&gt;inches|inch|in|mm|cm|ft|feet|</span><span class="se">\&quot;</span><span class="s2">)&quot;</span><span class="p">,</span>
+    <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">_AXIS_ALIGN_EPSILON</span> <span class="o">=</span> <span class="mf">1.5</span>
+<span class="n">_NON_AXIS_LINE_THRESHOLD</span> <span class="o">=</span> <span class="mi">8</span>
+<span class="n">_DENSE_PRIMITIVE_THRESHOLD</span> <span class="o">=</span> <span class="mi">1200</span>
+<span class="n">_MIXED_PRIMITIVE_THRESHOLD</span> <span class="o">=</span> <span class="mi">250</span>
+<span class="n">_MIXED_NON_AXIS_THRESHOLD</span> <span class="o">=</span> <span class="mi">3</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_require_pdf_deps</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">fitz</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;PyMuPDF is required to parse PDFs&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pytesseract</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;pytesseract is required for OCR&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">Image</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Pillow is required for OCR&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_pixmap_to_image</span><span class="p">(</span><span class="n">pix</span><span class="p">):</span>
+    <span class="n">mode</span> <span class="o">=</span> <span class="s2">&quot;RGB&quot;</span>
+    <span class="k">if</span> <span class="n">pix</span><span class="o">.</span><span class="n">alpha</span><span class="p">:</span>
+        <span class="n">mode</span> <span class="o">=</span> <span class="s2">&quot;RGBA&quot;</span>
+    <span class="k">return</span> <span class="n">Image</span><span class="o">.</span><span class="n">frombytes</span><span class="p">(</span><span class="n">mode</span><span class="p">,</span> <span class="p">[</span><span class="n">pix</span><span class="o">.</span><span class="n">width</span><span class="p">,</span> <span class="n">pix</span><span class="o">.</span><span class="n">height</span><span class="p">],</span> <span class="n">pix</span><span class="o">.</span><span class="n">samples</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_extract_text_layer</span><span class="p">(</span><span class="n">page</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">get_text</span><span class="p">(</span><span class="s2">&quot;text&quot;</span><span class="p">)</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">get_text</span><span class="p">(</span><span class="s2">&quot;rawdict&quot;</span><span class="p">)</span>
+    <span class="n">char_boxes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">has_images</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">raw</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;blocks&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="k">if</span> <span class="n">block</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;type&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">has_images</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">block</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;lines&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="k">for</span> <span class="n">span</span> <span class="ow">in</span> <span class="n">line</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;spans&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+                <span class="k">for</span> <span class="n">char</span> <span class="ow">in</span> <span class="n">span</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;chars&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+                    <span class="n">bbox</span> <span class="o">=</span> <span class="n">char</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;bbox&quot;</span><span class="p">)</span>
+                    <span class="n">char_boxes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                        <span class="p">{</span>
+                            <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">char</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;c&quot;</span><span class="p">),</span>
+                            <span class="s2">&quot;bbox&quot;</span><span class="p">:</span> <span class="n">bbox</span><span class="p">,</span>
+                            <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+                        <span class="p">}</span>
+                    <span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;char_boxes&quot;</span><span class="p">:</span> <span class="n">char_boxes</span><span class="p">,</span>
+        <span class="s2">&quot;has_images&quot;</span><span class="p">:</span> <span class="n">has_images</span><span class="p">,</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_point_xy</span><span class="p">(</span><span class="n">point</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">fitz</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">point</span><span class="p">,</span> <span class="n">fitz</span><span class="o">.</span><span class="n">Point</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">point</span><span class="o">.</span><span class="n">x</span><span class="p">),</span> <span class="nb">float</span><span class="p">(</span><span class="n">point</span><span class="o">.</span><span class="n">y</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">point</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">))</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">point</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">point</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">point</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_axis_aligned_line</span><span class="p">(</span><span class="n">start</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">end</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">epsilon</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">_AXIS_ALIGN_EPSILON</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">_point_xy</span><span class="p">(</span><span class="n">start</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">_point_xy</span><span class="p">(</span><span class="n">end</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">a</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">b</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="nb">abs</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">b</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="n">epsilon</span> <span class="ow">or</span> <span class="nb">abs</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">b</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="n">epsilon</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_page_has_embedded_image</span><span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">text_layer</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">bool</span><span class="p">(</span><span class="n">text_layer</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;has_images&quot;</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">page</span><span class="o">.</span><span class="n">get_images</span><span class="p">(</span><span class="n">full</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span> <span class="o">&gt;</span> <span class="mi">0</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_summarize_vector_geometry</span><span class="p">(</span><span class="n">drawings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+    <span class="n">stats</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;drawing_count&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">drawings</span><span class="p">),</span>
+        <span class="s2">&quot;primitive_count&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s2">&quot;line_count&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s2">&quot;rect_count&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s2">&quot;curve_count&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s2">&quot;quad_count&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s2">&quot;non_axis_line_count&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="k">for</span> <span class="n">drawing</span> <span class="ow">in</span> <span class="n">drawings</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">drawing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;items&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">item</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">kind</span> <span class="o">=</span> <span class="n">item</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;l&quot;</span><span class="p">:</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;line_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;primitive_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">_is_axis_aligned_line</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">item</span><span class="p">[</span><span class="mi">2</span><span class="p">]):</span>
+                    <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;non_axis_line_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;c&quot;</span><span class="p">:</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;curve_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;primitive_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;re&quot;</span><span class="p">:</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;rect_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;primitive_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;qu&quot;</span><span class="p">:</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;quad_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;primitive_count&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="k">return</span> <span class="n">stats</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_should_capture_vector_payload</span><span class="p">(</span><span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+    <span class="n">primitive_count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;primitive_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">line_count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;line_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">rect_count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rect_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">curve_count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;curve_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">quad_count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;quad_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">non_axis_line_count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;non_axis_line_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">0</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">primitive_count</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;no_geometry&quot;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">curve_count</span> <span class="o">+</span> <span class="n">quad_count</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;curve_or_quad&quot;</span>
+    <span class="k">if</span> <span class="n">non_axis_line_count</span> <span class="o">&gt;=</span> <span class="n">_NON_AXIS_LINE_THRESHOLD</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;non_axis_lines&quot;</span>
+    <span class="k">if</span> <span class="n">primitive_count</span> <span class="o">&gt;=</span> <span class="n">_DENSE_PRIMITIVE_THRESHOLD</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;dense_geometry&quot;</span>
+    <span class="k">if</span> <span class="p">(</span>
+        <span class="n">primitive_count</span> <span class="o">&gt;=</span> <span class="n">_MIXED_PRIMITIVE_THRESHOLD</span>
+        <span class="ow">and</span> <span class="n">non_axis_line_count</span> <span class="o">&gt;=</span> <span class="n">_MIXED_NON_AXIS_THRESHOLD</span>
+    <span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;mixed_geometry&quot;</span>
+    <span class="k">if</span> <span class="n">primitive_count</span> <span class="o">==</span> <span class="p">(</span><span class="n">line_count</span> <span class="o">+</span> <span class="n">rect_count</span><span class="p">)</span> <span class="ow">and</span> <span class="n">non_axis_line_count</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;axis_aligned_layout&quot;</span>
+    <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;low_signal_geometry&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_vector_primitives</span><span class="p">(</span><span class="n">drawings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="n">primitives</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">drawing</span> <span class="ow">in</span> <span class="n">drawings</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">drawing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;items&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">item</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">kind</span> <span class="o">=</span> <span class="n">item</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;l&quot;</span><span class="p">:</span>
+                <span class="n">primitives</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="p">{</span>
+                        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;line&quot;</span><span class="p">,</span>
+                        <span class="s2">&quot;points&quot;</span><span class="p">:</span> <span class="n">_json_friendly</span><span class="p">([</span><span class="n">item</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">item</span><span class="p">[</span><span class="mi">2</span><span class="p">]]),</span>
+                    <span class="p">}</span>
+                <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;c&quot;</span><span class="p">:</span>
+                <span class="n">primitives</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="p">{</span>
+                        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;curve&quot;</span><span class="p">,</span>
+                        <span class="s2">&quot;points&quot;</span><span class="p">:</span> <span class="n">_json_friendly</span><span class="p">([</span><span class="n">item</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">item</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">item</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">item</span><span class="p">[</span><span class="mi">4</span><span class="p">]]),</span>
+                    <span class="p">}</span>
+                <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;re&quot;</span><span class="p">:</span>
+                <span class="n">primitives</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="p">{</span>
+                        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;rect&quot;</span><span class="p">,</span>
+                        <span class="s2">&quot;rect&quot;</span><span class="p">:</span> <span class="n">_json_friendly</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+                    <span class="p">}</span>
+                <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;qu&quot;</span><span class="p">:</span>
+                <span class="n">primitives</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="p">{</span>
+                        <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;quad&quot;</span><span class="p">,</span>
+                        <span class="s2">&quot;points&quot;</span><span class="p">:</span> <span class="n">_json_friendly</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
+                    <span class="p">}</span>
+                <span class="p">)</span>
+    <span class="k">return</span> <span class="n">primitives</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ocr_page</span><span class="p">(</span>
+    <span class="n">image</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">lang</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">timeout_s</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">include_char_boxes</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+    <span class="n">ocr_kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;lang&quot;</span><span class="p">:</span> <span class="n">lang</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">timeout_s</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">ocr_kwargs</span><span class="p">[</span><span class="s2">&quot;timeout&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">timeout_s</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">pytesseract</span><span class="o">.</span><span class="n">image_to_data</span><span class="p">(</span>
+        <span class="n">image</span><span class="p">,</span>
+        <span class="n">output_type</span><span class="o">=</span><span class="n">TesseractOutput</span><span class="o">.</span><span class="n">DICT</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">ocr_kwargs</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">ocr_text_parts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">word</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text&quot;</span><span class="p">,</span> <span class="p">[])):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">word</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;left&quot;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;top&quot;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">w</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;width&quot;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">h</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;height&quot;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">conf</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;conf&quot;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">words</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">word</span><span class="p">,</span>
+                <span class="s2">&quot;bbox&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">w</span><span class="p">,</span> <span class="n">y</span> <span class="o">+</span> <span class="n">h</span><span class="p">],</span>
+                <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="n">conf</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+        <span class="n">ocr_text_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+
+    <span class="n">char_boxes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">include_char_boxes</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">pytesseract</span><span class="o">.</span><span class="n">image_to_boxes</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="o">**</span><span class="n">ocr_kwargs</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">():</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">6</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">char</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">,</span> <span class="n">x2</span><span class="p">,</span> <span class="n">y2</span><span class="p">,</span> <span class="n">page_num</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[:</span><span class="mi">6</span><span class="p">]</span>
+            <span class="n">char_boxes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">char</span><span class="p">,</span>
+                    <span class="s2">&quot;bbox&quot;</span><span class="p">:</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">x1</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">y1</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">x2</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">y2</span><span class="p">)],</span>
+                    <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+                    <span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">page_num</span><span class="p">),</span>
+                <span class="p">}</span>
+            <span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ocr_text_parts</span><span class="p">),</span>
+        <span class="s2">&quot;word_boxes&quot;</span><span class="p">:</span> <span class="n">words</span><span class="p">,</span>
+        <span class="s2">&quot;char_boxes&quot;</span><span class="p">:</span> <span class="n">char_boxes</span><span class="p">,</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_group_rows</span><span class="p">(</span><span class="n">word_boxes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">word_boxes</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">sorted_words</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">word_boxes</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">w</span><span class="p">:</span> <span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;bbox&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;bbox&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]))</span>
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">current</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">current_y</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">threshold</span> <span class="o">=</span> <span class="mf">8.0</span>
+
+    <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">sorted_words</span><span class="p">:</span>
+        <span class="n">y_top</span> <span class="o">=</span> <span class="n">word</span><span class="p">[</span><span class="s2">&quot;bbox&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">current_y</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">abs</span><span class="p">(</span><span class="n">y_top</span> <span class="o">-</span> <span class="n">current_y</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">threshold</span><span class="p">:</span>
+            <span class="n">current</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">current_y</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">current_y</span> <span class="o">=</span> <span class="n">y_top</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">current_y</span> <span class="o">=</span> <span class="p">(</span><span class="n">current_y</span> <span class="o">+</span> <span class="n">y_top</span><span class="p">)</span> <span class="o">/</span> <span class="mf">2.0</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">current</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">w</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;bbox&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]))</span>
+            <span class="n">current</span> <span class="o">=</span> <span class="p">[</span><span class="n">word</span><span class="p">]</span>
+            <span class="n">current_y</span> <span class="o">=</span> <span class="n">y_top</span>
+
+    <span class="k">if</span> <span class="n">current</span><span class="p">:</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">current</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">w</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;bbox&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="n">rows</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_extract_tables</span><span class="p">(</span><span class="n">word_boxes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">_group_rows</span><span class="p">(</span><span class="n">word_boxes</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">table_rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">cells</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">row</span><span class="p">:</span>
+            <span class="n">cells</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">word</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;bbox&quot;</span><span class="p">:</span> <span class="n">word</span><span class="p">[</span><span class="s2">&quot;bbox&quot;</span><span class="p">],</span>
+                <span class="p">}</span>
+            <span class="p">)</span>
+        <span class="n">table_rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;cells&quot;</span><span class="p">:</span> <span class="n">cells</span><span class="p">})</span>
+    <span class="k">return</span> <span class="p">[{</span><span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="n">table_rows</span><span class="p">}]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalize_units</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">page_number</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="n">units</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">match</span> <span class="ow">in</span> <span class="n">_UNIT_RE</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">))</span>
+        <span class="n">unit</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;unit&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="n">normalized_unit</span> <span class="o">=</span> <span class="n">unit</span>
+        <span class="n">normalized_value</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="k">if</span> <span class="n">unit</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;inch&quot;</span><span class="p">,</span> <span class="s2">&quot;inches&quot;</span><span class="p">,</span> <span class="s2">&quot;in&quot;</span><span class="p">,</span> <span class="s1">&#39;&quot;&#39;</span><span class="p">}:</span>
+            <span class="n">normalized_unit</span> <span class="o">=</span> <span class="s2">&quot;in&quot;</span>
+        <span class="k">elif</span> <span class="n">unit</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;ft&quot;</span><span class="p">,</span> <span class="s2">&quot;feet&quot;</span><span class="p">}:</span>
+            <span class="n">normalized_unit</span> <span class="o">=</span> <span class="s2">&quot;ft&quot;</span>
+        <span class="k">elif</span> <span class="n">unit</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;cm&quot;</span><span class="p">}:</span>
+            <span class="n">normalized_unit</span> <span class="o">=</span> <span class="s2">&quot;cm&quot;</span>
+        <span class="k">elif</span> <span class="n">unit</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;mm&quot;</span><span class="p">}:</span>
+            <span class="n">normalized_unit</span> <span class="o">=</span> <span class="s2">&quot;mm&quot;</span>
+        <span class="n">units</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="n">value</span><span class="p">,</span>
+                <span class="s2">&quot;unit&quot;</span><span class="p">:</span> <span class="n">unit</span><span class="p">,</span>
+                <span class="s2">&quot;normalized_value&quot;</span><span class="p">:</span> <span class="n">normalized_value</span><span class="p">,</span>
+                <span class="s2">&quot;normalized_unit&quot;</span><span class="p">:</span> <span class="n">normalized_unit</span><span class="p">,</span>
+                <span class="s2">&quot;page_number&quot;</span><span class="p">:</span> <span class="n">page_number</span><span class="p">,</span>
+                <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="n">source</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">units</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_serialize_json</span><span class="p">(</span><span class="n">payload</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">separators</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="s2">&quot;:&quot;</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_json_friendly</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">fitz</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">fitz</span><span class="o">.</span><span class="n">Rect</span><span class="p">):</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">value</span><span class="o">.</span><span class="n">x0</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">y0</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">x1</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">y1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">fitz</span><span class="o">.</span><span class="n">Quad</span><span class="p">):</span>
+            <span class="k">return</span> <span class="p">[[</span><span class="n">point</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="n">point</span><span class="o">.</span><span class="n">y</span><span class="p">]</span> <span class="k">for</span> <span class="n">point</span> <span class="ow">in</span> <span class="n">value</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">fitz</span><span class="o">.</span><span class="n">Point</span><span class="p">):</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">value</span><span class="o">.</span><span class="n">x</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">y</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">fitz</span><span class="o">.</span><span class="n">Matrix</span><span class="p">):</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">value</span><span class="o">.</span><span class="n">a</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">b</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">c</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">d</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">e</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">f</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">_json_friendly</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">_json_friendly</span><span class="p">(</span><span class="n">item</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">value</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">bool</span><span class="p">))</span> <span class="ow">or</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">value</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_parse_single_pdf_page</span><span class="p">(</span>
+    <span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span>
+    <span class="n">page_index</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">total_pages</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">config</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+    <span class="n">page_number</span> <span class="o">=</span> <span class="n">page_index</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="n">doc</span> <span class="o">=</span> <span class="n">fitz</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">page</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">load_page</span><span class="p">(</span><span class="n">page_index</span><span class="p">)</span>
+        <span class="n">log_event</span><span class="p">(</span>
+            <span class="s2">&quot;rag_pdf_page_start&quot;</span><span class="p">,</span>
+            <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+            <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+            <span class="n">total_pages</span><span class="o">=</span><span class="n">total_pages</span><span class="p">,</span>
+            <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">total_pages</span><span class="si">}</span><span class="s2">: extract text layer&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">text_layer</span> <span class="o">=</span> <span class="n">_extract_text_layer</span><span class="p">(</span><span class="n">page</span><span class="p">)</span>
+        <span class="n">text_len</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text_layer</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">log_event</span><span class="p">(</span>
+            <span class="s2">&quot;rag_pdf_text_layer_complete&quot;</span><span class="p">,</span>
+            <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+            <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+            <span class="n">text_chars</span><span class="o">=</span><span class="n">text_len</span><span class="p">,</span>
+            <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: text layer </span><span class="si">{</span><span class="n">text_len</span><span class="si">}</span><span class="s2"> chars&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">page_has_images</span> <span class="o">=</span> <span class="n">_page_has_embedded_image</span><span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">text_layer</span><span class="p">)</span>
+        <span class="n">ocr_layer</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;word_boxes&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;char_boxes&quot;</span><span class="p">:</span> <span class="p">[]}</span>
+        <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">ocr_enabled</span> <span class="ow">and</span> <span class="n">page_has_images</span><span class="p">:</span>
+            <span class="n">log_event</span><span class="p">(</span>
+                <span class="s2">&quot;rag_pdf_ocr_start&quot;</span><span class="p">,</span>
+                <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+                <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+                <span class="n">ocr_lang</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_lang</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: OCR start (lang=</span><span class="si">{</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_lang</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">pix</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">get_pixmap</span><span class="p">(</span><span class="n">dpi</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">72</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_dpi</span><span class="p">)))</span>
+            <span class="n">image</span> <span class="o">=</span> <span class="n">_pixmap_to_image</span><span class="p">(</span><span class="n">pix</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">ocr_layer</span> <span class="o">=</span> <span class="n">_ocr_page</span><span class="p">(</span>
+                    <span class="n">image</span><span class="p">,</span>
+                    <span class="n">lang</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_lang</span><span class="p">,</span>
+                    <span class="n">timeout_s</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_timeout_s</span><span class="p">)),</span>
+                    <span class="n">include_char_boxes</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_include_char_boxes</span><span class="p">),</span>
+                <span class="p">)</span>
+            <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                <span class="k">if</span> <span class="s2">&quot;timeout&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+                    <span class="n">log_event</span><span class="p">(</span>
+                        <span class="s2">&quot;rag_pdf_ocr_timeout&quot;</span><span class="p">,</span>
+                        <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+                        <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+                        <span class="n">timeout_s</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_timeout_s</span><span class="p">)),</span>
+                        <span class="n">message</span><span class="o">=</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: OCR timed out after &quot;</span>
+                            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nb">int</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">ocr_timeout_s</span><span class="p">))</span><span class="si">}</span><span class="s2">s&quot;</span>
+                        <span class="p">),</span>
+                    <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">log_event</span><span class="p">(</span>
+                        <span class="s2">&quot;rag_pdf_ocr_error&quot;</span><span class="p">,</span>
+                        <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+                        <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+                        <span class="n">error</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">),</span>
+                        <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: OCR failed (</span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+                    <span class="p">)</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="k">del</span> <span class="n">pix</span>
+            <span class="n">ocr_text_len</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ocr_layer</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="n">word_boxes</span> <span class="o">=</span> <span class="n">ocr_layer</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;word_boxes&quot;</span><span class="p">,</span> <span class="p">[])</span>
+            <span class="n">log_event</span><span class="p">(</span>
+                <span class="s2">&quot;rag_pdf_ocr_complete&quot;</span><span class="p">,</span>
+                <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+                <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+                <span class="n">ocr_chars</span><span class="o">=</span><span class="n">ocr_text_len</span><span class="p">,</span>
+                <span class="n">ocr_words</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">word_boxes</span><span class="p">)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">word_boxes</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="k">else</span> <span class="mi">0</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: OCR done (</span><span class="si">{</span><span class="n">ocr_text_len</span><span class="si">}</span><span class="s2"> chars)&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="n">config</span><span class="o">.</span><span class="n">ocr_enabled</span><span class="p">:</span>
+            <span class="n">log_event</span><span class="p">(</span>
+                <span class="s2">&quot;rag_pdf_ocr_skipped_no_image&quot;</span><span class="p">,</span>
+                <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+                <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: OCR skipped (no images detected)&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">drawings</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">get_drawings</span><span class="p">()</span>
+        <span class="n">vector_stats</span> <span class="o">=</span> <span class="n">_summarize_vector_geometry</span><span class="p">(</span><span class="n">drawings</span><span class="p">)</span>
+        <span class="n">capture_vectors</span><span class="p">,</span> <span class="n">vector_reason</span> <span class="o">=</span> <span class="n">_should_capture_vector_payload</span><span class="p">(</span><span class="n">vector_stats</span><span class="p">)</span>
+        <span class="n">log_event</span><span class="p">(</span>
+            <span class="s2">&quot;rag_pdf_vector_gate&quot;</span><span class="p">,</span>
+            <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+            <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+            <span class="n">capture_vectors</span><span class="o">=</span><span class="n">capture_vectors</span><span class="p">,</span>
+            <span class="n">vector_reason</span><span class="o">=</span><span class="n">vector_reason</span><span class="p">,</span>
+            <span class="n">primitive_count</span><span class="o">=</span><span class="n">vector_stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;primitive_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">line_count</span><span class="o">=</span><span class="n">vector_stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;line_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">rect_count</span><span class="o">=</span><span class="n">vector_stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rect_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">curve_count</span><span class="o">=</span><span class="n">vector_stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;curve_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">quad_count</span><span class="o">=</span><span class="n">vector_stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;quad_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">non_axis_line_count</span><span class="o">=</span><span class="n">vector_stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;non_axis_line_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">message</span><span class="o">=</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: vector payload &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;enabled&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">capture_vectors</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;skipped&#39;</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">vector_reason</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">capture_vectors</span><span class="p">:</span>
+            <span class="n">primitives</span> <span class="o">=</span> <span class="n">_build_vector_primitives</span><span class="p">(</span><span class="n">drawings</span><span class="p">)</span>
+            <span class="n">drawings_serialized</span> <span class="o">=</span> <span class="n">_json_friendly</span><span class="p">(</span><span class="n">drawings</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">primitives</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">drawings_serialized</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="n">tables</span> <span class="o">=</span> <span class="n">_extract_tables</span><span class="p">(</span><span class="n">ocr_layer</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;word_boxes&quot;</span><span class="p">,</span> <span class="p">[]))</span>
+        <span class="n">log_event</span><span class="p">(</span>
+            <span class="s2">&quot;rag_pdf_vectors_complete&quot;</span><span class="p">,</span>
+            <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+            <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+            <span class="n">drawing_count</span><span class="o">=</span><span class="n">vector_stats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;drawing_count&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">primitive_count</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">primitives</span><span class="p">),</span>
+            <span class="n">table_count</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">tables</span><span class="p">),</span>
+            <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: vectors </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">primitives</span><span class="p">)</span><span class="si">}</span><span class="s2">, tables </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tables</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">normalized_units</span> <span class="o">=</span> <span class="n">_normalize_units</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">text_layer</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">,</span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">ocr_layer</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">,</span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="n">page_number</span><span class="p">,</span>
+            <span class="s2">&quot;ocr&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">log_event</span><span class="p">(</span>
+            <span class="s2">&quot;rag_pdf_units_complete&quot;</span><span class="p">,</span>
+            <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+            <span class="n">page_number</span><span class="o">=</span><span class="n">page_number</span><span class="p">,</span>
+            <span class="n">unit_count</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">normalized_units</span><span class="p">),</span>
+            <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PDF page </span><span class="si">{</span><span class="n">page_number</span><span class="si">}</span><span class="s2">: normalized </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">normalized_units</span><span class="p">)</span><span class="si">}</span><span class="s2"> units&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">page_index</span><span class="p">,</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;page_number&quot;</span><span class="p">:</span> <span class="n">page_number</span><span class="p">,</span>
+                <span class="s2">&quot;text_layer&quot;</span><span class="p">:</span> <span class="n">text_layer</span><span class="p">,</span>
+                <span class="s2">&quot;ocr&quot;</span><span class="p">:</span> <span class="n">ocr_layer</span><span class="p">,</span>
+                <span class="s2">&quot;vector_primitives&quot;</span><span class="p">:</span> <span class="n">primitives</span><span class="p">,</span>
+                <span class="s2">&quot;vector_raw&quot;</span><span class="p">:</span> <span class="n">drawings_serialized</span><span class="p">,</span>
+                <span class="s2">&quot;tables&quot;</span><span class="p">:</span> <span class="n">tables</span><span class="p">,</span>
+                <span class="s2">&quot;normalized_units&quot;</span><span class="p">:</span> <span class="n">normalized_units</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">doc</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="parse_pdf">
+<a class="viewcode-back" href="../../../api/rag.engine.pdf_pipeline.html#rag.engine.pdf_pipeline.parse_pdf">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_pdf</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">RagConfig</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ParsedDocument</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">_require_pdf_deps</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span> <span class="o">&gt;</span> <span class="n">max_file_bytes_for</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s2">&quot;pdf&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="n">hasher</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha1</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">handle</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">iter</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">handle</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">),</span> <span class="sa">b</span><span class="s2">&quot;&quot;</span><span class="p">):</span>
+            <span class="n">hasher</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="n">file_hash</span> <span class="o">=</span> <span class="n">hasher</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+    <span class="n">doc</span> <span class="o">=</span> <span class="n">fitz</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">page_count</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">page_count</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">doc</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="n">page_workers</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">pdf_page_workers</span><span class="p">)),</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">page_count</span><span class="p">))</span>
+    <span class="n">log_event</span><span class="p">(</span>
+        <span class="s2">&quot;rag_pdf_parse_start&quot;</span><span class="p">,</span>
+        <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+        <span class="n">pages</span><span class="o">=</span><span class="n">page_count</span><span class="p">,</span>
+        <span class="n">page_workers</span><span class="o">=</span><span class="n">page_workers</span><span class="p">,</span>
+        <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Parsing PDF </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">page_count</span><span class="si">}</span><span class="s2"> pages, workers=</span><span class="si">{</span><span class="n">page_workers</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">pages_by_index</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">page_count</span> <span class="o">&lt;=</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">page_workers</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">page_count</span><span class="p">):</span>
+            <span class="n">parsed_index</span><span class="p">,</span> <span class="n">parsed_page</span> <span class="o">=</span> <span class="n">_parse_single_pdf_page</span><span class="p">(</span>
+                <span class="n">path</span><span class="p">,</span>
+                <span class="n">index</span><span class="p">,</span>
+                <span class="n">page_count</span><span class="p">,</span>
+                <span class="n">config</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">pages_by_index</span><span class="p">[</span><span class="n">parsed_index</span><span class="p">]</span> <span class="o">=</span> <span class="n">parsed_page</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">page_workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+            <span class="n">futures</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">submit_with_log_context</span><span class="p">(</span>
+                    <span class="n">executor</span><span class="p">,</span>
+                    <span class="n">_parse_single_pdf_page</span><span class="p">,</span>
+                    <span class="n">path</span><span class="p">,</span>
+                    <span class="n">index</span><span class="p">,</span>
+                    <span class="n">page_count</span><span class="p">,</span>
+                    <span class="n">config</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">page_count</span><span class="p">)</span>
+            <span class="p">]</span>
+            <span class="k">for</span> <span class="n">future</span> <span class="ow">in</span> <span class="n">as_completed</span><span class="p">(</span><span class="n">futures</span><span class="p">):</span>
+                <span class="n">parsed_index</span><span class="p">,</span> <span class="n">parsed_page</span> <span class="o">=</span> <span class="n">future</span><span class="o">.</span><span class="n">result</span><span class="p">()</span>
+                <span class="n">pages_by_index</span><span class="p">[</span><span class="n">parsed_index</span><span class="p">]</span> <span class="o">=</span> <span class="n">parsed_page</span>
+
+    <span class="n">pages</span> <span class="o">=</span> <span class="p">[</span><span class="n">pages_by_index</span><span class="p">[</span><span class="n">index</span><span class="p">]</span> <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">page_count</span><span class="p">)</span> <span class="k">if</span> <span class="n">index</span> <span class="ow">in</span> <span class="n">pages_by_index</span><span class="p">]</span>
+
+    <span class="n">log_event</span><span class="p">(</span>
+        <span class="s2">&quot;rag_pdf_parse_complete&quot;</span><span class="p">,</span>
+        <span class="n">path</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+        <span class="n">pages</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">),</span>
+        <span class="n">message</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Completed PDF parse </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span><span class="si">}</span><span class="s2"> pages)&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;path&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+        <span class="s2">&quot;size&quot;</span><span class="p">:</span> <span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="p">,</span>
+        <span class="s2">&quot;mtime&quot;</span><span class="p">:</span> <span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_mtime</span><span class="p">,</span>
+        <span class="s2">&quot;file_hash&quot;</span><span class="p">:</span> <span class="n">file_hash</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="n">structural_hints</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;pdf&quot;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">pages</span><span class="p">,</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">ParsedDocument</span><span class="p">(</span>
+        <span class="n">content</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="n">doc_type</span><span class="o">=</span><span class="s2">&quot;pdf&quot;</span><span class="p">,</span>
+        <span class="n">language</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">source</span><span class="o">=</span><span class="n">source</span><span class="p">,</span>
+        <span class="n">structural_hints</span><span class="o">=</span><span class="n">structural_hints</span><span class="p">,</span>
+    <span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

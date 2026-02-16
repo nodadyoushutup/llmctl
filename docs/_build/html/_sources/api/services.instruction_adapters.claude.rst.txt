@@ -1,0 +1,7 @@
+services.instruction\_adapters.claude module
+============================================
+
+.. automodule:: services.instruction_adapters.claude
+   :members:
+   :show-inheritance:
+   :undoc-members:

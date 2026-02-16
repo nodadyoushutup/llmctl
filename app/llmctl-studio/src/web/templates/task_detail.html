@@ -55,10 +55,13 @@
       <div class="subcard">
         <p class="eyebrow">context</p>
         <div class="stack" style="margin-top: 12px; font-size: 12px;">
+          {% set quick_rag_source_name = quick_rag_task_context.get("source_name") if quick_rag_task_context else "" %}
           <p class="muted">
             Agent:
             {% if agent %}
               <a href="{{ url_for('agents.view_agent', agent_id=agent.id) }}">{{ agent.name }}</a>
+            {% elif is_quick_rag_task %}
+              Sources quick run{% if quick_rag_source_name %} ({{ quick_rag_source_name }}){% endif %}
             {% elif is_quick_task and task.agent_id is none %}
               Quick Node (default profile)
             {% elif task.agent_id is none %}
@@ -175,7 +178,7 @@
     </div>
     {% if task.status in ["queued", "running"] %}
       <p class="muted" id="task-auto-refresh" style="margin-top: 16px;">
-        Auto-updating every 2 seconds while the node runs.
+        Realtime updates active. Polling fallback starts only if socket connectivity fails.
       </p>
     {% endif %}
   </section>
@@ -803,8 +806,9 @@
       };
 
       let pollTimer = null;
-      let polling = true;
+      let polling = false;
       let hadOutput = Boolean((outputEl?.textContent || "").length > 0);
+      let realtimeClient = null;
 
       const schedulePoll = () => {
         if (!polling) {
@@ -819,47 +823,74 @@
           window.clearTimeout(pollTimer);
           pollTimer = null;
         }
-        if (autoRefreshEl) {
-          autoRefreshEl.style.display = "none";
+      };
+
+      const startPollingFallback = (reason = "") => {
+        if (polling) {
+          return;
         }
+        polling = true;
+        if (autoRefreshEl) {
+          autoRefreshEl.style.display = "";
+          autoRefreshEl.textContent = reason
+            ? `Realtime unavailable (${reason}). Falling back to 1s polling.`
+            : "Realtime unavailable. Falling back to 1s polling.";
+        }
+        poll();
+      };
+
+      const applyTaskPayload = (data) => {
+        if (!data || typeof data !== "object") {
+          return;
+        }
+        updateStatus(data.status);
+        updateText(startedAtEl, data.started_at);
+        updateText(finishedAtEl, data.finished_at);
+        updateText(createdAtEl, data.created_at);
+        updateText(runTaskIdEl, data.run_task_id);
+        updateText(celeryIdEl, data.celery_task_id);
+        const hasOutput = updateOutput(data.output);
+        updateStages(data.stage_entries, data.current_stage, data.status);
+        root.setAttribute("data-task-status", data.status || "");
+        if (outputDetailsEl && hasOutput && !hadOutput && !outputDetailsEl.open) {
+          outputDetailsEl.open = true;
+        }
+        hadOutput = hasOutput;
+        if (!["queued", "running"].includes(String(data.status || ""))) {
+          stopPolling();
+          if (realtimeClient) {
+            realtimeClient.disconnect();
+            realtimeClient = null;
+          }
+          if (autoRefreshEl) {
+            autoRefreshEl.style.display = "none";
+          }
+        }
+      };
+
+      const fetchTaskStatus = async () => {
+        if (!statusUrl) {
+          throw new Error("Missing status URL.");
+        }
+        const response = await window.fetch(statusUrl, {
+          cache: "no-store",
+          headers: {
+            Accept: "application/json",
+          },
+        });
+        if (!response.ok) {
+          throw new Error("Failed to fetch node status.");
+        }
+        return response.json();
       };
 
       const poll = async () => {
         if (!polling) {
           return;
         }
-        if (!statusUrl) {
-          stopPolling();
-          return;
-        }
         try {
-          const response = await window.fetch(statusUrl, {
-            cache: "no-store",
-            headers: {
-              Accept: "application/json",
-            },
-          });
-          if (!response.ok) {
-            schedulePoll();
-            return;
-          }
-          const data = await response.json();
-          updateStatus(data.status);
-          updateText(startedAtEl, data.started_at);
-          updateText(finishedAtEl, data.finished_at);
-          updateText(createdAtEl, data.created_at);
-          updateText(runTaskIdEl, data.run_task_id);
-          updateText(celeryIdEl, data.celery_task_id);
-          const hasOutput = updateOutput(data.output);
-          updateStages(data.stage_entries, data.current_stage, data.status);
-          root.setAttribute("data-task-status", data.status || "");
-          if (outputDetailsEl && hasOutput && !hadOutput && !outputDetailsEl.open) {
-            outputDetailsEl.open = true;
-          }
-          hadOutput = hasOutput;
-          if (!["queued", "running"].includes(data.status)) {
-            stopPolling();
-          }
+          const data = await fetchTaskStatus();
+          applyTaskPayload(data);
         } catch (error) {
           schedulePoll();
           return;
@@ -867,7 +898,63 @@
         schedulePoll();
       };
 
-      poll();
+      const taskId = Number(root.getAttribute("data-task-id") || "0");
+
+      const refreshFromSocketEvent = async () => {
+        try {
+          const data = await fetchTaskStatus();
+          applyTaskPayload(data);
+        } catch (_error) {
+          // Socket events will trigger additional attempts; fallback polling handles persistent failures.
+        }
+      };
+
+      const startRealtime = () => {
+        if (
+          !window.llmctlRealtime ||
+          typeof window.llmctlRealtime.connect !== "function" ||
+          !Number.isInteger(taskId) ||
+          taskId <= 0
+        ) {
+          startPollingFallback("helper unavailable");
+          return;
+        }
+        realtimeClient = window.llmctlRealtime.connect({
+          roomKeys: [`task:${taskId}`],
+          onSocketReady: () => {
+            stopPolling();
+            if (autoRefreshEl) {
+              autoRefreshEl.style.display = "";
+              autoRefreshEl.textContent = "Realtime updates active.";
+            }
+          },
+          onSocketFailure: (reason) => {
+            startPollingFallback(String(reason || "socket failure"));
+          },
+          onEvent: (eventName, envelope) => {
+            const payload = envelope && typeof envelope === "object" ? envelope : {};
+            const eventType = String(payload.event_type || eventName || "").trim();
+            const entityId = Number(payload.entity_id || "0");
+            if (!eventType.startsWith("node.task.") || entityId !== taskId) {
+              return;
+            }
+            refreshFromSocketEvent();
+          },
+        });
+        if (!realtimeClient) {
+          startPollingFallback("socket connection unavailable");
+        }
+      };
+
+      refreshFromSocketEvent();
+      startRealtime();
+      window.addEventListener("beforeunload", () => {
+        stopPolling();
+        if (realtimeClient) {
+          realtimeClient.disconnect();
+          realtimeClient = null;
+        }
+      });
     })();
   </script>
 {% endif %}

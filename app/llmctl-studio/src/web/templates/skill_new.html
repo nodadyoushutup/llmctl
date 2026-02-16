@@ -15,7 +15,14 @@
   <p class="muted" style="margin-top: 12px;">
     Create a new skill package and initial immutable version.
   </p>
-  <form method="post" action="{{ url_for('agents.create_skill') }}" class="form-grid" style="margin-top: 20px;">
+  <form
+    method="post"
+    action="{{ url_for('agents.create_skill') }}"
+    class="form-grid"
+    enctype="multipart/form-data"
+    style="margin-top: 20px;"
+    id="skillCreateForm"
+  >
     <label class="label">
       slug (name)
       <input type="text" name="name" class="input" placeholder="customer-support" required />
@@ -46,20 +53,42 @@
     </label>
     <label class="label">
       SKILL.md content (optional)
-      <textarea name="skill_md" class="textarea" rows="14" placeholder="Leave blank to auto-generate from metadata."></textarea>
-    </label>
-    <label class="label">
-      extra files JSON (optional)
       <textarea
-        name="extra_files_json"
+        name="skill_md"
         class="textarea"
-        rows="6"
-        placeholder='[{"path":"scripts/run.sh","content":"echo hello\\n"}]'
+        rows="14"
+        placeholder="Leave blank to auto-generate from metadata."
       ></textarea>
-      <span class="muted" style="font-size: 12px; margin-top: 6px;">
-        JSON array of objects with <code>path</code> and <code>content</code>.
-      </span>
     </label>
+
+    <div class="subcard" style="margin-top: 6px;">
+      <p class="eyebrow">optional uploaded files</p>
+      <p class="muted" style="margin-top: 6px; font-size: 12px;">
+        Allowed: text/code/docs + images/data/PDF/DOCX/PPTX. Max {{ max_upload_bytes // (1024 * 1024) }} MB per file.
+      </p>
+      <label class="label" style="margin-top: 10px;">
+        select files
+        <input type="file" id="skillCreateUploads" name="upload_files" class="input" multiple />
+      </label>
+      <input type="hidden" name="upload_specs_json" id="skillCreateUploadSpecs" value="[]" />
+      <div style="margin-top: 12px; overflow-x: auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Target path</th>
+              <th>On conflict</th>
+            </tr>
+          </thead>
+          <tbody id="skillCreateUploadRows">
+            <tr>
+              <td colspan="3"><p class="muted">No files selected.</p></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">
         <i class="fa-solid fa-plus"></i>
@@ -72,4 +101,122 @@
     </div>
   </form>
 </section>
+
+<script>
+  const createForm = document.getElementById("skillCreateForm");
+  const createUploadInput = document.getElementById("skillCreateUploads");
+  const createUploadRows = document.getElementById("skillCreateUploadRows");
+  const createUploadSpecs = document.getElementById("skillCreateUploadSpecs");
+
+  function defaultTargetPath(name) {
+    const cleaned = String(name || "").replaceAll("\\\\", "/").split("/").pop() || "file.txt";
+    return `references/${cleaned}`;
+  }
+
+  function renderCreateUploadRows() {
+    const files = Array.from(createUploadInput ? createUploadInput.files || [] : []);
+    if (!createUploadRows) {
+      return;
+    }
+    if (!files.length) {
+      createUploadRows.innerHTML = '<tr><td colspan="3"><p class="muted">No files selected.</p></td></tr>';
+      return;
+    }
+    createUploadRows.innerHTML = files
+      .map((file, index) => {
+        return `
+          <tr data-upload-index="${index}">
+            <td><p>${file.name}</p><p class="muted">${file.size} bytes</p></td>
+            <td>
+              <input type="text" class="input js-upload-path" value="${defaultTargetPath(file.name)}" />
+            </td>
+            <td>
+              <select class="input js-upload-conflict">
+                {% for option in upload_conflict_options %}
+                  <option value="{{ option }}" {% if option == 'ask' %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  function nextKeepBothPath(path, occupied) {
+    const normalized = String(path || "").trim();
+    const slash = normalized.lastIndexOf("/");
+    const parent = slash >= 0 ? normalized.slice(0, slash) : "";
+    const name = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+    const dot = name.indexOf(".");
+    const stem = dot >= 0 ? name.slice(0, dot) : name;
+    const suffix = dot >= 0 ? name.slice(dot) : "";
+    let index = 1;
+    while (index < 10000) {
+      const candidateName = `${stem} (${index})${suffix}`;
+      const candidate = parent ? `${parent}/${candidateName}` : candidateName;
+      if (!occupied.has(candidate)) {
+        return candidate;
+      }
+      index += 1;
+    }
+    return normalized;
+  }
+
+  function buildCreateUploadSpecs() {
+    const rows = Array.from(document.querySelectorAll("#skillCreateUploadRows tr[data-upload-index]"));
+    const occupied = new Set();
+    const specs = [];
+    for (const row of rows) {
+      const index = Number(row.getAttribute("data-upload-index"));
+      const pathInput = row.querySelector(".js-upload-path");
+      const conflictInput = row.querySelector(".js-upload-conflict");
+      const path = String(pathInput ? pathInput.value : "").trim();
+      const conflict = String(conflictInput ? conflictInput.value : "ask").trim().toLowerCase();
+      if (!path) {
+        return { error: "Each uploaded file needs a target path.", specs: [] };
+      }
+      if (occupied.has(path)) {
+        if (conflict === "ask") {
+          return { error: `Select conflict behavior for '${path}'.`, specs: [] };
+        }
+        if (conflict === "replace") {
+          specs.push({ index, path, conflict });
+          continue;
+        }
+        if (conflict === "keep_both") {
+          const keepBothPath = nextKeepBothPath(path, occupied);
+          occupied.add(keepBothPath);
+          specs.push({ index, path, conflict });
+          continue;
+        }
+        if (conflict === "skip") {
+          specs.push({ index, path, conflict });
+          continue;
+        }
+      } else {
+        occupied.add(path);
+      }
+      specs.push({ index, path, conflict });
+    }
+    return { error: "", specs };
+  }
+
+  if (createUploadInput) {
+    createUploadInput.addEventListener("change", renderCreateUploadRows);
+  }
+  if (createForm) {
+    createForm.addEventListener("submit", (event) => {
+      const { error, specs } = buildCreateUploadSpecs();
+      if (error) {
+        event.preventDefault();
+        window.alert(error);
+        return;
+      }
+      if (createUploadSpecs) {
+        createUploadSpecs.value = JSON.stringify(specs);
+      }
+    });
+  }
+</script>
 {% endblock %}

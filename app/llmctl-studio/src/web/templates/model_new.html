@@ -222,6 +222,9 @@
           <option value="{{ option }}"></option>
         {% endfor %}
       </datalist>
+      <p class="muted" style="margin-top: 6px; font-size: 12px;">
+        Curated suggestions are listed above; custom Claude model IDs are also allowed.
+      </p>
     </label>
 
     {% set vllm_remote_models = model_options.get("vllm_remote", []) %}

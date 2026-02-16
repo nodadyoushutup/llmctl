@@ -1,0 +1,16 @@
+storage package
+===============
+
+.. automodule:: storage
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   storage.attachment_storage
+   storage.script_storage

@@ -1,0 +1,26 @@
+rag.engine package
+==================
+
+.. automodule:: rag.engine
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   rag.engine.chunkers
+   rag.engine.code_spans
+   rag.engine.config
+   rag.engine.doc_structures
+   rag.engine.logging_utils
+   rag.engine.office_parsers
+   rag.engine.parsers
+   rag.engine.pdf_pipeline
+   rag.engine.pipeline
+   rag.engine.retrieval
+   rag.engine.token_utils
+   rag.engine.versions

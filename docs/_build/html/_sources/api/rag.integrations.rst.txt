@@ -1,0 +1,16 @@
+rag.integrations package
+========================
+
+.. automodule:: rag.integrations
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   rag.integrations.git_sync
+   rag.integrations.google_drive_sync

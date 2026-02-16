@@ -1,0 +1,15 @@
+rag.domain package
+==================
+
+.. automodule:: rag.domain
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   rag.domain.contracts

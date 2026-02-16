@@ -140,6 +140,8 @@
               <td>
                 {% if task.agent_id is not none %}
                   {{ agents_by_id.get(task.agent_id, "Agent " ~ task.agent_id) }}
+                {% elif task.kind in quick_rag_task_kinds %}
+                  Sources quick run
                 {% elif task.kind in ["quick", "chat"] %}
                   Quick Node (default)
                 {% else %}
@@ -158,6 +160,10 @@
                   <span class="status status-success" data-task-status>succeeded</span>
                 {% elif task.status == "failed" %}
                   <span class="status status-failed" data-task-status>failed</span>
+                {% elif task.status in ["canceled", "cancelled"] %}
+                  <span class="status status-idle" data-task-status>{{ task.status }}</span>
+                {% elif task.status == "paused" %}
+                  <span class="status status-idle" data-task-status>paused</span>
                 {% else %}
                   <span class="status status-idle" data-task-status>{{ task.status }}</span>
                 {% endif %}

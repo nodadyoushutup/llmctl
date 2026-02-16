@@ -1,0 +1,298 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>core package &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="core.chroma_mcp_stdio_wrapper module" href="core.chroma_mcp_stdio_wrapper.html" />
+    <link rel="prev" title="chat.settings module" href="chat.settings.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">Studio API Packages</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="chat.html">chat package</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">core package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#submodules">Submodules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="core.chroma_mcp_stdio_wrapper.html">core.chroma_mcp_stdio_wrapper module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.config.html">core.config module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.db.html">core.db module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.mcp_config.html">core.mcp_config module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.prompt_envelope.html">core.prompt_envelope module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.quick_node.html">core.quick_node module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.task_integrations.html">core.task_integrations module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.task_kinds.html">core.task_kinds module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.task_stages.html">core.task_stages module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="core.vllm_models.html">core.vllm_models module</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rag.html">rag package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="services.html">services package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="storage.html">storage package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="web.html">web package</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">Studio API Packages</a></li>
+      <li class="breadcrumb-item active">core package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/api/core.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-core">
+<span id="core-package"></span><h1>core package<a class="headerlink" href="#module-core" title="Link to this heading"></a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="core.chroma_mcp_stdio_wrapper.html">core.chroma_mcp_stdio_wrapper module</a></li>
+<li class="toctree-l1"><a class="reference internal" href="core.config.html">core.config module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.config.html#core.config.Config"><code class="docutils literal notranslate"><span class="pre">Config</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.DATA_DIR"><code class="docutils literal notranslate"><span class="pre">Config.DATA_DIR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.WORKSPACES_DIR"><code class="docutils literal notranslate"><span class="pre">Config.WORKSPACES_DIR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SCRIPTS_DIR"><code class="docutils literal notranslate"><span class="pre">Config.SCRIPTS_DIR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.ATTACHMENTS_DIR"><code class="docutils literal notranslate"><span class="pre">Config.ATTACHMENTS_DIR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SSH_KEYS_DIR"><code class="docutils literal notranslate"><span class="pre">Config.SSH_KEYS_DIR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.DATABASE_FILENAME"><code class="docutils literal notranslate"><span class="pre">Config.DATABASE_FILENAME</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SQLALCHEMY_DATABASE_URI"><code class="docutils literal notranslate"><span class="pre">Config.SQLALCHEMY_DATABASE_URI</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SECRET_KEY"><code class="docutils literal notranslate"><span class="pre">Config.SECRET_KEY</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.PREFERRED_URL_SCHEME"><code class="docutils literal notranslate"><span class="pre">Config.PREFERRED_URL_SCHEME</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.PROXY_FIX_ENABLED"><code class="docutils literal notranslate"><span class="pre">Config.PROXY_FIX_ENABLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.PROXY_FIX_X_FOR"><code class="docutils literal notranslate"><span class="pre">Config.PROXY_FIX_X_FOR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.PROXY_FIX_X_PROTO"><code class="docutils literal notranslate"><span class="pre">Config.PROXY_FIX_X_PROTO</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.PROXY_FIX_X_HOST"><code class="docutils literal notranslate"><span class="pre">Config.PROXY_FIX_X_HOST</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.PROXY_FIX_X_PORT"><code class="docutils literal notranslate"><span class="pre">Config.PROXY_FIX_X_PORT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.PROXY_FIX_X_PREFIX"><code class="docutils literal notranslate"><span class="pre">Config.PROXY_FIX_X_PREFIX</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_REDIS_HOST"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_REDIS_HOST</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_REDIS_PORT"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_REDIS_PORT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_REDIS_BROKER_DB"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_REDIS_BROKER_DB</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_REDIS_BACKEND_DB"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_REDIS_BACKEND_DB</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_BROKER_URL"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_BROKER_URL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_RESULT_BACKEND"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_RESULT_BACKEND</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_BROKER_TRANSPORT_OPTIONS"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_BROKER_TRANSPORT_OPTIONS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_REDIS_DB"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_REDIS_DB</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_MESSAGE_QUEUE"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_MESSAGE_QUEUE</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_ASYNC_MODE"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_ASYNC_MODE</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_PATH"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_PATH</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_CORS_ALLOWED_ORIGINS"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_CORS_ALLOWED_ORIGINS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_TRANSPORTS"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_TRANSPORTS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_PING_INTERVAL"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_PING_INTERVAL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_PING_TIMEOUT"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_PING_TIMEOUT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_MONITOR_CLIENTS"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_MONITOR_CLIENTS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_LOGGER"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_LOGGER</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.SOCKETIO_ENGINEIO_LOGGER"><code class="docutils literal notranslate"><span class="pre">Config.SOCKETIO_ENGINEIO_LOGGER</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.AGENT_POLL_SECONDS"><code class="docutils literal notranslate"><span class="pre">Config.AGENT_POLL_SECONDS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CELERY_REVOKE_ON_STOP"><code class="docutils literal notranslate"><span class="pre">Config.CELERY_REVOKE_ON_STOP</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.WORKSPACE_CLEANUP_ENABLED"><code class="docutils literal notranslate"><span class="pre">Config.WORKSPACE_CLEANUP_ENABLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.WORKSPACE_CLEANUP_INTERVAL_SECONDS"><code class="docutils literal notranslate"><span class="pre">Config.WORKSPACE_CLEANUP_INTERVAL_SECONDS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.LLM_PROVIDER"><code class="docutils literal notranslate"><span class="pre">Config.LLM_PROVIDER</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CODEX_CMD"><code class="docutils literal notranslate"><span class="pre">Config.CODEX_CMD</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CODEX_MODEL"><code class="docutils literal notranslate"><span class="pre">Config.CODEX_MODEL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CODEX_SKIP_GIT_REPO_CHECK"><code class="docutils literal notranslate"><span class="pre">Config.CODEX_SKIP_GIT_REPO_CHECK</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.GEMINI_CMD"><code class="docutils literal notranslate"><span class="pre">Config.GEMINI_CMD</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.GEMINI_MODEL"><code class="docutils literal notranslate"><span class="pre">Config.GEMINI_MODEL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CLAUDE_CMD"><code class="docutils literal notranslate"><span class="pre">Config.CLAUDE_CMD</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CLAUDE_MODEL"><code class="docutils literal notranslate"><span class="pre">Config.CLAUDE_MODEL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CLAUDE_CLI_AUTO_INSTALL"><code class="docutils literal notranslate"><span class="pre">Config.CLAUDE_CLI_AUTO_INSTALL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CLAUDE_CLI_REQUIRE_READY"><code class="docutils literal notranslate"><span class="pre">Config.CLAUDE_CLI_REQUIRE_READY</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CLAUDE_CLI_INSTALL_SCRIPT"><code class="docutils literal notranslate"><span class="pre">Config.CLAUDE_CLI_INSTALL_SCRIPT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CLAUDE_AUTH_REQUIRE_API_KEY"><code class="docutils literal notranslate"><span class="pre">Config.CLAUDE_AUTH_REQUIRE_API_KEY</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.VLLM_LOCAL_CMD"><code class="docutils literal notranslate"><span class="pre">Config.VLLM_LOCAL_CMD</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.VLLM_REMOTE_BASE_URL"><code class="docutils literal notranslate"><span class="pre">Config.VLLM_REMOTE_BASE_URL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.VLLM_REMOTE_API_KEY"><code class="docutils literal notranslate"><span class="pre">Config.VLLM_REMOTE_API_KEY</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.VLLM_LOCAL_CUSTOM_MODELS_DIR"><code class="docutils literal notranslate"><span class="pre">Config.VLLM_LOCAL_CUSTOM_MODELS_DIR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.VLLM_LOCAL_FALLBACK_MODEL"><code class="docutils literal notranslate"><span class="pre">Config.VLLM_LOCAL_FALLBACK_MODEL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.VLLM_REMOTE_DEFAULT_MODEL"><code class="docutils literal notranslate"><span class="pre">Config.VLLM_REMOTE_DEFAULT_MODEL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CHROMA_HOST"><code class="docutils literal notranslate"><span class="pre">Config.CHROMA_HOST</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CHROMA_PORT"><code class="docutils literal notranslate"><span class="pre">Config.CHROMA_PORT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.CHROMA_SSL"><code class="docutils literal notranslate"><span class="pre">Config.CHROMA_SSL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.GITHUB_MCP_URL"><code class="docutils literal notranslate"><span class="pre">Config.GITHUB_MCP_URL</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_PROVIDER"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_PROVIDER</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_FALLBACK_PROVIDER"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_FALLBACK_PROVIDER</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_FALLBACK_ENABLED"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_FALLBACK_ENABLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_FALLBACK_ON_DISPATCH_ERROR"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_FALLBACK_ON_DISPATCH_ERROR</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_EXECUTION_TIMEOUT_SECONDS"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_EXECUTION_TIMEOUT_SECONDS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_LOG_COLLECTION_TIMEOUT_SECONDS"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_LOG_COLLECTION_TIMEOUT_SECONDS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_CANCEL_GRACE_TIMEOUT_SECONDS"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_CANCEL_GRACE_TIMEOUT_SECONDS</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_CANCEL_FORCE_KILL_ENABLED"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_CANCEL_FORCE_KILL_ENABLED</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_WORKSPACE_ROOT"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_WORKSPACE_ROOT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_DOCKER_HOST"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_DOCKER_HOST</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_DOCKER_IMAGE"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_DOCKER_IMAGE</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_DOCKER_NETWORK"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_DOCKER_NETWORK</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_DOCKER_PULL_POLICY"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_DOCKER_PULL_POLICY</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_DOCKER_ENV_JSON"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_DOCKER_ENV_JSON</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_K8S_NAMESPACE"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_K8S_NAMESPACE</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_K8S_IMAGE"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_K8S_IMAGE</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_K8S_IN_CLUSTER"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_K8S_IN_CLUSTER</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_K8S_SERVICE_ACCOUNT"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_K8S_SERVICE_ACCOUNT</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.config.html#core.config.Config.NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON"><code class="docutils literal notranslate"><span class="pre">Config.NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.db.html">core.db module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.db.html#core.db.utcnow"><code class="docutils literal notranslate"><span class="pre">utcnow()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.db.html#core.db.Base"><code class="docutils literal notranslate"><span class="pre">Base</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="core.db.html#core.db.Base.metadata"><code class="docutils literal notranslate"><span class="pre">Base.metadata</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.db.html#core.db.Base.registry"><code class="docutils literal notranslate"><span class="pre">Base.registry</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="core.db.html#core.db.BaseModel"><code class="docutils literal notranslate"><span class="pre">BaseModel</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="core.db.html#core.db.BaseModel.get"><code class="docutils literal notranslate"><span class="pre">BaseModel.get()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.db.html#core.db.BaseModel.list"><code class="docutils literal notranslate"><span class="pre">BaseModel.list()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.db.html#core.db.BaseModel.create"><code class="docutils literal notranslate"><span class="pre">BaseModel.create()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.db.html#core.db.BaseModel.save"><code class="docutils literal notranslate"><span class="pre">BaseModel.save()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="core.db.html#core.db.BaseModel.delete"><code class="docutils literal notranslate"><span class="pre">BaseModel.delete()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="core.db.html#core.db.init_engine"><code class="docutils literal notranslate"><span class="pre">init_engine()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.db.html#core.db.init_db"><code class="docutils literal notranslate"><span class="pre">init_db()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.db.html#core.db.create_session"><code class="docutils literal notranslate"><span class="pre">create_session()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.db.html#core.db.session_scope"><code class="docutils literal notranslate"><span class="pre">session_scope()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.mcp_config.html">core.mcp_config module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.mcp_config.html#core.mcp_config.parse_mcp_config"><code class="docutils literal notranslate"><span class="pre">parse_mcp_config()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.mcp_config.html#core.mcp_config.format_mcp_config"><code class="docutils literal notranslate"><span class="pre">format_mcp_config()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.mcp_config.html#core.mcp_config.render_mcp_config"><code class="docutils literal notranslate"><span class="pre">render_mcp_config()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.mcp_config.html#core.mcp_config.validate_server_key"><code class="docutils literal notranslate"><span class="pre">validate_server_key()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.mcp_config.html#core.mcp_config.build_mcp_overrides"><code class="docutils literal notranslate"><span class="pre">build_mcp_overrides()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.prompt_envelope.html">core.prompt_envelope module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.prompt_envelope.html#core.prompt_envelope.parse_prompt_input"><code class="docutils literal notranslate"><span class="pre">parse_prompt_input()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.prompt_envelope.html#core.prompt_envelope.is_prompt_envelope"><code class="docutils literal notranslate"><span class="pre">is_prompt_envelope()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.prompt_envelope.html#core.prompt_envelope.extract_user_request"><code class="docutils literal notranslate"><span class="pre">extract_user_request()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.prompt_envelope.html#core.prompt_envelope.build_prompt_envelope"><code class="docutils literal notranslate"><span class="pre">build_prompt_envelope()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.prompt_envelope.html#core.prompt_envelope.serialize_prompt_envelope"><code class="docutils literal notranslate"><span class="pre">serialize_prompt_envelope()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.quick_node.html">core.quick_node module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.quick_node.html#core.quick_node.build_quick_node_system_contract"><code class="docutils literal notranslate"><span class="pre">build_quick_node_system_contract()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.quick_node.html#core.quick_node.build_quick_node_agent_profile"><code class="docutils literal notranslate"><span class="pre">build_quick_node_agent_profile()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.task_integrations.html">core.task_integrations module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.task_integrations.html#core.task_integrations.validate_task_integration_keys"><code class="docutils literal notranslate"><span class="pre">validate_task_integration_keys()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.task_integrations.html#core.task_integrations.normalize_task_integration_keys"><code class="docutils literal notranslate"><span class="pre">normalize_task_integration_keys()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.task_integrations.html#core.task_integrations.serialize_task_integration_keys"><code class="docutils literal notranslate"><span class="pre">serialize_task_integration_keys()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.task_integrations.html#core.task_integrations.parse_task_integration_keys"><code class="docutils literal notranslate"><span class="pre">parse_task_integration_keys()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.task_integrations.html#core.task_integrations.is_task_integration_selected"><code class="docutils literal notranslate"><span class="pre">is_task_integration_selected()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.task_kinds.html">core.task_kinds module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.task_kinds.html#core.task_kinds.is_quick_task_kind"><code class="docutils literal notranslate"><span class="pre">is_quick_task_kind()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.task_kinds.html#core.task_kinds.is_quick_rag_task_kind"><code class="docutils literal notranslate"><span class="pre">is_quick_rag_task_kind()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="core.task_kinds.html#core.task_kinds.task_kind_label"><code class="docutils literal notranslate"><span class="pre">task_kind_label()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.task_stages.html">core.task_stages module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.task_stages.html#core.task_stages.task_stage_label"><code class="docutils literal notranslate"><span class="pre">task_stage_label()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="core.vllm_models.html">core.vllm_models module</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="core.vllm_models.html#core.vllm_models.discover_vllm_local_models"><code class="docutils literal notranslate"><span class="pre">discover_vllm_local_models()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="chat.settings.html" class="btn btn-neutral float-left" title="chat.settings module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="core.chroma_mcp_stdio_wrapper.html" class="btn btn-neutral float-right" title="core.chroma_mcp_stdio_wrapper module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

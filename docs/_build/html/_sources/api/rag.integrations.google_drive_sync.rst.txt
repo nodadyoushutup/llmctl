@@ -1,0 +1,7 @@
+rag.integrations.google\_drive\_sync module
+===========================================
+
+.. automodule:: rag.integrations.google_drive_sync
+   :members:
+   :show-inheritance:
+   :undoc-members:

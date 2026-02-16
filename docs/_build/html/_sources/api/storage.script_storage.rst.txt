@@ -1,0 +1,7 @@
+storage.script\_storage module
+==============================
+
+.. automodule:: storage.script_storage
+   :members:
+   :show-inheritance:
+   :undoc-members:

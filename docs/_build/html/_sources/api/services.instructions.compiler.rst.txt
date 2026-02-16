@@ -1,0 +1,7 @@
+services.instructions.compiler module
+=====================================
+
+.. automodule:: services.instructions.compiler
+   :members:
+   :show-inheritance:
+   :undoc-members:
