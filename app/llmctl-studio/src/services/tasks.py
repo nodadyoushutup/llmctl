@@ -49,6 +49,8 @@ from core.models import (
     AgentTask,
     Attachment,
     Flowchart,
+    FLOWCHART_EDGE_MODE_DOTTED,
+    FLOWCHART_EDGE_MODE_SOLID,
     FlowchartNode,
     FlowchartRun,
     FlowchartRunNode,
@@ -3384,6 +3386,8 @@ def _build_flowchart_input_context(
 ) -> dict[str, Any]:
     upstream_nodes: list[dict[str, Any]] = []
     latest_upstream: dict[str, Any] | None = None
+
+    # Preserve existing trigger-context behavior for solid activations.
     if upstream_results is not None:
         for upstream in upstream_results:
             source_node_id_raw = _parse_optional_int(
@@ -3394,12 +3398,19 @@ def _build_flowchart_input_context(
             source_node_id = source_node_id_raw if source_node_id_raw > 0 else None
             entry = {
                 "node_id": source_node_id,
+                "source_edge_id": _parse_optional_int(
+                    upstream.get("source_edge_id"),
+                    default=0,
+                    minimum=0,
+                )
+                or None,
                 "node_type": upstream.get("node_type"),
                 "condition_key": upstream.get("condition_key"),
                 "execution_index": upstream.get("execution_index"),
                 "output_state": upstream.get("output_state") or {},
                 "routing_state": upstream.get("routing_state") or {},
                 "sequence": upstream.get("sequence"),
+                "edge_mode": _normalize_flowchart_edge_mode(upstream.get("edge_mode")),
             }
             upstream_nodes.append(entry)
             if latest_upstream is None or (
@@ -3409,18 +3420,22 @@ def _build_flowchart_input_context(
                 latest_upstream = entry
     else:
         for edge in incoming_edges or []:
+            if not _edge_is_solid(edge):
+                continue
             source_node_id = int(edge["source_node_id"])
             previous = (latest_results or {}).get(source_node_id)
             if previous is None:
                 continue
             entry = {
                 "node_id": source_node_id,
+                "source_edge_id": int(edge["id"]),
                 "node_type": previous.get("node_type"),
                 "condition_key": edge.get("condition_key"),
                 "execution_index": previous.get("execution_index"),
                 "output_state": previous.get("output_state") or {},
                 "routing_state": previous.get("routing_state") or {},
                 "sequence": previous.get("sequence"),
+                "edge_mode": FLOWCHART_EDGE_MODE_SOLID,
             }
             upstream_nodes.append(entry)
             if latest_upstream is None or (
@@ -3428,6 +3443,78 @@ def _build_flowchart_input_context(
                 > _parse_optional_int(latest_upstream.get("sequence"), default=0)
             ):
                 latest_upstream = entry
+
+    dotted_upstream_nodes: list[dict[str, Any]] = []
+    for edge in incoming_edges or []:
+        if not _edge_is_dotted(edge):
+            continue
+        source_node_id = int(edge["source_node_id"])
+        previous = (latest_results or {}).get(source_node_id)
+        if previous is None:
+            # Dotted sources are optional in v1; missing output contributes no payload.
+            continue
+        dotted_upstream_nodes.append(
+            {
+                "node_id": source_node_id,
+                "source_edge_id": int(edge["id"]),
+                "node_type": previous.get("node_type"),
+                "condition_key": edge.get("condition_key"),
+                "execution_index": previous.get("execution_index"),
+                "output_state": previous.get("output_state") or {},
+                "routing_state": previous.get("routing_state") or {},
+                "sequence": previous.get("sequence"),
+                "edge_mode": FLOWCHART_EDGE_MODE_DOTTED,
+            }
+        )
+
+    if logger.isEnabledFor(logging.DEBUG):
+        incoming_dotted_edge_count = sum(
+            1 for edge in (incoming_edges or []) if _edge_is_dotted(edge)
+        )
+        pulled_sources = [
+            {
+                "source_edge_id": item.get("source_edge_id"),
+                "source_node_id": item.get("node_id"),
+            }
+            for item in dotted_upstream_nodes
+        ]
+        logger.debug(
+            "Flowchart run %s node %s execution %s pulled dotted context %s/%s (available/declared): %s",
+            run_id,
+            node_id,
+            execution_index,
+            len(dotted_upstream_nodes),
+            incoming_dotted_edge_count,
+            pulled_sources,
+        )
+
+    trigger_sources = [
+        {
+            "source_edge_id": entry.get("source_edge_id"),
+            "source_node_id": entry.get("node_id"),
+            "source_node_type": entry.get("node_type"),
+            "condition_key": entry.get("condition_key"),
+            "execution_index": entry.get("execution_index"),
+            "sequence": entry.get("sequence"),
+            "edge_mode": FLOWCHART_EDGE_MODE_SOLID,
+        }
+        for entry in upstream_nodes
+        if _normalize_flowchart_edge_mode(entry.get("edge_mode"))
+        == FLOWCHART_EDGE_MODE_SOLID
+    ]
+    pulled_dotted_sources = [
+        {
+            "source_edge_id": entry.get("source_edge_id"),
+            "source_node_id": entry.get("node_id"),
+            "source_node_type": entry.get("node_type"),
+            "condition_key": entry.get("condition_key"),
+            "execution_index": entry.get("execution_index"),
+            "sequence": entry.get("sequence"),
+            "edge_mode": FLOWCHART_EDGE_MODE_DOTTED,
+        }
+        for entry in dotted_upstream_nodes
+    ]
+
     return {
         "flowchart": {
             "id": flowchart_id,
@@ -3441,6 +3528,9 @@ def _build_flowchart_input_context(
         },
         "upstream_nodes": upstream_nodes,
         "latest_upstream": latest_upstream,
+        "dotted_upstream_nodes": dotted_upstream_nodes,
+        "trigger_sources": trigger_sources,
+        "pulled_dotted_sources": pulled_dotted_sources,
     }
 
 
@@ -3597,6 +3687,21 @@ def _flowchart_task_output_display(output_state: dict[str, Any]) -> str:
     return _json_dumps(output_state)
 
 
+def _normalize_flowchart_edge_mode(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned == FLOWCHART_EDGE_MODE_DOTTED:
+        return FLOWCHART_EDGE_MODE_DOTTED
+    return FLOWCHART_EDGE_MODE_SOLID
+
+
+def _edge_is_solid(edge: dict[str, Any]) -> bool:
+    return _normalize_flowchart_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_SOLID
+
+
+def _edge_is_dotted(edge: dict[str, Any]) -> bool:
+    return _normalize_flowchart_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_DOTTED
+
+
 def _resolve_flowchart_outgoing_edges(
     *,
     node_type: str,
@@ -3607,25 +3712,28 @@ def _resolve_flowchart_outgoing_edges(
     if not outgoing_edges:
         return []
 
+    solid_edges = [edge for edge in outgoing_edges if _edge_is_solid(edge)]
     route_key_raw = routing_state.get("route_key")
     route_key = str(route_key_raw).strip() if route_key_raw is not None else ""
 
     if node_type == FLOWCHART_NODE_TYPE_DECISION:
+        if not solid_edges:
+            raise ValueError("Decision node has no solid outgoing edges.")
         if not route_key:
             raise ValueError("Decision node did not produce a route_key.")
-        for edge in outgoing_edges:
+        for edge in solid_edges:
             condition_key = str(edge.get("condition_key") or "").strip()
             if condition_key == route_key:
                 return [edge]
         fallback_key = str(node_config.get("fallback_condition_key") or "").strip()
         if fallback_key:
-            for edge in outgoing_edges:
+            for edge in solid_edges:
                 condition_key = str(edge.get("condition_key") or "").strip()
                 if condition_key == fallback_key:
                     return [edge]
         default_edges = [
             edge
-            for edge in outgoing_edges
+            for edge in solid_edges
             if not str(edge.get("condition_key") or "").strip()
         ]
         if len(default_edges) == 1:
@@ -3635,11 +3743,11 @@ def _resolve_flowchart_outgoing_edges(
         )
 
     if route_key:
-        for edge in outgoing_edges:
+        for edge in solid_edges:
             condition_key = str(edge.get("condition_key") or "").strip()
             if condition_key == route_key:
                 return [edge]
-    return list(outgoing_edges)
+    return list(solid_edges)
 
 
 def _record_flowchart_guardrail_failure(
@@ -4836,11 +4944,13 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
         outgoing_by_source: dict[int, list[dict[str, Any]]] = {}
         incoming_by_target: dict[int, list[dict[str, Any]]] = {}
         for edge in sorted(list(flowchart.edges), key=lambda item: item.id):
+            edge_mode = _normalize_flowchart_edge_mode(edge.edge_mode)
             outgoing_by_source.setdefault(edge.source_node_id, []).append(
                 {
                     "id": edge.id,
                     "source_node_id": edge.source_node_id,
                     "target_node_id": edge.target_node_id,
+                    "edge_mode": edge_mode,
                     "condition_key": edge.condition_key,
                 }
             )
@@ -4849,6 +4959,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     "id": edge.id,
                     "source_node_id": edge.source_node_id,
                     "target_node_id": edge.target_node_id,
+                    "edge_mode": edge_mode,
                     "condition_key": edge.condition_key,
                 }
             )
@@ -4885,6 +4996,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             {
                 int(edge["source_node_id"])
                 for edge in incoming_by_target.get(node_id, [])
+                if _edge_is_solid(edge)
             }
         )
         incoming_parent_ids[node_id] = parent_ids
@@ -5187,6 +5299,23 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     )
                 return
 
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Flowchart run %s node %s (%s) selected %s solid trigger edge(s): %s",
+                    run_id,
+                    node_id,
+                    node_spec.get("node_type"),
+                    len(selected_edges),
+                    [
+                        {
+                            "edge_id": int(edge.get("id") or 0),
+                            "target_node_id": int(edge.get("target_node_id") or 0),
+                            "edge_mode": _normalize_flowchart_edge_mode(edge.get("edge_mode")),
+                        }
+                        for edge in selected_edges
+                    ],
+                )
+
             emitted = {
                 "source_node_id": node_id,
                 "node_type": node_spec.get("node_type"),
@@ -5224,7 +5353,9 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                 parent_ids = incoming_parent_ids.get(target_node_id, [])
                 token = {
                     **emitted,
+                    "source_edge_id": int(edge["id"]),
                     "condition_key": edge.get("condition_key"),
+                    "edge_mode": _normalize_flowchart_edge_mode(edge.get("edge_mode")),
                 }
                 if not parent_ids:
                     ready_queue.append(

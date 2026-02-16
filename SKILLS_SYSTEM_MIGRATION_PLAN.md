@@ -61,40 +61,85 @@ Target state:
 
 ## Stage 0 - Product decisions and scope lock
 
-- [ ] Confirm attachment model for v1:
+- [x] Confirm attachment model for v1:
   - [x] node-level skills only.
   - [ ] task template + node override, or
   - [ ] agent + node merge.
-- [ ] Decide binding granularity:
-  - [ ] bindings defined on reusable entities (node/task/agent), then snapshotted per run.
-  - [ ] avoid manual per-run skill assignment except explicit override APIs.
-- [ ] Confirm precedence/merge order:
-  - [ ] system default skills
-  - [ ] workspace/project skills
-  - [ ] entity-attached skills.
-- [ ] Confirm context-budget policy for skills:
-  - [ ] max SKILL.md size
-  - [ ] lazy-load references/assets
-  - [ ] hard caps for injected fallback text.
-- [ ] Confirm run isolation policy:
-  - [ ] per-run workspace naming convention (`run-<flowchart_run_node_id>-<token>`).
-  - [ ] per-run provider home env vars (`HOME`, `CODEX_HOME`, provider-specific dirs).
-  - [ ] global settings are read-only during task execution.
-- [ ] Confirm runtime mode:
-  - [ ] process-isolated mode is v1 default.
-  - [ ] optional containerized node executor deferred to v1.x unless explicitly pulled in.
-- [ ] Confirm conflict behavior:
-  - [ ] duplicate skill slug/version handling
-  - [ ] deterministic order rules.
-- [ ] Confirm initial provider targets for native support:
-  - [ ] Codex
-  - [ ] Claude Code
-  - [ ] Gemini CLI
-- [ ] Define GA success criteria (see Acceptance Criteria section).
+- [x] Decide binding granularity:
+  - [x] bindings defined on reusable entities (node/task/agent), then snapshotted per run.
+  - [x] avoid manual per-run skill assignment except explicit override APIs.
+- [x] Confirm precedence/merge order:
+  - [x] system default skills
+  - [x] workspace/project skills
+  - [x] entity-attached skills.
+- [x] Confirm context-budget policy for skills:
+  - [x] max SKILL.md size
+  - [x] lazy-load references/assets
+  - [x] hard caps for injected fallback text.
+- [x] Confirm run isolation policy:
+  - [x] per-run workspace naming convention (`run-<flowchart_run_node_id>-<token>`).
+  - [x] per-run provider home env vars (`HOME`, `CODEX_HOME`, provider-specific dirs).
+  - [x] global settings are read-only during task execution.
+- [x] Confirm runtime mode:
+  - [x] process-isolated mode is v1 default.
+  - [x] optional containerized node executor deferred to v1.x unless explicitly pulled in.
+- [x] Confirm conflict behavior:
+  - [x] duplicate skill slug/version handling
+  - [x] deterministic order rules.
+- [x] Confirm initial provider targets for native support:
+  - [x] Codex
+  - [x] Claude Code
+  - [x] Gemini CLI
+- [x] Define GA success criteria (see Acceptance Criteria section).
 
 Deliverables:
-- [ ] Finalized architecture decision record in `docs/`.
-- [ ] Published v1 scope with explicit non-goals.
+- [x] Finalized architecture decision record in `docs/`.
+- [x] Published v1 scope with explicit non-goals.
+
+### Stage 0 decision log (locked 2026-02-16)
+
+- [x] v1 attachment model is node-level only (`flowchart_node_skills`).
+- [x] Skill bindings are defined on reusable entities and resolved/snapshotted per run.
+- [x] Manual per-run skill assignment is not part of normal runtime; explicit override APIs are deferred.
+- [x] Merge/precedence order is defined as: system defaults -> workspace/project -> entity-attached.
+- [x] For duplicate skill slug collisions across layers, the highest-precedence layer wins.
+- [x] For same-layer ordering, attachments resolve deterministically by `position ASC`, then `skill.name ASC`.
+- [x] Context-budget policy is locked:
+  - [x] `SKILL.md` max size: `64 KiB`.
+  - [x] Total package max size: `1 MiB`; max single file size: `256 KiB`.
+  - [x] `references/*` and `assets/*` are lazy-loaded (never eagerly in fallback prompt text).
+  - [x] Fallback injection caps: `12,000` chars per skill and `32,000` chars total.
+- [x] Run isolation policy is locked:
+  - [x] run-local workspace root naming: `run-<flowchart_run_node_id>-<token>`.
+  - [x] run-local provider config homes via env (`HOME`, `CODEX_HOME`, and provider-scoped config roots where supported).
+  - [x] global/provider user settings are read-only during task execution.
+- [x] Runtime mode is locked:
+  - [x] process-isolated execution is v1 default.
+  - [x] optional containerized node executor is deferred to v1.x.
+- [x] Conflict behavior is locked:
+  - [x] duplicate skill slug rejected by unique `skills.name`.
+  - [x] duplicate skill version per skill rejected by unique (`skill_id`, `version`).
+  - [x] resolver output ordering is deterministic.
+- [x] Native provider targets for v1 are Codex, Claude Code, and Gemini CLI.
+- [x] GA success criteria source of truth is the Acceptance Criteria section in this file.
+
+### Stage 0 final v1 scope statement (locked 2026-02-16)
+
+- Skills are first-class entities with immutable versions and files (`skills`, `skill_versions`, `skill_files`).
+- v1 attachments are node-level only, with ordered many-to-many mapping via `flowchart_node_skills`.
+- Resolver behavior is deterministic and snapshotted onto node-run records before provider execution.
+- v1 runtime supports provider-native materialization for Codex, Claude Code, and Gemini CLI, with deterministic fallback prompt/context injection for non-native runtimes.
+- Execution isolation is run-local for workspace and provider config homes; shared global config mutation during execution is disallowed.
+
+### Stage 0 explicit non-goals (v1)
+
+- No task-template-level or agent-level skill attachment model in v1.
+- No default manual per-run skill assignment UX in v1.
+- No org-global/system-skill management policy in v1; only workspace DB records are in scope.
+- No secrets-reference packaging model in v1 skill files.
+- No remote skill registry install/sync in v1 (defer to v1.1+).
+- No containerized node executor as v1 default (process isolation only).
+- No ongoing legacy `Skill Script` compatibility mode after migration cutover.
 
 ## Stage 1 - Data model migration
 
@@ -265,14 +310,14 @@ Deliverables:
 - [ ] 100 parallel runs with disjoint skill sets complete with zero cross-run skill/config contamination.
 - [ ] Documentation is updated and internally consistent.
 
-## Open questions
+## Open questions (resolved in Stage 0)
 
-- [ ] Should skills be version-pinned per node/task, or always latest active version?
-- [ ] Do we allow org-global/system skills that cannot be edited by normal users?
-- [ ] Should skills support secrets references, or only plain resources + MCP tools?
-- [ ] What is the max allowed skill package size and per-file size?
-- [ ] Do we support remote registries in v1 or defer to v1.1?
-- [ ] Do we introduce containerized node executors in v1.x for stronger isolation, or stay process-isolated only?
+- [x] Skills are version-pinned at resolution time (snapshotted per run), not implicitly "latest active" at execution time.
+- [x] Org-global/system-skill management is deferred from v1 (reserved precedence layer only).
+- [x] v1 supports plain resources + MCP tools only; secrets-reference support is deferred.
+- [x] Max allowed sizes are locked: package `1 MiB`, single file `256 KiB`, `SKILL.md` `64 KiB`.
+- [x] Remote registries are deferred from v1 to v1.1+.
+- [x] v1 stays process-isolated; containerized node executors are deferred to v1.x.
 
 ## Suggested implementation order (high confidence)
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,6 +64,12 @@ FLOWCHART_NODE_TYPE_CHOICES = (
     FLOWCHART_NODE_TYPE_MEMORY,
     FLOWCHART_NODE_TYPE_DECISION,
 )
+FLOWCHART_EDGE_MODE_SOLID = "solid"
+FLOWCHART_EDGE_MODE_DOTTED = "dotted"
+FLOWCHART_EDGE_MODE_CHOICES = (
+    FLOWCHART_EDGE_MODE_SOLID,
+    FLOWCHART_EDGE_MODE_DOTTED,
+)
 
 MCP_SERVER_TYPE_CUSTOM = "custom"
 MCP_SERVER_TYPE_INTEGRATED = "integrated"
@@ -107,6 +114,63 @@ MILESTONE_HEALTH_CHOICES = (
     MILESTONE_HEALTH_GREEN,
     MILESTONE_HEALTH_YELLOW,
     MILESTONE_HEALTH_RED,
+)
+
+RAG_SOURCE_KIND_LOCAL = "local"
+RAG_SOURCE_KIND_GITHUB = "github"
+RAG_SOURCE_KIND_GOOGLE_DRIVE = "google_drive"
+RAG_SOURCE_KIND_CHOICES = (
+    RAG_SOURCE_KIND_LOCAL,
+    RAG_SOURCE_KIND_GITHUB,
+    RAG_SOURCE_KIND_GOOGLE_DRIVE,
+)
+
+RAG_SOURCE_SCHEDULE_UNIT_MINUTES = "minutes"
+RAG_SOURCE_SCHEDULE_UNIT_HOURS = "hours"
+RAG_SOURCE_SCHEDULE_UNIT_DAYS = "days"
+RAG_SOURCE_SCHEDULE_UNIT_WEEKS = "weeks"
+RAG_SOURCE_SCHEDULE_UNIT_CHOICES = (
+    RAG_SOURCE_SCHEDULE_UNIT_MINUTES,
+    RAG_SOURCE_SCHEDULE_UNIT_HOURS,
+    RAG_SOURCE_SCHEDULE_UNIT_DAYS,
+    RAG_SOURCE_SCHEDULE_UNIT_WEEKS,
+)
+
+RAG_INDEX_MODE_FRESH = "fresh"
+RAG_INDEX_MODE_DELTA = "delta"
+RAG_INDEX_MODE_CHOICES = (
+    RAG_INDEX_MODE_FRESH,
+    RAG_INDEX_MODE_DELTA,
+)
+
+RAG_INDEX_TRIGGER_MANUAL = "manual"
+RAG_INDEX_TRIGGER_SCHEDULED = "scheduled"
+RAG_INDEX_TRIGGER_CHOICES = (
+    RAG_INDEX_TRIGGER_MANUAL,
+    RAG_INDEX_TRIGGER_SCHEDULED,
+)
+
+RAG_INDEX_JOB_KIND_INDEX = "index"
+RAG_INDEX_JOB_STATUS_QUEUED = "queued"
+RAG_INDEX_JOB_STATUS_RUNNING = "running"
+RAG_INDEX_JOB_STATUS_PAUSING = "pausing"
+RAG_INDEX_JOB_STATUS_PAUSED = "paused"
+RAG_INDEX_JOB_STATUS_SUCCEEDED = "succeeded"
+RAG_INDEX_JOB_STATUS_FAILED = "failed"
+RAG_INDEX_JOB_STATUS_CANCELLED = "cancelled"
+RAG_INDEX_JOB_STATUS_CHOICES = (
+    RAG_INDEX_JOB_STATUS_QUEUED,
+    RAG_INDEX_JOB_STATUS_RUNNING,
+    RAG_INDEX_JOB_STATUS_PAUSING,
+    RAG_INDEX_JOB_STATUS_PAUSED,
+    RAG_INDEX_JOB_STATUS_SUCCEEDED,
+    RAG_INDEX_JOB_STATUS_FAILED,
+    RAG_INDEX_JOB_STATUS_CANCELLED,
+)
+RAG_INDEX_JOB_ACTIVE_STATUSES = (
+    RAG_INDEX_JOB_STATUS_QUEUED,
+    RAG_INDEX_JOB_STATUS_RUNNING,
+    RAG_INDEX_JOB_STATUS_PAUSING,
 )
 
 agent_task_scripts = Table(
@@ -384,6 +448,158 @@ class IntegrationSetting(BaseModel):
     __tablename__ = "integration_settings"
     __table_args__ = (
         UniqueConstraint("provider", "key", name="uq_integration_provider_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class RAGSource(BaseModel):
+    __tablename__ = "rag_sources"
+    __table_args__ = (
+        UniqueConstraint("collection", name="uq_rag_sources_collection"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    local_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    git_repo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    git_branch: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    git_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
+    drive_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    collection: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    indexed_file_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    indexed_chunk_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    indexed_file_types: Mapped[str | None] = mapped_column(Text, nullable=True)
+    index_schedule_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    index_schedule_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    index_schedule_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=RAG_INDEX_MODE_FRESH,
+        server_default=text("'fresh'"),
+    )
+    next_index_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    index_jobs: Mapped[list["RAGIndexJob"]] = relationship(
+        "RAGIndexJob",
+        back_populates="source",
+        cascade="all, delete-orphan",
+        order_by="RAGIndexJob.created_at.desc()",
+    )
+    file_states: Mapped[list["RAGSourceFileState"]] = relationship(
+        "RAGSourceFileState",
+        back_populates="source",
+        cascade="all, delete-orphan",
+        order_by="RAGSourceFileState.path.asc()",
+    )
+
+
+class RAGIndexJob(BaseModel):
+    __tablename__ = "rag_index_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=RAG_INDEX_JOB_KIND_INDEX, index=True
+    )
+    trigger_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=RAG_INDEX_TRIGGER_MANUAL,
+        server_default=text("'manual'"),
+    )
+    mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=RAG_INDEX_MODE_FRESH,
+        server_default=text("'fresh'"),
+    )
+    status: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        default=RAG_INDEX_JOB_STATUS_QUEUED,
+        server_default=text("'queued'"),
+        index=True,
+    )
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("rag_sources.id"), nullable=False, index=True
+    )
+    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    source: Mapped["RAGSource"] = relationship("RAGSource", back_populates="index_jobs")
+
+
+class RAGSourceFileState(BaseModel):
+    __tablename__ = "rag_source_file_states"
+    __table_args__ = (
+        UniqueConstraint("source_id", "path", name="uq_rag_source_file_source_path"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("rag_sources.id"), nullable=False, index=True
+    )
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(80), nullable=False)
+    indexed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    doc_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    source: Mapped["RAGSource"] = relationship(
+        "RAGSource", back_populates="file_states"
+    )
+
+
+class RAGSetting(BaseModel):
+    __tablename__ = "rag_settings"
+    __table_args__ = (
+        UniqueConstraint("provider", "key", name="uq_rag_settings_provider_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -754,6 +970,12 @@ class FlowchartEdge(BaseModel):
     )
     source_handle_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     target_handle_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    edge_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=FLOWCHART_EDGE_MODE_SOLID,
+        server_default=text("'solid'"),
+    )
     condition_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

@@ -598,6 +598,10 @@
     cursor: pointer;
   }
 
+  .flow-edge-path.is-dotted {
+    stroke-dasharray: 7 5;
+  }
+
   .flow-edge-hit {
     stroke: transparent;
     stroke-width: 18;
@@ -622,6 +626,12 @@
 
   .flow-inspector .label {
     font-size: 12px;
+  }
+
+  .flow-field-help {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.4;
   }
 
   .flow-checkbox-list {
@@ -863,9 +873,10 @@
     const MEMORY_NODE_WIDTH = 190;
     const MEMORY_NODE_HEIGHT = 108;
     const DECISION_NODE_SIZE = 144;
-    const DEFAULT_MAX_OUTGOING_EDGES = 1;
-    const DECISION_MAX_OUTGOING_EDGES = 3;
     const END_MAX_OUTGOING_EDGES = 0;
+    const EDGE_MODE_SOLID = "solid";
+    const EDGE_MODE_DOTTED = "dotted";
+    const EDGE_MODE_SET = new Set([EDGE_MODE_SOLID, EDGE_MODE_DOTTED]);
     const WORKSPACE_WIDTH = 200000;
     const WORKSPACE_HEIGHT = 200000;
     let worldOriginX = WORKSPACE_WIDTH / 2;
@@ -1141,29 +1152,52 @@
       return state.nodes.find((node) => nodeToken(node) === String(token)) || null;
     }
 
-    function maxOutgoingEdgesForNode(node) {
-      if (node && String(node.node_type || "") === END_NODE_TYPE) {
-        return END_MAX_OUTGOING_EDGES;
-      }
-      if (node && String(node.node_type || "") === "decision") {
-        return DECISION_MAX_OUTGOING_EDGES;
-      }
-      return DEFAULT_MAX_OUTGOING_EDGES;
+    function isEndNode(node) {
+      return Boolean(node) && String(node.node_type || "") === END_NODE_TYPE;
     }
 
-    function outgoingEdgeCount(nodeTokenValue) {
+    function isDecisionNode(node) {
+      return Boolean(node) && String(node.node_type || "") === "decision";
+    }
+
+    function maxOutgoingEdgesForNode(node) {
+      if (isEndNode(node)) {
+        return END_MAX_OUTGOING_EDGES;
+      }
+      return Number.POSITIVE_INFINITY;
+    }
+
+    function outgoingEdgeCount(nodeTokenValue, edgeMode = null, options = {}) {
       const sourceToken = String(nodeTokenValue);
-      return state.edges.filter((edge) => String(edge.source_node_id) === sourceToken).length;
+      const normalizedMode = edgeMode ? normalizeEdgeMode(edgeMode) : null;
+      const excludedEdgeId =
+        options.excludeEdgeId !== null && options.excludeEdgeId !== undefined
+          ? String(options.excludeEdgeId)
+          : null;
+      return state.edges.filter((edge) => {
+        if (String(edge.source_node_id) !== sourceToken) {
+          return false;
+        }
+        if (excludedEdgeId && String(edge.id) === excludedEdgeId) {
+          return false;
+        }
+        if (normalizedMode !== null && normalizeEdgeMode(edge.edge_mode) !== normalizedMode) {
+          return false;
+        }
+        return true;
+      }).length;
     }
 
     function outgoingEdgeLimitMessage(node) {
-      if (node && String(node.node_type || "") === END_NODE_TYPE) {
+      if (isEndNode(node)) {
         return "End nodes cannot have outgoing edges.";
       }
-      if (node && String(node.node_type || "") === "decision") {
-        return `Decision nodes support up to ${DECISION_MAX_OUTGOING_EDGES} outgoing edges.`;
-      }
-      return `This node supports up to ${DEFAULT_MAX_OUTGOING_EDGES} outgoing edge.`;
+      return "Only End nodes are blocked from creating outgoing edges.";
+    }
+
+    function nextDecisionConditionKey(sourceTokenValue, options = {}) {
+      const nextRouteIndex = outgoingEdgeCount(sourceTokenValue, EDGE_MODE_SOLID, options) + 1;
+      return `route_${nextRouteIndex}`;
     }
 
     function findEdge(id) {
@@ -1172,6 +1206,11 @@
 
     function nodeTypeLabel(nodeType) {
       return String(nodeType || "").replaceAll("_", " ");
+    }
+
+    function normalizeEdgeMode(value) {
+      const cleaned = String(value || "").trim().toLowerCase();
+      return EDGE_MODE_SET.has(cleaned) ? cleaned : EDGE_MODE_SOLID;
     }
 
     function defaultNodeTitle(nodeType) {
@@ -1988,6 +2027,7 @@
           rawEdge.target_handle_id !== null && rawEdge.target_handle_id !== undefined
             ? String(rawEdge.target_handle_id)
             : null,
+        edge_mode: normalizeEdgeMode(rawEdge.edge_mode),
         condition_key: rawEdge.condition_key || "",
         label: rawEdge.label || "",
       }));
@@ -2033,6 +2073,7 @@
           target_node_id: edge.target_node_id,
           source_handle_id: edge.source_handle_id || null,
           target_handle_id: edge.target_handle_id || null,
+          edge_mode: normalizeEdgeMode(edge.edge_mode),
           condition_key: edge.condition_key || null,
           label: edge.label || null,
         })),
@@ -2408,6 +2449,9 @@
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("d", d);
         path.classList.add("flow-edge-path");
+        if (normalizeEdgeMode(edge.edge_mode) === EDGE_MODE_DOTTED) {
+          path.classList.add("is-dotted");
+        }
         if (String(state.selectedEdgeId) === String(edge.id)) {
           path.classList.add("is-selected");
         }
@@ -2914,14 +2958,38 @@
     function selectedEdgeInspectorHtml(edge) {
       const source = findNode(edge.source_node_id);
       const target = findNode(edge.target_node_id);
+      const edgeMode = normalizeEdgeMode(edge.edge_mode);
+      const sourceIsDecision = isDecisionNode(source);
+      const conditionLabel =
+        sourceIsDecision && edgeMode === EDGE_MODE_SOLID
+          ? "condition key (required for decision solid routes)"
+          : "condition key (optional)";
+      const conditionHint =
+        sourceIsDecision && edgeMode === EDGE_MODE_SOLID
+          ? "Decision routing reads condition keys only from solid edges."
+          : sourceIsDecision
+            ? "Decision routing ignores condition keys on dotted edges."
+            : "Condition keys are used for decision-route matching on solid decision edges.";
       return `
         <p class="eyebrow">edge inspector</p>
         <h3 class="section-title" style="margin-top: 6px;">${escapeHtml(source ? source.title : edge.source_node_id)} -> ${escapeHtml(target ? target.title : edge.target_node_id)}</h3>
 
         <label class="label" style="margin-top: 12px;">
-          condition key (required for decision branches)
+          connection mode
+          <select class="input" id="inspectorEdgeMode">
+            <option value="${EDGE_MODE_SOLID}" ${edgeMode === EDGE_MODE_SOLID ? "selected" : ""}>Solid (trigger + context)</option>
+            <option value="${EDGE_MODE_DOTTED}" ${edgeMode === EDGE_MODE_DOTTED ? "selected" : ""}>Dotted (pull-only context dependency)</option>
+          </select>
+        </label>
+        <p class="muted flow-field-help">
+          Solid connectors trigger target execution and pass context. Dotted connectors never trigger execution; they only expose pull-only context dependencies.
+        </p>
+
+        <label class="label" style="margin-top: 12px;">
+          ${conditionLabel}
           <input type="text" class="input" id="inspectorEdgeCondition" value="${escapeHtml(edge.condition_key || "")}" />
         </label>
+        <p class="muted flow-field-help">${conditionHint}</p>
 
         <label class="label" style="margin-top: 10px;">
           label (optional)
@@ -3120,9 +3188,27 @@
 
       if (selectedEdge) {
         inspectorEl.innerHTML = selectedEdgeInspectorHtml(selectedEdge);
+        const modeSelect = document.getElementById("inspectorEdgeMode");
         const conditionInput = document.getElementById("inspectorEdgeCondition");
         const labelInput = document.getElementById("inspectorEdgeLabel");
         const deleteButton = document.getElementById("deleteEdgeButton");
+
+        modeSelect.addEventListener("change", () => {
+          selectedEdge.edge_mode = normalizeEdgeMode(modeSelect.value);
+          const sourceNode = findNode(selectedEdge.source_node_id);
+          if (
+            selectedEdge.edge_mode === EDGE_MODE_SOLID &&
+            isDecisionNode(sourceNode) &&
+            !String(selectedEdge.condition_key || "").trim()
+          ) {
+            selectedEdge.condition_key = nextDecisionConditionKey(selectedEdge.source_node_id, {
+              excludeEdgeId: selectedEdge.id,
+            });
+          }
+          setDirty(true);
+          renderInspector();
+          renderEdges();
+        });
 
         conditionInput.addEventListener("input", () => {
           selectedEdge.condition_key = conditionInput.value.trim();
@@ -3147,7 +3233,7 @@
         <h3 class="section-title" style="margin-top: 6px;">Nothing selected</h3>
         <p class="muted" style="margin-top: 10px;">
           Select a node to edit node name, type, refs, settings, model, MCP servers, integrations, and stage scripts.
-          Select an edge to edit condition keys and labels.
+          Select an edge to edit connection mode, condition keys, and labels.
         </p>
       `;
     }
@@ -3249,13 +3335,17 @@
         setMessage(outgoingEdgeLimitMessage(sourceNode), "error");
         return;
       }
+      const initialConditionKey = isDecisionNode(sourceNode)
+        ? nextDecisionConditionKey(sourceToken)
+        : "";
       state.edges.push({
         id: `client-edge-${nextClientEdgeId++}`,
         source_node_id: sourceToken,
         target_node_id: targetToken,
         source_handle_id: String(sourceHandleId || "").trim() || null,
         target_handle_id: String(targetHandleId || "").trim() || null,
-        condition_key: sourceNode.node_type === "decision" ? `route_${outgoingCount + 1}` : "",
+        edge_mode: EDGE_MODE_SOLID,
+        condition_key: initialConditionKey,
         label: "",
       });
       state.selectedEdgeId = String(state.edges[state.edges.length - 1].id);

@@ -150,10 +150,12 @@ def _ensure_schema() -> None:
         flowchart_edge_columns = {
             "source_handle_id": "VARCHAR(32)",
             "target_handle_id": "VARCHAR(32)",
+            "edge_mode": "VARCHAR(16) NOT NULL DEFAULT 'solid'",
             "condition_key": "VARCHAR(128)",
             "label": "VARCHAR(255)",
         }
         _ensure_columns(connection, "flowchart_edges", flowchart_edge_columns)
+        _migrate_flowchart_edge_modes(connection)
 
         flowchart_run_columns = {
             "celery_task_id": "VARCHAR(255)",
@@ -220,6 +222,8 @@ def _ensure_schema() -> None:
         _migrate_agent_task_kind_values(connection)
         _drop_pipeline_schema(connection)
         _ensure_flowchart_indexes(connection)
+        _ensure_rag_schema(connection)
+        _ensure_rag_indexes(connection)
         _drop_agent_utility_ownership(connection)
         _ensure_canonical_workflow_views(connection)
 
@@ -1151,6 +1155,227 @@ def _migrate_milestone_status(connection) -> None:
             "WHERE status = 'done' AND (completed IS NULL OR completed = 0)"
         )
     )
+
+
+def _migrate_flowchart_edge_modes(connection) -> None:
+    tables = _table_names(connection)
+    if "flowchart_edges" not in tables:
+        return
+    columns = _table_columns(connection, "flowchart_edges")
+    if "edge_mode" not in columns:
+        return
+    connection.execute(
+        text(
+            "UPDATE flowchart_edges "
+            "SET edge_mode = 'solid' "
+            "WHERE edge_mode IS NULL "
+            "OR trim(edge_mode) = '' "
+            "OR lower(trim(edge_mode)) NOT IN ('solid', 'dotted')"
+        )
+    )
+
+
+def _ensure_rag_schema(connection) -> None:
+    tables = _table_names(connection)
+
+    rag_source_columns = {
+        "name": "VARCHAR(128) NOT NULL DEFAULT ''",
+        "kind": "VARCHAR(16) NOT NULL DEFAULT 'local'",
+        "local_path": "TEXT",
+        "git_repo": "VARCHAR(255)",
+        "git_branch": "VARCHAR(128)",
+        "git_dir": "TEXT",
+        "drive_folder_id": "VARCHAR(255)",
+        "collection": "VARCHAR(128) NOT NULL DEFAULT ''",
+        "last_indexed_at": "DATETIME",
+        "last_error": "TEXT",
+        "indexed_file_count": "INTEGER",
+        "indexed_chunk_count": "INTEGER",
+        "indexed_file_types": "TEXT",
+        "index_schedule_value": "INTEGER",
+        "index_schedule_unit": "VARCHAR(16)",
+        "index_schedule_mode": "VARCHAR(16) NOT NULL DEFAULT 'fresh'",
+        "next_index_at": "DATETIME",
+        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    if "rag_sources" in tables:
+        _ensure_columns(connection, "rag_sources", rag_source_columns)
+
+    rag_index_job_columns = {
+        "kind": "VARCHAR(32) NOT NULL DEFAULT 'index'",
+        "trigger_mode": "VARCHAR(16) NOT NULL DEFAULT 'manual'",
+        "mode": "VARCHAR(16) NOT NULL DEFAULT 'fresh'",
+        "status": "VARCHAR(24) NOT NULL DEFAULT 'queued'",
+        "source_id": "INTEGER",
+        "celery_task_id": "VARCHAR(255)",
+        "output": "TEXT",
+        "error": "TEXT",
+        "meta_json": "TEXT",
+        "started_at": "DATETIME",
+        "finished_at": "DATETIME",
+        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    if "rag_index_jobs" in tables:
+        _ensure_columns(connection, "rag_index_jobs", rag_index_job_columns)
+
+    rag_file_state_columns = {
+        "source_id": "INTEGER",
+        "path": "TEXT",
+        "fingerprint": "VARCHAR(80)",
+        "indexed": "INTEGER NOT NULL DEFAULT 0",
+        "doc_type": "VARCHAR(32)",
+        "chunk_count": "INTEGER NOT NULL DEFAULT 0",
+        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    if "rag_source_file_states" in tables:
+        _ensure_columns(connection, "rag_source_file_states", rag_file_state_columns)
+
+    rag_settings_columns = {
+        "provider": "VARCHAR(32)",
+        "key": "VARCHAR(64)",
+        "value": "TEXT",
+        "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    if "rag_settings" in tables:
+        _ensure_columns(connection, "rag_settings", rag_settings_columns)
+
+    _migrate_rag_source_schedule_modes(connection)
+    _migrate_rag_index_job_modes(connection)
+    _migrate_rag_index_job_trigger_modes(connection)
+    _migrate_rag_index_job_statuses(connection)
+
+
+def _migrate_rag_source_schedule_modes(connection) -> None:
+    tables = _table_names(connection)
+    if "rag_sources" not in tables:
+        return
+    columns = _table_columns(connection, "rag_sources")
+    if "index_schedule_mode" not in columns:
+        return
+    connection.execute(
+        text(
+            "UPDATE rag_sources "
+            "SET index_schedule_mode = 'fresh' "
+            "WHERE index_schedule_mode IS NULL "
+            "OR trim(index_schedule_mode) = '' "
+            "OR lower(trim(index_schedule_mode)) NOT IN ('fresh', 'delta')"
+        )
+    )
+
+
+def _migrate_rag_index_job_modes(connection) -> None:
+    tables = _table_names(connection)
+    if "rag_index_jobs" not in tables:
+        return
+    columns = _table_columns(connection, "rag_index_jobs")
+    if "mode" not in columns:
+        return
+    connection.execute(
+        text(
+            "UPDATE rag_index_jobs "
+            "SET mode = 'fresh' "
+            "WHERE mode IS NULL "
+            "OR trim(mode) = '' "
+            "OR lower(trim(mode)) NOT IN ('fresh', 'delta')"
+        )
+    )
+
+
+def _migrate_rag_index_job_trigger_modes(connection) -> None:
+    tables = _table_names(connection)
+    if "rag_index_jobs" not in tables:
+        return
+    columns = _table_columns(connection, "rag_index_jobs")
+    if "trigger_mode" not in columns:
+        return
+    connection.execute(
+        text(
+            "UPDATE rag_index_jobs "
+            "SET trigger_mode = 'manual' "
+            "WHERE trigger_mode IS NULL "
+            "OR trim(trigger_mode) = '' "
+            "OR lower(trim(trigger_mode)) NOT IN ('manual', 'scheduled')"
+        )
+    )
+
+
+def _migrate_rag_index_job_statuses(connection) -> None:
+    tables = _table_names(connection)
+    if "rag_index_jobs" not in tables:
+        return
+    columns = _table_columns(connection, "rag_index_jobs")
+    if "status" not in columns:
+        return
+    connection.execute(
+        text(
+            "UPDATE rag_index_jobs "
+            "SET status = 'queued' "
+            "WHERE status IS NULL "
+            "OR trim(status) = '' "
+            "OR lower(trim(status)) NOT IN "
+            "('queued', 'running', 'pausing', 'paused', 'succeeded', 'failed', 'cancelled')"
+        )
+    )
+
+
+def _ensure_rag_indexes(connection) -> None:
+    tables = _table_names(connection)
+    if "rag_sources" in tables:
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_rag_sources_kind ON rag_sources (kind)")
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_sources_next_index_at ON rag_sources (next_index_at)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_sources_schedule_mode ON rag_sources (index_schedule_mode)"
+            )
+        )
+
+    if "rag_index_jobs" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_index_jobs_source_id ON rag_index_jobs (source_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_index_jobs_status ON rag_index_jobs (status)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_index_jobs_created_at ON rag_index_jobs (created_at)"
+            )
+        )
+
+    if "rag_source_file_states" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_source_file_states_source_id ON rag_source_file_states (source_id)"
+            )
+        )
+
+    if "rag_settings" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_rag_settings_provider ON rag_settings (provider)"
+            )
+        )
 
 
 def _ensure_flowchart_indexes(connection) -> None:

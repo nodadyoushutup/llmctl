@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 from pathlib import Path
 
 from flask import Flask
@@ -9,6 +10,7 @@ from core.config import Config
 from core.db import create_session, init_db, init_engine
 from core.migrations import apply_runtime_migrations
 from core.seed import seed_defaults
+from rag.web.scheduler import start_source_scheduler, stop_source_scheduler
 from web.views import bp as agents_bp
 
 
@@ -48,5 +50,7 @@ def create_app() -> Flask:
         seeder_db.close()
 
     app.register_blueprint(agents_bp)
+    start_source_scheduler()
+    atexit.register(stop_source_scheduler)
 
     return app

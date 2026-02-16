@@ -13,6 +13,15 @@ def _should_start_worker(debug: bool) -> bool:
     return True
 
 
+def _should_start_rag_worker(debug: bool) -> bool:
+    default = os.getenv("CELERY_AUTOSTART", "true")
+    if os.getenv("RAG_CELERY_AUTOSTART", default).lower() != "true":
+        return False
+    if debug and os.getenv("WERKZEUG_RUN_MAIN") != "true":
+        return False
+    return True
+
+
 def _should_start_beat(debug: bool) -> bool:
     default = os.getenv("CELERY_AUTOSTART", "true")
     if os.getenv("CELERY_BEAT_AUTOSTART", default).lower() != "true":
@@ -47,6 +56,48 @@ def _start_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | 
         concurrency,
         "--queues",
         queue_name,
+        "--hostname",
+        "llmctl-studio-default@%h",
+    ]
+    return subprocess.Popen(command, cwd=repo_root, env=env)
+
+
+def _start_rag_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | None:
+    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    if not _should_start_rag_worker(debug):
+        return None
+
+    queue_name = os.getenv(
+        "RAG_CELERY_WORKER_QUEUES",
+        "llmctl_studio.rag.index,llmctl_studio.rag.drive,llmctl_studio.rag.git",
+    )
+    concurrency = os.getenv(
+        "RAG_CELERY_WORKER_CONCURRENCY",
+        os.getenv("CELERY_WORKER_CONCURRENCY", "6"),
+    )
+    loglevel = os.getenv(
+        "RAG_CELERY_WORKER_LOGLEVEL",
+        os.getenv("CELERY_WORKER_LOGLEVEL", "info"),
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{src_path}{os.pathsep}{env.get('PYTHONPATH', '')}".strip(
+        os.pathsep
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "celery",
+        "-A",
+        "services.celery_app:celery_app",
+        "worker",
+        "--loglevel",
+        loglevel,
+        "--concurrency",
+        concurrency,
+        "--queues",
+        queue_name,
+        "--hostname",
+        "llmctl-studio-rag@%h",
     ]
     return subprocess.Popen(command, cwd=repo_root, env=env)
 
@@ -96,10 +147,17 @@ def main() -> int:
     port = int(os.getenv("FLASK_PORT", "5055"))
     debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
     worker = _start_celery_worker(src_path, repo_root)
+    rag_worker = _start_rag_celery_worker(src_path, repo_root)
     beat = _start_celery_beat(src_path, repo_root)
     try:
         app.run(host=host, port=port, debug=debug)
     finally:
+        if rag_worker is not None:
+            rag_worker.terminate()
+            try:
+                rag_worker.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                rag_worker.kill()
         if worker is not None:
             worker.terminate()
             try:

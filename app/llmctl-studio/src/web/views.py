@@ -49,6 +49,7 @@ from core.models import (
     Agent,
     AgentTask,
     Attachment,
+    FLOWCHART_EDGE_MODE_CHOICES,
     FLOWCHART_NODE_TYPE_CHOICES,
     FLOWCHART_NODE_TYPE_DECISION,
     FLOWCHART_NODE_TYPE_END,
@@ -236,8 +237,6 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
     FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True},
     FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True},
 }
-FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES = 1
-FLOWCHART_DECISION_MAX_OUTGOING_EDGES = 3
 FLOWCHART_END_MAX_OUTGOING_EDGES = 0
 FLOWCHART_DEFAULT_START_X = 280.0
 FLOWCHART_DEFAULT_START_Y = 170.0
@@ -3908,6 +3907,19 @@ def _coerce_optional_handle_id(value: object, *, field_name: str) -> str | None:
     return cleaned
 
 
+def _coerce_flowchart_edge_mode(value: object, *, field_name: str) -> str:
+    cleaned = str(value).strip().lower()
+    if not cleaned:
+        raise ValueError(
+            f"{field_name} is required and must be one of {', '.join(FLOWCHART_EDGE_MODE_CHOICES)}."
+        )
+    if cleaned not in FLOWCHART_EDGE_MODE_CHOICES:
+        raise ValueError(
+            f"{field_name} must be one of {', '.join(FLOWCHART_EDGE_MODE_CHOICES)}."
+        )
+    return cleaned
+
+
 def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
     return FLOWCHART_NODE_UTILITY_COMPATIBILITY.get(
         node_type,
@@ -3973,6 +3985,7 @@ def _serialize_flowchart_edge(edge: FlowchartEdge) -> dict[str, object]:
         "target_node_id": edge.target_node_id,
         "source_handle_id": edge.source_handle_id,
         "target_handle_id": edge.target_handle_id,
+        "edge_mode": edge.edge_mode,
         "condition_key": edge.condition_key,
         "label": edge.label,
         "created_at": _human_time(edge.created_at),
@@ -4023,7 +4036,97 @@ def _serialize_flowchart_run(run: FlowchartRun) -> dict[str, object]:
     }
 
 
+def _flowchart_trace_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned, 10)
+        except ValueError:
+            return None
+    return None
+
+
+def _flowchart_serialize_context_source(
+    item: object,
+    *,
+    default_edge_mode: str,
+) -> dict[str, object] | None:
+    if not isinstance(item, dict):
+        return None
+    source_node_id = _flowchart_trace_int(
+        item.get("source_node_id", item.get("node_id"))
+    )
+    source_node_type = str(
+        item.get("source_node_type", item.get("node_type")) or ""
+    ).strip()
+    edge_mode = str(item.get("edge_mode") or default_edge_mode).strip().lower()
+    if edge_mode not in {"solid", "dotted"}:
+        edge_mode = default_edge_mode
+    condition_key = str(item.get("condition_key") or "").strip() or None
+    return {
+        "source_edge_id": _flowchart_trace_int(item.get("source_edge_id")),
+        "source_node_id": source_node_id,
+        "source_node_type": source_node_type or None,
+        "condition_key": condition_key,
+        "execution_index": _flowchart_trace_int(item.get("execution_index")),
+        "sequence": _flowchart_trace_int(item.get("sequence")),
+        "edge_mode": edge_mode,
+    }
+
+
+def _flowchart_run_node_context_trace(
+    input_context: dict[str, object],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    raw_trigger_sources = input_context.get("trigger_sources")
+    if not isinstance(raw_trigger_sources, list):
+        raw_trigger_sources = input_context.get("upstream_nodes")
+    trigger_sources: list[dict[str, object]] = []
+    if isinstance(raw_trigger_sources, list):
+        for item in raw_trigger_sources:
+            serialized = _flowchart_serialize_context_source(
+                item,
+                default_edge_mode="solid",
+            )
+            if serialized is None:
+                continue
+            if str(serialized.get("edge_mode")) != "solid":
+                continue
+            trigger_sources.append(serialized)
+
+    raw_pulled_sources = input_context.get("pulled_dotted_sources")
+    if not isinstance(raw_pulled_sources, list):
+        raw_pulled_sources = input_context.get("dotted_upstream_nodes")
+    pulled_dotted_sources: list[dict[str, object]] = []
+    if isinstance(raw_pulled_sources, list):
+        for item in raw_pulled_sources:
+            serialized = _flowchart_serialize_context_source(
+                item,
+                default_edge_mode="dotted",
+            )
+            if serialized is None:
+                continue
+            if str(serialized.get("edge_mode")) != "dotted":
+                continue
+            pulled_dotted_sources.append(serialized)
+
+    return trigger_sources, pulled_dotted_sources
+
+
 def _serialize_flowchart_run_node(node_run: FlowchartRunNode) -> dict[str, object]:
+    input_context = _parse_json_dict(node_run.input_context_json)
+    trigger_sources, pulled_dotted_sources = _flowchart_run_node_context_trace(
+        input_context
+    )
     return {
         "id": node_run.id,
         "flowchart_run_id": node_run.flowchart_run_id,
@@ -4031,7 +4134,11 @@ def _serialize_flowchart_run_node(node_run: FlowchartRunNode) -> dict[str, objec
         "execution_index": node_run.execution_index,
         "agent_task_id": node_run.agent_task_id,
         "status": node_run.status,
-        "input_context": _parse_json_dict(node_run.input_context_json),
+        "input_context": input_context,
+        "trigger_sources": trigger_sources,
+        "pulled_dotted_sources": pulled_dotted_sources,
+        "trigger_source_count": len(trigger_sources),
+        "pulled_dotted_source_count": len(pulled_dotted_sources),
         "output_state": _parse_json_dict(node_run.output_state_json),
         "routing_state": _parse_json_dict(node_run.routing_state_json),
         "error": node_run.error,
@@ -4340,8 +4447,20 @@ def _validate_flowchart_graph_snapshot(
             f"Flowchart must contain exactly one start node; found {len(start_nodes)}."
         )
 
-    decision_outgoing_keys: dict[int, list[str]] = {}
+    decision_solid_outgoing_keys: dict[int, list[str]] = {}
+    decision_solid_outgoing_counts: dict[int, int] = {}
+    edge_modes_by_pair: dict[tuple[int, int], set[str]] = {}
     for edge in edges:
+        edge_mode = str(edge.get("edge_mode") or "").strip().lower()
+        if edge_mode not in FLOWCHART_EDGE_MODE_CHOICES:
+            edge_token = edge.get("id")
+            if edge_token is None:
+                edge_token = (
+                    f"{edge.get('source_node_id')}->{edge.get('target_node_id')}"
+                )
+            errors.append(
+                f"Edge {edge_token} must define edge_mode as solid or dotted."
+            )
         source_node_id = int(edge["source_node_id"])
         target_node_id = int(edge["target_node_id"])
         if source_node_id not in node_ids:
@@ -4352,17 +4471,39 @@ def _validate_flowchart_graph_snapshot(
             continue
         outgoing[source_node_id] = outgoing.get(source_node_id, 0) + 1
         incoming[target_node_id] = incoming.get(target_node_id, 0) + 1
+        if edge_mode in FLOWCHART_EDGE_MODE_CHOICES:
+            edge_modes_by_pair.setdefault((source_node_id, target_node_id), set()).add(
+                edge_mode
+            )
         node_type = node_type_by_id.get(source_node_id)
         condition_key = (str(edge.get("condition_key") or "")).strip()
-        if node_type == FLOWCHART_NODE_TYPE_DECISION:
-            if not condition_key:
-                errors.append(
-                    f"Decision node {source_node_id} requires condition_key on each outgoing edge."
+        if edge_mode == "solid":
+            if node_type == FLOWCHART_NODE_TYPE_DECISION:
+                if not condition_key:
+                    errors.append(
+                        f"Decision node {source_node_id} requires condition_key on each solid outgoing edge."
+                    )
+                decision_solid_outgoing_keys.setdefault(source_node_id, []).append(
+                    condition_key
                 )
-            decision_outgoing_keys.setdefault(source_node_id, []).append(condition_key)
-        elif condition_key:
+                decision_solid_outgoing_counts[source_node_id] = (
+                    decision_solid_outgoing_counts.get(source_node_id, 0) + 1
+                )
+            elif condition_key:
+                errors.append(
+                    "Only decision nodes may define condition_key on solid edges "
+                    f"(source node {source_node_id})."
+                )
+        elif edge_mode == "dotted" and condition_key and node_type != FLOWCHART_NODE_TYPE_DECISION:
             errors.append(
-                f"Only decision nodes may define condition_key (source node {source_node_id})."
+                "Only decision nodes may define condition_key on dotted edges "
+                f"(source node {source_node_id})."
+            )
+
+    for (source_node_id, target_node_id), modes in edge_modes_by_pair.items():
+        if "solid" in modes and "dotted" in modes:
+            errors.append(
+                f"Edges {source_node_id}->{target_node_id} cannot mix solid and dotted modes for the same source/target pair."
             )
 
     for node in nodes:
@@ -4374,23 +4515,14 @@ def _validate_flowchart_graph_snapshot(
         if node_type == FLOWCHART_NODE_TYPE_END:
             if outgoing_count > FLOWCHART_END_MAX_OUTGOING_EDGES:
                 errors.append(f"End node {node_id} cannot have outgoing edges.")
-        elif node_type == FLOWCHART_NODE_TYPE_DECISION:
-            if outgoing_count > FLOWCHART_DECISION_MAX_OUTGOING_EDGES:
-                errors.append(
-                    f"Decision node {node_id} supports at most {FLOWCHART_DECISION_MAX_OUTGOING_EDGES} outgoing edges."
-                )
-        elif outgoing_count > FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES:
-            errors.append(
-                f"Node {node_id} ({node_type}) supports at most {FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES} outgoing edge."
-            )
         if node.get("node_type") != FLOWCHART_NODE_TYPE_DECISION:
             continue
-        if outgoing_count == 0:
-            errors.append(f"Decision node {node_id} must have at least one outgoing edge.")
-        keys = [key for key in decision_outgoing_keys.get(node_id, []) if key]
+        if decision_solid_outgoing_counts.get(node_id, 0) == 0:
+            errors.append(f"Decision node {node_id} must have at least one solid outgoing edge.")
+        keys = [key for key in decision_solid_outgoing_keys.get(node_id, []) if key]
         if len(keys) != len(set(keys)):
             errors.append(
-                f"Decision node {node_id} has duplicate condition_key values."
+                f"Decision node {node_id} has duplicate condition_key values across solid edges."
             )
 
     if len(start_nodes) == 1:
@@ -4399,6 +4531,9 @@ def _validate_flowchart_graph_snapshot(
         frontier = [start_id]
         adjacency: dict[int, list[int]] = {}
         for edge in edges:
+            edge_mode = str(edge.get("edge_mode") or "").strip().lower()
+            if edge_mode != "solid":
+                continue
             source_node_id = int(edge["source_node_id"])
             target_node_id = int(edge["target_node_id"])
             adjacency.setdefault(source_node_id, []).append(target_node_id)
@@ -4450,6 +4585,7 @@ def _flowchart_graph_state(
             "target_node_id": edge.target_node_id,
             "source_handle_id": edge.source_handle_id,
             "target_handle_id": edge.target_handle_id,
+            "edge_mode": edge.edge_mode,
             "condition_key": edge.condition_key,
             "label": edge.label,
         }
@@ -7192,6 +7328,12 @@ def upsert_flowchart_graph(flowchart_id: int):
                     raw_edge.get("target_handle_id"),
                     field_name=f"edges[{index}].target_handle_id",
                 )
+                if "edge_mode" not in raw_edge:
+                    raise ValueError(f"edges[{index}].edge_mode is required.")
+                edge_mode = _coerce_flowchart_edge_mode(
+                    raw_edge.get("edge_mode"),
+                    field_name=f"edges[{index}].edge_mode",
+                )
                 condition_key = str(raw_edge.get("condition_key") or "").strip() or None
                 label = str(raw_edge.get("label") or "").strip() or None
                 FlowchartEdge.create(
@@ -7201,6 +7343,7 @@ def upsert_flowchart_graph(flowchart_id: int):
                     target_node_id=target_node_id,
                     source_handle_id=source_handle_id,
                     target_handle_id=target_handle_id,
+                    edge_mode=edge_mode,
                     condition_key=condition_key,
                     label=label,
                 )

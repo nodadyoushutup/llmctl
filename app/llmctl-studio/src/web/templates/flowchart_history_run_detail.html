@@ -94,6 +94,8 @@
             <th>Node</th>
             <th>Status</th>
             <th>Execution</th>
+            <th>Triggered By (Solid)</th>
+            <th>Pulled Context (Dotted)</th>
             <th>Node task</th>
             <th>Started</th>
             <th>Finished</th>
@@ -125,6 +127,34 @@
                 <span class="status {{ status_class(node_run.status) }}">{{ node_run.status }}</span>
               </td>
               <td class="muted">{{ node_run.execution_index }}</td>
+              <td>
+                {% if node_run.trigger_sources %}
+                  {% for source in node_run.trigger_sources %}
+                    <p class="muted" style="margin: 0; font-size: 12px;">
+                      edge {{ source.source_edge_id or "-" }} from node {{ source.source_node_id or "-" }}
+                      {% if source.source_node_type %}
+                        ({{ source.source_node_type }})
+                      {% endif %}
+                    </p>
+                  {% endfor %}
+                {% else %}
+                  <span class="muted">-</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if node_run.pulled_dotted_sources %}
+                  {% for source in node_run.pulled_dotted_sources %}
+                    <p class="muted" style="margin: 0; font-size: 12px;">
+                      edge {{ source.source_edge_id or "-" }} from node {{ source.source_node_id or "-" }}
+                      {% if source.source_node_type %}
+                        ({{ source.source_node_type }})
+                      {% endif %}
+                    </p>
+                  {% endfor %}
+                {% else %}
+                  <span class="muted">-</span>
+                {% endif %}
+              </td>
               <td>
                 {% if node_run.agent_task_id %}
                   <a href="{{ url_for('agents.view_node', task_id=node_run.agent_task_id) }}">

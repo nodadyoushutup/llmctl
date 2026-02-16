@@ -123,12 +123,89 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             node_type=FLOWCHART_NODE_TYPE_DECISION,
             node_config={},
             outgoing_edges=[
-                {"id": 1, "condition_key": "reject"},
-                {"id": 2, "condition_key": "approve"},
+                {"id": 1, "edge_mode": "solid", "condition_key": "reject"},
+                {"id": 2, "edge_mode": "solid", "condition_key": "approve"},
             ],
             routing_state=routing_state,
         )
         self.assertEqual([2], [edge["id"] for edge in selected])
+
+    def test_decision_route_resolution_ignores_dotted_edges(self) -> None:
+        selected = studio_tasks._resolve_flowchart_outgoing_edges(
+            node_type=FLOWCHART_NODE_TYPE_DECISION,
+            node_config={},
+            outgoing_edges=[
+                {"id": 1, "edge_mode": "dotted", "condition_key": "approve"},
+                {"id": 2, "edge_mode": "solid", "condition_key": "approve"},
+            ],
+            routing_state={"route_key": "approve"},
+        )
+        self.assertEqual([2], [edge["id"] for edge in selected])
+
+    def test_non_decision_route_resolution_emits_only_solid_edges(self) -> None:
+        selected = studio_tasks._resolve_flowchart_outgoing_edges(
+            node_type=FLOWCHART_NODE_TYPE_TASK,
+            node_config={},
+            outgoing_edges=[
+                {"id": 1, "edge_mode": "solid", "condition_key": ""},
+                {"id": 2, "edge_mode": "dotted", "condition_key": ""},
+            ],
+            routing_state={},
+        )
+        self.assertEqual([1], [edge["id"] for edge in selected])
+
+    def test_input_context_includes_trigger_and_pulled_source_metadata(self) -> None:
+        context = studio_tasks._build_flowchart_input_context(
+            flowchart_id=10,
+            run_id=22,
+            node_id=7,
+            node_type=FLOWCHART_NODE_TYPE_MEMORY,
+            execution_index=3,
+            total_execution_count=9,
+            incoming_edges=[
+                {
+                    "id": 101,
+                    "source_node_id": 1,
+                    "target_node_id": 7,
+                    "edge_mode": "solid",
+                    "condition_key": "",
+                },
+                {
+                    "id": 202,
+                    "source_node_id": 2,
+                    "target_node_id": 7,
+                    "edge_mode": "dotted",
+                    "condition_key": "",
+                },
+            ],
+            latest_results={
+                1: {
+                    "node_type": FLOWCHART_NODE_TYPE_TASK,
+                    "execution_index": 4,
+                    "sequence": 6,
+                    "output_state": {"value": "solid"},
+                    "routing_state": {},
+                },
+                2: {
+                    "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                    "execution_index": 5,
+                    "sequence": 8,
+                    "output_state": {"value": "dotted"},
+                    "routing_state": {},
+                },
+            },
+            upstream_results=None,
+        )
+        trigger_sources = context.get("trigger_sources") or []
+        pulled_sources = context.get("pulled_dotted_sources") or []
+        self.assertEqual(1, len(trigger_sources))
+        self.assertEqual(1, len(pulled_sources))
+        self.assertEqual(101, trigger_sources[0].get("source_edge_id"))
+        self.assertEqual(1, trigger_sources[0].get("source_node_id"))
+        self.assertEqual("solid", trigger_sources[0].get("edge_mode"))
+        self.assertEqual(202, pulled_sources[0].get("source_edge_id"))
+        self.assertEqual(2, pulled_sources[0].get("source_node_id"))
+        self.assertEqual("dotted", pulled_sources[0].get("edge_mode"))
 
     def test_script_stage_split_preserves_order(self) -> None:
         scripts = [
@@ -529,6 +606,171 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 [left_node_id, right_node_id],
                 sorted(node["node_id"] for node in upstream_nodes),
             )
+
+    def test_dotted_edges_do_not_trigger_downstream_execution(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="dotted-no-trigger")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            source_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=1.0,
+                y=0.0,
+            )
+            target_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=2.0,
+                y=0.0,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=source_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=source_node.id,
+                target_node_id=target_node.id,
+                edge_mode="dotted",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            run_id = flowchart_run.id
+            start_node_id = start_node.id
+            source_node_id = source_node.id
+            target_node_id = target_node.id
+
+        self._invoke_flowchart_run(flowchart.id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            self.assertIsNotNone(run)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            node_runs = (
+                session.query(FlowchartRunNode)
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .order_by(FlowchartRunNode.id.asc())
+                .all()
+            )
+            self.assertEqual(
+                [start_node_id, source_node_id],
+                [item.flowchart_node_id for item in node_runs],
+            )
+            self.assertFalse(
+                any(item.flowchart_node_id == target_node_id for item in node_runs)
+            )
+
+    def test_dotted_context_is_pulled_without_gating_execution(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="dotted-context-pull")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            dotted_source_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=1.0,
+                y=-1.0,
+            )
+            trigger_source_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=1.0,
+                y=1.0,
+            )
+            target_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=2.0,
+                y=0.0,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=dotted_source_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=trigger_source_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=dotted_source_node.id,
+                target_node_id=target_node.id,
+                edge_mode="dotted",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=trigger_source_node.id,
+                target_node_id=target_node.id,
+                edge_mode="solid",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            run_id = flowchart_run.id
+            dotted_source_node_id = dotted_source_node.id
+            trigger_source_node_id = trigger_source_node.id
+            target_node_id = target_node.id
+
+        self._invoke_flowchart_run(flowchart.id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            self.assertIsNotNone(run)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            target_run = (
+                session.query(FlowchartRunNode)
+                .where(
+                    FlowchartRunNode.flowchart_run_id == run_id,
+                    FlowchartRunNode.flowchart_node_id == target_node_id,
+                )
+                .first()
+            )
+            self.assertIsNotNone(target_run)
+            assert target_run is not None
+            input_context = json.loads(target_run.input_context_json or "{}")
+            upstream_nodes = input_context.get("upstream_nodes") or []
+            dotted_upstream_nodes = input_context.get("dotted_upstream_nodes") or []
+            self.assertEqual(1, len(upstream_nodes))
+            self.assertEqual(trigger_source_node_id, upstream_nodes[0].get("node_id"))
+            self.assertEqual("solid", upstream_nodes[0].get("edge_mode"))
+            self.assertEqual(1, len(dotted_upstream_nodes))
+            self.assertEqual(dotted_source_node_id, dotted_upstream_nodes[0].get("node_id"))
+            self.assertEqual("dotted", dotted_upstream_nodes[0].get("edge_mode"))
 
     def test_reaching_start_queues_followup_run(self) -> None:
         with session_scope() as session:
@@ -1083,6 +1325,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "source_node_id": "n-start",
                         "target_node_id": "n-decision",
+                        "edge_mode": "solid",
                         "source_handle_id": "r1",
                         "target_handle_id": "l1",
                         "label": "to decision",
@@ -1090,6 +1333,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "source_node_id": "n-decision",
                         "target_node_id": "n-start",
+                        "edge_mode": "solid",
                         "source_handle_id": "b2",
                         "target_handle_id": "t2",
                         "condition_key": "Start node executed.",
@@ -1110,8 +1354,10 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         }
         self.assertIn(("r1", "l1"), saved_edge_map)
         self.assertEqual("to decision", saved_edge_map[("r1", "l1")].get("label"))
+        self.assertEqual("solid", saved_edge_map[("r1", "l1")].get("edge_mode"))
         self.assertIn(("b2", "t2"), saved_edge_map)
         self.assertEqual("loop", saved_edge_map[("b2", "t2")].get("label"))
+        self.assertEqual("solid", saved_edge_map[("b2", "t2")].get("edge_mode"))
 
         load_response = self.client.get(f"/flowcharts/{flowchart_id}/graph")
         self.assertEqual(200, load_response.status_code)
@@ -1157,6 +1403,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "source_node_id": "n-start",
                         "target_node_id": "n-task",
+                        "edge_mode": "solid",
                         "source_handle_id": "l1",
                         "target_handle_id": "r1",
                     }
@@ -1170,6 +1417,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(1, len(edges))
         self.assertEqual("l1", edges[0].get("source_handle_id"))
         self.assertEqual("r1", edges[0].get("target_handle_id"))
+        self.assertEqual("solid", edges[0].get("edge_mode"))
 
         delete_response = self.client.post(
             f"/flowcharts/{flowchart_id}/delete",
@@ -1178,8 +1426,107 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(200, delete_response.status_code)
         self.assertTrue((delete_response.get_json() or {}).get("deleted"))
 
-    def test_graph_rejects_multiple_outputs_for_non_decision_nodes(self) -> None:
-        flowchart_id = self._create_flowchart("Stage 9 Output Limit")
+    def test_graph_requires_edge_mode_in_edge_payload(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Edge Mode Required")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 200,
+                        "y": 20,
+                        "config": {"task_prompt": "Hello"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        self.assertIn("edges[0].edge_mode is required", (response.get_json() or {}).get("error", ""))
+
+    def test_graph_rejects_invalid_edge_mode(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Invalid Edge Mode")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 200,
+                        "y": 20,
+                        "config": {"task_prompt": "Hello"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "push",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        self.assertIn(
+            "edges[0].edge_mode must be one of solid, dotted",
+            (response.get_json() or {}).get("error", ""),
+        )
+
+    def test_graph_persists_dotted_edge_mode(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Dotted Edge")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 200,
+                        "y": 20,
+                        "config": {"task_prompt": "Hello"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "dotted",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, response.status_code)
+        edge_payload = ((response.get_json() or {}).get("edges") or [{}])[0]
+        self.assertEqual("dotted", edge_payload.get("edge_mode"))
+
+    def test_graph_allows_multiple_outputs_for_non_decision_nodes(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Output Fanout")
         response = self.client.post(
             f"/flowcharts/{flowchart_id}/graph",
             json={
@@ -1206,20 +1553,25 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     },
                 ],
                 "edges": [
-                    {"source_node_id": "n-start", "target_node_id": "n-task-a"},
-                    {"source_node_id": "n-start", "target_node_id": "n-task-b"},
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task-a",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task-b",
+                        "edge_mode": "solid",
+                    },
                 ],
             },
         )
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(200, response.status_code)
         payload = response.get_json() or {}
-        errors = ((payload.get("validation") or {}).get("errors")) or []
-        self.assertTrue(
-            any("supports at most 1 outgoing edge" in str(error) for error in errors)
-        )
+        self.assertTrue((payload.get("validation") or {}).get("valid"))
 
-    def test_graph_rejects_more_than_three_decision_outputs(self) -> None:
-        flowchart_id = self._create_flowchart("Stage 9 Decision Output Limit")
+    def test_graph_allows_more_than_three_decision_outputs(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Decision Output Fanout")
         response = self.client.post(
             f"/flowcharts/{flowchart_id}/graph",
             json={
@@ -1266,35 +1618,265 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     },
                 ],
                 "edges": [
-                    {"source_node_id": "n-start", "target_node_id": "n-decision"},
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-decision",
+                        "edge_mode": "solid",
+                    },
                     {
                         "source_node_id": "n-decision",
                         "target_node_id": "n-task-1",
+                        "edge_mode": "solid",
                         "condition_key": "route_1",
                     },
                     {
                         "source_node_id": "n-decision",
                         "target_node_id": "n-task-2",
+                        "edge_mode": "solid",
                         "condition_key": "route_2",
                     },
                     {
                         "source_node_id": "n-decision",
                         "target_node_id": "n-task-3",
+                        "edge_mode": "solid",
                         "condition_key": "route_3",
                     },
                     {
                         "source_node_id": "n-decision",
                         "target_node_id": "n-task-4",
+                        "edge_mode": "solid",
                         "condition_key": "route_4",
                     },
                 ],
             },
         )
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(200, response.status_code)
         payload = response.get_json() or {}
-        errors = ((payload.get("validation") or {}).get("errors")) or []
+        self.assertTrue((payload.get("validation") or {}).get("valid"))
+        self.assertEqual(
+            5,
+            len(
+                [
+                    edge
+                    for edge in (payload.get("edges") or [])
+                    if edge.get("source_node_id") is not None
+                ]
+            ),
+        )
+
+    def test_graph_rejects_mixed_edge_modes_for_same_pair(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Mixed Mode Pair")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 180,
+                        "y": 0,
+                        "config": {"task_prompt": "do work"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "dotted",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
         self.assertTrue(
-            any("supports at most 3 outgoing edges" in str(error) for error in errors)
+            any("cannot mix solid and dotted modes" in str(error) for error in errors)
+        )
+
+    def test_graph_uses_solid_edges_for_disconnected_detection(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Solid Reachability")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 180,
+                        "y": 0,
+                        "config": {"task_prompt": "do work"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "dotted",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
+        self.assertTrue(
+            any("Disconnected required nodes found" in str(error) for error in errors)
+        )
+
+    def test_graph_requires_decision_to_have_solid_outgoing_edge(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Decision Solid Required")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-decision",
+                        "node_type": FLOWCHART_NODE_TYPE_DECISION,
+                        "x": 120,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 260,
+                        "y": 0,
+                        "config": {"task_prompt": "do work"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-decision",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "n-decision",
+                        "target_node_id": "n-task",
+                        "edge_mode": "dotted",
+                        "condition_key": "ignored_route",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
+        self.assertTrue(
+            any("must have at least one solid outgoing edge" in str(error) for error in errors)
+        )
+
+    def test_graph_allows_decision_condition_key_on_dotted_edges(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Decision Dotted Condition Key")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-decision",
+                        "node_type": FLOWCHART_NODE_TYPE_DECISION,
+                        "x": 120,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task-a",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 280,
+                        "y": -30,
+                        "config": {"task_prompt": "A"},
+                    },
+                    {
+                        "client_id": "n-task-b",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 280,
+                        "y": 30,
+                        "config": {"task_prompt": "B"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-decision",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "n-decision",
+                        "target_node_id": "n-task-a",
+                        "edge_mode": "solid",
+                        "condition_key": "route_a",
+                    },
+                    {
+                        "source_node_id": "n-decision",
+                        "target_node_id": "n-task-b",
+                        "edge_mode": "dotted",
+                        "condition_key": "ignored_route_b",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertTrue((response.get_json() or {}).get("validation", {}).get("valid"))
+
+    def test_graph_rejects_non_decision_condition_key_on_dotted_edges(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Dotted Condition Key Non Decision")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 180,
+                        "y": 0,
+                        "config": {"task_prompt": "do work"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "dotted",
+                        "condition_key": "invalid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
+        self.assertTrue(
+            any("Only decision nodes may define condition_key on dotted edges" in str(error) for error in errors)
         )
 
     def test_graph_rejects_outgoing_edges_from_end_nodes(self) -> None:
@@ -1324,8 +1906,16 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     },
                 ],
                 "edges": [
-                    {"source_node_id": "n-start", "target_node_id": "n-end"},
-                    {"source_node_id": "n-end", "target_node_id": "n-task"},
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-end",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "n-end",
+                        "target_node_id": "n-task",
+                        "edge_mode": "solid",
+                    },
                 ],
             },
         )
@@ -1446,6 +2036,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "source_node_id": "n-start",
                         "target_node_id": "n-task",
+                        "edge_mode": "solid",
                     }
                 ],
             },
@@ -1502,6 +2093,67 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             self.assertEqual(run_id, task.flowchart_run_id)
             self.assertEqual(start_node_id, task.flowchart_node_id)
 
+    def test_history_run_api_exposes_trigger_and_pulled_context_sources(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="Stage 9 Trace Metadata")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            FlowchartRunNode.create(
+                session,
+                flowchart_run_id=flowchart_run.id,
+                flowchart_node_id=start_node.id,
+                execution_index=1,
+                status="succeeded",
+                input_context_json=json.dumps(
+                    {
+                        "trigger_sources": [
+                            {
+                                "source_edge_id": 11,
+                                "source_node_id": 21,
+                                "source_node_type": FLOWCHART_NODE_TYPE_TASK,
+                                "edge_mode": "solid",
+                            }
+                        ],
+                        "pulled_dotted_sources": [
+                            {
+                                "source_edge_id": 33,
+                                "source_node_id": 44,
+                                "source_node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                                "edge_mode": "dotted",
+                            }
+                        ],
+                    }
+                ),
+                output_state_json=json.dumps({"message": "ok"}),
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+
+        response = self.client.get(f"/flowcharts/{flowchart_id}/history/{run_id}?format=json")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        node_runs = payload.get("node_runs") or []
+        self.assertEqual(1, len(node_runs))
+        node_run = node_runs[0]
+        trigger_sources = node_run.get("trigger_sources") or []
+        pulled_sources = node_run.get("pulled_dotted_sources") or []
+        self.assertEqual(1, len(trigger_sources))
+        self.assertEqual(11, trigger_sources[0].get("source_edge_id"))
+        self.assertEqual("solid", trigger_sources[0].get("edge_mode"))
+        self.assertEqual(1, len(pulled_sources))
+        self.assertEqual(33, pulled_sources[0].get("source_edge_id"))
+        self.assertEqual("dotted", pulled_sources[0].get("edge_mode"))
+
     def test_graph_rejects_task_without_ref_or_inline_prompt(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Invalid Task")
         graph_response = self.client.post(
@@ -1526,6 +2178,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "source_node_id": "n-start",
                         "target_node_id": "n-task",
+                        "edge_mode": "solid",
                     }
                 ],
             },
@@ -1556,7 +2209,11 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     },
                 ],
                 "edges": [
-                    {"source_node_id": "start", "target_node_id": "launch"},
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "launch",
+                        "edge_mode": "solid",
+                    },
                 ],
             },
         )
@@ -1583,7 +2240,11 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     },
                 ],
                 "edges": [
-                    {"source_node_id": "start", "target_node_id": "launch"},
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "launch",
+                        "edge_mode": "solid",
+                    },
                 ],
             },
         )
@@ -1673,6 +2334,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "source_node_id": "n-start",
                         "target_node_id": "n-task",
+                        "edge_mode": "solid",
                     }
                 ],
             },
@@ -1823,15 +2485,32 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     },
                 ],
                 "edges": [
-                    {"source_node_id": "start", "target_node_id": "task"},
-                    {"source_node_id": "task", "target_node_id": "decision"},
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "task",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "task",
+                        "target_node_id": "decision",
+                        "edge_mode": "solid",
+                    },
                     {
                         "source_node_id": "decision",
                         "target_node_id": "plan",
+                        "edge_mode": "solid",
                         "condition_key": "continue",
                     },
-                    {"source_node_id": "plan", "target_node_id": "milestone"},
-                    {"source_node_id": "milestone", "target_node_id": "memory"},
+                    {
+                        "source_node_id": "plan",
+                        "target_node_id": "milestone",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "milestone",
+                        "target_node_id": "memory",
+                        "edge_mode": "solid",
+                    },
                 ],
             },
         )

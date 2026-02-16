@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
+if str(STUDIO_SRC) not in sys.path:
+    sys.path.insert(0, str(STUDIO_SRC))
+
+from rag.engine.config import RagConfig
+
+
+def test_config(tmp_path: Path | None = None) -> RagConfig:
+    root = tmp_path or Path("/tmp")
+    return RagConfig(
+        repo_root=root,
+        rag_mode="local",
+        chroma_host="localhost",
+        chroma_port=8000,
+        collection="test_collection",
+        embed_provider="openai",
+        chat_provider="openai",
+        openai_api_key=None,
+        gemini_api_key=None,
+        openai_embedding_model="text-embedding-3-small",
+        gemini_embedding_model="models/gemini-embedding-001",
+        embed_model="text-embedding-3-small",
+        embed_max_tokens_per_request=300000,
+        embed_max_tokens_per_input=8192,
+        embed_max_batch_items=100,
+        embed_min_request_interval_s=0.0,
+        embed_target_tokens_per_minute=0,
+        embed_rate_limit_max_retries=6,
+        git_url=None,
+        git_repo=None,
+        git_pat=None,
+        git_ssh_key_path=None,
+        git_branch="main",
+        git_poll_s=300.0,
+        git_dir=Path("/tmp/llmctl-studio-rag-repo"),
+        watch_enabled=True,
+        watch_debounce_s=1.0,
+        chunk_lines=10,
+        chunk_overlap_lines=2,
+        max_file_bytes=1_000_000,
+        exclude_dirs=set(),
+        exclude_globs=[],
+        include_globs=[],
+        max_file_bytes_by_type={"pdf": 1_000_000_000},
+        exclude_globs_by_type={},
+        chunk_lines_by_type={},
+        chunk_overlap_lines_by_type={},
+        enabled_doc_types=set(),
+        ocr_enabled=True,
+        ocr_lang="eng",
+        ocr_dpi=150,
+        ocr_timeout_s=45,
+        ocr_include_char_boxes=False,
+        drive_sync_workers=4,
+        index_parallel_workers=6,
+        pdf_page_workers=6,
+        embed_parallel_requests=6,
+        openai_chat_model="gpt-4o-mini",
+        gemini_chat_model="gemini-2.5-flash",
+        chat_model="gpt-4o-mini",
+        chat_response_style="high",
+        chat_temperature=0.2,
+        chat_top_k=5,
+        chat_max_history=8,
+        chat_max_context_chars=12000,
+        chat_snippet_chars=600,
+        chat_context_budget_tokens=8000,
+        web_port=5050,
+    )
