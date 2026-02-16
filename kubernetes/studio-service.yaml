@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmctl-studio
+  namespace: llmctl
+spec:
+  selector:
+    app: llmctl-studio
+  ports:
+    - name: http
+      port: 5155
+      targetPort: http

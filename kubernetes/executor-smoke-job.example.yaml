@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llmctl-executor-smoke
+  namespace: llmctl
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: llmctl-executor
+      restartPolicy: Never
+      containers:
+        - name: executor
+          image: llmctl-executor:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LLMCTL_EXECUTOR_PAYLOAD_JSON
+              value: '{"contract_version":"v1","result_contract_version":"v1","provider":"kubernetes","command":["/bin/bash","-lc","echo llmctl-executor-smoke"],"emit_start_markers":true}'

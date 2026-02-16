@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-studio
+  namespace: llmctl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llmctl-studio
+  template:
+    metadata:
+      labels:
+        app: llmctl-studio
+    spec:
+      serviceAccountName: llmctl-studio
+      containers:
+        - name: studio
+          image: llmctl-studio:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5155
+              name: http
+          env:
+            - name: LLMCTL_STUDIO_DATA_DIR
+              value: /app/data
+          envFrom:
+            - configMapRef:
+                name: llmctl-studio-config
+            - secretRef:
+                name: llmctl-studio-secrets
+                optional: true
+          volumeMounts:
+            - name: studio-data
+              mountPath: /app/data
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: studio-data
+          persistentVolumeClaim:
+            claimName: llmctl-studio-data

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-redis
+  namespace: llmctl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llmctl-redis
+  template:
+    metadata:
+      labels:
+        app: llmctl-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          args: ["redis-server", "--appendonly", "yes", "--port", "6390"]
+          ports:
+            - containerPort: 6390
+              name: redis
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmctl-redis
+  namespace: llmctl
+spec:
+  selector:
+    app: llmctl-redis
+  ports:
+    - name: redis
+      port: 6390
+      targetPort: redis
