@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: llmctl-studio
+  name: llmctl-studio-backend
   namespace: llmctl
 ---
 apiVersion: v1
@@ -13,7 +13,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: llmctl-studio-executor-jobs
+  name: llmctl-studio-backend-executor-jobs
   namespace: llmctl
 rules:
   - apiGroups: ["batch"]
@@ -29,21 +29,21 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: llmctl-studio-executor-jobs
+  name: llmctl-studio-backend-executor-jobs
   namespace: llmctl
 subjects:
   - kind: ServiceAccount
-    name: llmctl-studio
+    name: llmctl-studio-backend
     namespace: llmctl
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: llmctl-studio-executor-jobs
+  name: llmctl-studio-backend-executor-jobs
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: llmctl-studio-cluster-read
+  name: llmctl-studio-backend-cluster-read
 rules:
   - apiGroups: [""]
     resources: ["namespaces", "services", "endpoints"]
@@ -52,12 +52,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: llmctl-studio-cluster-read
+  name: llmctl-studio-backend-cluster-read
 subjects:
   - kind: ServiceAccount
-    name: llmctl-studio
+    name: llmctl-studio-backend
     namespace: llmctl
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: llmctl-studio-cluster-read
+  name: llmctl-studio-backend-cluster-read

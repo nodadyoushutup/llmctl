@@ -6,5 +6,5 @@ patches:
   - path: studio-live-code-patch.yaml
     target:
       kind: Deployment
-      name: llmctl-studio
+      name: llmctl-studio-backend
       namespace: llmctl

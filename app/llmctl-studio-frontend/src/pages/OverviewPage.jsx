@@ -8,7 +8,7 @@ export default function OverviewPage() {
         <ul>
           <li>Stage 4 bootstrap remains the foundation for migration waves.</li>
           <li>Parity tracker now maps legacy Flask routes to React migration targets.</li>
-          <li>Wave 1 chat routes are migrated to React with <code>/api</code> reads.</li>
+          <li>Wave 1/2 core flows are native React; remaining routes run in legacy bridge mode.</li>
         </ul>
       </article>
       <article className="card">
@@ -18,6 +18,9 @@ export default function OverviewPage() {
         </p>
         <p>
           <Link to="/chat/activity">Open migrated chat activity flow</Link>
+        </p>
+        <p>
+          <Link to="/execution-monitor">Open Wave 2 execution monitor</Link>
         </p>
       </article>
     </section>

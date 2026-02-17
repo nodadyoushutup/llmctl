@@ -8,6 +8,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as OrmSession, sessionmaker
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
@@ -56,7 +59,12 @@ class StudioDbTestCase(unittest.TestCase):
 
     def _reset_engine(self) -> None:
         self._dispose_engine()
-        core_db.init_engine(Config.SQLALCHEMY_DATABASE_URI)
+        core_db._engine = create_engine(Config.SQLALCHEMY_DATABASE_URI, future=True)
+        core_db.SessionLocal = sessionmaker(
+            bind=core_db._engine,
+            expire_on_commit=False,
+            class_=OrmSession,
+        )
         core_db.init_db()
 
 
@@ -227,14 +235,7 @@ class AgentRoleMarkdownStage6Tests(StudioDbTestCase):
                         stderr="",
                     )
 
-                with (
-                    patch.object(studio_tasks, "_run_llm", side_effect=_fake_run_llm),
-                    patch.object(
-                        studio_tasks,
-                        "_run_llmctl_mcp_stdio_preflight",
-                        return_value=None,
-                    ),
-                ):
+                with patch.object(studio_tasks, "_run_llm", side_effect=_fake_run_llm):
                     studio_tasks._execute_agent_task(
                         task_id,
                         celery_task_id=f"stage6-{provider}-{autorun}",
@@ -300,14 +301,7 @@ class AgentRoleMarkdownStage6Tests(StudioDbTestCase):
                 stderr="",
             )
 
-        with (
-            patch.object(studio_tasks, "_run_llm", side_effect=_fake_run_llm),
-            patch.object(
-                studio_tasks,
-                "_run_llmctl_mcp_stdio_preflight",
-                return_value=None,
-            ),
-        ):
+        with patch.object(studio_tasks, "_run_llm", side_effect=_fake_run_llm):
             studio_tasks._execute_agent_task(task_id, celery_task_id="stage6-vllm")
 
         custom_md = captured.get("custom_md") or ""
@@ -375,14 +369,7 @@ class AgentRoleMarkdownStage6Tests(StudioDbTestCase):
                 stderr="",
             )
 
-        with (
-            patch.object(studio_tasks, "_run_llm", side_effect=_fake_run_llm),
-            patch.object(
-                studio_tasks,
-                "_run_llmctl_mcp_stdio_preflight",
-                return_value=None,
-            ),
-        ):
+        with patch.object(studio_tasks, "_run_llm", side_effect=_fake_run_llm):
             studio_tasks._execute_agent_task(task_id, celery_task_id="stage6-fallback")
 
         self.assertEqual("0", captured.get("native_file_exists"))

@@ -4,7 +4,8 @@ import OverviewPage from './pages/OverviewPage'
 import ApiDiagnosticsPage from './pages/ApiDiagnosticsPage'
 import ChatActivityPage from './pages/ChatActivityPage'
 import ChatThreadPage from './pages/ChatThreadPage'
-import NotFoundPage from './pages/NotFoundPage'
+import ExecutionMonitorPage from './pages/ExecutionMonitorPage'
+import LegacyMirrorPage from './pages/LegacyMirrorPage'
 import ParityChecklistPage from './pages/ParityChecklistPage'
 
 export default function App() {
@@ -15,8 +16,9 @@ export default function App() {
         <Route path="/parity-checklist" element={<ParityChecklistPage />} />
         <Route path="/chat/activity" element={<ChatActivityPage />} />
         <Route path="/chat/threads/:threadId" element={<ChatThreadPage />} />
+        <Route path="/execution-monitor" element={<ExecutionMonitorPage />} />
         <Route path="/api-diagnostics" element={<ApiDiagnosticsPage />} />
-        <Route path="*" element={<NotFoundPage />} />
+        <Route path="*" element={<LegacyMirrorPage />} />
       </Routes>
     </AppLayout>
   )

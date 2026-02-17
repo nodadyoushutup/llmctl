@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session as OrmSession, sessionmaker
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
@@ -18,6 +19,7 @@ from core.config import Config
 from core.db import session_scope
 from core.integrated_mcp import (
     GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE,
+    INTEGRATED_MCP_ATLASSIAN_KEY,
     INTEGRATED_MCP_GOOGLE_CLOUD_KEY,
     INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY,
     sync_integrated_mcp_servers,
@@ -30,10 +32,17 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self._tmp_path = Path(self._tmp.name)
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
+        self._orig_k8s_namespace = Config.NODE_EXECUTOR_K8S_NAMESPACE
         self._orig_google_cloud_creds = GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE
         Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{self._tmp_path / 'stage10.sqlite3'}"
+        Config.NODE_EXECUTOR_K8S_NAMESPACE = "llmctl"
         self._dispose_engine()
-        core_db.init_engine(Config.SQLALCHEMY_DATABASE_URI)
+        core_db._engine = create_engine(Config.SQLALCHEMY_DATABASE_URI, future=True)
+        core_db.SessionLocal = sessionmaker(
+            bind=core_db._engine,
+            expire_on_commit=False,
+            class_=OrmSession,
+        )
         core_db.init_db()
 
         import core.integrated_mcp as integrated_mcp
@@ -48,6 +57,7 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
         integrated_mcp.GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE = self._orig_google_cloud_creds
         self._dispose_engine()
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
+        Config.NODE_EXECUTOR_K8S_NAMESPACE = self._orig_k8s_namespace
         self._tmp.cleanup()
 
     def _dispose_engine(self) -> None:
@@ -118,15 +128,11 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
             self.assertIsNotNone(server)
             assert server is not None
             self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
-            self.assertEqual("gcloud-mcp", server.config_json.get("command"))
-            env = server.config_json.get("env")
-            self.assertIsInstance(env, dict)
-            assert isinstance(env, dict)
-            self.assertEqual("demo-project", env.get("GOOGLE_CLOUD_PROJECT"))
-            self.assertIn(
-                "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
-                env,
+            self.assertEqual(
+                "http://llmctl-mcp-google-cloud.llmctl.svc.cluster.local:8000/mcp",
+                server.config_json.get("url"),
             )
+            self.assertEqual("streamable-http", server.config_json.get("transport"))
 
         import core.integrated_mcp as integrated_mcp
 
@@ -201,3 +207,81 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
                 .first()
             )
             self.assertIsNone(server)
+
+    def test_sync_rewrites_existing_integrated_row_to_kubernetes_url_idempotently(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="LLMCTL MCP",
+                server_key="llmctl-mcp",
+                description="legacy",
+                config_json={"command": "python3", "args": ["app/llmctl-mcp/run.py"]},
+                server_type="custom",
+            )
+
+        first_summary = sync_integrated_mcp_servers()
+        self.assertGreaterEqual(first_summary["updated"], 1)
+
+        with session_scope() as session:
+            server = (
+                session.execute(select(MCPServer).where(MCPServer.server_key == "llmctl-mcp"))
+                .scalars()
+                .one()
+            )
+            self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
+            self.assertEqual(
+                "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
+                server.config_json.get("url"),
+            )
+            self.assertEqual("streamable-http", server.config_json.get("transport"))
+
+        second_summary = sync_integrated_mcp_servers()
+        self.assertEqual(0, second_summary["updated"])
+        self.assertEqual(0, second_summary["created"])
+        self.assertEqual(0, second_summary["deleted"])
+
+    def test_sync_normalizes_legacy_jira_key_with_kubernetes_config(self) -> None:
+        self._set_integration_settings(
+            "jira",
+            {
+                "site": "https://example.atlassian.net",
+                "email": "user@example.com",
+                "api_key": "token-value",
+            },
+        )
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="Jira MCP",
+                server_key="jira",
+                description="legacy jira key",
+                config_json={"command": "mcp-atlassian"},
+                server_type=MCP_SERVER_TYPE_INTEGRATED,
+            )
+
+        sync_integrated_mcp_servers()
+
+        with session_scope() as session:
+            legacy = (
+                session.execute(select(MCPServer).where(MCPServer.server_key == "jira"))
+                .scalars()
+                .first()
+            )
+            self.assertIsNone(legacy)
+            atlassian = (
+                session.execute(
+                    select(MCPServer).where(
+                        MCPServer.server_key == INTEGRATED_MCP_ATLASSIAN_KEY
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            self.assertIsNotNone(atlassian)
+            assert atlassian is not None
+            self.assertEqual("Atlassian MCP", atlassian.name)
+            self.assertEqual(
+                "http://llmctl-mcp-atlassian.llmctl.svc.cluster.local:8000/mcp",
+                atlassian.config_json.get("url"),
+            )
+            self.assertEqual("streamable-http", atlassian.config_json.get("transport"))

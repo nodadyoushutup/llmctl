@@ -22,16 +22,12 @@ export default function ParityChecklistPage() {
             <strong>{summary.total}</strong>
           </div>
           <div className="stat-item">
-            <span>Migrated</span>
+            <span>Native React</span>
             <strong>{summary.migrated}</strong>
           </div>
           <div className="stat-item">
-            <span>In Progress</span>
-            <strong>{summary.in_progress}</strong>
-          </div>
-          <div className="stat-item">
-            <span>Planned</span>
-            <strong>{summary.planned}</strong>
+            <span>Legacy Bridge</span>
+            <strong>{summary.bridged}</strong>
           </div>
         </div>
       </article>
@@ -57,7 +53,7 @@ export default function ParityChecklistPage() {
                   <td>{item.area}</td>
                   <td>
                     <span className={statusClassName(item.status)}>
-                      {parityStatusLabels[item.status] || parityStatusLabels.planned}
+                      {parityStatusLabels[item.status] || parityStatusLabels.bridged}
                     </span>
                   </td>
                   <td>

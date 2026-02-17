@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: llmctl-studio
+  name: llmctl-studio-backend
   namespace: llmctl
 spec:
   template:
@@ -22,9 +22,6 @@ spec:
             - name: studio-project-code
               mountPath: /app/app/llmctl-studio-backend/seed-skills
               subPath: app/llmctl-studio-backend/seed-skills
-            - name: studio-project-code
-              mountPath: /app/app/llmctl-mcp
-              subPath: app/llmctl-mcp
             - name: studio-data
               mountPath: /app/data
       volumes:

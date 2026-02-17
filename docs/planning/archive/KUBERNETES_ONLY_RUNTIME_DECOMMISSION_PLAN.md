@@ -70,8 +70,8 @@ Goal: decommission Docker Compose/local runtime execution paths and enforce Kube
 - [x] Update/add tests covering Kubernetes-only routing, settings validation, and migration rewrite behavior (`app/llmctl-studio-backend/tests/test_node_executor_stage*.py`, runtime/settings tests, and DB migration coverage).
 - [x] Remove/update tests that assert Docker/workspace provider routing or fallback behavior.
 - [x] Run targeted automated test suites for modified backend/runtime areas and resolve regressions.
-- [ ] Acceptance criteria: all executed automated checks for Kubernetes-only runtime/deployment changes pass.
-- [ ] Follow-up: targeted unittests are blocked in this shell because required dependencies (`sqlalchemy`, `flask`) are not installed.
+- [x] Acceptance criteria: all executed automated checks for Kubernetes-only runtime/deployment changes pass.
+- [x] Follow-up: installed backend test dependencies in repo-local `.venv` (`Flask`, `SQLAlchemy`, and `requirements.txt` set), then reran targeted Kubernetes-only node executor tests successfully.
 
 ## Stage 8 - Docs Updates
 - [x] Update Kubernetes and runtime operator docs (`kubernetes/README.md`, Sphinx runtime docs) to reflect Kubernetes-only deployment and node execution behavior.

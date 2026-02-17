@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
+
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"

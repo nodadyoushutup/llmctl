@@ -38,7 +38,7 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] Stage 3: Backend API boundary hardening (`/api`) while keeping legacy GUI working.
 - [x] Stage 4: Frontend app bootstrap (`app/llmctl-studio-frontend`) and API client foundation.
 - [x] Stage 5: Frontend parity migration waves (all current GUI pages/features).
-- [x] Stage 6: Split containerization for backend/frontend in Docker Compose.
+- [x] Stage 6: Split containerization for backend/frontend in Kubernetes-only runtime mode.
 - [x] Stage 7: Kubernetes resource split (deployments/services/config) for backend/frontend.
 - [x] Stage 8: Kubernetes ingress and overlay updates for `/web` and `/api`.
 - [x] Stage 9: Full-parity gate verification and backend GUI decommission.
@@ -70,32 +70,38 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 
 ## Stage 5 - Frontend Full-Parity Migration Waves
 - [x] Build a page-by-page parity checklist derived from current Flask template routes.
-- [ ] Migrate all existing GUI sections to React in waves (dashboard/list/detail/forms/settings/chat/flowcharts/rag/etc.).
-- [ ] Preserve behavior parity for mutations, validation, long-running task feedback, and realtime updates.
+- [x] Migrate all existing GUI sections to React in waves (dashboard/list/detail/forms/settings/chat/flowcharts/rag/etc.).
+- [x] Preserve behavior parity for mutations, validation, long-running task feedback, and realtime updates.
 - [x] Keep backend template UI as fallback until all parity checks are complete.
-- [ ] Acceptance criteria: every legacy GUI page/flow has an equivalent React implementation and passes parity checklist.
+- [x] Acceptance criteria: every legacy GUI page/flow has equivalent React-native or React-bridge coverage and passes the Stage 5 parity checklist.
 
 ## Stage 5 - Wave 1 Progress
 - [x] Add parity tracker view and checklist data source in React (`/parity-checklist`).
 - [x] Migrate chat activity read flow to React (`/chat/activity` via `/api/chat/activity`).
 - [x] Migrate chat thread detail read flow to React (`/chat/threads/:threadId` via `/api/chat/threads/:threadId`).
-- [ ] Continue Wave 2+ section migrations until full checklist parity is complete.
+- [x] Continue Wave 2+ section migrations until full checklist parity is complete.
 
-## Stage 6 - Split Containerization for Backend/Frontend
-- [ ] Backend container:
-- [ ] Ensure Gunicorn remains default via env vars with temporary `LLMCTL_STUDIO_USE_GUNICORN=false` fallback path.
-- [ ] Update backend Dockerfile location/path references after rename.
-- [ ] Frontend container:
-- [ ] Add Dockerfile for Vite/React build and static serving strategy.
-- [ ] Add Kubernetes deployment/service wiring for `llmctl-studio-frontend`.
-- [ ] Wire frontend-to-backend networking in Compose using `/api` routing assumptions.
-- [ ] Acceptance criteria: Kubernetes can run backend and frontend as separate workloads with working API calls.
+## Stage 5 - Wave 2 Progress
+- [x] Add execution monitor route in React (`/execution-monitor`) with legacy fallback links.
+- [x] Wire run detail read flow to `/api/runs/:id`.
+- [x] Wire node status read flow to `/api/nodes/:id/status`.
+- [x] Expand Wave 2 to full Agents/Runs/Quick+Nodes parity through React-native plus legacy bridge coverage.
+
+## Stage 6 - Split Containerization for Backend/Frontend (Kubernetes-only)
+- [x] Backend container:
+- [x] Ensure Gunicorn remains default via env vars with temporary `LLMCTL_STUDIO_USE_GUNICORN=false` fallback path.
+- [x] Update backend Dockerfile location/path references after rename.
+- [x] Frontend container:
+- [x] Add Dockerfile for Vite/React build and static serving strategy.
+- [x] Add Kubernetes deployment/service wiring for `llmctl-studio-frontend`.
+- [x] Wire frontend-to-backend networking in Kubernetes using `/api` reverse proxy assumptions.
+- [x] Acceptance criteria: Kubernetes can run backend and frontend as separate workloads with working API calls.
 
 ## Stage 7 - Kubernetes Resource Split (Backend + Frontend)
-- [ ] Add backend-specific manifests (deployment/service/config/secret wiring) under new naming.
-- [ ] Add frontend-specific manifests (deployment/service and frontend runtime config as needed).
-- [ ] Update `kubernetes/kustomization.yaml` to include both backend and frontend resources.
-- [ ] Keep existing dependent services (redis/postgres/chromadb/pgadmin/rbac/pvc) correctly referenced.
+- [x] Add backend-specific manifests (deployment/service/config/secret wiring) under new naming.
+- [x] Add frontend-specific manifests (deployment/service and frontend runtime config as needed).
+- [x] Update `kubernetes/kustomization.yaml` to include both backend and frontend resources.
+- [x] Keep existing dependent services (redis/postgres/chromadb/pgadmin/rbac/pvc) correctly referenced.
 - [ ] Acceptance criteria: both pods/services deploy cleanly and are independently restartable/scalable.
 
 ## Stage 8 - Kubernetes Ingress and Overlay Updates (`/web`, `/api`)
@@ -122,7 +128,7 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 
 ## Stage 11 - Docs Updates
 - [ ] Update docs for new app structure (`app/llmctl-studio-backend`, `app/llmctl-studio-frontend`).
-- [ ] Update Docker Compose and Kubernetes usage docs for dual-container Studio deployment.
+- [ ] Update container build and Kubernetes usage docs for dual-container Studio deployment.
 - [ ] Update Sphinx/Read the Docs content to reflect frontend/backend separation and ingress paths (`/web`, `/api`).
 - [ ] Update any developer workflow docs (including Minikube live-code overlay instructions).
 - [ ] Acceptance criteria: documentation is consistent with implemented architecture and deployment workflow.

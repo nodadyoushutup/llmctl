@@ -185,9 +185,27 @@ body {
   border: 1px solid rgba(179, 202, 237, 0.36);
 }
 
+.status-bridged {
+  background: rgba(93, 156, 222, 0.2);
+  color: #bfe3ff;
+  border: 1px solid rgba(143, 199, 248, 0.45);
+}
+
 .legacy-note {
   margin: 0.4rem 0 0;
   font-size: 0.92rem;
+}
+
+.legacy-frame-card {
+  padding: 0.4rem;
+}
+
+.legacy-frame {
+  width: 100%;
+  min-height: 70vh;
+  border: 1px solid rgba(172, 205, 234, 0.3);
+  border-radius: 0.7rem;
+  background: #08131f;
 }
 
 .activity-list {
@@ -212,6 +230,67 @@ body {
 .activity-item header span {
   font-size: 0.85rem;
   color: #bed6f0;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 140px) auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.inline-form label {
+  font-size: 0.88rem;
+  color: #c8dbef;
+}
+
+.inline-form input {
+  width: 100%;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(172, 205, 234, 0.34);
+  background: rgba(8, 24, 37, 0.75);
+  color: #f4f7ff;
+  padding: 0.45rem 0.55rem;
+}
+
+.inline-form button {
+  border-radius: 0.55rem;
+  border: 1px solid rgba(172, 205, 234, 0.5);
+  background: rgba(32, 87, 135, 0.74);
+  color: #f4f7ff;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+
+.inline-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.kv-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.6rem;
+}
+
+.kv-grid > div {
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.6rem;
+  background: rgba(17, 39, 58, 0.72);
+  border: 1px solid rgba(172, 205, 234, 0.22);
+}
+
+.kv-grid dt {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #bfd5ee;
+}
+
+.kv-grid dd {
+  margin: 0.3rem 0 0;
+  font-weight: 700;
 }
 
 .runtime-panel {
@@ -278,5 +357,9 @@ a {
 
   .top-nav {
     width: 100%;
+  }
+
+  .inline-form {
+    grid-template-columns: 1fr;
   }
 }

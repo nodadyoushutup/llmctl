@@ -6,11 +6,21 @@ function normalizeProxyTarget(value) {
   return raw ? raw : ''
 }
 
+function normalizeBasePath(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '/') {
+    return '/'
+  }
+  return `/${raw.replace(/^\/+|\/+$/g, '')}/`
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const devApiProxyTarget = normalizeProxyTarget(env.VITE_DEV_API_PROXY_TARGET)
+  const basePath = normalizeBasePath(env.VITE_WEB_BASE_PATH)
 
   return {
+    base: basePath,
     plugins: [react()],
     server: devApiProxyTarget
       ? {

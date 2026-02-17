@@ -123,8 +123,8 @@ def create_app() -> Flask:
 
     init_engine(app.config["SQLALCHEMY_DATABASE_URI"])
     init_db()
-    seed_defaults()
     apply_runtime_migrations()
+    seed_defaults()
 
     seeder_db = _SeederDB(create_session)
     seeder = FlaskSeeder()

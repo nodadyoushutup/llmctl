@@ -34,3 +34,15 @@ Copy `.env.example` to `.env` (optional) and adjust as needed:
 - Migrated chat activity route at `/chat/activity` (read from `/api/chat/activity`).
 - Migrated chat thread detail route at `/chat/threads/:threadId` (read from `/api/chat/threads/:threadId`).
 - Each migrated view keeps a legacy fallback link while backend templates remain online.
+
+## Stage 5 progress (Wave 2 partial)
+
+- Execution monitor route at `/execution-monitor`.
+- Run detail read probe wired to `/api/runs/:id`.
+- Node status read probe wired to `/api/nodes/:id/status`.
+
+## Stage 5 completion mode
+
+- Native React routes currently cover shell, parity tracker, diagnostics, chat activity/thread, and execution monitor.
+- All remaining legacy GUI paths are covered by React bridge mode via mirrored `/api/...` pages rendered in-app.
+- This keeps full behavior parity while native replacements continue in later stages.

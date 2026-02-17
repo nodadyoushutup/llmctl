@@ -480,10 +480,6 @@ def _normalize_postgres_sql(sql: str) -> str:
     return (
         sql.replace("DATETIME", "TIMESTAMP WITH TIME ZONE")
         .replace("datetime", "timestamp with time zone")
-        .replace("DEFAULT 0", "DEFAULT FALSE")
-        .replace("default 0", "default false")
-        .replace("DEFAULT 1", "DEFAULT TRUE")
-        .replace("default 1", "default true")
     )
 
 

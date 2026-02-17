@@ -3006,30 +3006,13 @@ def _build_task_mcp_configs(
     task_servers = list(task.mcp_servers)
     template_servers = list(task_template.mcp_servers) if task_template else []
     selected_servers = task_servers if task_servers else template_servers
-    configs = _build_mcp_config_map(selected_servers)
-    configs["llmctl-mcp"] = _build_builtin_llmctl_mcp_config()
-    return configs
+    return _build_mcp_config_map(selected_servers)
 
 
 def _first_available_model_id(session) -> int | None:
     return session.execute(
         select(LLMModel.id).order_by(LLMModel.created_at.desc()).limit(1)
     ).scalar_one_or_none()
-
-
-def _builtin_llmctl_mcp_run_path() -> Path:
-    return Path(__file__).resolve().parents[4] / "app" / "llmctl-mcp" / "run.py"
-
-
-def _build_builtin_llmctl_mcp_config() -> dict[str, Any]:
-    run_path = _builtin_llmctl_mcp_run_path()
-    if not run_path.is_file():
-        raise ValueError(f"Required llmctl-mcp runner is missing: {run_path}")
-    return {
-        "command": "python3",
-        "args": [str(run_path)],
-        "env": {"LLMCTL_MCP_TRANSPORT": "stdio"},
-    }
 
 
 def _run_llm_process(
@@ -3264,59 +3247,6 @@ def _run_llm(
         time.sleep(1.0)
         result = _run_llm_process(cmd, prompt, on_update=on_update, cwd=cwd, env=env)
     return result
-
-
-def _run_llmctl_mcp_stdio_preflight(
-    mcp_configs: dict[str, dict[str, Any]],
-    on_log: Callable[[str], None] | None = None,
-    cwd: str | Path | None = None,
-    env: dict[str, str] | None = None,
-) -> None:
-    config = mcp_configs.get("llmctl-mcp")
-    if not config:
-        return
-    command = config.get("command")
-    if not command:
-        if on_log:
-            on_log("MCP preflight skipped: llmctl-mcp has no command configured.")
-        return
-    args = _extract_list_config(config.get("args"), "args")
-    repo_root = Path(__file__).resolve().parents[4]
-    smoke_test = repo_root / "app" / "llmctl-mcp" / "scripts" / "stdio_smoke_test.py"
-    if not smoke_test.exists():
-        raise RuntimeError(f"MCP preflight missing: {smoke_test}")
-    tool_args = json.dumps({"limit": 1, "order_by": "id"})
-    cmd = [
-        "python3",
-        str(smoke_test),
-        "--timeout",
-        "8",
-        "--tool-name",
-        "llmctl_get_flowchart",
-        "--tool-args",
-        tool_args,
-        "--",
-        str(command),
-        *args,
-    ]
-    if on_log:
-        on_log(f"MCP preflight (llmctl-mcp): {_format_cmd_for_log(cmd)}")
-    result = subprocess.run(
-        cmd,
-        text=True,
-        capture_output=True,
-        env=env or os.environ.copy(),
-        cwd=str(cwd) if cwd is not None else None,
-    )
-    if result.stdout.strip() and on_log:
-        on_log(result.stdout.rstrip())
-    if result.stderr.strip() and on_log:
-        on_log(result.stderr.rstrip())
-    if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(
-            message or f"MCP preflight failed with code {result.returncode}."
-        )
 
 
 def _update_task_logs(
@@ -4428,14 +4358,6 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     _append_task_log(
                         "Fallback mode selected but no SKILL.md excerpts were available."
                     )
-            if provider == "gemini" and "llmctl-mcp" in mcp_configs:
-                _append_task_log("Running MCP stdio preflight for llmctl-mcp...")
-                _run_llmctl_mcp_stdio_preflight(
-                    mcp_configs,
-                    on_log=_append_task_log,
-                    cwd=llm_cwd,
-                    env=llm_env,
-                )
             _append_task_log(f"Launching {provider_label}...")
             result = _run_llm(
                 provider,
@@ -5586,7 +5508,6 @@ def _execute_flowchart_task_node(
         model_config.get("agent_markdown_filename") or ""
     ).strip() or None
     mcp_configs = _build_mcp_config_map(mcp_servers)
-    mcp_configs["llmctl-mcp"] = _build_builtin_llmctl_mcp_config()
 
     ordered_scripts: list[Script] = []
     seen_script_ids: set[int] = set()

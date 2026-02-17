@@ -18,6 +18,7 @@ from core.models import (
     Script,
     Skill,
     SkillVersion,
+    SYSTEM_MANAGED_MCP_SERVER_KEYS,
     TaskTemplate,
 )
 from services.skills import build_skill_package_from_directory, import_skill_package_to_db
@@ -1377,6 +1378,7 @@ def seed_defaults() -> None:
     with session_scope() as session:
         _seed_roles(session)
         _seed_mcp_servers(session)
+        _seed_integrated_mcp_servers(session)
         _seed_models(session)
         _seed_agents(session)
         _seed_scripts(session)
@@ -1553,6 +1555,9 @@ def _seed_mcp_servers(session) -> None:
         server_key = payload.get("server_key")
         if not isinstance(server_key, str) or not server_key.strip():
             continue
+        if server_key in SYSTEM_MANAGED_MCP_SERVER_KEYS:
+            # Integrated/system-managed servers are synchronized separately.
+            continue
         name = payload.get("name")
         description = payload.get("description")
         raw_config = payload.get("config_json")
@@ -1588,6 +1593,12 @@ def _seed_mcp_servers(session) -> None:
             )
         ):
             server.config_json = config_json
+
+
+def _seed_integrated_mcp_servers(session) -> None:
+    from core.integrated_mcp import sync_integrated_mcp_servers_in_session
+
+    sync_integrated_mcp_servers_in_session(session)
 
 
 def _append_prompt_once(prompt: str, addition: str) -> str:

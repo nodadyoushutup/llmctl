@@ -42,7 +42,7 @@ RUN apt-get update \
         google-chrome-stable \
         google-cloud-cli \
         nodejs \
-    && npm install -g @openai/codex@latest @google/gemini-cli@latest @modelcontextprotocol/server-github@2025.4.8 @google-cloud/gcloud-mcp@0.5.3 \
+    && npm install -g @openai/codex@latest @google/gemini-cli@latest \
     && if [ "${INSTALL_CLAUDE}" = "true" ]; then npm install -g @anthropic-ai/claude-code@latest; fi \
     && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium-browser \
     && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium \
@@ -57,13 +57,11 @@ RUN /app/scripts/install/install-docker-cli.sh \
     && /app/app/llmctl-studio-backend/docker/scripts/setup-user-groups.sh
 
 COPY app/llmctl-studio-backend/requirements.txt /app/app/llmctl-studio-backend/requirements.txt
-COPY app/llmctl-mcp/requirements.txt /app/app/llmctl-mcp/requirements.txt
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     LLMCTL_STUDIO_USE_GUNICORN=true
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt \
-    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-mcp/requirements.txt \
     && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm>=0.8.5"; fi
 
 COPY . /app

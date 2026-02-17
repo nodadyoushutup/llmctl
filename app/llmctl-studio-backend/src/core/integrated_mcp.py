@@ -24,6 +24,15 @@ INTEGRATED_MCP_CHROMA_KEY = "chroma"
 INTEGRATED_MCP_GOOGLE_CLOUD_KEY = "google-cloud"
 INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY = "google-workspace"
 LEGACY_ATLASSIAN_KEY = "jira"
+INTEGRATED_MCP_TRANSPORT = "streamable-http"
+INTEGRATED_MCP_PATH = "/mcp"
+INTEGRATED_MCP_SERVICE_ENDPOINTS: dict[str, tuple[str, int]] = {
+    INTEGRATED_MCP_LLMCTL_KEY: ("llmctl-mcp", 9020),
+    INTEGRATED_MCP_GITHUB_KEY: ("llmctl-mcp-github", 8000),
+    INTEGRATED_MCP_ATLASSIAN_KEY: ("llmctl-mcp-atlassian", 8000),
+    INTEGRATED_MCP_CHROMA_KEY: ("llmctl-mcp-chroma", 8000),
+    INTEGRATED_MCP_GOOGLE_CLOUD_KEY: ("llmctl-mcp-google-cloud", 8000),
+}
 DOCKER_CHROMA_HOST_ALIASES = {"llmctl-chromadb", "chromadb"}
 GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE = (
     Path(Config.DATA_DIR) / "credentials" / "google-cloud-service-account.json"
@@ -127,7 +136,7 @@ def _desired_integrated_server_payloads(
     payload: dict[str, dict[str, Any]] = {
         INTEGRATED_MCP_LLMCTL_KEY: {
             "name": "LLMCTL MCP",
-            "description": "System-provided llmctl MCP server bundled with Studio.",
+            "description": "System-managed llmctl MCP server hosted in Kubernetes.",
             "config": _llmctl_config(),
         }
     }
@@ -137,7 +146,7 @@ def _desired_integrated_server_payloads(
         payload[INTEGRATED_MCP_GITHUB_KEY] = {
             "name": "GitHub MCP",
             "description": "System-managed GitHub MCP server from Integration settings.",
-            "config": _github_config(github_pat),
+            "config": _github_config(),
         }
 
     atlassian_env = _atlassian_env(jira, confluence)
@@ -145,25 +154,20 @@ def _desired_integrated_server_payloads(
         payload[INTEGRATED_MCP_ATLASSIAN_KEY] = {
             "name": "Atlassian MCP",
             "description": "System-managed Atlassian MCP server from Jira/Confluence settings.",
-            "config": _atlassian_config(atlassian_env),
+            "config": _atlassian_config(),
         }
 
-    chroma_host, chroma_port, chroma_ssl = _resolved_chroma_settings(chroma)
+    chroma_host, chroma_port, _ = _resolved_chroma_settings(chroma)
     if chroma_host and chroma_port is not None:
         payload[INTEGRATED_MCP_CHROMA_KEY] = {
             "name": "Chroma MCP",
             "description": "System-managed Chroma MCP server from ChromaDB integration settings.",
-            "config": _chroma_config(
-                host=chroma_host,
-                port=chroma_port,
-                ssl=chroma_ssl,
-            ),
+            "config": _chroma_config(),
         }
 
     google_cloud_mcp_enabled = _as_bool_default(
         google_cloud.get("google_cloud_mcp_enabled"), default=True
     )
-    google_cloud_project_id = _clean(google_cloud.get("google_cloud_project_id"))
     if google_cloud_mcp_enabled:
         credentials_path = _write_google_cloud_service_account_file(
             google_cloud.get("service_account_json")
@@ -174,10 +178,7 @@ def _desired_integrated_server_payloads(
                 "description": (
                     "System-managed Google Cloud MCP server from Google Cloud integration settings."
                 ),
-                "config": _google_cloud_config(
-                    credentials_path=credentials_path,
-                    project_id=google_cloud_project_id,
-                ),
+                "config": _google_cloud_config(),
             }
     else:
         _remove_google_cloud_service_account_file(GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE)
@@ -262,64 +263,42 @@ def _resolved_chroma_settings(chroma: dict[str, str]) -> tuple[str, int | None, 
 
 
 def _llmctl_config() -> dict[str, Any]:
-    run_path = Path(__file__).resolve().parents[4] / "app" / "llmctl-mcp" / "run.py"
+    return _integrated_service_config(INTEGRATED_MCP_LLMCTL_KEY)
+
+
+def _github_config() -> dict[str, Any]:
+    return _integrated_service_config(INTEGRATED_MCP_GITHUB_KEY)
+
+
+def _atlassian_config() -> dict[str, Any]:
+    return _integrated_service_config(INTEGRATED_MCP_ATLASSIAN_KEY)
+
+
+def _chroma_config() -> dict[str, Any]:
+    return _integrated_service_config(INTEGRATED_MCP_CHROMA_KEY)
+
+
+def _google_cloud_config() -> dict[str, Any]:
+    return _integrated_service_config(INTEGRATED_MCP_GOOGLE_CLOUD_KEY)
+
+
+def _integrated_service_config(server_key: str) -> dict[str, Any]:
+    endpoint = INTEGRATED_MCP_SERVICE_ENDPOINTS.get(server_key)
+    if endpoint is None:
+        raise KeyError(f"No integrated MCP service endpoint configured for {server_key}")
+    service_name, port = endpoint
+    namespace = _integrated_mcp_namespace()
     return {
-        "command": "python3",
-        "args": [str(run_path)],
-        "env": {"LLMCTL_MCP_TRANSPORT": "stdio"},
+        "url": (
+            f"http://{service_name}.{namespace}.svc.cluster.local:{port}{INTEGRATED_MCP_PATH}"
+        ),
+        "transport": INTEGRATED_MCP_TRANSPORT,
     }
 
 
-def _github_config(pat: str) -> dict[str, Any]:
-    return {
-        "command": "mcp-server-github",
-        "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": pat},
-    }
-
-
-def _atlassian_config(env: dict[str, str]) -> dict[str, Any]:
-    return {
-        "command": "mcp-atlassian",
-        "args": ["--transport", "stdio"],
-        "env": {key: env[key] for key in sorted(env)},
-    }
-
-
-def _chroma_config(*, host: str, port: int, ssl: bool) -> dict[str, Any]:
-    wrapper_path = Path(__file__).resolve().parent / "chroma_mcp_stdio_wrapper.py"
-    return {
-        "command": "python3",
-        "args": [
-            str(wrapper_path),
-            "--client-type",
-            "http",
-            "--host",
-            host,
-            "--port",
-            str(port),
-            "--ssl",
-            "true" if ssl else "false",
-        ],
-    }
-
-
-def _google_cloud_config(
-    *,
-    credentials_path: Path,
-    project_id: str,
-) -> dict[str, Any]:
-    env = {
-        "GOOGLE_APPLICATION_CREDENTIALS": str(credentials_path),
-        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE": str(credentials_path),
-    }
-    if project_id:
-        env["GOOGLE_CLOUD_PROJECT"] = project_id
-        env["GCP_PROJECT_ID"] = project_id
-        env["CLOUDSDK_CORE_PROJECT"] = project_id
-    return {
-        "command": "gcloud-mcp",
-        "env": {key: env[key] for key in sorted(env)},
-    }
+def _integrated_mcp_namespace() -> str:
+    namespace = _clean(getattr(Config, "NODE_EXECUTOR_K8S_NAMESPACE", ""))
+    return namespace or "default"
 
 
 def _write_google_cloud_service_account_file(raw_json: str | None) -> Path | None:

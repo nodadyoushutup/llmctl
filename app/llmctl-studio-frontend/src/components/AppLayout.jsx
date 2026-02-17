@@ -5,6 +5,7 @@ const navItems = [
   { to: '/', label: 'Overview', end: true },
   { to: '/parity-checklist', label: 'Parity Tracker' },
   { to: '/chat/activity', label: 'Chat Activity' },
+  { to: '/execution-monitor', label: 'Execution Monitor' },
   { to: '/api-diagnostics', label: 'API Diagnostics' },
 ]
 

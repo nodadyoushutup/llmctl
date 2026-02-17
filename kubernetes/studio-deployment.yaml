@@ -1,20 +1,79 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: llmctl-studio
+  name: llmctl-studio-backend
   namespace: llmctl
 spec:
   replicas: 1
   revisionHistoryLimit: 0
   selector:
     matchLabels:
-      app: llmctl-studio
+      app: llmctl-studio-backend
   template:
     metadata:
       labels:
-        app: llmctl-studio
+        app: llmctl-studio-backend
     spec:
-      serviceAccountName: llmctl-studio
+      serviceAccountName: llmctl-studio-backend
+      initContainers:
+        - name: wait-for-integrated-mcp
+          image: curlimages/curl:8.12.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              wait_enabled="$(printf '%s' "${LLMCTL_STUDIO_MCP_WAIT_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')"
+              case "${wait_enabled}" in
+                1|true|yes|on)
+                  ;;
+                *)
+                  echo "Skipping integrated MCP readiness wait."
+                  exit 0
+                  ;;
+              esac
+
+              namespace="${LLMCTL_NODE_EXECUTOR_K8S_NAMESPACE:-llmctl}"
+              required_endpoints="${LLMCTL_STUDIO_MCP_REQUIRED_ENDPOINTS:-}"
+              if [ -z "${required_endpoints}" ]; then
+                required_endpoints="http://llmctl-mcp.${namespace}.svc.cluster.local:9020/mcp"
+              fi
+
+              timeout_seconds="${LLMCTL_STUDIO_MCP_WAIT_TIMEOUT_SECONDS:-240}"
+              case "${timeout_seconds}" in
+                ''|*[!0-9]*)
+                  timeout_seconds="240"
+                  ;;
+              esac
+              deadline="$(( $(date +%s) + timeout_seconds ))"
+
+              old_ifs="${IFS}"
+              IFS=','
+              for raw_endpoint in ${required_endpoints}; do
+                endpoint="$(printf '%s' "${raw_endpoint}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+                if [ -z "${endpoint}" ]; then
+                  continue
+                fi
+                echo "Waiting for integrated MCP endpoint: ${endpoint}"
+                while :; do
+                  http_code="$(curl -sS -o /dev/null -m 5 --connect-timeout 2 -w '%{http_code}' "${endpoint}" || true)"
+                  if [ "${http_code}" != "000" ]; then
+                    echo "Integrated MCP endpoint ready: ${endpoint} (HTTP ${http_code})"
+                    break
+                  fi
+                  now="$(date +%s)"
+                  if [ "${now}" -ge "${deadline}" ]; then
+                    echo "Timed out waiting for integrated MCP endpoint: ${endpoint}"
+                    exit 1
+                  fi
+                  sleep 2
+                done
+              done
+              IFS="${old_ifs}"
+          envFrom:
+            - configMapRef:
+                name: llmctl-studio-config
       containers:
         - name: studio
           image: llmctl-studio:latest

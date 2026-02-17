@@ -87,37 +87,89 @@ Stage 3 implementation note:
 - [x] `kubectl -n llmctl get deploy llmctl-mcp llmctl-mcp-github llmctl-mcp-atlassian llmctl-mcp-chroma llmctl-mcp-google-cloud`.
 
 ## Stage 4 - Studio Integrated MCP DB Migration + Sync Refactor
-- [ ] Refactor integrated MCP payload generation in `app/llmctl-studio-backend/src/core/integrated_mcp.py` from local `command`/`stdio` assumptions to Kubernetes service `url` endpoints.
-- [ ] Add in-place migration logic in `app/llmctl-studio-backend/src/core/db.py` (or existing runtime migration path) to rewrite existing integrated `mcp_servers.config_json` rows to new in-cluster endpoint payloads.
-- [ ] Keep migration idempotent so repeated startups do not churn unchanged rows.
-- [ ] Preserve integrated server type semantics and legacy key normalization behavior (for example old `jira` key handling).
-- [ ] Acceptance criteria: existing installations auto-update integrated MCP rows to in-cluster URL configs without manual DB edits.
+- [x] Refactor integrated MCP payload generation in `app/llmctl-studio-backend/src/core/integrated_mcp.py` from local `command`/`stdio` assumptions to Kubernetes service `url` endpoints.
+- [x] Add in-place migration logic in `app/llmctl-studio-backend/src/core/db.py` (or existing runtime migration path) to rewrite existing integrated `mcp_servers.config_json` rows to new in-cluster endpoint payloads.
+- [x] Keep migration idempotent so repeated startups do not churn unchanged rows.
+- [x] Preserve integrated server type semantics and legacy key normalization behavior (for example old `jira` key handling).
+- [x] Acceptance criteria: existing installations auto-update integrated MCP rows to in-cluster URL configs without manual DB edits.
+
+Stage 4 implementation notes:
+- [x] Runtime migration path remains `core/migrations.py -> sync_integrated_mcp_servers()`, now rendering integrated MCP configs as `{"url":"http://<service>.<namespace>.svc.cluster.local:<port>/mcp","transport":"streamable-http"}`.
+- [x] Namespace resolution for integrated MCP URLs uses `Config.NODE_EXECUTOR_K8S_NAMESPACE` with fallback `default`.
+- [x] Added/updated regression coverage in `tests/test_google_cloud_integrated_mcp_stage10.py` for URL payload generation, idempotent rewrite of legacy command configs, and legacy `jira` normalization to `atlassian`.
+- [x] Test execution in this shell is currently blocked by missing dependency `sqlalchemy`; `python3 -m py_compile` passed for touched Python files.
 
 ## Stage 5 - Seed Defaults Alignment for New Environments
-- [ ] Add/update MCP seed defaults in `app/llmctl-studio-backend/src/core/seed.py` to create expected integrated MCP records for fresh databases.
-- [ ] Ensure seed behavior does not override valid migrated records unexpectedly.
-- [ ] Align startup migration/seed ordering in `app/llmctl-studio-backend/src/core/migrations.py` and app boot path so migration + seed defaults are consistent.
-- [ ] Acceptance criteria: fresh environment gets correct integrated MCP endpoints from seed; existing environments retain migrated rows cleanly.
+- [x] Add/update MCP seed defaults in `app/llmctl-studio-backend/src/core/seed.py` to create expected integrated MCP records for fresh databases.
+- [x] Ensure seed behavior does not override valid migrated records unexpectedly.
+- [x] Align startup migration/seed ordering in `app/llmctl-studio-backend/src/core/migrations.py` and app boot path so migration + seed defaults are consistent.
+- [x] Acceptance criteria: fresh environment gets correct integrated MCP endpoints from seed; existing environments retain migrated rows cleanly.
+
+Stage 5 implementation notes:
+- [x] Added integrated MCP seed synchronization hook in `core/seed.py` (`_seed_integrated_mcp_servers`) so `seed_defaults()` now materializes expected integrated MCP rows for fresh DBs using the same in-cluster URL contract as runtime sync.
+- [x] Hardened `_seed_mcp_servers` to skip `SYSTEM_MANAGED_MCP_SERVER_KEYS`, preventing custom MCP seed payloads from mutating integrated/system-managed server rows.
+- [x] Updated startup ordering in `web/app.py` to run `apply_runtime_migrations()` before `seed_defaults()` so migration rewrites settle first and seed fill-in behavior stays consistent.
+- [x] Expanded `tests/test_seed_stage11.py` with integrated MCP seed assertions (fresh create + no-churn for existing migrated-style row).
+- [x] Validation: `python3 -m py_compile` passed for touched files; unittest execution remains blocked in this shell because `sqlalchemy` is not installed.
 
 ## Stage 6 - Studio Image/Runtime Decoupling from Embedded MCP Servers
-- [ ] Remove integrated MCP server runtime installs from `app/llmctl-studio-backend/docker/Dockerfile` that are no longer needed inside Studio.
-- [ ] Remove Studio image coupling to local `app/llmctl-mcp` runtime dependencies where no longer required.
-- [ ] Update `app/llmctl-studio-backend/src/services/tasks.py` to stop hardcoded local `llmctl-mcp` command injection and use DB-managed integrated MCP config behavior.
-- [ ] Update Kubernetes overlays/runtime configuration only where needed to keep local development behavior coherent with the new DB-managed integrated MCP model.
-- [ ] Acceptance criteria: Studio image size decreases and Studio no longer depends on embedded MCP server executables for integrated MCP operation.
+- [x] Remove integrated MCP server runtime installs from `app/llmctl-studio-backend/docker/Dockerfile` that are no longer needed inside Studio.
+- [x] Remove Studio image coupling to local `app/llmctl-mcp` runtime dependencies where no longer required.
+- [x] Update `app/llmctl-studio-backend/src/services/tasks.py` to stop hardcoded local `llmctl-mcp` command injection and use DB-managed integrated MCP config behavior.
+- [x] Update Kubernetes overlays/runtime configuration only where needed to keep local development behavior coherent with the new DB-managed integrated MCP model.
+- [x] Acceptance criteria: Studio image size decreases and Studio no longer depends on embedded MCP server executables for integrated MCP operation.
+
+Stage 6 implementation notes:
+- [x] Removed Studio image installs of embedded integrated MCP runtimes in `app/llmctl-studio-backend/docker/Dockerfile`:
+- [x] dropped npm globals `@modelcontextprotocol/server-github` and `@google-cloud/gcloud-mcp`.
+- [x] removed `COPY app/llmctl-mcp/requirements.txt` and venv `pip install` of `app/llmctl-mcp` requirements.
+- [x] Refactored `services/tasks.py` to rely on DB-selected MCP servers only:
+- [x] removed builtin `llmctl-mcp` config injection from both agent and flowchart task execution paths.
+- [x] removed local stdio preflight helper (`_run_llmctl_mcp_stdio_preflight`) and related gemini preflight call.
+- [x] Updated Minikube live-code overlay (`kubernetes-overlays/minikube-live-code/studio-live-code-patch.yaml`) to stop mounting `/app/app/llmctl-mcp` into Studio pod.
+- [x] Updated tests in `tests/test_agent_role_markdown_stage6.py` to remove patches for deleted stdio preflight helper.
+- [x] Validation: `python3 -m py_compile` passed for touched Python files; `kubectl kustomize kubernetes-overlays/minikube-live-code` succeeded after overlay update.
+- [x] Known local test blocker: targeted unittest execution remains blocked in this shell because `sqlalchemy` is not installed.
 
 ## Stage 7 - Single-Cutover Wiring and Deployment Sequencing
-- [ ] Update Studio runtime configuration (`kubernetes/studio-configmap.yaml` and related settings) for any new integrated MCP endpoint/env assumptions.
-- [ ] Define and implement one-release deployment order: MCP services available before Studio applies DB migration/sync.
-- [ ] Add rollback-safe toggles or fallback logic for cutover failure handling where feasible.
-- [ ] Acceptance criteria: one coordinated deployment switches integrated MCP usage to Kubernetes services with no manual patching between steps.
+- [x] Update Studio runtime configuration (`kubernetes/studio-configmap.yaml` and related settings) for any new integrated MCP endpoint/env assumptions.
+- [x] Define and implement one-release deployment order: MCP services available before Studio applies DB migration/sync.
+- [x] Add rollback-safe toggles or fallback logic for cutover failure handling where feasible.
+- [x] Acceptance criteria: one coordinated deployment switches integrated MCP usage to Kubernetes services with no manual patching between steps.
+
+Stage 7 implementation notes:
+- [x] Added Studio cutover gating keys to `kubernetes/studio-configmap.yaml`:
+- [x] `LLMCTL_STUDIO_MCP_WAIT_ENABLED` (toggle, default `true`).
+- [x] `LLMCTL_STUDIO_MCP_WAIT_TIMEOUT_SECONDS` (startup wait timeout, default `240`).
+- [x] `LLMCTL_STUDIO_MCP_REQUIRED_ENDPOINTS` (comma-separated required MCP endpoints; default includes canonical `llmctl-mcp` service URL).
+- [x] Added `wait-for-integrated-mcp` init container to `kubernetes/studio-deployment.yaml` that:
+- [x] waits for configured MCP endpoints to respond before Studio container starts, enforcing MCP-first startup ordering in a single apply/sync release.
+- [x] supports safe rollback bypass by setting `LLMCTL_STUDIO_MCP_WAIT_ENABLED=false`.
+- [x] Validation completed:
+- [x] `kubectl kustomize kubernetes`
+- [x] `kubectl apply -k kubernetes --dry-run=server`
+- [x] live apply + rollout checks for MCP deployments and Studio.
+- [x] local Minikube note: base image rollout exposed a pre-existing image/code mismatch (old image expected legacy string MCP config); reapplying `kubernetes-overlays/minikube-live-code` restored healthy Studio rollout with current source-mounted code.
 
 ## Stage 8 - Automated Testing
-- [ ] Add/update backend tests for integrated MCP sync behavior and DB migration rewrite semantics.
-- [ ] Add/update tests for seed defaults + migration interaction (fresh DB and existing DB paths).
-- [ ] Validate Kubernetes manifest rendering and applyability (`kubectl kustomize` / server-side dry-run as available).
-- [ ] Run targeted automated test suites and fix regressions.
-- [ ] Acceptance criteria: all executed automated checks for this migration path pass.
+- [x] Add/update backend tests for integrated MCP sync behavior and DB migration rewrite semantics.
+- [x] Add/update tests for seed defaults + migration interaction (fresh DB and existing DB paths).
+- [x] Validate Kubernetes manifest rendering and applyability (`kubectl kustomize` / server-side dry-run as available).
+- [x] Run targeted automated test suites and fix regressions.
+- [x] Acceptance criteria: all executed automated checks for this migration path pass.
+
+Stage 8 execution notes:
+- [x] Updated test harness compatibility for PostgreSQL-only runtime guard (SQLite tests now bootstrap SQLAlchemy engine/session directly in tests):
+- [x] `app/llmctl-studio-backend/tests/test_seed_stage11.py`
+- [x] `app/llmctl-studio-backend/tests/test_agent_role_markdown_stage6.py`
+- [x] Kubernetes manifest checks passed:
+- [x] `kubectl kustomize kubernetes`
+- [x] `kubectl apply -k kubernetes --dry-run=server`
+- [x] Targeted backend tests passed (using repo venv and bootstrap DB URI env to satisfy import-time Config guard):
+- [x] `LLMCTL_STUDIO_DATABASE_URI='postgresql+psycopg://u:p@127.0.0.1:5432/test' .venv/bin/python -m unittest app/llmctl-studio-backend/tests/test_google_cloud_integrated_mcp_stage10.py app/llmctl-studio-backend/tests/test_seed_stage11.py app/llmctl-studio-backend/tests/test_agent_role_markdown_stage6.py`
+- [x] `LLMCTL_STUDIO_DATABASE_URI='postgresql+psycopg://u:p@127.0.0.1:5432/test' .venv/bin/python -m unittest app/llmctl-studio-backend/tests/test_mcp_config_json_stage12.py`
+- [x] Python syntax checks passed for touched backend/test modules:
+- [x] `python3 -m py_compile app/llmctl-studio-backend/src/core/integrated_mcp.py app/llmctl-studio-backend/src/core/seed.py app/llmctl-studio-backend/src/services/tasks.py app/llmctl-studio-backend/src/web/app.py app/llmctl-studio-backend/tests/test_google_cloud_integrated_mcp_stage10.py app/llmctl-studio-backend/tests/test_seed_stage11.py app/llmctl-studio-backend/tests/test_agent_role_markdown_stage6.py`
 
 ## Stage 9 - Docs Updates
 - [ ] Update Kubernetes docs in `kubernetes/README.md` for new MCP Deployments/Services, required secrets, and cutover expectations.

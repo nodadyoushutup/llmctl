@@ -17,3 +17,5 @@ resources:
   - studio-rbac.yaml
   - studio-deployment.yaml
   - studio-service.yaml
+  - studio-frontend-deployment.yaml
+  - studio-frontend-service.yaml
