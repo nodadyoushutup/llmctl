@@ -1816,33 +1816,6 @@ export function deleteChromaCollection(collectionName, { next = '' } = {}) {
   })
 }
 
-export function getRagChatMeta() {
-  return requestJson('/rag/chat')
-}
-
-export function sendRagChat({
-  message = '',
-  collections = [],
-  sourceIds = [],
-  topK = 5,
-  history = [],
-  historyLimit = '',
-  verbosity = '',
-} = {}) {
-  return requestJson('/rag/chat', {
-    method: 'POST',
-    body: {
-      message,
-      collections,
-      source_ids: sourceIds,
-      top_k: topK,
-      history,
-      history_limit: historyLimit,
-      verbosity,
-    },
-  })
-}
-
 export function getRagSources() {
   return requestJson('/rag/sources')
 }

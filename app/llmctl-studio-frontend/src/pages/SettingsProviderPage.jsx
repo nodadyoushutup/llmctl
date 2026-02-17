@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
 import {
   getSettingsProvider,
@@ -54,6 +55,28 @@ function sectionLabel(sectionId) {
     return 'Claude'
   }
   return 'Controls'
+}
+
+function sectionIcon(sectionId) {
+  if (sectionId === 'controls') {
+    return 'fa-solid fa-wave-square'
+  }
+  if (sectionId === 'codex') {
+    return 'fa-solid fa-robot'
+  }
+  if (sectionId === 'gemini') {
+    return 'fa-solid fa-star'
+  }
+  if (sectionId === 'claude') {
+    return 'fa-solid fa-brain'
+  }
+  if (sectionId === 'vllm_local') {
+    return 'fa-solid fa-computer'
+  }
+  if (sectionId === 'vllm_remote') {
+    return 'fa-solid fa-globe'
+  }
+  return 'fa-solid fa-gear'
 }
 
 function errorMessage(error, fallback) {
@@ -164,6 +187,15 @@ export default function SettingsProviderPage() {
   const localModels = Array.isArray(payload?.vllm_local_settings?.models)
     ? payload.vllm_local_settings.models
     : []
+  const providerSidebarItems = providerSections.map((item) => {
+    const itemId = normalizeSection(item?.id)
+    return {
+      id: itemId,
+      to: routeSectionPath(itemId),
+      label: item?.label || sectionLabel(itemId),
+      icon: sectionIcon(itemId),
+    }
+  })
 
   function toggleEnabled(providerId) {
     setControlsForm((current) => ({
@@ -190,236 +222,230 @@ export default function SettingsProviderPage() {
             <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
           </div>
         </div>
-        <div className="toolbar">
-          <div className="toolbar-group">
-            {providerSections.map((item) => {
-              const itemId = normalizeSection(item?.id)
-              const active = itemId === activeSection
-              return (
-                <Link
-                  key={itemId}
-                  to={routeSectionPath(itemId)}
-                  className={active ? 'btn-link' : 'btn-link btn-secondary'}
-                >
-                  {item?.label || sectionLabel(itemId)}
-                </Link>
-              )
-            })}
-          </div>
-        </div>
         {state.loading ? <p>Loading provider settings...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
-
-        {!state.loading && !state.error && activeSection === 'controls' ? (
-          <div className="stack-sm">
-            <label className="field">
-              <span>Default provider</span>
-              <select
-                value={controlsForm.defaultProvider}
-                onChange={(event) => setControlsForm((current) => ({ ...current, defaultProvider: event.target.value }))}
-              >
-                <option value="">None</option>
-                {providerDetails.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.label || provider.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <fieldset className="field">
-              <legend>Enabled providers</legend>
-              <div className="checkbox-grid">
-                {providerDetails.map((provider) => (
-                  <label key={provider.id} className="checkbox-item">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(controlsForm.enabledByProvider[provider.id])}
-                      onChange={() => toggleEnabled(provider.id)}
-                    />
-                    <span>{provider.label || provider.id}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn-link"
-                disabled={busy}
-                onClick={() => save(async () => {
-                  const enabledProviders = Object.entries(controlsForm.enabledByProvider)
-                    .filter(([, enabled]) => Boolean(enabled))
-                    .map(([providerId]) => providerId)
-                  await updateSettingsProviderControls({
-                    defaultProvider: controlsForm.defaultProvider,
-                    enabledProviders,
-                  })
-                })}
-              >
-                Save Controls
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {!state.loading && !state.error && activeSection === 'codex' ? (
-          <div className="stack-sm">
-            <label className="field">
-              <span>Codex API key</span>
-              <input
-                type="password"
-                value={codexApiKey}
-                onChange={(event) => setCodexApiKey(event.target.value)}
-              />
-            </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn-link"
-                disabled={busy}
-                onClick={() => save(() => updateSettingsProviderCodex({ apiKey: codexApiKey }))}
-              >
-                Save Codex
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {!state.loading && !state.error && activeSection === 'gemini' ? (
-          <div className="stack-sm">
-            <label className="field">
-              <span>Gemini API key</span>
-              <input
-                type="password"
-                value={geminiApiKey}
-                onChange={(event) => setGeminiApiKey(event.target.value)}
-              />
-            </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn-link"
-                disabled={busy}
-                onClick={() => save(() => updateSettingsProviderGemini({ apiKey: geminiApiKey }))}
-              >
-                Save Gemini
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {!state.loading && !state.error && activeSection === 'claude' ? (
-          <div className="stack-sm">
-            <label className="field">
-              <span>Claude API key</span>
-              <input
-                type="password"
-                value={claudeApiKey}
-                onChange={(event) => setClaudeApiKey(event.target.value)}
-              />
-            </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn-link"
-                disabled={busy}
-                onClick={() => save(() => updateSettingsProviderClaude({ apiKey: claudeApiKey }))}
-              >
-                Save Claude
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {!state.loading && !state.error && activeSection === 'vllm_local' ? (
-          <div className="stack-sm">
-            <label className="field">
-              <span>Local model</span>
-              <select
-                value={vllmLocalForm.model}
-                onChange={(event) => setVllmLocalForm((current) => ({ ...current, model: event.target.value }))}
-              >
-                <option value="">Default</option>
-                {localModels.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label || item.value}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>HuggingFace token (optional)</span>
-              <input
-                type="password"
-                value={vllmLocalForm.huggingfaceToken}
-                onChange={(event) => setVllmLocalForm((current) => ({ ...current, huggingfaceToken: event.target.value }))}
-              />
-            </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn-link"
-                disabled={busy}
-                onClick={() => save(() => updateSettingsProviderVllmLocal({
-                  model: vllmLocalForm.model,
-                  huggingfaceToken: vllmLocalForm.huggingfaceToken,
-                }))}
-              >
-                Save vLLM Local
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {!state.loading && !state.error && activeSection === 'vllm_remote' ? (
-          <div className="stack-sm">
-            <label className="field">
-              <span>Base URL</span>
-              <input
-                type="text"
-                value={vllmRemoteForm.baseUrl}
-                onChange={(event) => setVllmRemoteForm((current) => ({ ...current, baseUrl: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>API key</span>
-              <input
-                type="password"
-                value={vllmRemoteForm.apiKey}
-                onChange={(event) => setVllmRemoteForm((current) => ({ ...current, apiKey: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>Default model</span>
-              <input
-                type="text"
-                value={vllmRemoteForm.model}
-                onChange={(event) => setVllmRemoteForm((current) => ({ ...current, model: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>Models list (comma separated)</span>
-              <input
-                type="text"
-                value={vllmRemoteForm.models}
-                onChange={(event) => setVllmRemoteForm((current) => ({ ...current, models: event.target.value }))}
-              />
-            </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn-link"
-                disabled={busy}
-                onClick={() => save(() => updateSettingsProviderVllmRemote(vllmRemoteForm))}
-              >
-                Save vLLM Remote
-              </button>
-            </div>
-          </div>
-        ) : null}
       </article>
+
+      <SettingsInnerSidebar
+        title="Provider Sections"
+        ariaLabel="Provider sections"
+        items={providerSidebarItems}
+        activeId={activeSection}
+      >
+        {!state.loading && !state.error ? (
+          <article className="card">
+            {activeSection === 'controls' ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>Default provider</span>
+                  <select
+                    value={controlsForm.defaultProvider}
+                    onChange={(event) => setControlsForm((current) => ({ ...current, defaultProvider: event.target.value }))}
+                  >
+                    <option value="">None</option>
+                    {providerDetails.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.label || provider.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset className="field">
+                  <legend>Enabled providers</legend>
+                  <div className="checkbox-grid">
+                    {providerDetails.map((provider) => (
+                      <label key={provider.id} className="checkbox-item">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(controlsForm.enabledByProvider[provider.id])}
+                          onChange={() => toggleEnabled(provider.id)}
+                        />
+                        <span>{provider.label || provider.id}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn-link"
+                    disabled={busy}
+                    onClick={() => save(async () => {
+                      const enabledProviders = Object.entries(controlsForm.enabledByProvider)
+                        .filter(([, enabled]) => Boolean(enabled))
+                        .map(([providerId]) => providerId)
+                      await updateSettingsProviderControls({
+                        defaultProvider: controlsForm.defaultProvider,
+                        enabledProviders,
+                      })
+                    })}
+                  >
+                    Save Controls
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeSection === 'codex' ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>Codex API key</span>
+                  <input
+                    type="password"
+                    value={codexApiKey}
+                    onChange={(event) => setCodexApiKey(event.target.value)}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn-link"
+                    disabled={busy}
+                    onClick={() => save(() => updateSettingsProviderCodex({ apiKey: codexApiKey }))}
+                  >
+                    Save Codex
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeSection === 'gemini' ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>Gemini API key</span>
+                  <input
+                    type="password"
+                    value={geminiApiKey}
+                    onChange={(event) => setGeminiApiKey(event.target.value)}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn-link"
+                    disabled={busy}
+                    onClick={() => save(() => updateSettingsProviderGemini({ apiKey: geminiApiKey }))}
+                  >
+                    Save Gemini
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeSection === 'claude' ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>Claude API key</span>
+                  <input
+                    type="password"
+                    value={claudeApiKey}
+                    onChange={(event) => setClaudeApiKey(event.target.value)}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn-link"
+                    disabled={busy}
+                    onClick={() => save(() => updateSettingsProviderClaude({ apiKey: claudeApiKey }))}
+                  >
+                    Save Claude
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeSection === 'vllm_local' ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>Local model</span>
+                  <select
+                    value={vllmLocalForm.model}
+                    onChange={(event) => setVllmLocalForm((current) => ({ ...current, model: event.target.value }))}
+                  >
+                    <option value="">Default</option>
+                    {localModels.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label || item.value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>HuggingFace token (optional)</span>
+                  <input
+                    type="password"
+                    value={vllmLocalForm.huggingfaceToken}
+                    onChange={(event) => setVllmLocalForm((current) => ({ ...current, huggingfaceToken: event.target.value }))}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn-link"
+                    disabled={busy}
+                    onClick={() => save(() => updateSettingsProviderVllmLocal({
+                      model: vllmLocalForm.model,
+                      huggingfaceToken: vllmLocalForm.huggingfaceToken,
+                    }))}
+                  >
+                    Save vLLM Local
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeSection === 'vllm_remote' ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>Base URL</span>
+                  <input
+                    type="text"
+                    value={vllmRemoteForm.baseUrl}
+                    onChange={(event) => setVllmRemoteForm((current) => ({ ...current, baseUrl: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>API key</span>
+                  <input
+                    type="password"
+                    value={vllmRemoteForm.apiKey}
+                    onChange={(event) => setVllmRemoteForm((current) => ({ ...current, apiKey: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Default model</span>
+                  <input
+                    type="text"
+                    value={vllmRemoteForm.model}
+                    onChange={(event) => setVllmRemoteForm((current) => ({ ...current, model: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Models list (comma separated)</span>
+                  <input
+                    type="text"
+                    value={vllmRemoteForm.models}
+                    onChange={(event) => setVllmRemoteForm((current) => ({ ...current, models: event.target.value }))}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn-link"
+                    disabled={busy}
+                    onClick={() => save(() => updateSettingsProviderVllmRemote(vllmRemoteForm))}
+                  >
+                    Save vLLM Remote
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </article>
+        ) : null}
+      </SettingsInnerSidebar>
     </section>
   )
 }

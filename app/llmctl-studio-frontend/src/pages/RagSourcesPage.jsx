@@ -134,7 +134,6 @@ export default function RagSourcesPage() {
             <p>Configure retrieval sources and run quick index operations.</p>
           </div>
           <div className="table-actions">
-            <Link to="/rag/chat" className="btn-link btn-secondary">RAG Chat</Link>
             <Link to="/rag/sources/new" className="btn-link">New Source</Link>
           </div>
         </div>

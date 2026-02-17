@@ -123,9 +123,9 @@ describe('App routing', () => {
     expect(await screen.findByRole('heading', { name: 'Chroma Collections' })).toBeInTheDocument()
   })
 
-  test('rag chat route is native react', async () => {
+  test('rag chat route redirects to rag sources', async () => {
     renderAt('/rag/chat')
-    expect(await screen.findByRole('heading', { name: 'RAG Chat' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'RAG Sources' })).toBeInTheDocument()
   })
 
   test('rag sources route is native react', async () => {

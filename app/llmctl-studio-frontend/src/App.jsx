@@ -71,7 +71,6 @@ import JiraIssuePage from './pages/JiraIssuePage'
 import ConfluencePage from './pages/ConfluencePage'
 import ChromaCollectionsPage from './pages/ChromaCollectionsPage'
 import ChromaCollectionDetailPage from './pages/ChromaCollectionDetailPage'
-import RagChatPage from './pages/RagChatPage'
 import RagSourcesPage from './pages/RagSourcesPage'
 import RagSourceNewPage from './pages/RagSourceNewPage'
 import RagSourceDetailPage from './pages/RagSourceDetailPage'
@@ -164,7 +163,7 @@ export default function App() {
       <Route path="/chroma" element={<Navigate to="/chroma/collections" replace />} />
       <Route path="/chroma/collections" element={<AppLayout><ChromaCollectionsPage /></AppLayout>} />
       <Route path="/chroma/collections/detail" element={<AppLayout><ChromaCollectionDetailPage /></AppLayout>} />
-      <Route path="/rag/chat" element={<AppLayout><RagChatPage /></AppLayout>} />
+      <Route path="/rag/chat" element={<Navigate to="/rag/sources" replace />} />
       <Route path="/rag/sources" element={<AppLayout><RagSourcesPage /></AppLayout>} />
       <Route path="/rag/sources/new" element={<AppLayout><RagSourceNewPage /></AppLayout>} />
       <Route path="/rag/sources/:sourceId" element={<AppLayout><RagSourceDetailPage /></AppLayout>} />

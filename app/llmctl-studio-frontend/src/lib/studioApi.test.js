@@ -67,8 +67,6 @@ import {
   getChromaCollections,
   getChromaCollection,
   deleteChromaCollection,
-  getRagChatMeta,
-  sendRagChat,
   getRagSources,
   getRagSourceMeta,
   createRagSource,
@@ -1262,16 +1260,6 @@ describe('studioApi', () => {
     getChromaCollections({ page: 2, perPage: 50 })
     getChromaCollection('docs')
     deleteChromaCollection('docs', { next: 'detail' })
-    getRagChatMeta()
-    sendRagChat({
-      message: 'What changed?',
-      collections: ['docs'],
-      sourceIds: [3],
-      topK: 7,
-      history: [{ role: 'user', content: 'hello' }],
-      historyLimit: 8,
-      verbosity: 'high',
-    })
     getRagSources()
     getRagSourceMeta()
     createRagSource({
@@ -1320,22 +1308,9 @@ describe('studioApi', () => {
         next: 'detail',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(11, '/rag/chat')
-    expect(requestJson).toHaveBeenNthCalledWith(12, '/rag/chat', {
-      method: 'POST',
-      body: {
-        message: 'What changed?',
-        collections: ['docs'],
-        source_ids: [3],
-        top_k: 7,
-        history: [{ role: 'user', content: 'hello' }],
-        history_limit: 8,
-        verbosity: 'high',
-      },
-    })
-    expect(requestJson).toHaveBeenNthCalledWith(13, '/rag/sources')
-    expect(requestJson).toHaveBeenNthCalledWith(14, '/rag/sources/new')
-    expect(requestJson).toHaveBeenNthCalledWith(15, '/rag/sources', {
+    expect(requestJson).toHaveBeenNthCalledWith(11, '/rag/sources')
+    expect(requestJson).toHaveBeenNthCalledWith(12, '/rag/sources/new')
+    expect(requestJson).toHaveBeenNthCalledWith(13, '/rag/sources', {
       method: 'POST',
       body: {
         name: 'docs',
@@ -1349,9 +1324,9 @@ describe('studioApi', () => {
         index_schedule_mode: 'delta',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(16, '/rag/sources/10')
-    expect(requestJson).toHaveBeenNthCalledWith(17, '/rag/sources/10/edit')
-    expect(requestJson).toHaveBeenNthCalledWith(18, '/rag/sources/10', {
+    expect(requestJson).toHaveBeenNthCalledWith(14, '/rag/sources/10')
+    expect(requestJson).toHaveBeenNthCalledWith(15, '/rag/sources/10/edit')
+    expect(requestJson).toHaveBeenNthCalledWith(16, '/rag/sources/10', {
       method: 'POST',
       body: {
         name: 'docs-updated',
@@ -1365,9 +1340,9 @@ describe('studioApi', () => {
         index_schedule_mode: 'fresh',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(19, '/rag/sources/10/quick-index', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(20, '/rag/sources/10/quick-delta-index', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(21, '/rag/sources/status?ids=10%2C11')
-    expect(requestJson).toHaveBeenNthCalledWith(22, '/rag/sources/10/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(17, '/rag/sources/10/quick-index', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(18, '/rag/sources/10/quick-delta-index', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(19, '/rag/sources/status?ids=10%2C11')
+    expect(requestJson).toHaveBeenNthCalledWith(20, '/rag/sources/10/delete', { method: 'POST' })
   })
 })

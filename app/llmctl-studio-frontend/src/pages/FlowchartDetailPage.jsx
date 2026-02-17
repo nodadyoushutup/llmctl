@@ -568,67 +568,116 @@ export default function FlowchartDetailPage() {
     setSelectedNodeId(String(nextNodeId || ''))
   }
 
-  const selectedNode = persistedNodes.find((node) => String(node.id) === String(selectedNodeId)) || null
-  const utilityNode = utilityState.payload?.node && typeof utilityState.payload.node === 'object'
-    ? utilityState.payload.node
-    : null
-  const utilityCatalog = utilityState.payload?.catalog && typeof utilityState.payload.catalog === 'object'
-    ? utilityState.payload.catalog
-    : catalog
-  const utilityValidation = utilityState.payload?.validation && typeof utilityState.payload.validation === 'object'
-    ? utilityState.payload.validation
-    : null
-  const models = Array.isArray(utilityCatalog?.models) ? utilityCatalog.models : []
-  const mcpServers = Array.isArray(utilityCatalog?.mcp_servers) ? utilityCatalog.mcp_servers : []
-  const scripts = Array.isArray(utilityCatalog?.scripts) ? utilityCatalog.scripts : []
-
   return (
-    <section className="stack" aria-label="Flowchart detail">
-      <article className="card">
-        <div className="title-row" style={{ marginBottom: '12px' }}>
-          <div className="table-actions">
-            {parsedFlowchartId ? (
-              <Link to="/flowcharts" className="btn btn-secondary">
-                <i className="fa-solid fa-arrow-left" />
-                back to flowcharts
-              </Link>
-            ) : null}
-            {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}/edit`} className="btn btn-secondary">
-                <i className="fa-solid fa-pen-to-square" />
-                edit metadata
-              </Link>
-            ) : null}
-            {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}/history`} className="btn btn-secondary">
-                <i className="fa-solid fa-clock-rotate-left" />
-                history
-              </Link>
-            ) : null}
-            <button
-              type="button"
-              className="icon-button icon-button-danger"
-              aria-label="Delete flowchart"
-              title="Delete flowchart"
-              disabled={isBusy('delete')}
-              onClick={handleDelete}
-            >
-              <ActionIcon name="trash" />
-            </button>
+    <section className="flowchart-fixed-page" aria-label="Flowchart detail">
+      <article className="card flowchart-fixed-card">
+        <header className="flowchart-fixed-header">
+          <div className="flowchart-fixed-toolbar">
+            <div className="table-actions">
+              {parsedFlowchartId ? (
+                <Link to="/flowcharts" className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  back to flowcharts
+                </Link>
+              ) : null}
+              {parsedFlowchartId ? (
+                <Link to={`/flowcharts/${parsedFlowchartId}/edit`} className="btn btn-secondary">
+                  <i className="fa-solid fa-pen-to-square" />
+                  edit metadata
+                </Link>
+              ) : null}
+              {parsedFlowchartId ? (
+                <Link to={`/flowcharts/${parsedFlowchartId}/history`} className="btn btn-secondary">
+                  <i className="fa-solid fa-clock-rotate-left" />
+                  history
+                </Link>
+              ) : null}
+              <button
+                type="button"
+                className="icon-button icon-button-danger"
+                aria-label="Delete flowchart"
+                title="Delete flowchart"
+                disabled={isBusy('delete')}
+                onClick={handleDelete}
+              >
+                <ActionIcon name="trash" />
+              </button>
+            </div>
+
+            <div className="table-actions flowchart-fixed-primary-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={isBusy('save-graph')}
+                onClick={handleSaveGraph}
+              >
+                <i className="fa-solid fa-floppy-disk" />
+                save graph
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isBusy('validate')}
+                onClick={handleValidate}
+              >
+                <i className="fa-solid fa-check" />
+                validate
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isBusy('run') || activeRun}
+                onClick={handleRun}
+              >
+                <i className="fa-solid fa-play" />
+                run flowchart
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={handleResetGraph}>
+                <i className="fa-solid fa-rotate-left" />
+                reset
+              </button>
+              {activeRunId ? (
+                <Link to={`/flowcharts/runs/${activeRunId}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-diagram-project" />
+                  open run
+                </Link>
+              ) : null}
+              {activeRunId ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={isBusy('stop')}
+                  onClick={() => handleStop(false)}
+                >
+                  <i className="fa-solid fa-stop" />
+                  stop
+                </button>
+              ) : null}
+              {activeRunId ? (
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  disabled={isBusy('force-stop')}
+                  onClick={() => handleStop(true)}
+                >
+                  <i className="fa-solid fa-ban" />
+                  force stop
+                </button>
+              ) : null}
+            </div>
           </div>
-        </div>
-        {state.loading ? <p>Loading flowchart...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
-        {catalogWarning ? <p className="toolbar-meta">{catalogWarning}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
-        {flowchart ? (
-          <div className="stack-sm">
-            <p className="muted" style={{ marginTop: '4px' }}>
-              flowchart {flowchart.id}: {flowchart.name}
-            </p>
-            <dl className="kv-grid">
+
+          <div className="flowchart-fixed-heading">
+            <h2>Flowchart Workspace</h2>
+            {flowchart ? (
+              <p className="muted">
+                flowchart {flowchart.id}: {flowchart.name}
+              </p>
+            ) : null}
+          </div>
+
+          {flowchart ? (
+            <dl className="flowchart-compact-meta">
               <div>
                 <dt>Description</dt>
                 <dd>{flowchart.description || '-'}</dd>
@@ -664,361 +713,43 @@ export default function FlowchartDetailPage() {
                 </dd>
               </div>
             </dl>
-            <div className="table-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={isBusy('save-graph')}
-                onClick={handleSaveGraph}
-              >
-                <i className="fa-solid fa-floppy-disk" />
-                save graph
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={isBusy('validate')}
-                onClick={handleValidate}
-              >
-                <i className="fa-solid fa-check" />
-                validate
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={isBusy('run') || activeRun}
-                onClick={handleRun}
-              >
-                <i className="fa-solid fa-play" />
-                run flowchart
-              </button>
-              {activeRunId ? (
-                <Link to={`/flowcharts/runs/${activeRunId}`} className="btn btn-secondary">
-                  <i className="fa-solid fa-diagram-project" />
-                  open active run
-                </Link>
-              ) : null}
-              {activeRunId ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={isBusy('stop')}
-                  onClick={() => handleStop(false)}
-                >
-                  <i className="fa-solid fa-stop" />
-                  stop flowchart
-                </button>
-              ) : null}
-              {activeRunId ? (
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  disabled={isBusy('force-stop')}
-                  onClick={() => handleStop(true)}
-                >
-                  <i className="fa-solid fa-ban" />
-                  force stop
-                </button>
-              ) : null}
-            </div>
-            {activeValidation ? (
-              <div className="stack-sm">
-                <p className={activeValidation.valid ? 'toolbar-meta' : 'error-text'}>
-                  Validation: {activeValidation.valid ? 'valid' : 'invalid'}
-                </p>
-                {!activeValidation.valid && validationErrors.length > 0 ? (
-                  <ul>
-                    {validationErrors.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </article>
+          ) : null}
 
-      <article className="card">
-        <h2>Flowchart Workspace</h2>
-        <FlowchartWorkspaceEditor
-          key={`flowchart-workspace-${editorRevision}`}
-          initialNodes={nodes}
-          initialEdges={edges}
-          catalog={catalog}
-          nodeTypes={nodeTypeOptions}
-          runningNodeIds={runningNodeIds}
-          onGraphChange={handleWorkspaceGraphChange}
-          onNodeSelectionChange={handleWorkspaceSelectionChange}
-          onNotice={handleWorkspaceNotice}
-        />
-        <div className="stack-sm">
-          <div className="form-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={isBusy('save-graph')}
-              onClick={handleSaveGraph}
-            >
-              <i className="fa-solid fa-floppy-disk" />
-              save graph
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={handleResetGraph}>
-              <i className="fa-solid fa-rotate-left" />
-              reset workspace
-            </button>
-          </div>
-          <details>
-            <summary className="toolbar-meta">Raw graph JSON</summary>
-            <label className="field">
-              <span>nodes[] JSON</span>
-              <textarea className="table-textarea" value={graphDraft.nodesText} readOnly />
-            </label>
-            <label className="field">
-              <span>edges[] JSON</span>
-              <textarea className="table-textarea" value={graphDraft.edgesText} readOnly />
-            </label>
-          </details>
-        </div>
-      </article>
-
-      <article className="card">
-        <h2>Node Utilities</h2>
-        <p className="toolbar-meta">Select a persisted node to manage model/MCP/script/skill operations.</p>
-        {!utilitiesAvailable ? (
-          <p className="error-text">Node utilities are temporarily unavailable while catalog endpoints are degraded.</p>
-        ) : null}
-        <div className="toolbar-group">
-          <label htmlFor="flowchart-node-select">Node</label>
-          <select
-            id="flowchart-node-select"
-            value={selectedNodeId}
-            onChange={(event) => setSelectedNodeId(event.target.value)}
-            disabled={!utilitiesAvailable}
-          >
-            <option value="">Select node</option>
-            {persistedNodes.map((node) => (
-              <option key={node.id} value={node.id}>
-                {node.title || `Node ${node.id}`} ({node.node_type})
-              </option>
-            ))}
-          </select>
-        </div>
-        {utilityState.loading ? <p>Loading node utilities...</p> : null}
-        {utilityState.error ? <p className="error-text">{utilityState.error}</p> : null}
-        {selectedNode && utilityNode ? (
-          <div className="stack-sm">
-            <dl className="kv-grid">
-              <div>
-                <dt>Node</dt>
-                <dd>{selectedNode.title || `Node ${selectedNode.id}`}</dd>
-              </div>
-              <div>
-                <dt>Type</dt>
-                <dd>{selectedNode.node_type || '-'}</dd>
-              </div>
-              <div>
-                <dt>Model</dt>
-                <dd>{utilityNode.model_id || '-'}</dd>
-              </div>
-              <div>
-                <dt>MCP IDs</dt>
-                <dd>{Array.isArray(utilityNode.mcp_server_ids) ? utilityNode.mcp_server_ids.join(', ') || '-' : '-'}</dd>
-              </div>
-              <div>
-                <dt>Script IDs</dt>
-                <dd>{Array.isArray(utilityNode.script_ids) ? utilityNode.script_ids.join(', ') || '-' : '-'}</dd>
-              </div>
-              <div>
-                <dt>Attachment IDs</dt>
-                <dd>{Array.isArray(utilityNode.attachment_ids) ? utilityNode.attachment_ids.join(', ') || '-' : '-'}</dd>
-              </div>
-            </dl>
-
-            {utilityValidation ? (
-              <p className={utilityValidation.valid ? 'toolbar-meta' : 'error-text'}>
-                Utility compatibility: {utilityValidation.valid ? 'valid' : 'invalid'}
-                {!utilityValidation.valid && Array.isArray(utilityValidation.errors)
-                  ? ` (${utilityValidation.errors.join('; ')})`
-                  : ''}
+          {state.loading ? <p>Loading flowchart...</p> : null}
+          {state.error ? <p className="error-text">{state.error}</p> : null}
+          {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
+          {catalogWarning ? <p className="toolbar-meta">{catalogWarning}</p> : null}
+          {actionError ? <p className="error-text">{actionError}</p> : null}
+          {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
+          {activeValidation ? (
+            <div className="stack-sm">
+              <p className={activeValidation.valid ? 'toolbar-meta' : 'error-text'}>
+                Validation: {activeValidation.valid ? 'valid' : 'invalid'}
               </p>
-            ) : null}
-
-            <div className="form-grid">
-              <label className="field">
-                <span>Set model</span>
-                <select value={modelIdInput} onChange={(event) => setModelIdInput(event.target.value)}>
-                  <option value="">None</option>
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name || `Model ${model.id}`}
-                    </option>
+              {!activeValidation.valid && validationErrors.length > 0 ? (
+                <ul>
+                  {validationErrors.map((item) => (
+                    <li key={item}>{item}</li>
                   ))}
-                </select>
-              </label>
-              <div className="form-actions">
-                <button type="button" className="btn-link btn-secondary" onClick={handleSetModel}>
-                  Save model
-                </button>
-              </div>
-            </div>
-
-            <div className="form-grid">
-              <label className="field">
-                <span>Attach MCP server</span>
-                <select value={mcpServerIdInput} onChange={(event) => setMcpServerIdInput(event.target.value)}>
-                  <option value="">Select MCP server</option>
-                  {mcpServers.map((server) => (
-                    <option key={server.id} value={server.id}>
-                      {server.name || `MCP ${server.id}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="form-actions">
-                <button type="button" className="btn-link btn-secondary" onClick={handleAttachMcp}>
-                  Attach MCP
-                </button>
-              </div>
-              {Array.isArray(utilityNode.mcp_server_ids) && utilityNode.mcp_server_ids.length > 0 ? (
-                <div className="table-actions">
-                  {utilityNode.mcp_server_ids.map((mcpId) => (
-                    <button
-                      key={mcpId}
-                      type="button"
-                      className="icon-button icon-button-danger"
-                      aria-label={`Detach MCP ${mcpId}`}
-                      title={`Detach MCP ${mcpId}`}
-                      onClick={() => handleDetachMcp(mcpId)}
-                    >
-                      <ActionIcon name="trash" />
-                    </button>
-                  ))}
-                </div>
+                </ul>
               ) : null}
             </div>
+          ) : null}
+        </header>
 
-            <div className="form-grid">
-              <label className="field">
-                <span>Attach script</span>
-                <select value={scriptIdInput} onChange={(event) => setScriptIdInput(event.target.value)}>
-                  <option value="">Select script</option>
-                  {scripts.map((script) => (
-                    <option key={script.id} value={script.id}>
-                      {script.file_name || `Script ${script.id}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="form-actions">
-                <button type="button" className="btn-link btn-secondary" onClick={handleAttachScript}>
-                  Attach script
-                </button>
-              </div>
-              {Array.isArray(utilityNode.script_ids) && utilityNode.script_ids.length > 0 ? (
-                <div className="table-actions">
-                  {utilityNode.script_ids.map((scriptId) => (
-                    <button
-                      key={scriptId}
-                      type="button"
-                      className="icon-button icon-button-danger"
-                      aria-label={`Detach script ${scriptId}`}
-                      title={`Detach script ${scriptId}`}
-                      onClick={() => handleDetachScript(scriptId)}
-                    >
-                      <ActionIcon name="trash" />
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              <label className="field">
-                <span>Reorder script ids (comma separated)</span>
-                <input
-                  type="text"
-                  value={scriptIdsInput}
-                  onChange={(event) => setScriptIdsInput(event.target.value)}
-                  placeholder="3,5,8"
-                />
-              </label>
-              <div className="form-actions">
-                <button type="button" className="btn-link btn-secondary" onClick={handleReorderScripts}>
-                  Save script order
-                </button>
-              </div>
-            </div>
-
-            <div className="form-grid">
-              <label className="field">
-                <span>Skill id</span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={skillIdInput}
-                  onChange={(event) => setSkillIdInput(event.target.value)}
-                  placeholder="42"
-                />
-              </label>
-              <div className="form-actions">
-                <button type="button" className="btn-link btn-secondary" onClick={handleAttachSkill}>
-                  Attach skill
-                </button>
-                <button type="button" className="btn-link btn-secondary" onClick={handleDetachSkill}>
-                  Detach skill
-                </button>
-              </div>
-              <label className="field">
-                <span>Reorder skill ids (comma separated)</span>
-                <input
-                  type="text"
-                  value={skillIdsInput}
-                  onChange={(event) => setSkillIdsInput(event.target.value)}
-                  placeholder="2,4,6"
-                />
-              </label>
-              <div className="form-actions">
-                <button type="button" className="btn-link btn-secondary" onClick={handleReorderSkills}>
-                  Save skill order
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </article>
-
-      <article className="card">
-        <h2>Recent Runs</h2>
-        {runs.length === 0 ? <p>No runs recorded yet.</p> : null}
-        {runs.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Run</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Started</th>
-                  <th>Finished</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((run) => (
-                  <tr key={run.id}>
-                    <td>
-                      <Link to={`/flowcharts/runs/${run.id}`}>Run {run.id}</Link>
-                    </td>
-                    <td>
-                      <span className={runStatusClass(run.status)}>{run.status || '-'}</span>
-                    </td>
-                    <td>{run.created_at || '-'}</td>
-                    <td>{run.started_at || '-'}</td>
-                    <td>{run.finished_at || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+        <div className="flowchart-fixed-workspace">
+          <FlowchartWorkspaceEditor
+            key={`flowchart-workspace-${editorRevision}`}
+            initialNodes={nodes}
+            initialEdges={edges}
+            catalog={catalog}
+            nodeTypes={nodeTypeOptions}
+            runningNodeIds={runningNodeIds}
+            onGraphChange={handleWorkspaceGraphChange}
+            onNodeSelectionChange={handleWorkspaceSelectionChange}
+            onNotice={handleWorkspaceNotice}
+          />
+        </div>
       </article>
     </section>
   )

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
 import {
   getSettingsIntegrations,
@@ -68,6 +69,31 @@ function sectionLabel(sectionId) {
     return 'ChromaDB'
   }
   return sectionId.charAt(0).toUpperCase() + sectionId.slice(1)
+}
+
+function sectionIcon(sectionId) {
+  if (sectionId === 'git') {
+    return 'fa-solid fa-code-branch'
+  }
+  if (sectionId === 'github') {
+    return 'fa-brands fa-github'
+  }
+  if (sectionId === 'jira') {
+    return 'fa-brands fa-jira'
+  }
+  if (sectionId === 'confluence') {
+    return 'fa-brands fa-confluence'
+  }
+  if (sectionId === 'google_cloud' || sectionId === 'google_workspace') {
+    return 'fa-brands fa-google'
+  }
+  if (sectionId === 'huggingface') {
+    return 'fa-solid fa-face-smile'
+  }
+  if (sectionId === 'chroma') {
+    return 'fa-solid fa-layer-group'
+  }
+  return 'fa-solid fa-plug'
 }
 
 function asBool(value) {
@@ -215,6 +241,15 @@ export default function SettingsIntegrationsPage() {
   const integrationSections = Array.isArray(payload?.integration_sections) && payload.integration_sections.length > 0
     ? payload.integration_sections
     : SECTION_IDS.map((id) => ({ id, label: sectionLabel(id) }))
+  const integrationSidebarItems = integrationSections.map((item) => {
+    const itemId = normalizeSection(item?.id)
+    return {
+      id: itemId,
+      to: routeSectionPath(itemId),
+      label: item?.label || sectionLabel(itemId),
+      icon: sectionIcon(itemId),
+    }
+  })
 
   return (
     <section className="stack" aria-label="Settings integrations">
@@ -231,30 +266,19 @@ export default function SettingsIntegrationsPage() {
             <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
           </div>
         </div>
-        <div className="toolbar">
-          <div className="toolbar-group">
-            {integrationSections.map((item) => {
-              const itemId = normalizeSection(item?.id)
-              const active = itemId === activeSection
-              return (
-                <Link
-                  key={itemId}
-                  to={routeSectionPath(itemId)}
-                  className={active ? 'btn-link' : 'btn-link btn-secondary'}
-                >
-                  {item?.label || sectionLabel(itemId)}
-                </Link>
-              )
-            })}
-          </div>
-        </div>
         {state.loading ? <p>Loading integration settings...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
       </article>
 
-      {!state.loading && !state.error && activeSection === 'git' ? (
+      <SettingsInnerSidebar
+        title="Integration Sections"
+        ariaLabel="Integration sections"
+        items={integrationSidebarItems}
+        activeId={activeSection}
+      >
+        {!state.loading && !state.error && activeSection === 'git' ? (
         <article className="card">
           <h2>Git</h2>
           <div className="form-grid">
@@ -281,9 +305,9 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
 
-      {!state.loading && !state.error && activeSection === 'github' ? (
+        {!state.loading && !state.error && activeSection === 'github' ? (
         <article className="card">
           <h2>GitHub</h2>
           <div className="form-grid">
@@ -350,9 +374,9 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
 
-      {!state.loading && !state.error && activeSection === 'jira' ? (
+        {!state.loading && !state.error && activeSection === 'jira' ? (
         <article className="card">
           <h2>Jira</h2>
           <div className="form-grid">
@@ -416,9 +440,9 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
 
-      {!state.loading && !state.error && activeSection === 'confluence' ? (
+        {!state.loading && !state.error && activeSection === 'confluence' ? (
         <article className="card">
           <h2>Confluence</h2>
           <div className="form-grid">
@@ -471,9 +495,9 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
 
-      {!state.loading && !state.error && activeSection === 'google_cloud' ? (
+        {!state.loading && !state.error && activeSection === 'google_cloud' ? (
         <article className="card">
           <h2>Google Cloud</h2>
           <div className="form-grid">
@@ -495,9 +519,9 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
 
-      {!state.loading && !state.error && activeSection === 'google_workspace' ? (
+        {!state.loading && !state.error && activeSection === 'google_workspace' ? (
         <article className="card">
           <h2>Google Workspace</h2>
           <div className="form-grid">
@@ -519,9 +543,9 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
 
-      {!state.loading && !state.error && activeSection === 'huggingface' ? (
+        {!state.loading && !state.error && activeSection === 'huggingface' ? (
         <article className="card">
           <h2>Hugging Face</h2>
           <div className="form-grid">
@@ -541,9 +565,9 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
 
-      {!state.loading && !state.error && activeSection === 'chroma' ? (
+        {!state.loading && !state.error && activeSection === 'chroma' ? (
         <article className="card">
           <h2>ChromaDB</h2>
           <div className="form-grid">
@@ -565,7 +589,8 @@ export default function SettingsIntegrationsPage() {
             </div>
           </div>
         </article>
-      ) : null}
+        ) : null}
+      </SettingsInnerSidebar>
     </section>
   )
 }

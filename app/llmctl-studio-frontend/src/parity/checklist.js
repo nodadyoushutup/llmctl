@@ -177,10 +177,10 @@ export const parityChecklist = [
   {
     wave: 'Wave 7',
     area: 'RAG Pages',
-    legacyPath: '/rag/chat and /rag/sources*',
-    reactPath: '/rag/chat + /rag/sources + /rag/sources/new + /rag/sources/:sourceId + /rag/sources/:sourceId/edit',
+    legacyPath: '/rag/sources*',
+    reactPath: '/rag/sources + /rag/sources/new + /rag/sources/:sourceId + /rag/sources/:sourceId/edit',
     status: 'migrated',
-    notes: 'Native React chat and source CRUD/quick-index flows via `/api/rag/*` endpoints.',
+    notes: 'Native React source CRUD and quick-index flows via `/api/rag/sources*` endpoints.',
   },
 ]
 

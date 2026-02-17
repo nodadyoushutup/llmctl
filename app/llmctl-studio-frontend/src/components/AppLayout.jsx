@@ -43,7 +43,6 @@ const navSections = [
     label: 'RAG',
     items: [
       { id: 'rag-sources', to: '/rag/sources', label: 'Sources', icon: 'fa-solid fa-database' },
-      { id: 'rag-chat', to: '/rag/chat', label: 'Chat', icon: 'fa-solid fa-comments' },
     ],
   },
   {
