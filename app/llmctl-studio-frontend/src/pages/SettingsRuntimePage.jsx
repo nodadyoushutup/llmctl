@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -274,33 +274,19 @@ export default function SettingsRuntimePage() {
 
   return (
     <section className="stack" aria-label="Settings runtime">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Settings Runtime</h2>
-            <p>Node executor, RAG runtime, and chat runtime controls.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>
-            <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
-            <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
-            <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
-          </div>
-        </div>
-        {state.loading ? <p>Loading runtime settings...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
-      </article>
-
       <SettingsInnerSidebar
         title="Runtime Sections"
         ariaLabel="Runtime sections"
         items={runtimeSidebarItems}
         activeId={activeSection}
       >
-        {!state.loading && !state.error ? (
-          <article className="card">
+        <article className="card">
+          {state.loading ? <p>Loading runtime settings...</p> : null}
+          {state.error ? <p className="error-text">{state.error}</p> : null}
+          {actionError ? <p className="error-text">{actionError}</p> : null}
+          {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
+          {!state.loading && !state.error ? (
+            <>
             {activeSection === 'node' ? (
               <div className="stack-sm">
                 <h3>Node executor</h3>
@@ -478,8 +464,9 @@ export default function SettingsRuntimePage() {
                 </div>
               </div>
             ) : null}
-          </article>
-        ) : null}
+            </>
+          ) : null}
+        </article>
       </SettingsInnerSidebar>
     </section>
   )

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -92,6 +92,34 @@ function errorMessage(error, fallback) {
   return fallback
 }
 
+function ProviderSectionCard({
+  title,
+  description,
+  icon,
+  children,
+  actions,
+}) {
+  return (
+    <article className="card provider-settings-card">
+      <header className="provider-settings-header">
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        {icon ? (
+          <span className="provider-settings-icon" aria-hidden="true">
+            <i className={icon} />
+          </span>
+        ) : null}
+      </header>
+      <div className="stack-sm provider-settings-body">
+        {children}
+      </div>
+      {actions ? <div className="form-actions provider-settings-actions">{actions}</div> : null}
+    </article>
+  )
+}
+
 export default function SettingsProviderPage() {
   const { section } = useParams()
   const activeSection = useMemo(() => normalizeSection(section), [section])
@@ -133,7 +161,7 @@ export default function SettingsProviderPage() {
         enabledByProvider[providerId] = Boolean(provider.enabled)
       })
       setControlsForm({
-        defaultProvider: String(payload?.provider_summary?.provider || ''),
+        defaultProvider: String(payload?.provider_summary?.provider || '').trim().toLowerCase(),
         enabledByProvider,
       })
       setCodexApiKey(String(payload?.codex_settings?.api_key || ''))
@@ -196,6 +224,15 @@ export default function SettingsProviderPage() {
       icon: sectionIcon(itemId),
     }
   })
+  const activeDefaultLabel = providerDetails.find((provider) => {
+    const providerId = String(provider?.id || '').trim().toLowerCase()
+    return providerId === controlsForm.defaultProvider
+  })?.label || controlsForm.defaultProvider || 'None'
+  const enabledProviderCount = providerDetails.filter((provider) => {
+    const providerId = String(provider?.id || '').trim().toLowerCase()
+    return Boolean(controlsForm.enabledByProvider[providerId])
+  }).length
+  const hasStatus = state.loading || state.error || actionError || actionInfo
 
   function toggleEnabled(providerId) {
     setControlsForm((current) => ({
@@ -209,65 +246,29 @@ export default function SettingsProviderPage() {
 
   return (
     <section className="stack" aria-label="Settings provider">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Settings Provider</h2>
-            <p>Enable providers and configure provider-specific authentication/runtime controls.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>
-            <Link to="/settings/runtime" className="btn-link btn-secondary">Runtime</Link>
-            <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
-            <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
-          </div>
-        </div>
-        {state.loading ? <p>Loading provider settings...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
-      </article>
-
       <SettingsInnerSidebar
         title="Provider Sections"
         ariaLabel="Provider sections"
         items={providerSidebarItems}
         activeId={activeSection}
       >
-        {!state.loading && !state.error ? (
+        {hasStatus ? (
           <article className="card">
+            {state.loading ? <p>Loading provider settings...</p> : null}
+            {state.error ? <p className="error-text">{state.error}</p> : null}
+            {actionError ? <p className="error-text">{actionError}</p> : null}
+            {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
+          </article>
+        ) : null}
+
+        {!state.loading && !state.error ? (
+          <div className="provider-settings-shell">
             {activeSection === 'controls' ? (
-              <div className="stack-sm">
-                <label className="field">
-                  <span>Default provider</span>
-                  <select
-                    value={controlsForm.defaultProvider}
-                    onChange={(event) => setControlsForm((current) => ({ ...current, defaultProvider: event.target.value }))}
-                  >
-                    <option value="">None</option>
-                    {providerDetails.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.label || provider.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <fieldset className="field">
-                  <legend>Enabled providers</legend>
-                  <div className="checkbox-grid">
-                    {providerDetails.map((provider) => (
-                      <label key={provider.id} className="checkbox-item">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(controlsForm.enabledByProvider[provider.id])}
-                          onChange={() => toggleEnabled(provider.id)}
-                        />
-                        <span>{provider.label || provider.id}</span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                <div className="form-actions">
+              <ProviderSectionCard
+                title="Provider Controls"
+                description="Choose the default provider and control which providers are available throughout Studio."
+                icon="fa-solid fa-wave-square"
+                actions={(
                   <button
                     type="button"
                     className="btn-link"
@@ -284,21 +285,70 @@ export default function SettingsProviderPage() {
                   >
                     Save Controls
                   </button>
+                )}
+              >
+                <div className="provider-controls-summary">
+                  <div className="provider-controls-stat">
+                    <span className="provider-controls-stat-label">Active default</span>
+                    <strong>{activeDefaultLabel}</strong>
+                  </div>
+                  <div className="provider-controls-stat">
+                    <span className="provider-controls-stat-label">Enabled now</span>
+                    <strong>{enabledProviderCount} providers</strong>
+                  </div>
                 </div>
-              </div>
+                <label className="field">
+                  <span>Default provider</span>
+                  <select
+                    value={controlsForm.defaultProvider}
+                    onChange={(event) => setControlsForm((current) => ({ ...current, defaultProvider: event.target.value }))}
+                  >
+                    <option value="">None</option>
+                    {providerDetails.map((provider) => {
+                      const providerId = String(provider?.id || '').trim().toLowerCase()
+                      return (
+                        <option key={providerId} value={providerId}>
+                          {provider.label || providerId}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </label>
+                <fieldset className="field provider-toggle-fieldset">
+                  <legend>Enabled providers</legend>
+                  <div className="provider-toggle-grid">
+                    {providerDetails.map((provider) => {
+                      const providerId = String(provider?.id || '').trim().toLowerCase()
+                      const isEnabled = Boolean(controlsForm.enabledByProvider[providerId])
+                      return (
+                        <label
+                          key={providerId}
+                          className={`provider-toggle${isEnabled ? ' is-enabled' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={() => toggleEnabled(providerId)}
+                          />
+                          <span className="provider-toggle-indicator" aria-hidden="true" />
+                          <span className="provider-toggle-copy">
+                            <span className="provider-toggle-label">{provider.label || providerId}</span>
+                            <span className="provider-toggle-meta">{isEnabled ? 'Enabled' : 'Disabled'}</span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </fieldset>
+              </ProviderSectionCard>
             ) : null}
 
             {activeSection === 'codex' ? (
-              <div className="stack-sm">
-                <label className="field">
-                  <span>Codex API key</span>
-                  <input
-                    type="password"
-                    value={codexApiKey}
-                    onChange={(event) => setCodexApiKey(event.target.value)}
-                  />
-                </label>
-                <div className="form-actions">
+              <ProviderSectionCard
+                title="Codex"
+                description="Configure the API key used for Codex provider requests."
+                icon="fa-solid fa-robot"
+                actions={(
                   <button
                     type="button"
                     className="btn-link"
@@ -307,21 +357,25 @@ export default function SettingsProviderPage() {
                   >
                     Save Codex
                   </button>
-                </div>
-              </div>
+                )}
+              >
+                <label className="field">
+                  <span>Codex API key</span>
+                  <input
+                    type="password"
+                    value={codexApiKey}
+                    onChange={(event) => setCodexApiKey(event.target.value)}
+                  />
+                </label>
+              </ProviderSectionCard>
             ) : null}
 
             {activeSection === 'gemini' ? (
-              <div className="stack-sm">
-                <label className="field">
-                  <span>Gemini API key</span>
-                  <input
-                    type="password"
-                    value={geminiApiKey}
-                    onChange={(event) => setGeminiApiKey(event.target.value)}
-                  />
-                </label>
-                <div className="form-actions">
+              <ProviderSectionCard
+                title="Gemini"
+                description="Set the Gemini credential used for inference and tooling."
+                icon="fa-solid fa-star"
+                actions={(
                   <button
                     type="button"
                     className="btn-link"
@@ -330,21 +384,25 @@ export default function SettingsProviderPage() {
                   >
                     Save Gemini
                   </button>
-                </div>
-              </div>
+                )}
+              >
+                <label className="field">
+                  <span>Gemini API key</span>
+                  <input
+                    type="password"
+                    value={geminiApiKey}
+                    onChange={(event) => setGeminiApiKey(event.target.value)}
+                  />
+                </label>
+              </ProviderSectionCard>
             ) : null}
 
             {activeSection === 'claude' ? (
-              <div className="stack-sm">
-                <label className="field">
-                  <span>Claude API key</span>
-                  <input
-                    type="password"
-                    value={claudeApiKey}
-                    onChange={(event) => setClaudeApiKey(event.target.value)}
-                  />
-                </label>
-                <div className="form-actions">
+              <ProviderSectionCard
+                title="Claude"
+                description="Set the Anthropic API key for Claude-backed responses."
+                icon="fa-solid fa-brain"
+                actions={(
                   <button
                     type="button"
                     className="btn-link"
@@ -353,12 +411,38 @@ export default function SettingsProviderPage() {
                   >
                     Save Claude
                   </button>
-                </div>
-              </div>
+                )}
+              >
+                <label className="field">
+                  <span>Claude API key</span>
+                  <input
+                    type="password"
+                    value={claudeApiKey}
+                    onChange={(event) => setClaudeApiKey(event.target.value)}
+                  />
+                </label>
+              </ProviderSectionCard>
             ) : null}
 
             {activeSection === 'vllm_local' ? (
-              <div className="stack-sm">
+              <ProviderSectionCard
+                title="vLLM Local"
+                description="Pick a local model and optional Hugging Face token for local vLLM runtime."
+                icon="fa-solid fa-computer"
+                actions={(
+                  <button
+                    type="button"
+                    className="btn-link"
+                    disabled={busy}
+                    onClick={() => save(() => updateSettingsProviderVllmLocal({
+                      model: vllmLocalForm.model,
+                      huggingfaceToken: vllmLocalForm.huggingfaceToken,
+                    }))}
+                  >
+                    Save vLLM Local
+                  </button>
+                )}
+              >
                 <label className="field">
                   <span>Local model</span>
                   <select
@@ -374,31 +458,32 @@ export default function SettingsProviderPage() {
                   </select>
                 </label>
                 <label className="field">
-                  <span>HuggingFace token (optional)</span>
+                  <span>Hugging Face token (optional)</span>
                   <input
                     type="password"
                     value={vllmLocalForm.huggingfaceToken}
                     onChange={(event) => setVllmLocalForm((current) => ({ ...current, huggingfaceToken: event.target.value }))}
                   />
                 </label>
-                <div className="form-actions">
+              </ProviderSectionCard>
+            ) : null}
+
+            {activeSection === 'vllm_remote' ? (
+              <ProviderSectionCard
+                title="vLLM Remote"
+                description="Configure remote vLLM endpoint details, credentials, and model defaults."
+                icon="fa-solid fa-globe"
+                actions={(
                   <button
                     type="button"
                     className="btn-link"
                     disabled={busy}
-                    onClick={() => save(() => updateSettingsProviderVllmLocal({
-                      model: vllmLocalForm.model,
-                      huggingfaceToken: vllmLocalForm.huggingfaceToken,
-                    }))}
+                    onClick={() => save(() => updateSettingsProviderVllmRemote(vllmRemoteForm))}
                   >
-                    Save vLLM Local
+                    Save vLLM Remote
                   </button>
-                </div>
-              </div>
-            ) : null}
-
-            {activeSection === 'vllm_remote' ? (
-              <div className="stack-sm">
+                )}
+              >
                 <label className="field">
                   <span>Base URL</span>
                   <input
@@ -431,19 +516,9 @@ export default function SettingsProviderPage() {
                     onChange={(event) => setVllmRemoteForm((current) => ({ ...current, models: event.target.value }))}
                   />
                 </label>
-                <div className="form-actions">
-                  <button
-                    type="button"
-                    className="btn-link"
-                    disabled={busy}
-                    onClick={() => save(() => updateSettingsProviderVllmRemote(vllmRemoteForm))}
-                  >
-                    Save vLLM Remote
-                  </button>
-                </div>
-              </div>
+              </ProviderSectionCard>
             ) : null}
-          </article>
+          </div>
         ) : null}
       </SettingsInnerSidebar>
     </section>

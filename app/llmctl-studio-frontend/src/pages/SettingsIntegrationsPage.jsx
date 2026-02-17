@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -253,31 +253,16 @@ export default function SettingsIntegrationsPage() {
 
   return (
     <section className="stack" aria-label="Settings integrations">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Settings Integrations</h2>
-            <p>Configuration and validation controls for Git, provider integrations, and Chroma.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>
-            <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
-            <Link to="/settings/runtime" className="btn-link btn-secondary">Runtime</Link>
-            <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
-          </div>
-        </div>
-        {state.loading ? <p>Loading integration settings...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
-      </article>
-
       <SettingsInnerSidebar
         title="Integration Sections"
         ariaLabel="Integration sections"
         items={integrationSidebarItems}
         activeId={activeSection}
       >
+        {state.loading ? <p>Loading integration settings...</p> : null}
+        {state.error ? <p className="error-text">{state.error}</p> : null}
+        {actionError ? <p className="error-text">{actionError}</p> : null}
+        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
         {!state.loading && !state.error && activeSection === 'git' ? (
         <article className="card">
           <h2>Git</h2>

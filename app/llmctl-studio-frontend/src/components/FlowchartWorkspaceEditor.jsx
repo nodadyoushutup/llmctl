@@ -15,6 +15,11 @@ const TYPE_TO_REF_CATALOG_KEY = {
 
 const WORLD_WIDTH = 4200
 const WORLD_HEIGHT = 2600
+const WORLD_PADDING = 24
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 1.8
+const ZOOM_STEP = 0.1
+const PALETTE_DRAG_TYPE = 'application/x-llmctl-flow-node-type'
 
 const NODE_DIMENSIONS = {
   start: { width: 108, height: 108 },
@@ -75,6 +80,14 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+function normalizeZoom(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return 1
+  }
+  return clamp(parsed, MIN_ZOOM, MAX_ZOOM)
+}
+
 function normalizeNodeType(value) {
   const type = String(value || '').trim().toLowerCase()
   return DEFAULT_NODE_TYPES.includes(type) ? type : 'task'
@@ -88,6 +101,14 @@ function titleForType(type) {
 function nodeDimensions(type) {
   const normalized = normalizeNodeType(type)
   return NODE_DIMENSIONS[normalized] || NODE_DIMENSIONS.default
+}
+
+function centeredNodePosition(nodeType) {
+  const dimensions = nodeDimensions(nodeType)
+  return {
+    x: clamp(WORLD_WIDTH / 2 - dimensions.width / 2, WORLD_PADDING, WORLD_WIDTH - dimensions.width - WORLD_PADDING),
+    y: clamp(WORLD_HEIGHT / 2 - dimensions.height / 2, WORLD_PADDING, WORLD_HEIGHT - dimensions.height - WORLD_PADDING),
+  }
 }
 
 function connectorPosition(node, handleId) {
@@ -219,6 +240,39 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
     tokenLookup.set(`client:${clientId}`, token)
   }
 
+  const firstStartNode = normalizedNodes.find((node) => normalizeNodeType(node.node_type) === 'start') || null
+  if (!firstStartNode) {
+    const clientId = Math.max(maxClientNodeId + 1, 1)
+    maxClientNodeId = clientId
+    const centered = centeredNodePosition('start')
+    const startNode = {
+      token: makeNodeToken(null, clientId),
+      persistedId: null,
+      clientId,
+      node_type: 'start',
+      title: 'Start',
+      ref_id: null,
+      x: centered.x,
+      y: centered.y,
+      config: defaultConfigForType('start'),
+      model_id: null,
+      mcp_server_ids: [],
+      script_ids: [],
+      attachment_ids: [],
+    }
+    normalizedNodes.unshift(startNode)
+    tokenLookup.set(String(clientId), startNode.token)
+    tokenLookup.set(`client:${clientId}`, startNode.token)
+  } else if (
+    normalizedNodes.length === 1 &&
+    Math.abs(toNumber(firstStartNode.x, 0)) < 0.001 &&
+    Math.abs(toNumber(firstStartNode.y, 0)) < 0.001
+  ) {
+    const centered = centeredNodePosition('start')
+    firstStartNode.x = centered.x
+    firstStartNode.y = centered.y
+  }
+
   const normalizedEdges = []
   const sourceEdges = Array.isArray(initialEdges) ? initialEdges : []
   for (const raw of sourceEdges) {
@@ -270,6 +324,7 @@ export default function FlowchartWorkspaceEditor({
     [initialNodes, initialEdges],
   )
   const viewportRef = useRef(null)
+  const hasCenteredInitialViewRef = useRef(false)
   const nextClientNodeIdRef = useRef(initialWorkspace.nextClientNodeId)
   const nextClientEdgeIdRef = useRef(initialWorkspace.nextClientEdgeId)
 
@@ -279,6 +334,7 @@ export default function FlowchartWorkspaceEditor({
   const [selectedEdgeId, setSelectedEdgeId] = useState('')
   const [connectStart, setConnectStart] = useState(null)
   const [dragging, setDragging] = useState(null)
+  const [zoom, setZoom] = useState(1)
 
   const runningNodeIdSet = useMemo(() => {
     const values = Array.isArray(runningNodeIds) ? runningNodeIds : []
@@ -294,13 +350,26 @@ export default function FlowchartWorkspaceEditor({
   }, [nodeTypes])
 
   useEffect(() => {
+    if (hasCenteredInitialViewRef.current) {
+      return
+    }
     const viewport = viewportRef.current
     if (!viewport) {
       return
     }
-    viewport.scrollLeft = Math.max(0, WORLD_WIDTH / 2 - viewport.clientWidth / 2)
-    viewport.scrollTop = Math.max(0, WORLD_HEIGHT / 2 - viewport.clientHeight / 2)
-  }, [])
+    const startNode = nodes.find((node) => normalizeNodeType(node.node_type) === 'start') || nodes[0] || null
+    if (startNode) {
+      const dimensions = nodeDimensions(startNode.node_type)
+      const centerX = toNumber(startNode.x, 0) + dimensions.width / 2
+      const centerY = toNumber(startNode.y, 0) + dimensions.height / 2
+      viewport.scrollLeft = Math.max(0, centerX - viewport.clientWidth / 2)
+      viewport.scrollTop = Math.max(0, centerY - viewport.clientHeight / 2)
+    } else {
+      viewport.scrollLeft = Math.max(0, WORLD_WIDTH / 2 - viewport.clientWidth / 2)
+      viewport.scrollTop = Math.max(0, WORLD_HEIGHT / 2 - viewport.clientHeight / 2)
+    }
+    hasCenteredInitialViewRef.current = true
+  }, [nodes])
 
   const nodesByToken = useMemo(() => {
     const map = new Map()
@@ -344,15 +413,15 @@ export default function FlowchartWorkspaceEditor({
         return
       }
       const rect = viewport.getBoundingClientRect()
-      const graphX = event.clientX - rect.left + viewport.scrollLeft
-      const graphY = event.clientY - rect.top + viewport.scrollTop
+      const graphX = (event.clientX - rect.left + viewport.scrollLeft) / zoom
+      const graphY = (event.clientY - rect.top + viewport.scrollTop) / zoom
       setNodes((current) => current.map((node) => {
         if (node.token !== dragging.token) {
           return node
         }
         const dimensions = nodeDimensions(node.node_type)
-        const x = clamp(graphX - dragging.offsetX, 24, WORLD_WIDTH - dimensions.width - 24)
-        const y = clamp(graphY - dragging.offsetY, 24, WORLD_HEIGHT - dimensions.height - 24)
+        const x = clamp(graphX - dragging.offsetX, WORLD_PADDING, WORLD_WIDTH - dimensions.width - WORLD_PADDING)
+        const y = clamp(graphY - dragging.offsetY, WORLD_PADDING, WORLD_HEIGHT - dimensions.height - WORLD_PADDING)
         return {
           ...node,
           x,
@@ -371,7 +440,7 @@ export default function FlowchartWorkspaceEditor({
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', onPointerUp)
     }
-  }, [dragging])
+  }, [dragging, zoom])
 
   const selectedNode = selectedNodeToken ? nodesByToken.get(selectedNodeToken) || null : null
   const selectedEdge = selectedEdgeId
@@ -410,21 +479,16 @@ export default function FlowchartWorkspaceEditor({
     }))
   }
 
-  function addNode(nodeType) {
+  function addNodeAt(nodeType, centerX, centerY) {
     const normalizedType = normalizeNodeType(nodeType)
     if (normalizedType === 'start' && nodes.some((node) => normalizeNodeType(node.node_type) === 'start')) {
       emitNotice('Only one start node is allowed.')
       return
     }
 
-    const viewport = viewportRef.current
     const dimensions = nodeDimensions(normalizedType)
-    let x = WORLD_WIDTH / 2 - dimensions.width / 2
-    let y = WORLD_HEIGHT / 2 - dimensions.height / 2
-    if (viewport) {
-      x = viewport.scrollLeft + viewport.clientWidth / 2 - dimensions.width / 2
-      y = viewport.scrollTop + viewport.clientHeight / 2 - dimensions.height / 2
-    }
+    const x = toNumber(centerX, WORLD_WIDTH / 2) - dimensions.width / 2
+    const y = toNumber(centerY, WORLD_HEIGHT / 2) - dimensions.height / 2
 
     const clientId = nextClientNodeIdRef.current++
     const node = {
@@ -434,8 +498,8 @@ export default function FlowchartWorkspaceEditor({
       node_type: normalizedType,
       title: titleForType(normalizedType),
       ref_id: null,
-      x: clamp(x, 24, WORLD_WIDTH - dimensions.width - 24),
-      y: clamp(y, 24, WORLD_HEIGHT - dimensions.height - 24),
+      x: clamp(x, WORLD_PADDING, WORLD_WIDTH - dimensions.width - WORLD_PADDING),
+      y: clamp(y, WORLD_PADDING, WORLD_HEIGHT - dimensions.height - WORLD_PADDING),
       config: defaultConfigForType(normalizedType),
       model_id: null,
       mcp_server_ids: [],
@@ -446,6 +510,17 @@ export default function FlowchartWorkspaceEditor({
     setNodes((current) => [...current, node])
     setSelectedNodeToken(node.token)
     setSelectedEdgeId('')
+  }
+
+  function addNode(nodeType) {
+    const viewport = viewportRef.current
+    const centerX = viewport
+      ? (viewport.scrollLeft + viewport.clientWidth / 2) / zoom
+      : WORLD_WIDTH / 2
+    const centerY = viewport
+      ? (viewport.scrollTop + viewport.clientHeight / 2) / zoom
+      : WORLD_HEIGHT / 2
+    addNodeAt(nodeType, centerX, centerY)
   }
 
   const removeNode = useCallback((token) => {
@@ -516,8 +591,8 @@ export default function FlowchartWorkspaceEditor({
     }
     event.preventDefault()
     const rect = viewport.getBoundingClientRect()
-    const graphX = event.clientX - rect.left + viewport.scrollLeft
-    const graphY = event.clientY - rect.top + viewport.scrollTop
+    const graphX = (event.clientX - rect.left + viewport.scrollLeft) / zoom
+    const graphY = (event.clientY - rect.top + viewport.scrollTop) / zoom
     setDragging({
       token: node.token,
       offsetX: graphX - toNumber(node.x, 0),
@@ -640,11 +715,94 @@ export default function FlowchartWorkspaceEditor({
     return catalog.models
   }, [catalog])
 
+  function setZoomKeepingCenter(nextZoomValue) {
+    const viewport = viewportRef.current
+    const nextZoom = normalizeZoom(nextZoomValue)
+    if (!viewport) {
+      setZoom(nextZoom)
+      return
+    }
+    if (Math.abs(nextZoom - zoom) < 0.001) {
+      return
+    }
+    const centerX = (viewport.scrollLeft + viewport.clientWidth / 2) / zoom
+    const centerY = (viewport.scrollTop + viewport.clientHeight / 2) / zoom
+    setZoom(nextZoom)
+    window.requestAnimationFrame(() => {
+      const maxScrollLeft = Math.max(0, WORLD_WIDTH * nextZoom - viewport.clientWidth)
+      const maxScrollTop = Math.max(0, WORLD_HEIGHT * nextZoom - viewport.clientHeight)
+      viewport.scrollLeft = clamp(centerX * nextZoom - viewport.clientWidth / 2, 0, maxScrollLeft)
+      viewport.scrollTop = clamp(centerY * nextZoom - viewport.clientHeight / 2, 0, maxScrollTop)
+    })
+  }
+
+  function resetViewport() {
+    const viewport = viewportRef.current
+    const focusNode = nodes.find((node) => normalizeNodeType(node.node_type) === 'start') || nodes[0] || null
+    const nextZoom = 1
+    setZoom(nextZoom)
+    if (!viewport) {
+      return
+    }
+    window.requestAnimationFrame(() => {
+      if (focusNode) {
+        const dimensions = nodeDimensions(focusNode.node_type)
+        const centerX = toNumber(focusNode.x, 0) + dimensions.width / 2
+        const centerY = toNumber(focusNode.y, 0) + dimensions.height / 2
+        const maxScrollLeft = Math.max(0, WORLD_WIDTH * nextZoom - viewport.clientWidth)
+        const maxScrollTop = Math.max(0, WORLD_HEIGHT * nextZoom - viewport.clientHeight)
+        viewport.scrollLeft = clamp(centerX * nextZoom - viewport.clientWidth / 2, 0, maxScrollLeft)
+        viewport.scrollTop = clamp(centerY * nextZoom - viewport.clientHeight / 2, 0, maxScrollTop)
+        return
+      }
+      viewport.scrollLeft = Math.max(0, WORLD_WIDTH / 2 - viewport.clientWidth / 2)
+      viewport.scrollTop = Math.max(0, WORLD_HEIGHT / 2 - viewport.clientHeight / 2)
+    })
+  }
+
+  function handlePaletteDragStart(event, nodeType) {
+    if (!event.dataTransfer) {
+      return
+    }
+    event.dataTransfer.effectAllowed = 'copy'
+    event.dataTransfer.setData(PALETTE_DRAG_TYPE, nodeType)
+    event.dataTransfer.setData('text/plain', nodeType)
+  }
+
+  function handleViewportDragOver(event) {
+    if (!event.dataTransfer) {
+      return
+    }
+    const types = Array.from(event.dataTransfer.types || [])
+    if (!types.includes(PALETTE_DRAG_TYPE) && !types.includes('text/plain')) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  function handleViewportDrop(event) {
+    if (!event.dataTransfer) {
+      return
+    }
+    const droppedType = event.dataTransfer.getData(PALETTE_DRAG_TYPE) || event.dataTransfer.getData('text/plain')
+    const normalizedType = normalizeNodeType(droppedType)
+    const viewport = viewportRef.current
+    if (!viewport) {
+      return
+    }
+    event.preventDefault()
+    const rect = viewport.getBoundingClientRect()
+    const graphX = (event.clientX - rect.left + viewport.scrollLeft) / zoom
+    const graphY = (event.clientY - rect.top + viewport.scrollTop) / zoom
+    addNodeAt(normalizedType, graphX, graphY)
+  }
+
   return (
     <div className="flow-ws-layout">
       <aside className="flow-ws-sidebar">
         <p className="eyebrow">Node Bar</p>
-        <p className="toolbar-meta">Click to add a node at the current viewport center.</p>
+        <p className="toolbar-meta">Drag to drop on canvas, or click to add at viewport center.</p>
         <div className="flow-ws-palette">
           {availableNodeTypes.map((nodeType) => {
             const disabled = nodeType === 'start' && nodes.some((node) => normalizeNodeType(node.node_type) === 'start')
@@ -654,6 +812,8 @@ export default function FlowchartWorkspaceEditor({
                 type="button"
                 className="btn btn-secondary flow-ws-palette-item"
                 disabled={disabled}
+                draggable={!disabled}
+                onDragStart={(event) => handlePaletteDragStart(event, nodeType)}
                 onClick={() => addNode(nodeType)}
               >
                 {nodeType}
@@ -668,21 +828,45 @@ export default function FlowchartWorkspaceEditor({
           <p className="toolbar-meta">
             {connectStart
               ? `Connecting from ${connectStart.nodeToken} (${connectStart.handleId}). Click a target handle.`
-              : 'Drag nodes, click handles to connect, then edit in the inspector.'}
+              : 'Drag nodes to move, drag palette types to add, connect with handles, then edit in inspector.'}
           </p>
-          {connectStart ? (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setConnectStart(null)}
-            >
-              cancel connect
+          <div className="flow-ws-toolbar-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => setZoomKeepingCenter(zoom - ZOOM_STEP)}>
+              <i className="fa-solid fa-magnifying-glass-minus" />
             </button>
-          ) : null}
+            <span className="flow-ws-zoom-label">{Math.round(zoom * 100)}%</span>
+            <button type="button" className="btn btn-secondary" onClick={() => setZoomKeepingCenter(zoom + ZOOM_STEP)}>
+              <i className="fa-solid fa-magnifying-glass-plus" />
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={resetViewport}>
+              <i className="fa-solid fa-arrows-to-dot" />
+              reset view
+            </button>
+            {connectStart ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setConnectStart(null)}
+              >
+                cancel connect
+              </button>
+            ) : null}
+          </div>
         </div>
-        <div className="flow-ws-viewport" ref={viewportRef}>
-          <div className="flow-ws-world" style={{ width: `${WORLD_WIDTH}px`, height: `${WORLD_HEIGHT}px` }}>
-            <svg className="flow-ws-edge-layer" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} preserveAspectRatio="none">
+        <div className="flow-ws-viewport" ref={viewportRef} onDragOver={handleViewportDragOver} onDrop={handleViewportDrop}>
+          <div
+            className="flow-ws-world-stage"
+            style={{ width: `${WORLD_WIDTH * zoom}px`, height: `${WORLD_HEIGHT * zoom}px` }}
+          >
+            <div
+              className="flow-ws-world"
+              style={{
+                width: `${WORLD_WIDTH}px`,
+                height: `${WORLD_HEIGHT}px`,
+                transform: `scale(${zoom})`,
+              }}
+            >
+              <svg className="flow-ws-edge-layer" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} preserveAspectRatio="none">
               {edges.map((edge) => {
                 const sourceNode = nodesByToken.get(edge.sourceToken)
                 const targetNode = nodesByToken.get(edge.targetToken)
@@ -713,55 +897,56 @@ export default function FlowchartWorkspaceEditor({
                   </g>
                 )
               })}
-            </svg>
+              </svg>
 
-            {nodes.map((node) => {
-              const dimensions = nodeDimensions(node.node_type)
-              const selected = selectedNodeToken === node.token
-              const running = node.persistedId != null && runningNodeIdSet.has(node.persistedId)
-              return (
-                <button
-                  key={node.token}
-                  type="button"
-                  className={`flow-ws-node is-type-${normalizeNodeType(node.node_type)}${selected ? ' is-selected' : ''}${running ? ' is-running' : ''}`}
-                  style={{
-                    left: `${toNumber(node.x, 0)}px`,
-                    top: `${toNumber(node.y, 0)}px`,
-                    width: `${dimensions.width}px`,
-                    height: `${dimensions.height}px`,
-                  }}
-                  onPointerDown={(event) => beginDrag(event, node)}
-                  onClick={() => {
-                    setSelectedNodeToken(node.token)
-                    setSelectedEdgeId('')
-                  }}
-                >
-                  <span className="flow-ws-node-content">
-                    <span className="flow-ws-node-title">{node.title || titleForType(node.node_type)}</span>
-                    {node.ref_id ? <span className="flow-ws-node-meta">ref {node.ref_id}</span> : null}
-                  </span>
-                  {HANDLE_IDS.map((handleId) => {
-                    const connector = connectorPosition(node, handleId)
-                    const hot = connectStart && connectStart.nodeToken === node.token && connectStart.handleId === handleId
-                    return (
-                      <span
-                        key={handleId}
-                        className={`flow-ws-node-connector${hot ? ' is-hot' : ''}`}
-                        style={{
-                          left: `${connector.x - toNumber(node.x, 0)}px`,
-                          top: `${connector.y - toNumber(node.y, 0)}px`,
-                        }}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          toggleConnector(node.token, handleId)
-                        }}
-                        title={`${node.title || node.node_type} ${handleId}`}
-                      />
-                    )
-                  })}
-                </button>
-              )
-            })}
+              {nodes.map((node) => {
+                const dimensions = nodeDimensions(node.node_type)
+                const selected = selectedNodeToken === node.token
+                const running = node.persistedId != null && runningNodeIdSet.has(node.persistedId)
+                return (
+                  <button
+                    key={node.token}
+                    type="button"
+                    className={`flow-ws-node is-type-${normalizeNodeType(node.node_type)}${selected ? ' is-selected' : ''}${running ? ' is-running' : ''}`}
+                    style={{
+                      left: `${toNumber(node.x, 0)}px`,
+                      top: `${toNumber(node.y, 0)}px`,
+                      width: `${dimensions.width}px`,
+                      height: `${dimensions.height}px`,
+                    }}
+                    onPointerDown={(event) => beginDrag(event, node)}
+                    onClick={() => {
+                      setSelectedNodeToken(node.token)
+                      setSelectedEdgeId('')
+                    }}
+                  >
+                    <span className="flow-ws-node-content">
+                      <span className="flow-ws-node-title">{node.title || titleForType(node.node_type)}</span>
+                      {node.ref_id ? <span className="flow-ws-node-meta">ref {node.ref_id}</span> : null}
+                    </span>
+                    {HANDLE_IDS.map((handleId) => {
+                      const connector = connectorPosition(node, handleId)
+                      const hot = connectStart && connectStart.nodeToken === node.token && connectStart.handleId === handleId
+                      return (
+                        <span
+                          key={handleId}
+                          className={`flow-ws-node-connector${hot ? ' is-hot' : ''}`}
+                          style={{
+                            left: `${connector.x - toNumber(node.x, 0)}px`,
+                            top: `${connector.y - toNumber(node.y, 0)}px`,
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            toggleConnector(node.token, handleId)
+                          }}
+                          title={`${node.title || node.node_type} ${handleId}`}
+                        />
+                      )
+                    })}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
       </div>

@@ -4,23 +4,13 @@ import ActionIcon from '../components/ActionIcon'
 import FlowchartWorkspaceEditor from '../components/FlowchartWorkspaceEditor'
 import { HttpError } from '../lib/httpClient'
 import {
-  attachFlowchartNodeMcp,
-  attachFlowchartNodeScript,
-  attachFlowchartNodeSkill,
   cancelFlowchartRun,
   deleteFlowchart,
-  detachFlowchartNodeMcp,
-  detachFlowchartNodeScript,
-  detachFlowchartNodeSkill,
   getFlowchartGraph,
   getFlowchartEdit,
   getFlowchartHistory,
-  getFlowchartNodeUtilities,
   getFlowchartRuntime,
-  reorderFlowchartNodeScripts,
-  reorderFlowchartNodeSkills,
   runFlowchart,
-  setFlowchartNodeModel,
   updateFlowchartGraph,
   validateFlowchart,
 } from '../lib/studioApi'
@@ -43,37 +33,9 @@ function errorMessage(error, fallback) {
   return fallback
 }
 
-function runStatusClass(status) {
-  const normalized = String(status || '').toLowerCase()
-  if (normalized === 'running' || normalized === 'queued') {
-    return 'status-chip status-running'
-  }
-  if (normalized === 'stopping') {
-    return 'status-chip status-warning'
-  }
-  if (normalized === 'failed' || normalized === 'error') {
-    return 'status-chip status-failed'
-  }
-  return 'status-chip status-idle'
-}
-
 function isRunActive(status) {
   const normalized = String(status || '').toLowerCase()
   return normalized === 'queued' || normalized === 'running' || normalized === 'stopping'
-}
-
-function toJsonText(value) {
-  return JSON.stringify(value, null, 2)
-}
-
-function parseCsvIds(raw) {
-  if (!String(raw || '').trim()) {
-    return []
-  }
-  return String(raw)
-    .split(',')
-    .map((item) => Number.parseInt(item.trim(), 10))
-    .filter((item) => Number.isInteger(item) && item > 0)
 }
 
 const DEFAULT_FLOWCHART_NODE_TYPES = ['start', 'end', 'flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag']
@@ -87,21 +49,11 @@ export default function FlowchartDetailPage() {
   const [actionError, setActionError] = useState('')
   const [actionInfo, setActionInfo] = useState('')
   const [busyAction, setBusyAction] = useState('')
-  const [graphDraft, setGraphDraft] = useState({ nodesText: '[]', edgesText: '[]' })
   const [editorGraph, setEditorGraph] = useState({ nodes: [], edges: [] })
   const [editorRevision, setEditorRevision] = useState(0)
   const [validationState, setValidationState] = useState(null)
   const [runtimeWarning, setRuntimeWarning] = useState('')
   const [catalogWarning, setCatalogWarning] = useState('')
-
-  const [selectedNodeId, setSelectedNodeId] = useState('')
-  const [utilityState, setUtilityState] = useState({ loading: false, payload: null, error: '' })
-  const [modelIdInput, setModelIdInput] = useState('')
-  const [mcpServerIdInput, setMcpServerIdInput] = useState('')
-  const [scriptIdInput, setScriptIdInput] = useState('')
-  const [skillIdInput, setSkillIdInput] = useState('')
-  const [scriptIdsInput, setScriptIdsInput] = useState('')
-  const [skillIdsInput, setSkillIdsInput] = useState('')
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!parsedFlowchartId) {
@@ -164,7 +116,6 @@ export default function FlowchartDetailPage() {
       const graph = detail?.graph && typeof detail.graph === 'object' ? detail.graph : { nodes: [], edges: [] }
       const nextNodes = Array.isArray(graph.nodes) ? graph.nodes : []
       const nextEdges = Array.isArray(graph.edges) ? graph.edges : []
-      setGraphDraft({ nodesText: toJsonText(nextNodes), edgesText: toJsonText(nextEdges) })
       setEditorGraph({ nodes: nextNodes, edges: nextEdges })
       setEditorRevision((current) => current + 1)
       setValidationState(detail?.validation && typeof detail.validation === 'object' ? detail.validation : null)
@@ -176,29 +127,6 @@ export default function FlowchartDetailPage() {
       }))
       setRuntimeWarning('')
       setCatalogWarning('')
-    }
-  }, [parsedFlowchartId])
-
-  const refreshUtilities = useCallback(async (nodeId, { silent = false } = {}) => {
-    if (!parsedFlowchartId || !nodeId) {
-      setUtilityState({ loading: false, payload: null, error: '' })
-      return
-    }
-    if (!silent) {
-      setUtilityState((current) => ({ ...current, loading: true, error: '' }))
-    }
-    try {
-      const payload = await getFlowchartNodeUtilities(parsedFlowchartId, nodeId)
-      setUtilityState({ loading: false, payload, error: '' })
-      setModelIdInput(payload?.node?.model_id ? String(payload.node.model_id) : '')
-      setScriptIdsInput(Array.isArray(payload?.node?.script_ids) ? payload.node.script_ids.join(',') : '')
-      setSkillIdsInput('')
-    } catch (error) {
-      setUtilityState((current) => ({
-        loading: false,
-        payload: silent ? current.payload : null,
-        error: errorMessage(error, 'Failed to load node utilities.'),
-      }))
     }
   }, [parsedFlowchartId])
 
@@ -214,12 +142,6 @@ export default function FlowchartDetailPage() {
   const flowchart = detail?.flowchart && typeof detail.flowchart === 'object' ? detail.flowchart : null
   const nodes = useMemo(() => (Array.isArray(editorGraph?.nodes) ? editorGraph.nodes : []), [editorGraph])
   const edges = useMemo(() => (Array.isArray(editorGraph?.edges) ? editorGraph.edges : []), [editorGraph])
-  const persistedNodes = useMemo(
-    () => nodes.filter((node) => parseId(node?.id)),
-    [nodes],
-  )
-  const selectedPersistedNodeId = useMemo(() => parseId(selectedNodeId), [selectedNodeId])
-  const runs = Array.isArray(detail?.runs) ? detail.runs : []
   const catalog = edit?.catalog && typeof edit.catalog === 'object' ? edit.catalog : null
   const nodeTypeOptions = useMemo(() => {
     const raw = edit?.node_types
@@ -232,28 +154,6 @@ export default function FlowchartDetailPage() {
   const activeRunId = runtime?.active_run_id || null
   const activeRun = isRunActive(runtimeStatus)
   const runningNodeIds = Array.isArray(runtime?.running_node_ids) ? runtime.running_node_ids : []
-  const utilitiesAvailable = Boolean(catalog)
-
-  useEffect(() => {
-    if (!selectedNodeId && persistedNodes.length > 0) {
-      setSelectedNodeId(String(persistedNodes[0].id))
-      return
-    }
-    if (
-      selectedNodeId &&
-      persistedNodes.every((node) => String(node.id) !== String(selectedNodeId))
-    ) {
-      setSelectedNodeId(persistedNodes.length > 0 ? String(persistedNodes[0].id) : '')
-    }
-  }, [persistedNodes, selectedNodeId])
-
-  useEffect(() => {
-    if (!utilitiesAvailable || !selectedPersistedNodeId) {
-      setUtilityState({ loading: false, payload: null, error: '' })
-      return
-    }
-    refreshUtilities(selectedPersistedNodeId)
-  }, [selectedPersistedNodeId, refreshUtilities, utilitiesAvailable])
 
   useEffect(() => {
     if (!activeRun || !parsedFlowchartId) {
@@ -380,168 +280,18 @@ export default function FlowchartDetailPage() {
           },
         }
       })
-      setGraphDraft({ nodesText: toJsonText(nextNodes), edgesText: toJsonText(nextEdges) })
       setEditorGraph({ nodes: nextNodes, edges: nextEdges })
       setEditorRevision((current) => current + 1)
       setValidationState(nextValidation)
       setActionInfo('Graph saved.')
-      if (selectedPersistedNodeId) {
-        await refreshUtilities(selectedPersistedNodeId, { silent: true })
-      }
     })
   }
 
   function handleResetGraph() {
-    setGraphDraft({ nodesText: toJsonText(nodes), edgesText: toJsonText(edges) })
     setEditorGraph({ nodes, edges })
     setEditorRevision((current) => current + 1)
     setActionError('')
     setActionInfo('Graph workspace reset to latest server payload.')
-  }
-
-  async function handleSetModel() {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    await withAction('set-model', async () => {
-      await setFlowchartNodeModel(parsedFlowchartId, selectedPersistedNodeId, {
-        modelId: parseId(modelIdInput),
-      })
-      setActionInfo('Node model updated.')
-      await refresh({ silent: true })
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleAttachMcp() {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    const parsedMcpId = parseId(mcpServerIdInput)
-    if (!parsedMcpId) {
-      setActionError('Select an MCP server to attach.')
-      return
-    }
-    await withAction('attach-mcp', async () => {
-      await attachFlowchartNodeMcp(parsedFlowchartId, selectedPersistedNodeId, { mcpServerId: parsedMcpId })
-      setActionInfo('MCP server attached.')
-      await refresh({ silent: true })
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleDetachMcp(mcpId) {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    await withAction(`detach-mcp-${mcpId}`, async () => {
-      await detachFlowchartNodeMcp(parsedFlowchartId, selectedPersistedNodeId, mcpId)
-      setActionInfo('MCP server detached.')
-      await refresh({ silent: true })
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleAttachScript() {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    const parsedScriptId = parseId(scriptIdInput)
-    if (!parsedScriptId) {
-      setActionError('Select a script to attach.')
-      return
-    }
-    await withAction('attach-script', async () => {
-      await attachFlowchartNodeScript(parsedFlowchartId, selectedPersistedNodeId, { scriptId: parsedScriptId })
-      setActionInfo('Script attached.')
-      await refresh({ silent: true })
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleDetachScript(scriptId) {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    await withAction(`detach-script-${scriptId}`, async () => {
-      await detachFlowchartNodeScript(parsedFlowchartId, selectedPersistedNodeId, scriptId)
-      setActionInfo('Script detached.')
-      await refresh({ silent: true })
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleReorderScripts() {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    await withAction('reorder-scripts', async () => {
-      await reorderFlowchartNodeScripts(parsedFlowchartId, selectedPersistedNodeId, {
-        scriptIds: parseCsvIds(scriptIdsInput),
-      })
-      setActionInfo('Script order updated.')
-      await refresh({ silent: true })
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleAttachSkill() {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    const parsedSkillId = parseId(skillIdInput)
-    if (!parsedSkillId) {
-      setActionError('Provide a skill id to attach.')
-      return
-    }
-    await withAction('attach-skill', async () => {
-      const payload = await attachFlowchartNodeSkill(parsedFlowchartId, selectedPersistedNodeId, {
-        skillId: parsedSkillId,
-      })
-      if (payload?.warning) {
-        setActionInfo(payload.warning)
-      } else {
-        setActionInfo('Skill attach request sent.')
-      }
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleDetachSkill() {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    const parsedSkillId = parseId(skillIdInput)
-    if (!parsedSkillId) {
-      setActionError('Provide a skill id to detach.')
-      return
-    }
-    await withAction('detach-skill', async () => {
-      const payload = await detachFlowchartNodeSkill(parsedFlowchartId, selectedPersistedNodeId, parsedSkillId)
-      if (payload?.warning) {
-        setActionInfo(payload.warning)
-      } else {
-        setActionInfo('Skill detach request sent.')
-      }
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
-  }
-
-  async function handleReorderSkills() {
-    if (!parsedFlowchartId || !selectedPersistedNodeId) {
-      return
-    }
-    await withAction('reorder-skills', async () => {
-      const payload = await reorderFlowchartNodeSkills(parsedFlowchartId, selectedPersistedNodeId, {
-        skillIds: parseCsvIds(skillIdsInput),
-      })
-      if (payload?.warning) {
-        setActionInfo(payload.warning)
-      } else {
-        setActionInfo('Skill reorder request sent.')
-      }
-      await refreshUtilities(selectedPersistedNodeId, { silent: true })
-    })
   }
 
   const activeValidation = validationState && typeof validationState === 'object'
@@ -561,11 +311,6 @@ export default function FlowchartDetailPage() {
     const nextNodes = Array.isArray(nextGraph?.nodes) ? nextGraph.nodes : []
     const nextEdges = Array.isArray(nextGraph?.edges) ? nextGraph.edges : []
     setEditorGraph({ nodes: nextNodes, edges: nextEdges })
-    setGraphDraft({ nodesText: toJsonText(nextNodes), edgesText: toJsonText(nextEdges) })
-  }
-
-  function handleWorkspaceSelectionChange(nextNodeId) {
-    setSelectedNodeId(String(nextNodeId || ''))
   }
 
   return (
@@ -666,53 +411,11 @@ export default function FlowchartDetailPage() {
               ) : null}
             </div>
           </div>
-
-          <div className="flowchart-fixed-heading">
-            <h2>Flowchart Workspace</h2>
-            {flowchart ? (
-              <p className="muted">
-                flowchart {flowchart.id}: {flowchart.name}
-              </p>
-            ) : null}
-          </div>
-
           {flowchart ? (
-            <dl className="flowchart-compact-meta">
-              <div>
-                <dt>Description</dt>
-                <dd>{flowchart.description || '-'}</dd>
-              </div>
-              <div>
-                <dt>Nodes</dt>
-                <dd>{nodes.length}</dd>
-              </div>
-              <div>
-                <dt>Edges</dt>
-                <dd>{edges.length}</dd>
-              </div>
-              <div>
-                <dt>Max node executions</dt>
-                <dd>{flowchart.max_node_executions || '-'}</dd>
-              </div>
-              <div>
-                <dt>Max runtime minutes</dt>
-                <dd>{flowchart.max_runtime_minutes || '-'}</dd>
-              </div>
-              <div>
-                <dt>Max parallel nodes</dt>
-                <dd>{flowchart.max_parallel_nodes || 1}</dd>
-              </div>
-              <div>
-                <dt>Active run</dt>
-                <dd>{activeRunId ? `run ${activeRunId}` : '-'}</dd>
-              </div>
-              <div>
-                <dt>Runtime status</dt>
-                <dd>
-                  <span className={runStatusClass(runtimeStatus)}>{runtimeStatus || 'idle'}</span>
-                </dd>
-              </div>
-            </dl>
+            <p className="flowchart-inline-meta">
+              nodes {nodes.length} · edges {edges.length} · runtime {runtimeStatus || 'idle'} · active run {activeRunId ? `run ${activeRunId}` : '-'} ·
+              {' '}max runtime {flowchart.max_runtime_minutes || '-'}m · max parallel {flowchart.max_parallel_nodes || 1} · validation {activeValidation?.valid ? 'valid' : 'invalid'}
+            </p>
           ) : null}
 
           {state.loading ? <p>Loading flowchart...</p> : null}
@@ -723,9 +426,6 @@ export default function FlowchartDetailPage() {
           {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
           {activeValidation ? (
             <div className="stack-sm">
-              <p className={activeValidation.valid ? 'toolbar-meta' : 'error-text'}>
-                Validation: {activeValidation.valid ? 'valid' : 'invalid'}
-              </p>
               {!activeValidation.valid && validationErrors.length > 0 ? (
                 <ul>
                   {validationErrors.map((item) => (
@@ -746,7 +446,6 @@ export default function FlowchartDetailPage() {
             nodeTypes={nodeTypeOptions}
             runningNodeIds={runningNodeIds}
             onGraphChange={handleWorkspaceGraphChange}
-            onNodeSelectionChange={handleWorkspaceSelectionChange}
             onNotice={handleWorkspaceNotice}
           />
         </div>

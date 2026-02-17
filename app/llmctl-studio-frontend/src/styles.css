@@ -1487,6 +1487,193 @@ fieldset.field {
   font-size: 0.85rem;
 }
 
+.provider-settings-shell {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.provider-settings-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(104, 178, 232, 0.34);
+  background:
+    radial-gradient(circle at top right, rgba(255, 122, 24, 0.18), transparent 48%),
+    linear-gradient(140deg, rgba(8, 26, 40, 0.95), rgba(11, 18, 31, 0.93));
+}
+
+.provider-settings-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(120deg, rgba(104, 178, 232, 0.08), transparent 32%);
+}
+
+.provider-settings-header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
+.provider-settings-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+}
+
+.provider-settings-header p {
+  margin: 0.4rem 0 0;
+  max-width: 52ch;
+  color: #bad1e5;
+  font-size: 0.88rem;
+}
+
+.provider-settings-icon {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(255, 122, 24, 0.42);
+  background: rgba(255, 122, 24, 0.16);
+  color: #ffd3ad;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.provider-settings-body,
+.provider-settings-actions {
+  position: relative;
+}
+
+.provider-settings-body {
+  margin-top: 1rem;
+}
+
+.provider-settings-actions {
+  margin-top: 0.95rem;
+}
+
+.provider-controls-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.provider-controls-stat {
+  border: 1px solid rgba(139, 193, 235, 0.36);
+  border-radius: 0.7rem;
+  background: rgba(7, 31, 49, 0.52);
+  padding: 0.7rem 0.75rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.provider-controls-stat strong {
+  font-size: 0.95rem;
+}
+
+.provider-controls-stat-label {
+  color: #aac5db;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.provider-toggle-fieldset {
+  border-color: rgba(139, 193, 235, 0.3);
+  background: rgba(7, 20, 34, 0.4);
+  padding: 0.75rem;
+}
+
+.provider-toggle-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.provider-toggle {
+  border: 1px solid rgba(132, 168, 199, 0.34);
+  border-radius: 0.7rem;
+  background: rgba(8, 27, 44, 0.7);
+  padding: 0.6rem 0.68rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+  cursor: pointer;
+}
+
+.provider-toggle:hover {
+  border-color: rgba(255, 122, 24, 0.48);
+  transform: translateY(-1px);
+}
+
+.provider-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(100%);
+}
+
+.provider-toggle-indicator {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 198, 223, 0.68);
+  background: rgba(9, 18, 28, 0.88);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.provider-toggle.is-enabled {
+  border-color: rgba(255, 122, 24, 0.54);
+  background: rgba(44, 22, 8, 0.46);
+}
+
+.provider-toggle.is-enabled .provider-toggle-indicator {
+  border-color: rgba(255, 122, 24, 0.7);
+  background: rgba(255, 122, 24, 0.3);
+}
+
+.provider-toggle.is-enabled .provider-toggle-indicator::after {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: #ffb474;
+}
+
+.provider-toggle-copy {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.provider-toggle-label {
+  font-size: 0.88rem;
+  color: #eff7ff;
+}
+
+.provider-toggle-meta {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #8eaac2;
+}
+
+.provider-toggle:focus-within {
+  outline: 2px solid rgba(255, 122, 24, 0.62);
+  outline-offset: 2px;
+}
+
 .field input,
 .field select,
 .field textarea {
@@ -1504,6 +1691,16 @@ fieldset.field {
 
 .field-span {
   grid-column: 1 / -1;
+}
+
+@media (max-width: 960px) {
+  .provider-controls-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-settings-header {
+    flex-direction: column;
+  }
 }
 
 .table-textarea {
@@ -1780,47 +1977,11 @@ fieldset.field {
   justify-content: flex-end;
 }
 
-.flowchart-fixed-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.flowchart-fixed-heading h2 {
-  font-size: 34px;
-  line-height: 1;
-}
-
-.flowchart-compact-meta {
+.flowchart-inline-meta {
   margin: 0;
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.flowchart-compact-meta > div {
-  padding: 0.4rem 0.45rem;
-  border-radius: 0.5rem;
-  background: rgba(17, 39, 58, 0.72);
-  border: 1px solid rgba(172, 205, 234, 0.22);
-}
-
-.flowchart-compact-meta dt {
-  margin: 0;
-  font-size: 0.67rem;
-  color: #bfd5ee;
+  font-size: 11px;
   letter-spacing: 0.02em;
-}
-
-.flowchart-compact-meta dd {
-  margin: 0.2rem 0 0;
-  font-size: 0.85rem;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: rgba(158, 175, 193, 0.86);
 }
 
 .flowchart-fixed-workspace {
@@ -1860,6 +2021,11 @@ fieldset.field {
 .flow-ws-palette-item {
   justify-content: flex-start;
   text-transform: capitalize;
+  cursor: grab;
+}
+
+.flow-ws-palette-item:active {
+  cursor: grabbing;
 }
 
 .flow-ws-editor {
@@ -1877,6 +2043,21 @@ fieldset.field {
   padding: 10px 12px;
 }
 
+.flow-ws-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.flow-ws-zoom-label {
+  min-width: 48px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .flow-ws-viewport {
   position: relative;
   flex: 1;
@@ -1886,8 +2067,15 @@ fieldset.field {
   background-size: 24px 24px;
 }
 
-.flow-ws-world {
+.flow-ws-world-stage {
   position: relative;
+}
+
+.flow-ws-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: top left;
 }
 
 .flow-ws-edge-layer {
@@ -2088,12 +2276,6 @@ pre {
   font-weight: 600;
 }
 
-@media (max-width: 1600px) {
-  .flowchart-compact-meta {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 1100px) {
   .flowchart-fixed-page {
     overflow: auto;
@@ -2105,10 +2287,6 @@ pre {
 
   .flowchart-fixed-primary-actions {
     justify-content: flex-start;
-  }
-
-  .flowchart-compact-meta {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .flowchart-fixed-workspace {

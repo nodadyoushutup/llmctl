@@ -140,12 +140,14 @@ describe('App routing', () => {
 
   test('settings provider route is native react', async () => {
     renderAt('/settings/provider')
-    expect(await screen.findByRole('heading', { name: 'Settings Provider' })).toBeInTheDocument()
+    expect(await screen.findByText('Provider Sections')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /controls/i })).toBeInTheDocument()
   })
 
   test('settings runtime route is native react', async () => {
     renderAt('/settings/runtime')
-    expect(await screen.findByRole('heading', { name: 'Settings Runtime' })).toBeInTheDocument()
+    expect(await screen.findByText('Runtime Sections')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /node runtime/i })).toBeInTheDocument()
   })
 
   test('settings chat route is native react', async () => {
@@ -155,7 +157,8 @@ describe('App routing', () => {
 
   test('settings integrations route is native react', async () => {
     renderAt('/settings/integrations')
-    expect(await screen.findByRole('heading', { name: 'Settings Integrations' })).toBeInTheDocument()
+    expect(await screen.findByText('Integration Sections')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /^git$/i })).toBeInTheDocument()
   })
 
   test('unknown route renders react not-found view', async () => {

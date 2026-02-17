@@ -69,11 +69,11 @@ const navSections = [
     id: 'settings',
     label: 'Settings',
     items: [
-      { id: 'settings-core', to: '/settings/core', label: 'Core', icon: 'fa-solid fa-gear' },
       { id: 'settings-provider', to: '/settings/provider', label: 'Providers', icon: 'fa-solid fa-wave-square' },
-      { id: 'settings-integrations', to: '/settings/integrations', label: 'Integrations', icon: 'fa-solid fa-plug' },
       { id: 'settings-runtime', to: '/settings/runtime', label: 'Runtime', icon: 'fa-solid fa-circle-info' },
+      { id: 'settings-integrations', to: '/settings/integrations', label: 'Integrations', icon: 'fa-solid fa-plug' },
       { id: 'settings-chat', to: '/settings/chat', label: 'Chat', icon: 'fa-solid fa-comments' },
+      { id: 'settings-core', to: '/settings/core', label: 'Core', icon: 'fa-solid fa-gear' },
     ],
   },
   {
@@ -117,7 +117,7 @@ export default function AppLayout({ children }) {
   const active = useMemo(() => findActive(location.pathname), [location.pathname])
   const [expandedBySection, setExpandedBySection] = useState(() => initialExpanded(location.pathname))
 
-  const title = active?.item?.label || 'LLMCTL-Studio'
+  const title = active?.item?.label || 'LLMCTL'
 
   return (
     <div className="app-shell page">
