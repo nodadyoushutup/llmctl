@@ -4,7 +4,7 @@ metadata:
   name: llmctl-celery-worker
   namespace: llmctl
 spec:
-  replicas: 2
+  replicas: 4
   revisionHistoryLimit: 0
   selector:
     matchLabels:
@@ -24,7 +24,7 @@ spec:
             - app/llmctl-celery-worker/run.py
             - worker
             - --concurrency
-            - "2"
+            - "1"
             - --queues
             - llmctl_studio,llmctl_studio.downloads.huggingface,llmctl_studio.rag.index,llmctl_studio.rag.drive,llmctl_studio.rag.git
             - --loglevel

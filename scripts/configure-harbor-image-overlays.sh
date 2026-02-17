@@ -21,6 +21,7 @@ Options:
   --registry <host:port>   Harbor registry endpoint (example: 10.107.62.134:80)
   --project <name>         Harbor project name (default: llmctl)
   --tag <tag>              Image tag (default: latest)
+  --argocd-app <name>      Also run argocd app set with Harbor image overrides
   -h, --help               Show this help
 
 Outputs:
@@ -29,6 +30,9 @@ Outputs:
 Then apply one of:
   - kubectl apply -k kubernetes-overlays/harbor-images
   - kubectl apply -k kubernetes-overlays/minikube-live-code-harbor
+
+For ArgoCD apps that track path "kubernetes", pass --argocd-app (for example: llmctl-studio)
+to set kustomize image overrides for llmctl images.
 EOF
 }
 
@@ -74,6 +78,7 @@ discover_registry() {
 HARBOR_REGISTRY="${HARBOR_REGISTRY:-}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-llmctl}"
 HARBOR_TAG="${HARBOR_TAG:-latest}"
+ARGOCD_APP="${ARGOCD_APP:-}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -102,6 +107,15 @@ while [ $# -gt 0 ]; do
         exit 2
       fi
       HARBOR_TAG="$2"
+      shift 2
+      ;;
+    --argocd-app)
+      if [ $# -lt 2 ]; then
+        echo "Error: --argocd-app requires a value." >&2
+        usage
+        exit 2
+      fi
+      ARGOCD_APP="$2"
       shift 2
       ;;
     -h|--help)
@@ -147,3 +161,25 @@ echo "  kubectl apply -k kubernetes-overlays/harbor-images"
 echo
 echo "Apply Harbor + live code overlay:"
 echo "  kubectl apply -k kubernetes-overlays/minikube-live-code-harbor"
+
+if [ -n "${ARGOCD_APP}" ]; then
+  if ! have_cmd argocd; then
+    echo
+    echo "Error: argocd CLI is required for --argocd-app but was not found in PATH." >&2
+    exit 1
+  fi
+
+  harbor_base="${HARBOR_REGISTRY}/${HARBOR_PROJECT}"
+  echo
+  echo "Updating ArgoCD app '${ARGOCD_APP}' kustomize image overrides..."
+  argocd app set "${ARGOCD_APP}" \
+    --kustomize-image "llmctl-studio-backend=${harbor_base}/llmctl-studio-backend:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-studio-frontend=${harbor_base}/llmctl-studio-frontend:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-celery-worker=${harbor_base}/llmctl-celery-worker:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-mcp=${harbor_base}/llmctl-mcp:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-executor=${harbor_base}/llmctl-executor:${HARBOR_TAG}"
+
+  echo "ArgoCD app image overrides updated."
+  echo "To apply immediately:"
+  echo "  argocd app sync ${ARGOCD_APP}"
+fi

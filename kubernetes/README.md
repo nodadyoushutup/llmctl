@@ -204,6 +204,15 @@ kubectl apply -k kubernetes-overlays/harbor-images
 
 This avoids Docker/CRI HTTPS-vs-HTTP pull mismatches that can occur when using Harbor NodePort endpoints directly in image names.
 
+If ArgoCD tracks `path: kubernetes` instead of the Harbor overlay path, set Harbor image overrides on the app:
+
+```bash
+scripts/configure-harbor-image-overlays.sh --argocd-app llmctl-studio
+argocd app sync llmctl-studio
+```
+
+That command updates all llmctl-managed images (`llmctl-studio-backend`, `llmctl-studio-frontend`, `llmctl-celery-worker`, `llmctl-mcp`, `llmctl-executor`) so ArgoCD does not fall back to unqualified local image names.
+
 ## Runtime knobs to edit
 
 Edit `kubernetes/studio-configmap.yaml` for these keys:

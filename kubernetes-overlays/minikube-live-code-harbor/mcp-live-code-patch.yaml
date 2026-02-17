@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-mcp
+  namespace: llmctl
+spec:
+  template:
+    spec:
+      containers:
+        - name: llmctl-mcp
+          command:
+            - python3
+            - app/llmctl-mcp/run.py
+          volumeMounts:
+            - name: mcp-project-code
+              mountPath: /app
+      volumes:
+        - name: mcp-project-code
+          hostPath:
+            path: /workspace/llmctl
+            type: Directory

@@ -14,14 +14,7 @@ spec:
           volumeMounts:
             - $patch: replace
             - name: studio-project-code
-              mountPath: /app/app/llmctl-studio-backend/run.py
-              subPath: app/llmctl-studio-backend/run.py
-            - name: studio-project-code
-              mountPath: /app/app/llmctl-studio-backend/src
-              subPath: app/llmctl-studio-backend/src
-            - name: studio-project-code
-              mountPath: /app/app/llmctl-studio-backend/seed-skills
-              subPath: app/llmctl-studio-backend/seed-skills
+              mountPath: /app
             - name: studio-data
               mountPath: /app/data
       volumes:
