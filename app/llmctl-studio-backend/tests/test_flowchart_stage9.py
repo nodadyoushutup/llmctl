@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 import uuid
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -63,6 +65,75 @@ from services import tasks as studio_tasks
 import web.views as studio_views
 
 
+class _LocalExecutionRouter:
+    def __init__(self, *, runtime_settings=None, kubernetes_executor=None) -> None:
+        del kubernetes_executor
+        self.runtime_settings = runtime_settings or {}
+
+    def route_request(self, request):
+        workspace_identity = str(
+            self.runtime_settings.get("workspace_identity_key") or "default"
+        ).strip() or "default"
+        return replace(
+            request,
+            selected_provider="kubernetes",
+            final_provider="kubernetes",
+            provider_dispatch_id=None,
+            workspace_identity=workspace_identity,
+            dispatch_status="dispatch_pending",
+            fallback_attempted=False,
+            fallback_reason=None,
+            dispatch_uncertain=False,
+            api_failure_category=None,
+            cli_fallback_used=False,
+            cli_preflight_passed=None,
+        )
+
+    def execute_routed(self, request, execute_callback):
+        from services.execution.contracts import (
+            EXECUTION_CONTRACT_VERSION,
+            EXECUTION_STATUS_SUCCESS,
+            ExecutionResult,
+        )
+
+        output_state, routing_state = execute_callback(request)
+        now = datetime.now(timezone.utc)
+        provider_dispatch_id = f"kubernetes:default/job-test-{request.execution_id}"
+        run_metadata = request.run_metadata_payload()
+        run_metadata.update(
+            {
+                "provider_dispatch_id": provider_dispatch_id,
+                "k8s_job_name": f"job-test-{request.execution_id}",
+                "k8s_pod_name": f"pod-test-{request.execution_id}",
+                "k8s_terminal_reason": "complete",
+                "dispatch_status": "dispatch_confirmed",
+            }
+        )
+        return ExecutionResult(
+            contract_version=EXECUTION_CONTRACT_VERSION,
+            status=EXECUTION_STATUS_SUCCESS,
+            exit_code=0,
+            started_at=now,
+            finished_at=now,
+            stdout="",
+            stderr="",
+            error=None,
+            provider_metadata={
+                "provider_dispatch_id": provider_dispatch_id,
+                "k8s_job_name": f"job-test-{request.execution_id}",
+                "k8s_pod_name": f"pod-test-{request.execution_id}",
+                "k8s_terminal_reason": "complete",
+            },
+            output_state=output_state,
+            routing_state=routing_state,
+            run_metadata=run_metadata,
+        )
+
+    def execute(self, request, execute_callback):
+        routed = self.route_request(request)
+        return self.execute_routed(routed, execute_callback)
+
+
 class StudioDbTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -78,9 +149,16 @@ class StudioDbTestCase(unittest.TestCase):
         )
         Config.WORKSPACES_DIR = str(tmp_dir / "workspaces")
         Path(Config.WORKSPACES_DIR).mkdir(parents=True, exist_ok=True)
+        self._execution_router_patcher = patch.object(
+            studio_tasks,
+            "ExecutionRouter",
+            _LocalExecutionRouter,
+        )
+        self._execution_router_patcher.start()
         self._reset_engine()
 
     def tearDown(self) -> None:
+        self._execution_router_patcher.stop()
         self._dispose_engine()
         self._drop_schema(self._schema_name)
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
@@ -2460,7 +2538,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(33, pulled_sources[0].get("source_edge_id"))
         self.assertEqual("dotted", pulled_sources[0].get("edge_mode"))
 
-    def test_graph_rejects_task_without_ref_or_inline_prompt(self) -> None:
+    def test_graph_allows_save_for_task_without_ref_or_inline_prompt(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Invalid Task")
         graph_response = self.client.post(
             f"/flowcharts/{flowchart_id}/graph",
@@ -2489,9 +2567,39 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 ],
             },
         )
-        self.assertEqual(400, graph_response.status_code)
+        self.assertEqual(200, graph_response.status_code)
         payload = graph_response.get_json() or {}
-        self.assertIn("task node requires ref_id or config.task_prompt", payload.get("error", ""))
+        validation = payload.get("validation") or {}
+        self.assertFalse(bool(validation.get("valid")))
+        self.assertTrue(
+            any(
+                "task node requires ref_id or config.task_prompt" in str(item)
+                for item in (validation.get("errors") or [])
+            )
+        )
+
+        validate_response = self.client.get(f"/flowcharts/{flowchart_id}/validate")
+        self.assertEqual(200, validate_response.status_code)
+        validate_payload = validate_response.get_json() or {}
+        self.assertFalse(bool(validate_payload.get("valid")))
+        self.assertTrue(
+            any(
+                "task node requires ref_id or config.task_prompt" in str(item)
+                for item in (validate_payload.get("errors") or [])
+            )
+        )
+
+        run_response = self.client.post(f"/flowcharts/{flowchart_id}/run", json={})
+        self.assertEqual(400, run_response.status_code)
+        run_payload = run_response.get_json() or {}
+        run_validation = run_payload.get("validation") or {}
+        self.assertFalse(bool(run_validation.get("valid")))
+        self.assertTrue(
+            any(
+                "task node requires ref_id or config.task_prompt" in str(item)
+                for item in (run_validation.get("errors") or [])
+            )
+        )
 
     def test_graph_accepts_flowchart_node_with_ref_and_rejects_missing_ref(self) -> None:
         parent_flowchart_id = self._create_flowchart("Stage 9 Parent Flowchart")

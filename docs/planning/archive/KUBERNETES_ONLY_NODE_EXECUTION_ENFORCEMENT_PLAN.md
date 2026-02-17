@@ -115,7 +115,7 @@ Goal: enforce Kubernetes-only node execution end-to-end so node workloads run in
 - [x] Acceptance criteria: all targeted tests pass for execution plane, control plane, and merged runtime behavior.
 
 ## Stage 7 - Docs Updates
-- [ ] Update Sphinx and operational docs to document Kubernetes-only node execution behavior and Celery role boundaries.
-- [ ] Update any runtime/operator guidance that still implies non-Kubernetes node execution paths.
-- [ ] Document the explicit architecture split: chat on Celery/service runtime, node-like workloads on executor pods.
-- [ ] Acceptance criteria: docs consistently state Kubernetes-only node execution and required runtime evidence fields.
+- [x] Update Sphinx and operational docs to document Kubernetes-only node execution behavior and Celery role boundaries.
+- [x] Update any runtime/operator guidance that still implies non-Kubernetes node execution paths.
+- [x] Document the explicit architecture split: chat on Celery/service runtime, node-like workloads on executor pods.
+- [x] Acceptance criteria: docs consistently state Kubernetes-only node execution and required runtime evidence fields.

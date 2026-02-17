@@ -65,6 +65,15 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(startNode).toMatchObject({ x: 0, y: 0 })
   })
 
+  test('hides start from the node bar palette', () => {
+    const { container } = render(<FlowchartWorkspaceEditor />)
+    const paletteLabels = Array.from(container.querySelectorAll('.flow-ws-sidebar .flow-ws-palette-item'))
+      .map((button) => String(button.textContent || '').trim().toLowerCase())
+
+    expect(paletteLabels).not.toContain('start')
+    expect(paletteLabels).toContain('end')
+  })
+
   test('renders legacy connector geometry and edge arrow marker', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(

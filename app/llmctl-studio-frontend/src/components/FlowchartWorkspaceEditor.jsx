@@ -743,6 +743,10 @@ export default function FlowchartWorkspaceEditor({
       .filter((item, index, array) => array.indexOf(item) === index)
     return normalized.length > 0 ? normalized : DEFAULT_NODE_TYPES
   }, [nodeTypes])
+  const paletteNodeTypes = useMemo(
+    () => availableNodeTypes.filter((nodeType) => nodeType !== 'start'),
+    [availableNodeTypes],
+  )
 
   const centerViewportOnGraphPoint = useCallback((graphX, graphY, zoomValue) => {
     const viewport = viewportRef.current
@@ -1413,15 +1417,13 @@ export default function FlowchartWorkspaceEditor({
       <aside className="flow-ws-sidebar">
         <p className="eyebrow">Node Bar</p>
         <div className="flow-ws-palette">
-          {availableNodeTypes.map((nodeType) => {
-            const disabled = nodeType === 'start' && nodes.some((node) => normalizeNodeType(node.node_type) === 'start')
+          {paletteNodeTypes.map((nodeType) => {
             return (
               <button
                 key={nodeType}
                 type="button"
                 className="btn btn-secondary flow-ws-palette-item"
-                disabled={disabled}
-                draggable={!disabled}
+                draggable
                 onDragStart={(event) => handlePaletteDragStart(event, nodeType)}
                 onClick={() => addNode(nodeType)}
               >

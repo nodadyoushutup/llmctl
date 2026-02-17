@@ -11384,7 +11384,6 @@ def upsert_flowchart_graph(flowchart_id: int):
 
     node_skill_binding_mode = _node_skill_binding_mode()
     node_skill_warnings: list[str] = []
-    validation_errors: list[str] = []
     try:
         with session_scope() as session:
             flowchart = session.get(Flowchart, flowchart_id)
@@ -11477,20 +11476,6 @@ def upsert_flowchart_graph(flowchart_id: int):
                         model_provider=selected_model_provider,
                     )
 
-                if node_type in FLOWCHART_NODE_TYPE_REQUIRES_REF and ref_id is None:
-                    raise ValueError(f"nodes[{index}] requires ref_id for node_type '{node_type}'.")
-                if node_type not in FLOWCHART_NODE_TYPE_WITH_REF and ref_id is not None:
-                    raise ValueError(
-                        f"nodes[{index}] node_type '{node_type}' does not allow ref_id."
-                    )
-                if (
-                    node_type == FLOWCHART_NODE_TYPE_TASK
-                    and ref_id is None
-                    and not _task_node_has_prompt(config_payload)
-                ):
-                    raise ValueError(
-                        f"nodes[{index}] task node requires ref_id or config.task_prompt."
-                    )
                 compatibility_errors = _validate_flowchart_utility_compatibility(
                     node_type,
                     model_id=model_id if model_field_present else None,
@@ -11529,19 +11514,6 @@ def upsert_flowchart_graph(flowchart_id: int):
                     if model_id is not None and session.get(LLMModel, model_id) is None:
                         raise ValueError(f"nodes[{index}].model_id {model_id} was not found.")
                     flowchart_node.model_id = model_id
-
-                if (
-                    node_type in FLOWCHART_NODE_TYPE_WITH_REF
-                    and flowchart_node.ref_id is not None
-                    and not _flowchart_ref_exists(
-                        session,
-                        node_type=node_type,
-                        ref_id=flowchart_node.ref_id,
-                    )
-                ):
-                    raise ValueError(
-                        f"nodes[{index}] references missing ref_id {flowchart_node.ref_id}."
-                    )
 
                 if "mcp_server_ids" in raw_node:
                     mcp_server_ids_raw = raw_node.get("mcp_server_ids")
@@ -11760,52 +11732,7 @@ def upsert_flowchart_graph(flowchart_id: int):
                     delete(FlowchartNode).where(FlowchartNode.id.in_(removed_node_ids))
                 )
 
-            updated_nodes = (
-                session.execute(
-                    select(FlowchartNode)
-                    .options(
-                        selectinload(FlowchartNode.mcp_servers),
-                        selectinload(FlowchartNode.scripts),
-                        selectinload(FlowchartNode.skills),
-                        selectinload(FlowchartNode.attachments),
-                    )
-                    .where(FlowchartNode.flowchart_id == flowchart_id)
-                    .order_by(FlowchartNode.id.asc())
-                )
-                .scalars()
-                .all()
-            )
-            updated_edges = (
-                session.execute(
-                    select(FlowchartEdge)
-                    .where(FlowchartEdge.flowchart_id == flowchart_id)
-                    .order_by(FlowchartEdge.id.asc())
-                )
-                .scalars()
-                .all()
-            )
-            validation_errors = _validate_flowchart_graph(updated_nodes, updated_edges)
-            for node in updated_nodes:
-                if (
-                    node.node_type in FLOWCHART_NODE_TYPE_WITH_REF
-                    and node.ref_id is not None
-                    and not _flowchart_ref_exists(
-                        session,
-                        node_type=node.node_type,
-                        ref_id=node.ref_id,
-                    )
-                ):
-                    validation_errors.append(
-                        f"Node {node.id} ({node.node_type}) ref_id {node.ref_id} does not exist."
-                    )
-            if validation_errors:
-                raise ValueError("Flowchart graph validation failed.")
     except ValueError as exc:
-        if validation_errors:
-            return {
-                "error": str(exc),
-                "validation": {"valid": False, "errors": validation_errors},
-            }, 400
         return {"error": str(exc)}, 400
 
     response_payload = get_flowchart_graph(flowchart_id)

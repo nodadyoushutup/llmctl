@@ -2255,11 +2255,117 @@ fieldset.field {
   color: #0b0f14;
 }
 
-.flowchart-inline-meta {
+.flowchart-meta-panel {
+  border: 1px solid rgba(109, 149, 183, 0.32);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(145deg, rgba(9, 23, 36, 0.94), rgba(11, 20, 32, 0.9));
+  display: grid;
+  gap: 10px;
+}
+
+.flowchart-meta-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.flowchart-meta-title {
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
-  letter-spacing: 0.02em;
-  color: rgba(158, 175, 193, 0.86);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: rgba(201, 219, 236, 0.96);
+}
+
+.flowchart-meta-title i {
+  color: var(--accent);
+}
+
+.flowchart-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(121, 150, 178, 0.34);
+  background: rgba(23, 38, 55, 0.68);
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: rgba(213, 227, 241, 0.92);
+}
+
+.flowchart-meta-pill.is-running {
+  border-color: rgba(34, 197, 94, 0.46);
+  background: rgba(22, 70, 49, 0.48);
+  color: #bcf5d3;
+}
+
+.flowchart-meta-pill.is-waiting {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(76, 50, 13, 0.48);
+  color: #f8d8a3;
+}
+
+.flowchart-meta-pill.is-idle {
+  border-color: rgba(148, 163, 184, 0.44);
+  background: rgba(30, 44, 58, 0.56);
+  color: #cfd8e4;
+}
+
+.flowchart-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.flowchart-meta-item {
+  border-radius: 10px;
+  border: 1px solid rgba(109, 149, 183, 0.3);
+  background: rgba(14, 29, 44, 0.58);
+  padding: 7px 9px;
+  display: grid;
+  gap: 5px;
+}
+
+.flowchart-meta-label {
+  margin: 0;
+  color: rgba(147, 170, 194, 0.9);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+.flowchart-meta-value {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f7fb;
+  line-height: 1.2;
+}
+
+.flowchart-meta-value.is-valid,
+.flowchart-meta-value.is-invalid {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.flowchart-meta-value.is-valid {
+  color: #bff5d4;
+}
+
+.flowchart-meta-value.is-invalid {
+  color: #ffb7b7;
 }
 
 .flowchart-fixed-workspace {
@@ -2610,6 +2716,10 @@ pre {
     order: 3;
     justify-content: flex-start;
     overflow: visible;
+  }
+
+  .flowchart-meta-grid {
+    grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   }
 
   .flowchart-fixed-primary-actions,

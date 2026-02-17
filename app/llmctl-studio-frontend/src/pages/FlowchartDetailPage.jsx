@@ -38,6 +38,17 @@ function isRunActive(status) {
   return normalized === 'queued' || normalized === 'running' || normalized === 'stopping'
 }
 
+function runtimeMetaTone(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'running') {
+    return 'is-running'
+  }
+  if (normalized === 'queued' || normalized === 'stopping') {
+    return 'is-waiting'
+  }
+  return 'is-idle'
+}
+
 function hasTaskPrompt(config) {
   if (!config || typeof config !== 'object') {
     return false
@@ -283,10 +294,6 @@ export default function FlowchartDetailPage() {
       return
     }
     await withAction('save-graph', async () => {
-      if (draftValidationErrors.length > 0) {
-        setValidationState({ valid: false, errors: draftValidationErrors })
-        throw new Error(draftValidationErrors[0])
-      }
       const nodesPayload = Array.isArray(editorGraph?.nodes) ? editorGraph.nodes : []
       const edgesPayload = Array.isArray(editorGraph?.edges) ? editorGraph.edges : []
       const payload = await updateFlowchartGraph(parsedFlowchartId, {
@@ -336,6 +343,11 @@ export default function FlowchartDetailPage() {
     ? { valid: false, errors: draftValidationErrors }
     : baseValidation
   const validationErrors = Array.isArray(activeValidation?.errors) ? activeValidation.errors : []
+  const runtimeLabel = runtimeStatus || 'idle'
+  const validationIssueCount = validationErrors.length
+  const validationLabel = activeValidation?.valid
+    ? 'valid'
+    : `${validationIssueCount} issue${validationIssueCount === 1 ? '' : 's'}`
 
   const handleWorkspaceNotice = useCallback((message) => {
     const text = String(message || '').trim()
@@ -512,10 +524,51 @@ export default function FlowchartDetailPage() {
             </div>
           </div>
           {flowchart && isMetaExpanded ? (
-            <p className="flowchart-inline-meta" id="flowchart-inline-meta">
-              nodes {nodes.length} · edges {edges.length} · runtime {runtimeStatus || 'idle'} · active run {activeRunId ? `run ${activeRunId}` : '-'} ·
-              {' '}max runtime {flowchart.max_runtime_minutes || '-'}m · max parallel {flowchart.max_parallel_nodes || 1} · validation {activeValidation?.valid ? 'valid' : 'invalid'}
-            </p>
+            <section className="flowchart-meta-panel" id="flowchart-inline-meta" aria-label="Flowchart metadata">
+              <div className="flowchart-meta-head">
+                <p className="flowchart-meta-title">
+                  <i className="fa-solid fa-chart-simple" />
+                  workspace metadata
+                </p>
+                <span className={`flowchart-meta-pill ${runtimeMetaTone(runtimeStatus)}`}>
+                  <i className="fa-solid fa-wave-square" />
+                  runtime {runtimeLabel}
+                </span>
+              </div>
+              <div className="flowchart-meta-grid">
+                <article className="flowchart-meta-item">
+                  <p className="flowchart-meta-label">nodes</p>
+                  <p className="flowchart-meta-value">{nodes.length}</p>
+                </article>
+                <article className="flowchart-meta-item">
+                  <p className="flowchart-meta-label">edges</p>
+                  <p className="flowchart-meta-value">{edges.length}</p>
+                </article>
+                <article className="flowchart-meta-item">
+                  <p className="flowchart-meta-label">active run</p>
+                  <p className="flowchart-meta-value">{activeRunId ? `run ${activeRunId}` : 'none'}</p>
+                </article>
+                <article className="flowchart-meta-item">
+                  <p className="flowchart-meta-label">max runtime</p>
+                  <p className="flowchart-meta-value">{flowchart.max_runtime_minutes || '-'}m</p>
+                </article>
+                <article className="flowchart-meta-item">
+                  <p className="flowchart-meta-label">max parallel</p>
+                  <p className="flowchart-meta-value">{flowchart.max_parallel_nodes || 1}</p>
+                </article>
+                <article className="flowchart-meta-item">
+                  <p className="flowchart-meta-label">validation</p>
+                  <p className={`flowchart-meta-value ${activeValidation?.valid ? 'is-valid' : 'is-invalid'}`}>
+                    {activeValidation?.valid ? (
+                      <i className="fa-solid fa-circle-check" />
+                    ) : (
+                      <i className="fa-solid fa-triangle-exclamation" />
+                    )}
+                    {validationLabel}
+                  </p>
+                </article>
+              </div>
+            </section>
           ) : null}
 
           {state.loading ? <p>Loading flowchart...</p> : null}
