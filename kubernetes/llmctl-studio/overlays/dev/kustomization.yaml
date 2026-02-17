@@ -2,3 +2,58 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
+images:
+  - name: llmctl-studio-backend
+    newName: 10.107.62.134:80/llmctl/llmctl-studio-backend
+    newTag: latest
+  - name: llmctl-studio-frontend
+    newName: 10.107.62.134:80/llmctl/llmctl-studio-frontend
+    newTag: latest
+  - name: llmctl-mcp
+    newName: 10.107.62.134:80/llmctl/llmctl-mcp
+    newTag: latest
+  - name: llmctl-executor
+    newName: 10.107.62.134:80/llmctl/llmctl-executor
+    newTag: latest
+  - name: llmctl-celery-worker
+    newName: 10.107.62.134:80/llmctl/llmctl-celery-worker
+    newTag: latest
+patches:
+  - target:
+      kind: ConfigMap
+      name: llmctl-studio-config
+      namespace: llmctl
+    patch: |-
+      - op: replace
+        path: /data/LLMCTL_NODE_EXECUTOR_K8S_IMAGE
+        value: 10.107.62.134:80/llmctl/llmctl-executor:latest
+  - path: studio-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-studio-backend
+      namespace: llmctl
+  - path: studio-frontend-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-studio-frontend
+      namespace: llmctl
+  - path: mcp-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-mcp
+      namespace: llmctl
+  - path: celery-worker-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-celery-worker
+      namespace: llmctl
+  - path: celery-beat-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-celery-beat
+      namespace: llmctl
+  - path: node-executor-live-code-config-patch.yaml
+    target:
+      kind: ConfigMap
+      name: llmctl-studio-config
+      namespace: llmctl

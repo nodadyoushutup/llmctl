@@ -49,7 +49,7 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] Move Flask app from `app/llmctl-studio` to `app/llmctl-studio-backend`.
 - [x] Update all path references across runtime/build tooling:
 - [x] Update runtime bind-mount/build wiring paths for the renamed backend target.
-- [x] Update `kubernetes-overlays/minikube-live-code/studio-live-code-patch.yaml` mount paths.
+- [x] Update `kubernetes/llmctl-studio/overlays/dev/studio-live-code-patch.yaml` mount paths.
 - [x] Update script paths and any direct references in repo configs and docs.
 - [x] Validate backend still boots after rename with no behavior change.
 - [x] Acceptance criteria: backend starts successfully from renamed path, and no stale `app/llmctl-studio` runtime dependency remains.
@@ -187,7 +187,7 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 
 ## Stage 1 - Execution Order (React-Only)
 - [x] Stage 2: Agents migration (full list/detail/create/edit/delete + role/priority/skill bindings).
-- [ ] Stage 3: Runs, quick tasks, and node execution surfaces.
+- [x] Stage 3: Runs, quick tasks, and node execution surfaces.
 - [ ] Stage 4: Task templates, plans, milestones, and memories.
 - [ ] Stage 5: Flowcharts (editor, runtime, history, run detail, node operations).
 - [ ] Stage 6: Settings, provider/runtime/chat config, and integrations.
@@ -214,10 +214,18 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [x] Mark Agents parity complete in tracker.
 
 ## Stage 3 - Runs, Quick Tasks, Nodes
-- [ ] Migrate `/runs` list/detail/new/edit to fully native React.
-- [ ] Migrate quick task and node status/task lifecycle flows.
-- [ ] Ensure long-running status and realtime feedback parity.
-- [ ] Mark Runs/Quick/Nodes parity complete in tracker.
+- [x] Migrate `/runs` list/detail/new/edit to fully native React.
+- [x] Migrate quick task and node status/task lifecycle flows.
+- [x] Ensure long-running status and realtime feedback parity.
+- [x] Mark Runs/Quick/Nodes parity complete in tracker.
+
+## Stage 3 - Completion Notes
+- [x] Added native React routes/pages for runs: `/runs`, `/runs/new`, `/runs/:runId`, `/runs/:runId/edit`.
+- [x] Added native React routes/pages for nodes: `/nodes`, `/nodes/new`, `/nodes/:nodeId`.
+- [x] Added native React route/page for quick tasks: `/quick`.
+- [x] Added Stage 3 API client coverage and tests in frontend (`studioApi.js`, `studioApi.test.js`).
+- [x] Added polling-based long-running feedback parity on run/node detail and active nodes list.
+- [x] Updated parity tracker entries to mark Runs and Quick Tasks + Nodes as migrated.
 
 ## Stage 4 - Templates, Plans, Milestones, Memories
 - [ ] Migrate task templates list/detail/new/edit/delete.

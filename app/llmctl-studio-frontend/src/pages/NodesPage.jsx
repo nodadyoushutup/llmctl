@@ -89,7 +89,10 @@ export default function NodesPage() {
   }, [refresh])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
-  const tasks = payload && Array.isArray(payload.tasks) ? payload.tasks : []
+  const tasks = useMemo(
+    () => (payload && Array.isArray(payload.tasks) ? payload.tasks : []),
+    [payload],
+  )
   const pagination = payload && payload.pagination && typeof payload.pagination === 'object'
     ? payload.pagination
     : null

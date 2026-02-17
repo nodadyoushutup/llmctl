@@ -8,7 +8,7 @@ export default function OverviewPage() {
         <ul>
           <li>Stage 4 bootstrap remains the foundation for migration waves.</li>
           <li>Parity tracker now maps legacy Flask routes to React migration targets.</li>
-          <li>Wave 1/2 core flows plus Agents are now native React; remaining routes run in migration fallback mode.</li>
+          <li>Wave 1/2 core flows plus Agents, Runs, Quick Task, and Nodes are now native React.</li>
         </ul>
       </article>
       <article className="card">
@@ -24,6 +24,15 @@ export default function OverviewPage() {
         </p>
         <p>
           <Link to="/agents">Open native agents domain</Link>
+        </p>
+        <p>
+          <Link to="/runs">Open native runs domain</Link>
+        </p>
+        <p>
+          <Link to="/nodes">Open native nodes domain</Link>
+        </p>
+        <p>
+          <Link to="/quick">Open native quick task flow</Link>
         </p>
       </article>
     </section>

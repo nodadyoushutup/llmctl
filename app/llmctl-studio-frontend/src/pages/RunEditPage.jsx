@@ -28,7 +28,6 @@ export default function RunEditPage() {
 
   useEffect(() => {
     if (!parsedRunId) {
-      setState({ loading: false, payload: null, error: 'Invalid run id.' })
       return
     }
     let cancelled = false
@@ -53,6 +52,10 @@ export default function RunEditPage() {
   const agent = payload && payload.agent && typeof payload.agent === 'object' ? payload.agent : null
   const message = payload?.message || 'Autoruns are managed from the agent.'
 
+  const invalidId = parsedRunId == null
+  const loading = invalidId ? false : state.loading
+  const error = invalidId ? 'Invalid run id.' : state.error
+
   return (
     <section className="stack" aria-label="Autorun edit">
       <article className="card">
@@ -63,9 +66,9 @@ export default function RunEditPage() {
             <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
           </div>
         </div>
-        {state.loading ? <p>Loading autorun metadata...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {!state.loading && !state.error ? (
+        {loading ? <p>Loading autorun metadata...</p> : null}
+        {error ? <p className="error-text">{error}</p> : null}
+        {!loading && !error ? (
           <div className="stack-sm">
             <p>{message}</p>
             <div className="table-actions">

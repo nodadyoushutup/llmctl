@@ -9,6 +9,14 @@ import AgentsPage from './pages/AgentsPage'
 import AgentDetailPage from './pages/AgentDetailPage'
 import AgentEditPage from './pages/AgentEditPage'
 import AgentNewPage from './pages/AgentNewPage'
+import RunsPage from './pages/RunsPage'
+import RunDetailPage from './pages/RunDetailPage'
+import RunEditPage from './pages/RunEditPage'
+import RunNewPage from './pages/RunNewPage'
+import NodesPage from './pages/NodesPage'
+import NodeDetailPage from './pages/NodeDetailPage'
+import NodeNewPage from './pages/NodeNewPage'
+import QuickTaskPage from './pages/QuickTaskPage'
 import LegacyMirrorPage from './pages/LegacyMirrorPage'
 import ParityChecklistPage from './pages/ParityChecklistPage'
 
@@ -26,6 +34,14 @@ export default function App() {
       <Route path="/agents/new" element={<AppLayout><AgentNewPage /></AppLayout>} />
       <Route path="/agents/:agentId" element={<AppLayout><AgentDetailPage /></AppLayout>} />
       <Route path="/agents/:agentId/edit" element={<AppLayout><AgentEditPage /></AppLayout>} />
+      <Route path="/runs" element={<AppLayout><RunsPage /></AppLayout>} />
+      <Route path="/runs/new" element={<AppLayout><RunNewPage /></AppLayout>} />
+      <Route path="/runs/:runId" element={<AppLayout><RunDetailPage /></AppLayout>} />
+      <Route path="/runs/:runId/edit" element={<AppLayout><RunEditPage /></AppLayout>} />
+      <Route path="/quick" element={<AppLayout><QuickTaskPage /></AppLayout>} />
+      <Route path="/nodes" element={<AppLayout><NodesPage /></AppLayout>} />
+      <Route path="/nodes/new" element={<AppLayout><NodeNewPage /></AppLayout>} />
+      <Route path="/nodes/:nodeId" element={<AppLayout><NodeDetailPage /></AppLayout>} />
       <Route path="/overview" element={<LegacyMirrorPage />} />
       <Route path="*" element={<LegacyMirrorPage />} />
     </Routes>

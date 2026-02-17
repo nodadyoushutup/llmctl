@@ -4,6 +4,9 @@ import { runtimeConfig, resolveSocketUrl } from '../config/runtime'
 const navItems = [
   { to: '/migration', label: 'Migration Hub' },
   { to: '/agents', label: 'Agents' },
+  { to: '/runs', label: 'Runs' },
+  { to: '/nodes', label: 'Nodes' },
+  { to: '/quick', label: 'Quick Task' },
   { to: '/overview', label: 'Legacy UI' },
   { to: '/parity-checklist', label: 'Parity Tracker' },
   { to: '/chat/activity', label: 'Chat Activity' },

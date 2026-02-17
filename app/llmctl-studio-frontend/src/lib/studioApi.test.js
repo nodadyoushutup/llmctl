@@ -7,10 +7,15 @@ vi.mock('./httpClient', () => ({
 import { requestJson } from './httpClient'
 import {
   attachAgentSkill,
+  cancelNode,
   createAgent,
   createAgentPriority,
+  createNode,
+  createQuickTask,
   deleteAgent,
   deleteAgentPriority,
+  deleteNode,
+  deleteRun,
   detachAgentSkill,
   getAgent,
   getAgentMeta,
@@ -18,8 +23,15 @@ import {
   getBackendHealth,
   getChatActivity,
   getChatThread,
+  getNode,
+  getNodeMeta,
+  getNodes,
   getNodeStatus,
   getRun,
+  getRunEdit,
+  getRunMeta,
+  getRuns,
+  getQuickTaskMeta,
   moveAgentPriority,
   moveAgentSkill,
   startAgent,
@@ -125,5 +137,75 @@ describe('studioApi', () => {
     expect(() => deleteAgent(0)).toThrow('agentId must be a positive integer.')
     expect(() => attachAgentSkill(2, 'x')).toThrow('skillId must be a positive integer.')
     expect(() => updateAgentPriority(2, 'bad', 'x')).toThrow('priorityId must be a positive integer.')
+  })
+
+  test('stage 3 runs endpoints map to expected api paths', () => {
+    getRuns()
+    getRuns({ page: 2.8, perPage: 25.1 })
+    getRunMeta({ agentId: 4 })
+    getRunEdit(11)
+    deleteRun(11)
+
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/runs?page=1&per_page=10')
+    expect(requestJson).toHaveBeenNthCalledWith(2, '/runs?page=2&per_page=25')
+    expect(requestJson).toHaveBeenNthCalledWith(3, '/runs/new?agent_id=4')
+    expect(requestJson).toHaveBeenNthCalledWith(4, '/runs/11/edit')
+    expect(requestJson).toHaveBeenNthCalledWith(5, '/runs/11/delete', { method: 'POST' })
+  })
+
+  test('stage 3 nodes endpoints map to expected api paths', () => {
+    getNodes()
+    getNodes({ page: 3, perPage: 50, agentId: 7, nodeType: 'task', status: 'running' })
+    getNode(8)
+    getNodeMeta()
+    createNode({
+      agentId: 3,
+      prompt: 'run this',
+      integrationKeys: ['github'],
+      scriptIdsByType: { pre_init: [1] },
+      scriptIds: [2],
+    })
+    cancelNode(8)
+    deleteNode(8)
+
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/nodes?page=1&per_page=10')
+    expect(requestJson).toHaveBeenNthCalledWith(2, '/nodes?page=3&per_page=50&agent_id=7&node_type=task&status=running')
+    expect(requestJson).toHaveBeenNthCalledWith(3, '/nodes/8')
+    expect(requestJson).toHaveBeenNthCalledWith(4, '/nodes/new')
+    expect(requestJson).toHaveBeenNthCalledWith(5, '/nodes/new', {
+      method: 'POST',
+      body: {
+        agent_id: 3,
+        prompt: 'run this',
+        integration_keys: ['github'],
+        script_ids_by_type: { pre_init: [1] },
+        script_ids: [2],
+      },
+    })
+    expect(requestJson).toHaveBeenNthCalledWith(6, '/nodes/8/cancel', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(7, '/nodes/8/delete', { method: 'POST' })
+  })
+
+  test('stage 3 quick endpoint maps to expected api paths', () => {
+    getQuickTaskMeta()
+    createQuickTask({
+      prompt: 'hello',
+      agentId: 2,
+      modelId: 3,
+      mcpServerIds: [4],
+      integrationKeys: ['github'],
+    })
+
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/quick')
+    expect(requestJson).toHaveBeenNthCalledWith(2, '/quick', {
+      method: 'POST',
+      body: {
+        prompt: 'hello',
+        agent_id: 2,
+        model_id: 3,
+        mcp_server_ids: [4],
+        integration_keys: ['github'],
+      },
+    })
   })
 })

@@ -5788,6 +5788,22 @@ def _stage3_api_request() -> bool:
     return _request_path_uses_api_prefix() or request.is_json
 
 
+def _workflow_wants_json() -> bool:
+    if _request_path_uses_api_prefix():
+        return True
+    if (request.args.get("format") or "").strip().lower() == "json":
+        return True
+    accepted = request.accept_mimetypes
+    return (
+        accepted["application/json"] > 0
+        and accepted["application/json"] >= accepted["text/html"]
+    )
+
+
+def _workflow_api_request() -> bool:
+    return _request_path_uses_api_prefix() or request.is_json
+
+
 def _flowchart_wants_json() -> bool:
     if _request_path_uses_api_prefix():
         return True
@@ -6121,6 +6137,173 @@ def _serialize_node_list_item(
         "created_at": _human_time(task.created_at),
         "updated_at": _human_time(task.updated_at),
         **metadata,
+    }
+
+
+def _serialize_workflow_pagination(pagination: dict[str, object]) -> dict[str, object]:
+    page_items = pagination.get("page_items")
+    items: list[dict[str, object]] = []
+    if isinstance(page_items, list):
+        for entry in page_items:
+            if not isinstance(entry, dict):
+                continue
+            if bool(entry.get("is_gap")):
+                items.append({"type": "gap"})
+                continue
+            label = str(entry.get("label") or "").strip()
+            try:
+                parsed_page = int(label)
+            except ValueError:
+                continue
+            items.append(
+                {
+                    "type": "page",
+                    "page": parsed_page,
+                    "is_current": bool(entry.get("is_current")),
+                }
+            )
+    return {
+        "page": int(pagination.get("page") or 1),
+        "per_page": int(pagination.get("per_page") or WORKFLOW_LIST_PER_PAGE),
+        "total_pages": int(pagination.get("total_pages") or 1),
+        "total_count": int(pagination.get("total_count") or 0),
+        "start_index": int(pagination.get("start_index") or 0),
+        "end_index": int(pagination.get("end_index") or 0),
+        "page_sizes": [int(item) for item in (pagination.get("page_sizes") or [])],
+        "items": items,
+    }
+
+
+def _serialize_plan_task(task: PlanTask) -> dict[str, object]:
+    return {
+        "id": task.id,
+        "plan_stage_id": task.plan_stage_id,
+        "name": task.name,
+        "description": task.description or "",
+        "position": task.position,
+        "completed_at": _human_time(task.completed_at),
+        "created_at": _human_time(task.created_at),
+        "updated_at": _human_time(task.updated_at),
+    }
+
+
+def _serialize_plan_stage(stage: PlanStage, *, include_tasks: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": stage.id,
+        "plan_id": stage.plan_id,
+        "name": stage.name,
+        "description": stage.description or "",
+        "position": stage.position,
+        "completed_at": _human_time(stage.completed_at),
+        "created_at": _human_time(stage.created_at),
+        "updated_at": _human_time(stage.updated_at),
+    }
+    if include_tasks:
+        payload["tasks"] = [_serialize_plan_task(task) for task in (stage.tasks or [])]
+    return payload
+
+
+def _serialize_plan(plan: Plan, *, include_stages: bool = False) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": plan.id,
+        "name": plan.name,
+        "description": plan.description or "",
+        "completed_at": _human_time(plan.completed_at),
+        "created_at": _human_time(plan.created_at),
+        "updated_at": _human_time(plan.updated_at),
+    }
+    if include_stages:
+        payload["stages"] = [
+            _serialize_plan_stage(stage, include_tasks=True)
+            for stage in (plan.stages or [])
+        ]
+    return payload
+
+
+def _serialize_plan_list_item(
+    plan: Plan,
+    *,
+    stage_count: int,
+    task_count: int,
+) -> dict[str, object]:
+    return {
+        **_serialize_plan(plan, include_stages=False),
+        "stage_count": int(stage_count or 0),
+        "task_count": int(task_count or 0),
+    }
+
+
+def _serialize_milestone(milestone: Milestone) -> dict[str, object]:
+    status_value = _milestone_status_value(milestone)
+    priority_value = _milestone_priority_value(milestone)
+    health_value = _milestone_health_value(milestone)
+    progress_value = _milestone_progress_value(milestone)
+    return {
+        "id": milestone.id,
+        "name": milestone.name,
+        "description": milestone.description or "",
+        "status": status_value,
+        "status_label": MILESTONE_STATUS_LABELS.get(status_value, status_value),
+        "status_class": MILESTONE_STATUS_CLASSES.get(status_value, "status-idle"),
+        "priority": priority_value,
+        "priority_label": MILESTONE_PRIORITY_LABELS.get(priority_value, priority_value),
+        "owner": milestone.owner or "",
+        "completed": bool(milestone.completed),
+        "start_date": _human_time(milestone.start_date),
+        "due_date": _human_time(milestone.due_date),
+        "progress_percent": progress_value,
+        "health": health_value,
+        "health_label": MILESTONE_HEALTH_LABELS.get(health_value, health_value),
+        "health_class": MILESTONE_HEALTH_CLASSES.get(health_value, "status-idle"),
+        "success_criteria": milestone.success_criteria or "",
+        "dependencies": milestone.dependencies or "",
+        "links": milestone.links or "",
+        "latest_update": milestone.latest_update or "",
+        "created_at": _human_time(milestone.created_at),
+        "updated_at": _human_time(milestone.updated_at),
+    }
+
+
+def _serialize_memory(memory: Memory) -> dict[str, object]:
+    return {
+        "id": memory.id,
+        "description": memory.description,
+        "created_at": _human_time(memory.created_at),
+        "updated_at": _human_time(memory.updated_at),
+    }
+
+
+def _serialize_task_template(template: TaskTemplate) -> dict[str, object]:
+    return {
+        "id": template.id,
+        "name": template.name,
+        "description": template.description or "",
+        "prompt": template.prompt,
+        "agent_id": template.agent_id,
+        "model_id": template.model_id,
+        "created_at": _human_time(template.created_at),
+        "updated_at": _human_time(template.updated_at),
+        "attachments": [
+            {
+                "id": attachment.id,
+                "file_name": attachment.file_name,
+                "file_path": attachment.file_path,
+                "content_type": attachment.content_type,
+                "size_bytes": attachment.size_bytes,
+            }
+            for attachment in (template.attachments or [])
+        ],
+    }
+
+
+def _serialize_task_template_node(item: dict[str, object]) -> dict[str, object]:
+    return {
+        "node_id": int(item.get("node_id") or 0),
+        "task_name": str(item.get("task_name") or ""),
+        "prompt_preview": str(item.get("prompt_preview") or ""),
+        "node_type": str(item.get("node_type") or ""),
+        "flowchart_id": int(item.get("flowchart_id") or 0),
+        "flowchart_name": str(item.get("flowchart_name") or ""),
     }
 
 
@@ -9220,6 +9403,18 @@ def list_plans():
         }
         for plan, stage_count, task_count in rows
     ]
+    if _workflow_wants_json():
+        return {
+            "plans": [
+                _serialize_plan_list_item(
+                    item["plan"],
+                    stage_count=int(item["stage_count"]),
+                    task_count=int(item["task_count"]),
+                )
+                for item in plans
+            ],
+            "pagination": _serialize_workflow_pagination(pagination),
+        }
     return render_template(
         "plans.html",
         plans=plans,
@@ -9233,12 +9428,22 @@ def list_plans():
 
 @bp.get("/plans/new")
 def new_plan():
+    if _workflow_wants_json():
+        return {
+            "message": "Create plans by adding Plan nodes in a flowchart.",
+            "flowcharts_url": url_for("agents.list_flowcharts"),
+        }
     flash("Create plans by adding Plan nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.post("/plans")
 def create_plan():
+    if _workflow_api_request():
+        return {
+            "error": "Create plans by adding Plan nodes in a flowchart.",
+            "reason_code": "FLOWCHART_MANAGED_PLAN_CREATE",
+        }, 409
     flash("Create plans by adding Plan nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
@@ -9259,6 +9464,14 @@ def view_plan(plan_id: int):
             abort(404)
     stage_count = len(plan.stages)
     task_count = sum(len(stage.tasks) for stage in plan.stages)
+    if _workflow_wants_json():
+        return {
+            "plan": _serialize_plan(plan, include_stages=True),
+            "summary": {
+                "stage_count": stage_count,
+                "task_count": task_count,
+            },
+        }
     return render_template(
         "plan_detail.html",
         plan=plan,
@@ -9276,6 +9489,10 @@ def edit_plan(plan_id: int):
         plan = session.get(Plan, plan_id)
         if plan is None:
             abort(404)
+    if _workflow_wants_json():
+        return {
+            "plan": _serialize_plan(plan),
+        }
     return render_template(
         "plan_edit.html",
         plan=plan,
@@ -9286,20 +9503,40 @@ def edit_plan(plan_id: int):
 
 @bp.post("/plans/<int:plan_id>")
 def update_plan(plan_id: int):
-    name = request.form.get("name", "").strip()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    completed_at_raw_obj = (
+        payload.get("completed_at")
+        if is_api_request
+        else request.form.get("completed_at", "")
+    )
+    name = str(name_raw or "").strip()
     if not name:
+        if is_api_request:
+            return {"error": "Plan name is required."}, 400
         flash("Plan name is required.", "error")
         return redirect(url_for("agents.edit_plan", plan_id=plan_id))
-    description = request.form.get("description", "").strip() or None
-    completed_at_raw = request.form.get("completed_at", "").strip()
+    description = str(description_raw or "").strip() or None
+    completed_at_raw = str(completed_at_raw_obj or "").strip()
     completed_at = _parse_completed_at(completed_at_raw)
     if completed_at_raw and completed_at is None:
+        if is_api_request:
+            return {"error": "Completed at must be a valid date/time."}, 400
         flash("Completed at must be a valid date/time.", "error")
         return redirect(url_for("agents.edit_plan", plan_id=plan_id))
 
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
     )
+    plan_payload: dict[str, object] | None = None
     with session_scope() as session:
         plan = session.get(Plan, plan_id)
         if plan is None:
@@ -9307,13 +9544,17 @@ def update_plan(plan_id: int):
         plan.name = name
         plan.description = description
         plan.completed_at = completed_at
+        plan_payload = _serialize_plan(plan)
 
+    if is_api_request:
+        return {"ok": True, "plan": plan_payload}
     flash("Plan updated.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/plans/<int:plan_id>/delete")
 def delete_plan(plan_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(request.form.get("next"), url_for("agents.list_plans"))
     with session_scope() as session:
         plan = session.get(Plan, plan_id)
@@ -9330,26 +9571,48 @@ def delete_plan(plan_id: int):
             )
         session.execute(delete(PlanStage).where(PlanStage.plan_id == plan_id))
         session.delete(plan)
+    if is_api_request:
+        return {"ok": True}
     flash("Plan deleted.", "success")
     return redirect(next_url)
 
 
 @bp.post("/plans/<int:plan_id>/stages")
 def create_plan_stage(plan_id: int):
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
     )
-    name = request.form.get("name", "").strip()
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    completed_at_raw_obj = (
+        payload.get("completed_at")
+        if is_api_request
+        else request.form.get("completed_at", "")
+    )
+    name = str(name_raw or "").strip()
     if not name:
+        if is_api_request:
+            return {"error": "Stage name is required."}, 400
         flash("Stage name is required.", "error")
         return redirect(redirect_target)
-    description = request.form.get("description", "").strip() or None
-    completed_at_raw = request.form.get("completed_at", "").strip()
+    description = str(description_raw or "").strip() or None
+    completed_at_raw = str(completed_at_raw_obj or "").strip()
     completed_at = _parse_completed_at(completed_at_raw)
     if completed_at_raw and completed_at is None:
+        if is_api_request:
+            return {"error": "Stage completed at must be a valid date/time."}, 400
         flash("Stage completed at must be a valid date/time.", "error")
         return redirect(redirect_target)
 
+    stage_payload: dict[str, object] | None = None
     with session_scope() as session:
         plan = session.get(Plan, plan_id)
         if plan is None:
@@ -9357,7 +9620,7 @@ def create_plan_stage(plan_id: int):
         max_position = session.execute(
             select(func.max(PlanStage.position)).where(PlanStage.plan_id == plan_id)
         ).scalar_one()
-        PlanStage.create(
+        stage = PlanStage.create(
             session,
             plan_id=plan_id,
             name=name,
@@ -9365,27 +9628,50 @@ def create_plan_stage(plan_id: int):
             position=(max_position or 0) + 1,
             completed_at=completed_at,
         )
+        stage_payload = _serialize_plan_stage(stage)
 
+    if is_api_request:
+        return {"ok": True, "stage": stage_payload}, 201
     flash("Plan stage added.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/plans/<int:plan_id>/stages/<int:stage_id>")
 def update_plan_stage(plan_id: int, stage_id: int):
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
     )
-    name = request.form.get("name", "").strip()
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    completed_at_raw_obj = (
+        payload.get("completed_at")
+        if is_api_request
+        else request.form.get("completed_at", "")
+    )
+    name = str(name_raw or "").strip()
     if not name:
+        if is_api_request:
+            return {"error": "Stage name is required."}, 400
         flash("Stage name is required.", "error")
         return redirect(redirect_target)
-    description = request.form.get("description", "").strip() or None
-    completed_at_raw = request.form.get("completed_at", "").strip()
+    description = str(description_raw or "").strip() or None
+    completed_at_raw = str(completed_at_raw_obj or "").strip()
     completed_at = _parse_completed_at(completed_at_raw)
     if completed_at_raw and completed_at is None:
+        if is_api_request:
+            return {"error": "Stage completed at must be a valid date/time."}, 400
         flash("Stage completed at must be a valid date/time.", "error")
         return redirect(redirect_target)
 
+    stage_payload: dict[str, object] | None = None
     with session_scope() as session:
         stage = session.get(PlanStage, stage_id)
         if stage is None or stage.plan_id != plan_id:
@@ -9393,13 +9679,17 @@ def update_plan_stage(plan_id: int, stage_id: int):
         stage.name = name
         stage.description = description
         stage.completed_at = completed_at
+        stage_payload = _serialize_plan_stage(stage)
 
+    if is_api_request:
+        return {"ok": True, "stage": stage_payload}
     flash("Plan stage updated.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/delete")
 def delete_plan_stage(plan_id: int, stage_id: int):
+    is_api_request = _workflow_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
     )
@@ -9409,26 +9699,48 @@ def delete_plan_stage(plan_id: int, stage_id: int):
             abort(404)
         session.execute(delete(PlanTask).where(PlanTask.plan_stage_id == stage_id))
         session.delete(stage)
+    if is_api_request:
+        return {"ok": True}
     flash("Plan stage deleted.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/tasks")
 def create_plan_task(plan_id: int, stage_id: int):
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
     )
-    name = request.form.get("name", "").strip()
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    completed_at_raw_obj = (
+        payload.get("completed_at")
+        if is_api_request
+        else request.form.get("completed_at", "")
+    )
+    name = str(name_raw or "").strip()
     if not name:
+        if is_api_request:
+            return {"error": "Task name is required."}, 400
         flash("Task name is required.", "error")
         return redirect(redirect_target)
-    description = request.form.get("description", "").strip() or None
-    completed_at_raw = request.form.get("completed_at", "").strip()
+    description = str(description_raw or "").strip() or None
+    completed_at_raw = str(completed_at_raw_obj or "").strip()
     completed_at = _parse_completed_at(completed_at_raw)
     if completed_at_raw and completed_at is None:
+        if is_api_request:
+            return {"error": "Task completed at must be a valid date/time."}, 400
         flash("Task completed at must be a valid date/time.", "error")
         return redirect(redirect_target)
 
+    task_payload: dict[str, object] | None = None
     with session_scope() as session:
         stage = session.get(PlanStage, stage_id)
         if stage is None or stage.plan_id != plan_id:
@@ -9436,7 +9748,7 @@ def create_plan_task(plan_id: int, stage_id: int):
         max_position = session.execute(
             select(func.max(PlanTask.position)).where(PlanTask.plan_stage_id == stage_id)
         ).scalar_one()
-        PlanTask.create(
+        task = PlanTask.create(
             session,
             plan_stage_id=stage_id,
             name=name,
@@ -9444,27 +9756,50 @@ def create_plan_task(plan_id: int, stage_id: int):
             position=(max_position or 0) + 1,
             completed_at=completed_at,
         )
+        task_payload = _serialize_plan_task(task)
 
+    if is_api_request:
+        return {"ok": True, "task": task_payload}, 201
     flash("Plan task added.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/tasks/<int:task_id>")
 def update_plan_task(plan_id: int, stage_id: int, task_id: int):
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
     )
-    name = request.form.get("name", "").strip()
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    completed_at_raw_obj = (
+        payload.get("completed_at")
+        if is_api_request
+        else request.form.get("completed_at", "")
+    )
+    name = str(name_raw or "").strip()
     if not name:
+        if is_api_request:
+            return {"error": "Task name is required."}, 400
         flash("Task name is required.", "error")
         return redirect(redirect_target)
-    description = request.form.get("description", "").strip() or None
-    completed_at_raw = request.form.get("completed_at", "").strip()
+    description = str(description_raw or "").strip() or None
+    completed_at_raw = str(completed_at_raw_obj or "").strip()
     completed_at = _parse_completed_at(completed_at_raw)
     if completed_at_raw and completed_at is None:
+        if is_api_request:
+            return {"error": "Task completed at must be a valid date/time."}, 400
         flash("Task completed at must be a valid date/time.", "error")
         return redirect(redirect_target)
 
+    task_payload: dict[str, object] | None = None
     with session_scope() as session:
         stage = session.get(PlanStage, stage_id)
         task = session.get(PlanTask, task_id)
@@ -9478,13 +9813,17 @@ def update_plan_task(plan_id: int, stage_id: int, task_id: int):
         task.name = name
         task.description = description
         task.completed_at = completed_at
+        task_payload = _serialize_plan_task(task)
 
+    if is_api_request:
+        return {"ok": True, "task": task_payload}
     flash("Plan task updated.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/plans/<int:plan_id>/stages/<int:stage_id>/tasks/<int:task_id>/delete")
 def delete_plan_task(plan_id: int, stage_id: int, task_id: int):
+    is_api_request = _workflow_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.view_plan", plan_id=plan_id)
     )
@@ -9499,61 +9838,74 @@ def delete_plan_task(plan_id: int, stage_id: int, task_id: int):
         ):
             abort(404)
         session.delete(task)
+    if is_api_request:
+        return {"ok": True}
     flash("Plan task deleted.", "success")
     return redirect(redirect_target)
 
 
-def _read_milestone_form() -> tuple[dict[str, object] | None, str | None]:
-    name = request.form.get("name", "").strip()
+def _read_milestone_form(
+    source: dict[str, object] | None = None,
+) -> tuple[dict[str, object] | None, str | None]:
+    if source is None:
+        source = request.form.to_dict()
+
+    def _value(key: str) -> str:
+        raw = source.get(key)
+        if raw is None:
+            return ""
+        return str(raw).strip()
+
+    name = _value("name")
     if not name:
         return None, "Name is required."
 
     status = _normalize_milestone_choice(
-        request.form.get("status"),
+        _value("status"),
         choices=MILESTONE_STATUS_CHOICES,
         fallback=MILESTONE_STATUS_PLANNED,
     )
     priority = _normalize_milestone_choice(
-        request.form.get("priority"),
+        _value("priority"),
         choices=MILESTONE_PRIORITY_CHOICES,
         fallback=MILESTONE_PRIORITY_MEDIUM,
     )
     health = _normalize_milestone_choice(
-        request.form.get("health"),
+        _value("health"),
         choices=MILESTONE_HEALTH_CHOICES,
         fallback=MILESTONE_HEALTH_GREEN,
     )
 
-    start_date_raw = request.form.get("start_date", "").strip()
+    start_date_raw = _value("start_date")
     start_date = _parse_milestone_due_date(start_date_raw)
     if start_date_raw and start_date is None:
         return None, "Start date must be a valid date."
 
-    due_date_raw = request.form.get("due_date", "").strip()
+    due_date_raw = _value("due_date")
     due_date = _parse_milestone_due_date(due_date_raw)
     if due_date_raw and due_date is None:
         return None, "Due date must be a valid date."
     if start_date and due_date and due_date < start_date:
         return None, "Due date must be on or after the start date."
 
-    progress = _parse_milestone_progress(request.form.get("progress_percent"))
+    progress = _parse_milestone_progress(_value("progress_percent"))
     if progress is None:
         return None, "Progress must be a whole number between 0 and 100."
 
     payload: dict[str, object] = {
         "name": name,
-        "description": request.form.get("description", "").strip() or None,
+        "description": _value("description") or None,
         "status": status,
         "priority": priority,
-        "owner": request.form.get("owner", "").strip() or None,
+        "owner": _value("owner") or None,
         "start_date": start_date,
         "due_date": due_date,
         "progress_percent": progress,
         "health": health,
-        "success_criteria": request.form.get("success_criteria", "").strip() or None,
-        "dependencies": request.form.get("dependencies", "").strip() or None,
-        "links": request.form.get("links", "").strip() or None,
-        "latest_update": request.form.get("latest_update", "").strip() or None,
+        "success_criteria": _value("success_criteria") or None,
+        "dependencies": _value("dependencies") or None,
+        "links": _value("links") or None,
+        "latest_update": _value("latest_update") or None,
     }
     completed = status == MILESTONE_STATUS_DONE
     payload["completed"] = completed
@@ -9585,6 +9937,25 @@ def list_milestones():
             .scalars()
             .all()
         )
+    if _workflow_wants_json():
+        return {
+            "milestones": [_serialize_milestone(milestone) for milestone in milestones],
+            "pagination": _serialize_workflow_pagination(pagination),
+            "options": {
+                "status": [
+                    {"value": value, "label": label}
+                    for value, label in MILESTONE_STATUS_OPTIONS
+                ],
+                "priority": [
+                    {"value": value, "label": label}
+                    for value, label in MILESTONE_PRIORITY_OPTIONS
+                ],
+                "health": [
+                    {"value": value, "label": label}
+                    for value, label in MILESTONE_HEALTH_OPTIONS
+                ],
+            },
+        }
     return render_template(
         "milestones.html",
         milestones=milestones,
@@ -9599,12 +9970,22 @@ def list_milestones():
 
 @bp.get("/milestones/new")
 def new_milestone():
+    if _workflow_wants_json():
+        return {
+            "message": "Create milestones by adding Milestone nodes in a flowchart.",
+            "flowcharts_url": url_for("agents.list_flowcharts"),
+        }
     flash("Create milestones by adding Milestone nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.post("/milestones")
 def create_milestone():
+    if _workflow_api_request():
+        return {
+            "error": "Create milestones by adding Milestone nodes in a flowchart.",
+            "reason_code": "FLOWCHART_MANAGED_MILESTONE_CREATE",
+        }, 409
     flash("Create milestones by adding Milestone nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
@@ -9615,6 +9996,10 @@ def view_milestone(milestone_id: int):
         milestone = session.get(Milestone, milestone_id)
         if milestone is None:
             abort(404)
+    if _workflow_wants_json():
+        return {
+            "milestone": _serialize_milestone(milestone),
+        }
     return render_template(
         "milestone_detail.html",
         milestone=milestone,
@@ -9631,6 +10016,24 @@ def edit_milestone(milestone_id: int):
         milestone = session.get(Milestone, milestone_id)
         if milestone is None:
             abort(404)
+    if _workflow_wants_json():
+        return {
+            "milestone": _serialize_milestone(milestone),
+            "options": {
+                "status": [
+                    {"value": value, "label": label}
+                    for value, label in MILESTONE_STATUS_OPTIONS
+                ],
+                "priority": [
+                    {"value": value, "label": label}
+                    for value, label in MILESTONE_PRIORITY_OPTIONS
+                ],
+                "health": [
+                    {"value": value, "label": label}
+                    for value, label in MILESTONE_HEALTH_OPTIONS
+                ],
+            },
+        }
     return render_template(
         "milestone_edit.html",
         milestone=milestone,
@@ -9642,22 +10045,33 @@ def edit_milestone(milestone_id: int):
 
 @bp.post("/milestones/<int:milestone_id>")
 def update_milestone(milestone_id: int):
-    payload, error = _read_milestone_form()
+    is_api_request = _workflow_api_request()
+    source_payload = request.get_json(silent=True) if request.is_json else {}
+    if source_payload is None or not isinstance(source_payload, dict):
+        source_payload = {}
+    payload, error = _read_milestone_form(source_payload if is_api_request else None)
     if error or payload is None:
+        if is_api_request:
+            return {"error": error or "Invalid milestone payload."}, 400
         flash(error or "Invalid milestone payload.", "error")
         return redirect(url_for("agents.edit_milestone", milestone_id=milestone_id))
+    milestone_payload: dict[str, object] | None = None
     with session_scope() as session:
         milestone = session.get(Milestone, milestone_id)
         if milestone is None:
             abort(404)
         for field, value in payload.items():
             setattr(milestone, field, value)
+        milestone_payload = _serialize_milestone(milestone)
+    if is_api_request:
+        return {"ok": True, "milestone": milestone_payload}
     flash("Milestone updated.", "success")
     return redirect(url_for("agents.view_milestone", milestone_id=milestone_id))
 
 
 @bp.post("/milestones/<int:milestone_id>/delete")
 def delete_milestone(milestone_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_milestones")
     )
@@ -9666,6 +10080,8 @@ def delete_milestone(milestone_id: int):
         if milestone is None:
             abort(404)
         session.delete(milestone)
+    if is_api_request:
+        return {"ok": True}
     flash("Milestone deleted.", "success")
     return redirect(next_url)
 
@@ -9770,6 +10186,12 @@ def list_task_templates():
             }
         )
 
+    if _workflow_wants_json():
+        return {
+            "task_nodes": [_serialize_task_template_node(item) for item in task_nodes],
+            "pagination": _serialize_workflow_pagination(pagination),
+        }
+
     return render_template(
         "task_templates.html",
         task_nodes=task_nodes,
@@ -9784,6 +10206,11 @@ def list_task_templates():
 
 @bp.get("/task-templates/new")
 def new_task_template():
+    if _workflow_wants_json():
+        return {
+            "message": "Create tasks by adding Task nodes in a flowchart.",
+            "flowcharts_url": url_for("agents.list_flowcharts"),
+        }
     flash("Create tasks by adding Task nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
@@ -9810,6 +10237,12 @@ def view_task_template(template_id: int):
                 AgentTask.task_template_id == template_id
             )
         ).scalar_one()
+    if _workflow_wants_json():
+        return {
+            "template": _serialize_task_template(template),
+            "task_count": int(task_count or 0),
+            "agents_by_id": {str(key): value for key, value in agents_by_id.items()},
+        }
     return render_template(
         "task_template_detail.html",
         template=template,
@@ -9838,6 +10271,11 @@ def edit_task_template(template_id: int):
         )
         if template is None:
             abort(404)
+    if _workflow_wants_json():
+        return {
+            "template": _serialize_task_template(template),
+            "agents": [_serialize_agent_list_item(agent) for agent in agents],
+        }
     return render_template(
         "task_template_edit.html",
         template=template,
@@ -13921,26 +14359,53 @@ def delete_chroma_collection():
 
 @bp.post("/task-templates")
 def create_task_template():
+    if _workflow_api_request():
+        return {
+            "error": "Create tasks by adding Task nodes in a flowchart.",
+            "reason_code": "FLOWCHART_MANAGED_TEMPLATE_CREATE",
+        }, 409
     flash("Create tasks by adding Task nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.post("/task-templates/<int:template_id>")
 def update_task_template(template_id: int):
-    name = request.form.get("name", "").strip()
-    prompt = request.form.get("prompt", "").strip()
-    description = request.form.get("description", "").strip()
-    agent_id_raw = request.form.get("agent_id", "").strip()
-    uploads = request.files.getlist("attachments")
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    prompt_raw = payload.get("prompt") if is_api_request else request.form.get("prompt", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    agent_id_raw_obj = payload.get("agent_id") if is_api_request else request.form.get("agent_id", "")
+    name = str(name_raw or "").strip()
+    prompt = str(prompt_raw or "").strip()
+    description = str(description_raw or "").strip()
+    agent_id_raw = str(agent_id_raw_obj or "").strip()
+    uploads = [] if is_api_request else request.files.getlist("attachments")
     agent_id: int | None = None
     if agent_id_raw:
-        if not agent_id_raw.isdigit():
+        try:
+            agent_id = _coerce_optional_int(
+                agent_id_raw,
+                field_name="agent_id",
+                minimum=1,
+            )
+        except ValueError:
+            if is_api_request:
+                return {"error": "Select a valid agent."}, 400
             flash("Select a valid agent.", "error")
             return redirect(url_for("agents.edit_task_template", template_id=template_id))
-        agent_id = int(agent_id_raw)
     if not name or not prompt:
+        if is_api_request:
+            return {"error": "Template name and prompt are required."}, 400
         flash("Template name and prompt are required.", "error")
         return redirect(url_for("agents.edit_task_template", template_id=template_id))
+    template_payload: dict[str, object] | None = None
     try:
         with session_scope() as session:
             template = session.get(TaskTemplate, template_id)
@@ -13949,6 +14414,8 @@ def update_task_template(template_id: int):
             if agent_id is not None:
                 agent = session.get(Agent, agent_id)
                 if agent is None:
+                    if is_api_request:
+                        return {"error": "Agent not found."}, 404
                     flash("Agent not found.", "error")
                     return redirect(
                         url_for("agents.edit_task_template", template_id=template_id)
@@ -13959,16 +14426,22 @@ def update_task_template(template_id: int):
             template.agent_id = agent_id
             attachments = _save_uploaded_attachments(session, uploads)
             _attach_attachments(template, attachments)
+            template_payload = _serialize_task_template(template)
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save template attachments")
+        if is_api_request:
+            return {"error": str(exc) or "Failed to save attachments."}, 400
         flash(str(exc) or "Failed to save attachments.", "error")
         return redirect(url_for("agents.edit_task_template", template_id=template_id))
+    if is_api_request:
+        return {"ok": True, "template": template_payload}
     flash("Template updated.", "success")
     return redirect(url_for("agents.view_task_template", template_id=template_id))
 
 
 @bp.post("/task-templates/<int:template_id>/attachments/<int:attachment_id>/remove")
 def remove_task_template_attachment(template_id: int, attachment_id: int):
+    is_api_request = _workflow_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"),
         url_for("agents.edit_task_template", template_id=template_id),
@@ -13990,6 +14463,8 @@ def remove_task_template_attachment(template_id: int, attachment_id: int):
             (item for item in template.attachments if item.id == attachment_id), None
         )
         if attachment is None:
+            if is_api_request:
+                return {"error": "Attachment not found on this template."}, 404
             flash("Attachment not found on this template.", "error")
             return redirect(redirect_target)
         template.attachments.remove(attachment)
@@ -13997,12 +14472,15 @@ def remove_task_template_attachment(template_id: int, attachment_id: int):
         removed_path = _delete_attachment_if_unused(session, attachment)
     if removed_path:
         remove_attachment_file(removed_path)
+    if is_api_request:
+        return {"ok": True}
     flash("Attachment removed.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/task-templates/<int:template_id>/delete")
 def delete_task_template(template_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_task_templates")
     )
@@ -14020,6 +14498,8 @@ def delete_task_template(template_id: int):
         for task in tasks_with_template:
             task.task_template_id = None
         session.delete(template)
+    if is_api_request:
+        return {"ok": True}
     flash("Template deleted.", "success")
     return redirect(next_url)
 

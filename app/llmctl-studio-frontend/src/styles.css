@@ -56,6 +56,8 @@ body {
 .top-nav {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .top-nav-link {
@@ -146,6 +148,45 @@ body {
 
 .title-row h2 {
   margin: 0;
+}
+
+.toolbar {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.75rem 0;
+}
+
+.toolbar-wrap {
+  align-items: flex-end;
+}
+
+.toolbar-group {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.toolbar-group label {
+  font-size: 0.82rem;
+  color: #c8dbef;
+}
+
+.toolbar-group select {
+  border-radius: 0.5rem;
+  border: 1px solid rgba(172, 205, 234, 0.34);
+  background: rgba(8, 24, 37, 0.75);
+  color: #f4f7ff;
+  padding: 0.35rem 0.5rem;
+}
+
+.toolbar-meta {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #c5d7ec;
 }
 
 .btn-link {
@@ -290,6 +331,12 @@ body {
   align-items: center;
 }
 
+.table-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #bfd5ee;
+}
+
 .icon-button {
   width: 2rem;
   height: 2rem;
@@ -337,6 +384,13 @@ body {
   gap: 0.8rem;
 }
 
+.form-actions {
+  display: inline-flex;
+  gap: 0.55rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .field {
   display: grid;
   gap: 0.35rem;
@@ -345,6 +399,26 @@ body {
 .field span {
   font-size: 0.86rem;
   color: #c8dbef;
+}
+
+.field fieldset,
+fieldset.field {
+  border: 1px solid rgba(172, 205, 234, 0.25);
+  border-radius: 0.55rem;
+  padding: 0.6rem;
+}
+
+.checkbox-grid {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.85rem;
 }
 
 .field input,

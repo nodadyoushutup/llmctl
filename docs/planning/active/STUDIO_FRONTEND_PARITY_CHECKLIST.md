@@ -15,7 +15,9 @@ Status key:
 ## Wave 2 - Agent Execution Flows
 - [x] Runs read monitor in React (`/execution-monitor` -> `/api/runs/:id`) [Native React].
 - [x] Nodes status monitor in React (`/execution-monitor` -> `/api/nodes/:id/status`) [Native React].
-- [x] Agents/Runs/Quick+Nodes full route coverage through bridge mode [Legacy Bridge].
+- [x] Agents full route coverage (`/agents`, `/agents/new`, `/agents/:id`, `/agents/:id/edit`) [Native React].
+- [x] Runs full route coverage (`/runs`, `/runs/new`, `/runs/:id`, `/runs/:id/edit`) [Native React].
+- [x] Quick+Nodes full route coverage (`/quick`, `/nodes`, `/nodes/new`, `/nodes/:id`) [Native React].
 
 ## Wave 3 - Planning and Knowledge Objects
 - [x] Plans list/detail/edit + stage/task mutations [Legacy Bridge].
@@ -51,5 +53,5 @@ Status key:
 ## Global Parity Gates
 - [x] Mutation parity preserved by bridge coverage for not-yet-native routes.
 - [x] Validation and error feedback preserved via native or bridge route behavior.
-- [x] Long-running task feedback and realtime update parity preserved via bridge/native mix.
+- [x] Long-running task feedback and realtime update parity preserved via native polling on execution routes.
 - [x] Every legacy route now has a working React route surface (native or bridge).

@@ -3,14 +3,14 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-TEMPLATE_PATH="${REPO_ROOT}/kubernetes-overlays/harbor-images/kustomization.tmpl.yaml"
-OUTPUT_PATH="${REPO_ROOT}/kubernetes-overlays/harbor-images/kustomization.yaml"
+TEMPLATE_PATH="${REPO_ROOT}/kubernetes/llmctl-studio/overlays/dev/kustomization.tmpl.yaml"
+OUTPUT_PATH="${REPO_ROOT}/kubernetes/llmctl-studio/overlays/dev/kustomization.yaml"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/configure-harbor-image-overlays.sh [options]
 
-Render Harbor image overlay for Kubernetes.
+Render Harbor image settings into the llmctl-studio dev overlay.
 
 Defaults:
   - Registry endpoint auto-discovered from Harbor ClusterIP service (fallback: NodePort)
@@ -25,11 +25,10 @@ Options:
   -h, --help               Show this help
 
 Outputs:
-  - kubernetes-overlays/harbor-images/kustomization.yaml
+  - kubernetes/llmctl-studio/overlays/dev/kustomization.yaml
 
-Then apply one of:
-  - kubectl apply -k kubernetes-overlays/harbor-images
-  - kubectl apply -k kubernetes-overlays/minikube-live-code-harbor
+Then apply:
+  - kubectl apply -k kubernetes/llmctl-studio/overlays/dev
 
 For ArgoCD apps that track path "kubernetes/llmctl-studio/overlays/dev", pass --argocd-app (for example: llmctl-studio)
 to set kustomize image overrides for llmctl images.
@@ -156,11 +155,8 @@ echo "  registry: ${HARBOR_REGISTRY}"
 echo "  project:  ${HARBOR_PROJECT}"
 echo "  tag:      ${HARBOR_TAG}"
 echo
-echo "Apply Harbor images overlay:"
-echo "  kubectl apply -k kubernetes-overlays/harbor-images"
-echo
-echo "Apply Harbor + live code overlay:"
-echo "  kubectl apply -k kubernetes-overlays/minikube-live-code-harbor"
+echo "Apply dev overlay:"
+echo "  kubectl apply -k kubernetes/llmctl-studio/overlays/dev"
 
 if [ -n "${ARGOCD_APP}" ]; then
   if ! have_cmd argocd; then

@@ -59,13 +59,28 @@ export default function NodeNewPage() {
   }, [])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
-  const agents = payload && Array.isArray(payload.agents) ? payload.agents : []
-  const scripts = payload && Array.isArray(payload.scripts) ? payload.scripts : []
-  const scriptTypeFields = payload && payload.script_type_fields && typeof payload.script_type_fields === 'object'
-    ? payload.script_type_fields
-    : {}
-  const integrationOptions = payload && Array.isArray(payload.integration_options) ? payload.integration_options : []
-  const scriptTypeChoices = payload && Array.isArray(payload.script_type_choices) ? payload.script_type_choices : []
+  const agents = useMemo(
+    () => (payload && Array.isArray(payload.agents) ? payload.agents : []),
+    [payload],
+  )
+  const scripts = useMemo(
+    () => (payload && Array.isArray(payload.scripts) ? payload.scripts : []),
+    [payload],
+  )
+  const scriptTypeFields = useMemo(
+    () => (payload && payload.script_type_fields && typeof payload.script_type_fields === 'object'
+      ? payload.script_type_fields
+      : {}),
+    [payload],
+  )
+  const integrationOptions = useMemo(
+    () => (payload && Array.isArray(payload.integration_options) ? payload.integration_options : []),
+    [payload],
+  )
+  const scriptTypeChoices = useMemo(
+    () => (payload && Array.isArray(payload.script_type_choices) ? payload.script_type_choices : []),
+    [payload],
+  )
 
   const scriptTypeValues = useMemo(() => Object.keys(scriptTypeFields), [scriptTypeFields])
   const scriptLabelByType = useMemo(() => {

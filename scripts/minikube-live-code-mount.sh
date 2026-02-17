@@ -25,6 +25,6 @@ fi
 PROJECT_ROOT="$(cd "${PROJECT_ROOT_INPUT}" && pwd)"
 
 echo "[minikube-live-code-mount.sh] profile=${PROFILE} source=${PROJECT_ROOT} target=${MOUNT_TARGET}"
-echo "[minikube-live-code-mount.sh] keep this process running while using kubernetes-overlays/minikube-live-code"
+echo "[minikube-live-code-mount.sh] keep this process running while using kubernetes/llmctl-studio/overlays/dev"
 
 exec minikube -p "${PROFILE}" mount "${PROJECT_ROOT}:${MOUNT_TARGET}"

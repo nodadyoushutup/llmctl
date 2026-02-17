@@ -16,11 +16,10 @@ ArgoCD tracks this as one application (`llmctl-studio`) for core services. pgAdm
 ## Layout
 
 - `kubernetes/llmctl-studio/base/`: core llmctl manifests (namespace, redis, postgres, chromadb, integrated MCP services, Studio backend/frontend, celery worker/beat, ingress, and example secrets).
-- `kubernetes/llmctl-studio/overlays/dev/`: current deployable overlay for llmctl-studio resources.
+- `kubernetes/llmctl-studio/overlays/dev/`: single deployable overlay for llmctl-studio resources (Harbor image overrides + live-code mounts + executor live-code config).
 - `kubernetes/llmctl-studio/argocd-application.yaml`: ArgoCD Application for the core stack at `kubernetes/llmctl-studio/overlays/dev`.
 - `kubernetes/pgadmin/`: pgAdmin namespace/manifests, secret example, and pgAdmin ArgoCD application.
 - `kubernetes/argocd-harbor-application.yaml`: ArgoCD Application that installs Harbor from the upstream Helm chart into `llmctl-harbor`.
-- `kubernetes-overlays/minikube-live-code/`: local-only overlay that mounts host project code into Studio backend/frontend, `llmctl-mcp`, celery worker/beat, and Kubernetes executor Jobs for rapid iteration without rebuilding images.
 
 ## Quick start
 
@@ -140,10 +139,10 @@ Use this when you want to keep stable base images in Minikube and mount your loc
 scripts/minikube-live-code-mount.sh
 ```
 
-2) Apply the local code-mount overlay:
+2) Apply the dev overlay:
 
 ```bash
-kubectl apply -k kubernetes-overlays/minikube-live-code
+kubectl apply -k kubernetes/llmctl-studio/overlays/dev
 ```
 
 3) Restart impacted workloads after code changes:
@@ -163,7 +162,7 @@ kubectl -n llmctl rollout status deploy/llmctl-studio-frontend
 
 Notes:
 
-- This overlay mounts `/workspace/llmctl` from the Minikube node into `/app` for Studio backend, `llmctl-mcp`, celery worker, and celery beat; frontend still mounts `/workspace/llmctl/app/llmctl-studio-frontend/dist` to `/usr/share/nginx/html/web`.
+- The `dev` overlay mounts `/workspace/llmctl` from the Minikube node into `/app` for Studio backend, `llmctl-mcp`, celery worker, and celery beat; frontend still mounts `/workspace/llmctl/app/llmctl-studio-frontend/dist` to `/usr/share/nginx/html/web`.
 - Executor Jobs spawned by Studio also mount `/workspace/llmctl` into `/app` when `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED=true`.
 - Keep the `minikube mount` process running; if it stops, the pod cannot read mounted code paths.
 - This is intended for local Minikube development, not shared/remote clusters.
@@ -216,16 +215,16 @@ minikube -p llmctl ip
 # open http://<minikube-ip>:30082/
 ```
 
-For Kubernetes image pulls from Harbor, render overlays with the in-cluster Harbor Service endpoint (ClusterIP:80):
+For Kubernetes image pulls from Harbor, render the `dev` overlay with the in-cluster Harbor Service endpoint (ClusterIP:80):
 
 ```bash
 scripts/configure-harbor-image-overlays.sh
-kubectl apply -k kubernetes-overlays/harbor-images
+kubectl apply -k kubernetes/llmctl-studio/overlays/dev
 ```
 
 This avoids Docker/CRI HTTPS-vs-HTTP pull mismatches that can occur when using Harbor NodePort endpoints directly in image names.
 
-If ArgoCD tracks `path: kubernetes/llmctl-studio/overlays/dev` instead of the Harbor overlay path, set Harbor image overrides on the app:
+If ArgoCD tracks `path: kubernetes/llmctl-studio/overlays/dev`, set Harbor image overrides on the app:
 
 ```bash
 scripts/configure-harbor-image-overlays.sh --argocd-app llmctl-studio

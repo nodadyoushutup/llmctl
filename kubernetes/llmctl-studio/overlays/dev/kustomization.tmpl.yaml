@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../kubernetes/llmctl-studio/overlays/dev
+  - ../../base
 images:
   - name: llmctl-studio-backend
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-studio-backend
@@ -27,3 +27,33 @@ patches:
       - op: replace
         path: /data/LLMCTL_NODE_EXECUTOR_K8S_IMAGE
         value: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor:__HARBOR_TAG__
+  - path: studio-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-studio-backend
+      namespace: llmctl
+  - path: studio-frontend-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-studio-frontend
+      namespace: llmctl
+  - path: mcp-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-mcp
+      namespace: llmctl
+  - path: celery-worker-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-celery-worker
+      namespace: llmctl
+  - path: celery-beat-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-celery-beat
+      namespace: llmctl
+  - path: node-executor-live-code-config-patch.yaml
+    target:
+      kind: ConfigMap
+      name: llmctl-studio-config
+      namespace: llmctl
