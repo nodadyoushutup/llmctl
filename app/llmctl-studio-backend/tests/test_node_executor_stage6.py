@@ -311,6 +311,30 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         )
         self.assertEqual("test-key", env_map.get("OPENAI_API_KEY"))
 
+    def test_build_job_manifest_includes_argocd_tracking_metadata(self) -> None:
+        executor = KubernetesExecutor({})
+        manifest = executor._build_job_manifest(
+            request=_request(),
+            job_name="job-argocd",
+            namespace="llmctl",
+            image="llmctl-executor:latest",
+            payload_json="{}",
+            service_account="",
+            image_pull_secrets=[],
+            k8s_gpu_limit=0,
+            execution_timeout=120,
+            job_ttl_seconds=1800,
+            argocd_app_name="llmctl-studio",
+        )
+        metadata = manifest.get("metadata") or {}
+        labels = metadata.get("labels") or {}
+        annotations = metadata.get("annotations") or {}
+        self.assertEqual("llmctl-studio", labels.get("app.kubernetes.io/instance"))
+        self.assertEqual(
+            "llmctl-studio:batch/Job:llmctl/job-argocd",
+            annotations.get("argocd.argoproj.io/tracking-id"),
+        )
+
     def test_build_executor_payload_contains_full_node_request(self) -> None:
         executor = KubernetesExecutor({})
         payload_json = executor._build_executor_payload_json(

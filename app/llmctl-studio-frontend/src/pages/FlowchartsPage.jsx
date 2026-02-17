@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteFlowchart, getFlowcharts } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -85,77 +86,78 @@ export default function FlowchartsPage() {
 
   return (
     <section className="stack" aria-label="Flowcharts">
-      <article className="card workflow-list-card">
-        <div className="card-header">
-          <h2 className="section-title">Flowcharts</h2>
-          <div className="table-actions">
-            <Link to="/flowcharts/new" className="btn btn-primary">
-              <i className="fa-solid fa-plus" />
-              create flowchart
+      <article className="card panel-card workflow-list-card">
+        <PanelHeader
+          title="Flowcharts"
+          actions={(
+            <Link to="/flowcharts/new" className="icon-button" aria-label="New flowchart" title="New flowchart">
+              <ActionIcon name="plus" />
             </Link>
-          </div>
+          )}
+        />
+        <div className="panel-card-body">
+          <p className="panel-header-copy">
+            Build and run node-based workflows with loops, routing, and guardrails.
+          </p>
+          {state.loading ? <p>Loading flowcharts...</p> : null}
+          {state.error ? <p className="error-text">{state.error}</p> : null}
+          {actionError ? <p className="error-text">{actionError}</p> : null}
+          {!state.loading && !state.error && flowcharts.length === 0 ? (
+            <p className="muted">No flowcharts yet.</p>
+          ) : null}
+          {!state.loading && !state.error && flowcharts.length > 0 ? (
+            <div className="table-wrap workflow-list-table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Flowchart</th>
+                    <th>Description</th>
+                    <th>Nodes</th>
+                    <th>Edges</th>
+                    <th>Runs</th>
+                    <th className="table-actions-cell">Delete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flowcharts.map((flowchart) => {
+                    const href = `/flowcharts/${flowchart.id}`
+                    const busy = Boolean(busyById[flowchart.id])
+                    return (
+                      <tr
+                        key={flowchart.id}
+                        className="table-row-link"
+                        data-href={href}
+                        onClick={(event) => handleRowClick(event, href)}
+                      >
+                        <td>
+                          <Link to={href}>{flowchart.name || `Flowchart ${flowchart.id}`}</Link>
+                        </td>
+                        <td className="muted">{flowchart.description || '-'}</td>
+                        <td className="muted">{flowchart.node_count ?? 0}</td>
+                        <td className="muted">{flowchart.edge_count ?? 0}</td>
+                        <td className="muted">{flowchart.run_count ?? 0}</td>
+                        <td className="table-actions-cell">
+                          <div className="table-actions">
+                            <button
+                              type="button"
+                              className="icon-button icon-button-danger"
+                              aria-label="Delete flowchart"
+                              title="Delete flowchart"
+                              disabled={busy}
+                              onClick={() => handleDelete(flowchart.id)}
+                            >
+                              <ActionIcon name="trash" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
-        <p className="muted" style={{ marginTop: '12px' }}>
-          Build and run node-based workflows with loops, routing, and guardrails.
-        </p>
-        {state.loading ? <p>Loading flowcharts...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {!state.loading && !state.error && flowcharts.length === 0 ? (
-          <p className="muted" style={{ marginTop: '16px' }}>No flowcharts yet.</p>
-        ) : null}
-        {!state.loading && !state.error && flowcharts.length > 0 ? (
-          <div className="workflow-list-table-shell">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Flowchart</th>
-                  <th>Description</th>
-                  <th>Nodes</th>
-                  <th>Edges</th>
-                  <th>Runs</th>
-                  <th className="table-actions-cell">Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {flowcharts.map((flowchart) => {
-                  const href = `/flowcharts/${flowchart.id}`
-                  const busy = Boolean(busyById[flowchart.id])
-                  return (
-                    <tr
-                      key={flowchart.id}
-                      className="table-row-link"
-                      data-href={href}
-                      onClick={(event) => handleRowClick(event, href)}
-                    >
-                      <td>
-                        <Link to={href}>{flowchart.name || `Flowchart ${flowchart.id}`}</Link>
-                      </td>
-                      <td className="muted">{flowchart.description || '-'}</td>
-                      <td className="muted">{flowchart.node_count ?? 0}</td>
-                      <td className="muted">{flowchart.edge_count ?? 0}</td>
-                      <td className="muted">{flowchart.run_count ?? 0}</td>
-                      <td className="table-actions-cell">
-                        <div className="table-actions">
-                          <button
-                            type="button"
-                            className="icon-button icon-button-danger"
-                            aria-label="Delete flowchart"
-                            title="Delete flowchart"
-                            disabled={busy}
-                            onClick={() => handleDelete(flowchart.id)}
-                          >
-                            <ActionIcon name="trash" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
       </article>
     </section>
   )

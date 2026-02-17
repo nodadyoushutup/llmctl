@@ -11,6 +11,7 @@ import {
   updateChatThreadConfig,
 } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
+import PanelHeader from '../components/PanelHeader'
 import PersistedDetails from '../components/PersistedDetails'
 
 const CHAT_SIDE_COLLAPSED_KEY = 'llmctl-chat-side-collapsed'
@@ -483,28 +484,47 @@ export default function ChatPage() {
   return (
     <section className={`chat-live-layout${isSideCollapsed ? ' chat-side-collapsed' : ''}`} id="chat-live-layout">
       <aside className="chat-panel chat-side-panel">
-        <div className="chat-threads-header">
-          <button
-            type="button"
-            className="btn-link chat-thread-create-button"
-            aria-label="Create thread"
-            onClick={handleCreateThread}
-            disabled={creatingThread}
-          >
-            <i className="fa-solid fa-plus" />
-            new chat
-          </button>
-          <Link className="btn-link btn-secondary chat-thread-create-button" to="/chat/activity">
-            <i className="fa-solid fa-timeline" />
-            activity
-          </Link>
-        </div>
+        <PanelHeader
+          className="chat-panel-header chat-threads-header"
+          title="Threads"
+          actionsClassName="chat-panel-header-actions"
+          actions={(
+            <>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Create thread"
+                title="Create thread"
+                onClick={handleCreateThread}
+                disabled={creatingThread}
+              >
+                <i className="fa-solid fa-plus" />
+              </button>
+              <Link className="icon-button" to="/chat/activity" aria-label="Chat activity" title="Chat activity">
+                <i className="fa-solid fa-timeline" />
+              </Link>
+            </>
+          )}
+        />
 
         {selectedThread ? (
           <PersistedDetails className="chat-session-drawer" storageKey="chat:session-controls" defaultOpen>
             <summary>
-              <span className="chat-session-title">session controls</span>
+              <span className="chat-session-title">controls</span>
               <span className="chat-session-summary">
+                <button
+                  type="button"
+                  className="btn-link btn-secondary chat-session-save-header"
+                  disabled={!sessionDirty || savingSession}
+                  onClick={async (event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    await saveSessionControls()
+                  }}
+                >
+                  <i className="fa-solid fa-floppy-disk" />
+                  save
+                </button>
                 <span className="chat-session-pill">{sessionModelLabel}</span>
                 <span className="chat-session-pill">{sessionComplexityLabel}</span>
               </span>
@@ -646,10 +666,6 @@ export default function ChatPage() {
                   <p className="chat-session-dirty" aria-live="polite">
                     {sessionDirty ? 'Unsaved changes' : 'Session is saved'}
                   </p>
-                  <button type="submit" className="btn-link btn-secondary chat-session-save" disabled={!sessionDirty || savingSession}>
-                    <i className="fa-solid fa-floppy-disk" />
-                    save
-                  </button>
                 </div>
               </form>
             </div>
@@ -691,46 +707,54 @@ export default function ChatPage() {
       </aside>
 
       <article className="chat-panel">
-        <div className="chat-main-topbar">
-          <div className="chat-main-title">
-            <h2 className="section-title">{selectedThread?.title || 'Live Chat'}</h2>
-            <p className="muted chat-main-usage">{usagePercentLabel}</p>
-          </div>
-          <div className="chat-main-actions">
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={isSideCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-              title={isSideCollapsed ? 'Expand side panel' : 'Collapse side panel'}
-              onClick={() => setIsSideCollapsed((value) => !value)}
-            >
-              <i className={`fa-solid ${isSideCollapsed ? 'fa-angles-right' : 'fa-angles-left'}`} />
-            </button>
-            {selectedThread ? (
-              <>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Clear thread"
-                  onClick={handleClearThread}
-                  disabled={clearingThread}
-                >
-                  <i className="fa-solid fa-eraser" />
-                </button>
-                <button
-                  id="chat-send-btn"
-                  type="submit"
-                  form="chat-turn-form"
-                  className="btn-link"
-                  disabled={sending || savingSession}
-                >
-                  <i className="fa-solid fa-paper-plane" />
-                  send
-                </button>
-              </>
-            ) : null}
-          </div>
-        </div>
+        <PanelHeader
+          className="chat-panel-header chat-main-topbar"
+          titleTag="div"
+          titleClassName="chat-main-title"
+          title={(
+            <>
+              <h2 className="section-title">{selectedThread?.title || 'Live Chat'}</h2>
+              <p className="muted chat-main-usage">{usagePercentLabel}</p>
+            </>
+          )}
+          actionsClassName="chat-main-actions"
+          actions={(
+            <>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={isSideCollapsed ? 'Expand side panel' : 'Collapse side panel'}
+                title={isSideCollapsed ? 'Expand side panel' : 'Collapse side panel'}
+                onClick={() => setIsSideCollapsed((value) => !value)}
+              >
+                <i className={`fa-solid ${isSideCollapsed ? 'fa-angles-right' : 'fa-angles-left'}`} />
+              </button>
+              {selectedThread ? (
+                <>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Clear thread"
+                    onClick={handleClearThread}
+                    disabled={clearingThread}
+                  >
+                    <i className="fa-solid fa-eraser" />
+                  </button>
+                  <button
+                    id="chat-send-btn"
+                    type="submit"
+                    form="chat-turn-form"
+                    className="btn-link"
+                    disabled={sending || savingSession}
+                  >
+                    <i className="fa-solid fa-paper-plane" />
+                    send
+                  </button>
+                </>
+              ) : null}
+            </>
+          )}
+        />
 
         {chatError ? <div className="chat-error-box">{chatError}</div> : null}
         {state.loading ? <p className="muted chat-loading-state">Loading chat runtime...</p> : null}

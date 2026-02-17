@@ -96,13 +96,13 @@ const MEMORY_CONNECTOR_LAYOUT = [
 ]
 const DECISION_CONNECTOR_LAYOUT = [
   { id: 't2', side: 'top', x: 50, y: 0 },
-  { id: 't3', side: 'decision-top-right', x: 76.8, y: 23.2 },
+  { id: 't3', side: 'decision-top-right', x: 75, y: 25 },
   { id: 'r1', side: 'right', x: 100, y: 50 },
-  { id: 'b3', side: 'decision-bottom-right', x: 76.8, y: 76.8 },
+  { id: 'b3', side: 'decision-bottom-right', x: 75, y: 75 },
   { id: 'b2', side: 'bottom', x: 50, y: 100 },
-  { id: 'b1', side: 'decision-bottom-left', x: 23.2, y: 76.8 },
+  { id: 'b1', side: 'decision-bottom-left', x: 25, y: 75 },
   { id: 'l1', side: 'left', x: 0, y: 50 },
-  { id: 't1', side: 'decision-top-left', x: 23.2, y: 23.2 },
+  { id: 't1', side: 'decision-top-left', x: 25, y: 25 },
 ]
 
 const CORE_CONNECTOR_BY_ID = new Map(CORE_CONNECTOR_LAYOUT.map((item) => [item.id, item]))
@@ -1515,11 +1515,11 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   }
 
   function handleViewportWheel(event) {
-    if (!(event.ctrlKey || event.metaKey)) {
-      return
-    }
     const viewport = viewportRef.current
     if (!viewport) {
+      return
+    }
+    if (event.deltaY === 0) {
       return
     }
     event.preventDefault()
@@ -1749,6 +1749,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       setSelectedEdgeId('')
                     }}
                   >
+                    <span className="flow-ws-node-shape" />
                     <span className="flow-ws-node-content">
                       <span className="flow-ws-node-title">{node.title || titleForType(node.node_type)}</span>
                       {NODE_TYPE_WITH_REF.has(normalizeNodeType(node.node_type)) && node.ref_id

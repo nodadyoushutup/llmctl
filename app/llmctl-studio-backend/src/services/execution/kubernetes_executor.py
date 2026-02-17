@@ -33,6 +33,10 @@ _DEFAULT_JOB_TTL_SECONDS = 1800
 _EXECUTOR_LIVE_CODE_ENABLED_ENV = "LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED"
 _EXECUTOR_LIVE_CODE_HOST_PATH_ENV = "LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_HOST_PATH"
 _EXECUTOR_LIVE_CODE_HOST_PATH_DEFAULT = "/workspace/llmctl"
+_EXECUTOR_ARGOCD_APP_NAME_ENV = "LLMCTL_NODE_EXECUTOR_K8S_ARGOCD_APP_NAME"
+_EXECUTOR_ARGOCD_APP_NAME_DEFAULT = "llmctl-studio"
+_ARGOCD_INSTANCE_LABEL_KEY = "app.kubernetes.io/instance"
+_ARGOCD_TRACKING_ID_ANNOTATION_KEY = "argocd.argoproj.io/tracking-id"
 _POD_ENV_ALLOWLIST = {
     "LLMCTL_STUDIO_DATABASE_URI",
     "LLMCTL_POSTGRES_HOST",
@@ -250,6 +254,11 @@ class KubernetesExecutor:
             )
             or ""
         ).strip()
+        argocd_app_name = str(
+            settings.get("k8s_argocd_app_name")
+            or os.getenv(_EXECUTOR_ARGOCD_APP_NAME_ENV)
+            or _EXECUTOR_ARGOCD_APP_NAME_DEFAULT
+        ).strip()
 
         try:
             outcome = self._dispatch_via_kubernetes(
@@ -269,6 +278,7 @@ class KubernetesExecutor:
                 job_ttl_seconds=job_ttl_seconds,
                 live_code_enabled=live_code_enabled,
                 live_code_host_path=live_code_host_path,
+                argocd_app_name=argocd_app_name,
             )
         except _KubernetesDispatchFailure as exc:
             provider_dispatch_id = (
@@ -445,6 +455,7 @@ class KubernetesExecutor:
         job_ttl_seconds: int,
         live_code_enabled: bool,
         live_code_host_path: str,
+        argocd_app_name: str,
     ) -> _KubernetesDispatchOutcome:
         kubeconfig_path: str | None = None
         try:
@@ -476,6 +487,7 @@ class KubernetesExecutor:
                 job_ttl_seconds=job_ttl_seconds,
                 live_code_enabled=live_code_enabled,
                 live_code_host_path=live_code_host_path,
+                argocd_app_name=argocd_app_name,
             )
             self._kubectl_apply_manifest(
                 kubectl_args,
@@ -620,8 +632,15 @@ class KubernetesExecutor:
         job_ttl_seconds: int,
         live_code_enabled: bool = False,
         live_code_host_path: str = "",
+        argocd_app_name: str = "",
     ) -> dict[str, Any]:
-        labels = self._job_labels(request)
+        labels = dict(self._job_labels(request))
+        metadata_annotations: dict[str, str] = {}
+        if argocd_app_name:
+            labels[_ARGOCD_INSTANCE_LABEL_KEY] = argocd_app_name
+            metadata_annotations[_ARGOCD_TRACKING_ID_ANNOTATION_KEY] = (
+                f"{argocd_app_name}:batch/Job:{namespace}/{job_name}"
+            )
         resources: dict[str, dict[str, str]] = {
             "requests": {"cpu": "100m", "memory": "128Mi"},
             "limits": {"cpu": "1", "memory": "1Gi"},
@@ -670,6 +689,7 @@ class KubernetesExecutor:
                 "name": job_name,
                 "namespace": namespace,
                 "labels": labels,
+                "annotations": metadata_annotations,
             },
             "spec": {
                 "backoffLimit": 0,

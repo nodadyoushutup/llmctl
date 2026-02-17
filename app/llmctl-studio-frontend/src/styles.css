@@ -88,6 +88,54 @@ a {
   text-decoration: none;
 }
 
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  border-radius: 10px;
+  border: 1px solid rgba(142, 162, 178, 0.38);
+  background-color: rgba(9, 15, 23, 0.82);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.02)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238ea2b2' d='M1.41.59 6 5.17 10.59.59 12 2l-6 6-6-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, no-repeat;
+  background-position: 0 0, right 12px center;
+  background-size: 100% 100%, 12px 8px;
+  color: var(--text);
+  padding: 8px 36px 8px 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease;
+}
+
+select:hover {
+  border-color: rgba(255, 122, 24, 0.5);
+  background-color: rgba(12, 20, 31, 0.9);
+}
+
+select:focus,
+select:focus-visible {
+  outline: none;
+  border-color: rgba(255, 122, 24, 0.7);
+  box-shadow: 0 0 0 3px rgba(255, 122, 24, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+select option,
+select optgroup {
+  background: #0f1722;
+  color: var(--text);
+}
+
+select[multiple],
+select[size]:not([size='1']) {
+  background-image: none;
+  padding-right: 10px;
+}
+
 .app-shell,
 .page {
   position: relative;
@@ -706,7 +754,6 @@ a {
   color: var(--muted);
 }
 
-.toolbar-group select,
 .toolbar-group input {
   border-radius: 10px;
   border: 1px solid var(--line);
@@ -929,14 +976,6 @@ a {
   color: var(--muted);
 }
 
-.pagination-size select {
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: rgba(11, 15, 20, 0.6);
-  color: var(--text);
-  padding: 8px 10px;
-}
-
 .chip {
   display: inline-flex;
   align-items: center;
@@ -1092,17 +1131,16 @@ a {
   box-shadow: 0 22px 48px rgba(0, 0, 0, 0.52);
 }
 
-.chat-threads-header {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(38, 49, 64, 0.72);
+.chat-panel-header {
+  padding-inline: 0;
 }
 
-.chat-thread-create-button {
-  width: 100%;
-  justify-content: center;
+.chat-panel-header-actions {
+  gap: 6px;
+}
+
+.chat-threads-header {
+  margin-bottom: 10px;
 }
 
 .chat-checklist {
@@ -1171,6 +1209,9 @@ a {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: inherit;
 }
 
 .chat-main-usage {
@@ -1227,6 +1268,11 @@ a {
   justify-content: flex-end;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.chat-session-save-header {
+  min-width: 88px;
+  justify-content: center;
 }
 
 .chat-session-content {
@@ -1294,11 +1340,6 @@ a {
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted);
-}
-
-.chat-session-save {
-  min-width: 120px;
-  justify-content: center;
 }
 
 .chat-picker {
@@ -1942,7 +1983,6 @@ fieldset.field {
 }
 
 .field input,
-.field select,
 .field textarea {
   width: 100%;
   border-radius: 0.55rem;
@@ -1950,6 +1990,10 @@ fieldset.field {
   background: rgba(8, 24, 37, 0.75);
   color: #f4f7ff;
   padding: 0.45rem 0.55rem;
+}
+
+.field select {
+  width: 100%;
 }
 
 .field textarea {
@@ -2800,14 +2844,12 @@ fieldset.field {
 
 .flow-ws-node {
   position: absolute;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(19, 28, 39, 0.96);
-  box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
   color: #fff;
   cursor: grab;
   user-select: none;
   padding: 0;
+  border: 0;
+  background: transparent;
   overflow: visible;
 }
 
@@ -2815,12 +2857,23 @@ fieldset.field {
   cursor: grabbing;
 }
 
-.flow-ws-node.is-selected {
+.flow-ws-node-shape {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(19, 28, 39, 0.96);
+  box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.flow-ws-node.is-selected .flow-ws-node-shape {
   border-color: rgba(255, 122, 24, 0.82);
   box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.28), 0 14px 28px rgba(9, 14, 21, 0.35);
 }
 
-.flow-ws-node.is-running {
+.flow-ws-node.is-running .flow-ws-node-shape {
   border-color: rgba(255, 122, 24, 0.95);
   box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.34), 0 14px 28px rgba(9, 14, 21, 0.35);
   background: linear-gradient(140deg, rgba(93, 42, 8, 0.96), rgba(27, 18, 13, 0.99));
@@ -2835,6 +2888,8 @@ fieldset.field {
   justify-content: center;
   gap: 6px;
   text-align: center;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .flow-ws-node-title {
@@ -2851,62 +2906,61 @@ fieldset.field {
   text-transform: uppercase;
 }
 
-.flow-ws-node.is-type-start,
-.flow-ws-node.is-type-flowchart {
+.flow-ws-node.is-type-start .flow-ws-node-shape,
+.flow-ws-node.is-type-flowchart .flow-ws-node-shape {
   border-radius: 999px;
 }
 
-.flow-ws-node.is-type-start {
+.flow-ws-node.is-type-start .flow-ws-node-shape {
   border-color: rgba(34, 197, 94, 0.74);
   background: linear-gradient(140deg, rgba(16, 46, 34, 0.94), rgba(17, 24, 33, 0.98));
 }
 
-.flow-ws-node.is-type-flowchart {
+.flow-ws-node.is-type-flowchart .flow-ws-node-shape {
   border-color: rgba(56, 189, 248, 0.74);
   background: linear-gradient(140deg, rgba(10, 49, 69, 0.94), rgba(17, 24, 33, 0.98));
 }
 
-.flow-ws-node.is-type-end {
+.flow-ws-node.is-type-end .flow-ws-node-shape {
   border: 1px solid rgba(239, 68, 68, 0.82);
   clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
   background: linear-gradient(140deg, rgba(77, 21, 21, 0.95), rgba(29, 13, 13, 0.99));
 }
 
-.flow-ws-node.is-type-task {
+.flow-ws-node.is-type-task .flow-ws-node-shape {
   border-color: rgba(59, 130, 246, 0.74);
   background: linear-gradient(140deg, rgba(18, 37, 68, 0.94), rgba(17, 24, 33, 0.98));
 }
 
-.flow-ws-node.is-type-plan {
+.flow-ws-node.is-type-plan .flow-ws-node-shape {
   border-color: rgba(250, 204, 21, 0.78);
   background: linear-gradient(140deg, rgba(66, 57, 16, 0.94), rgba(17, 24, 33, 0.98));
 }
 
-.flow-ws-node.is-type-memory {
+.flow-ws-node.is-type-memory .flow-ws-node-shape {
   border: 1px solid rgba(236, 72, 153, 0.74);
   clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
   background: linear-gradient(140deg, rgba(70, 20, 54, 0.94), rgba(17, 24, 33, 0.98));
 }
 
-.flow-ws-node.is-type-milestone {
+.flow-ws-node.is-type-milestone .flow-ws-node-shape {
   border: 1px solid rgba(168, 85, 247, 0.74);
   clip-path: polygon(16% 0, 84% 0, 100% 50%, 84% 100%, 16% 100%, 0 50%);
   background: linear-gradient(140deg, rgba(56, 26, 84, 0.94), rgba(17, 24, 33, 0.98));
 }
 
-.flow-ws-node.is-type-decision {
+.flow-ws-node.is-type-decision .flow-ws-node-shape {
   border: 1px solid rgba(20, 184, 166, 0.74);
-  transform: rotate(45deg);
-  border-radius: 12px;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  border-radius: 0;
   background: linear-gradient(140deg, rgba(14, 58, 58, 0.94), rgba(17, 24, 33, 0.98));
 }
 
 .flow-ws-node.is-type-decision .flow-ws-node-content {
-  transform: rotate(-45deg);
-  inset: 24px;
+  inset: 22px;
 }
 
-.flow-ws-node.is-type-rag {
+.flow-ws-node.is-type-rag .flow-ws-node-shape {
   border-color: rgba(16, 185, 129, 0.78);
   background: linear-gradient(140deg, rgba(10, 61, 44, 0.95), rgba(17, 24, 33, 0.98));
 }
@@ -2923,6 +2977,7 @@ fieldset.field {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease, transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  z-index: 2;
 }
 
 .flow-ws-node:hover .flow-ws-node-connector,
@@ -3054,10 +3109,6 @@ pre {
   .chat-session-actions {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .chat-session-save {
-    width: 100%;
   }
 
   .quick-node-form {

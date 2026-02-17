@@ -134,6 +134,19 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
+  test('zooms the graph on plain mouse wheel over viewport', async () => {
+    const { container } = render(<FlowchartWorkspaceEditor />)
+    const viewport = container.querySelector('.flow-ws-viewport')
+    expect(viewport).toBeTruthy()
+    expect(container.querySelector('.flow-ws-zoom-label')?.textContent).toBe('100%')
+
+    fireEvent.wheel(viewport, { deltaY: -120, clientX: 300, clientY: 200 })
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-zoom-label')?.textContent).toBe('110%')
+    })
+  })
+
   test('shows task validation hint when task node has no prompt', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(
