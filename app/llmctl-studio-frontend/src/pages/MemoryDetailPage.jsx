@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
 import { deleteMemory, getMemory } from '../lib/studioApi'
 
@@ -73,48 +72,63 @@ export default function MemoryDetailPage() {
   return (
     <section className="stack" aria-label="Memory detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Memory</h2>
-            <p>Native React detail view for `/memories/:memoryId`.</p>
-          </div>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
-            {memory ? <Link to={`/memories/${memory.id}/edit`} className="btn-link btn-secondary">Edit</Link> : null}
-            <Link to="/memories" className="btn-link btn-secondary">All Memories</Link>
+            <Link to="/memories" className="btn btn-secondary">
+              <i className="fa-solid fa-arrow-left" />
+              back
+            </Link>
+            {memory ? (
+              <Link to={`/memories/${memory.id}/edit`} className="btn btn-secondary">
+                <i className="fa-solid fa-pen-to-square" />
+                edit
+              </Link>
+            ) : null}
             {memory ? (
               <button
                 type="button"
-                className="icon-button icon-button-danger"
-                aria-label="Delete memory"
-                title="Delete memory"
+                className="btn btn-danger"
                 disabled={busy}
                 onClick={handleDelete}
               >
-                <ActionIcon name="trash" />
+                <i className="fa-solid fa-trash" />
+                delete
               </button>
             ) : null}
           </div>
         </div>
+
         {(!invalidId && state.loading) ? <p>Loading memory...</p> : null}
         {(invalidId || state.error) ? (
           <p className="error-text">{invalidId ? 'Invalid memory id.' : state.error}</p>
         ) : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
+
         {memory ? (
-          <dl className="kv-grid">
-            <div>
-              <dt>Created</dt>
-              <dd>{memory.created_at || '-'}</dd>
+          <>
+            <div className="card-header">
+              <div>
+                <p className="eyebrow">memory {memory.id}</p>
+                <h2 className="section-title">Memory</h2>
+              </div>
             </div>
-            <div>
-              <dt>Updated</dt>
-              <dd>{memory.updated_at || '-'}</dd>
+
+            <div className="grid grid-2" style={{ marginTop: '20px' }}>
+              <div className="subcard">
+                <p className="eyebrow">details</p>
+                <div className="stack" style={{ marginTop: '12px', fontSize: '12px' }}>
+                  <p className="muted">Created: {memory.created_at || '-'}</p>
+                  <p className="muted">Updated: {memory.updated_at || '-'}</p>
+                </div>
+              </div>
+              <div className="subcard">
+                <p className="eyebrow">description</p>
+                <p className="muted" style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>
+                  {memory.description || '-'}
+                </p>
+              </div>
             </div>
-            <div>
-              <dt>Description</dt>
-              <dd>{memory.description || '-'}</dd>
-            </div>
-          </dl>
+          </>
         ) : null}
       </article>
     </section>

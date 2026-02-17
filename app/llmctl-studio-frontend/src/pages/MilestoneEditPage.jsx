@@ -113,7 +113,10 @@ export default function MilestoneEditPage() {
     setFormError('')
     setSaving(true)
     try {
-      await updateMilestone(parsedMilestoneId, form)
+      await updateMilestone(parsedMilestoneId, {
+        ...form,
+        progressPercent: Number.parseInt(form.progressPercent, 10) || 0,
+      })
       navigate(`/milestones/${parsedMilestoneId}`)
     } catch (error) {
       setFormError(errorMessage(error, 'Failed to update milestone.'))
@@ -125,24 +128,40 @@ export default function MilestoneEditPage() {
   return (
     <section className="stack" aria-label="Edit milestone">
       <article className="card">
-        <div className="title-row">
-          <h2>{milestone ? `Edit ${milestone.name}` : 'Edit Milestone'}</h2>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
             {milestone ? (
-              <Link to={`/milestones/${milestone.id}`} className="btn-link btn-secondary">
-                Back to Milestone
+              <Link to={`/milestones/${milestone.id}`} className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back
               </Link>
             ) : null}
-            <Link to="/milestones" className="btn-link btn-secondary">All Milestones</Link>
+            <Link to="/milestones" className="btn btn-secondary">
+              <i className="fa-solid fa-list" />
+              all milestones
+            </Link>
           </div>
         </div>
-        {state.loading ? <p>Loading milestone...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+
+        <div className="card-header">
+          <div>
+            {milestone ? <p className="eyebrow">milestone {milestone.id}</p> : null}
+            <h2 className="section-title">Edit Milestone</h2>
+          </div>
+        </div>
+
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Update milestone planning, ownership, and delivery details.
+        </p>
+
+        {state.loading ? <p style={{ marginTop: '20px' }}>Loading milestone...</p> : null}
+        {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
+        {formError ? <p className="error-text" style={{ marginTop: '12px' }}>{formError}</p> : null}
+
         {!state.loading && !state.error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>name</span>
               <input
                 type="text"
                 required
@@ -151,7 +170,7 @@ export default function MilestoneEditPage() {
               />
             </label>
             <label className="field">
-              <span>Status</span>
+              <span>status</span>
               <select
                 value={form.status}
                 onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
@@ -164,7 +183,7 @@ export default function MilestoneEditPage() {
               </select>
             </label>
             <label className="field">
-              <span>Priority</span>
+              <span>priority</span>
               <select
                 value={form.priority}
                 onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value }))}
@@ -177,7 +196,7 @@ export default function MilestoneEditPage() {
               </select>
             </label>
             <label className="field">
-              <span>Health</span>
+              <span>health</span>
               <select
                 value={form.health}
                 onChange={(event) => setForm((current) => ({ ...current, health: event.target.value }))}
@@ -190,7 +209,7 @@ export default function MilestoneEditPage() {
               </select>
             </label>
             <label className="field">
-              <span>Owner</span>
+              <span>owner</span>
               <input
                 type="text"
                 value={form.owner}
@@ -198,7 +217,7 @@ export default function MilestoneEditPage() {
               />
             </label>
             <label className="field">
-              <span>Start date</span>
+              <span>start date</span>
               <input
                 type="date"
                 value={form.startDate}
@@ -206,7 +225,7 @@ export default function MilestoneEditPage() {
               />
             </label>
             <label className="field">
-              <span>Due date</span>
+              <span>due date</span>
               <input
                 type="date"
                 value={form.dueDate}
@@ -214,7 +233,7 @@ export default function MilestoneEditPage() {
               />
             </label>
             <label className="field">
-              <span>Progress %</span>
+              <span>progress %</span>
               <input
                 type="number"
                 min="0"
@@ -224,44 +243,51 @@ export default function MilestoneEditPage() {
               />
             </label>
             <label className="field field-span">
-              <span>Description</span>
+              <span>description</span>
               <textarea
                 value={form.description}
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               />
             </label>
             <label className="field field-span">
-              <span>Success criteria</span>
+              <span>success criteria</span>
               <textarea
                 value={form.successCriteria}
                 onChange={(event) => setForm((current) => ({ ...current, successCriteria: event.target.value }))}
               />
             </label>
             <label className="field field-span">
-              <span>Dependencies</span>
+              <span>dependencies</span>
               <textarea
                 value={form.dependencies}
                 onChange={(event) => setForm((current) => ({ ...current, dependencies: event.target.value }))}
               />
             </label>
             <label className="field field-span">
-              <span>Links</span>
+              <span>links</span>
               <textarea
                 value={form.links}
                 onChange={(event) => setForm((current) => ({ ...current, links: event.target.value }))}
               />
             </label>
             <label className="field field-span">
-              <span>Latest update</span>
+              <span>latest update</span>
               <textarea
                 value={form.latestUpdate}
                 onChange={(event) => setForm((current) => ({ ...current, latestUpdate: event.target.value }))}
               />
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={saving}>
-                {saving ? 'Saving...' : 'Save Milestone'}
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                <i className="fa-solid fa-floppy-disk" />
+                {saving ? 'saving...' : 'save'}
               </button>
+              {milestone ? (
+                <Link className="btn btn-secondary" to={`/milestones/${milestone.id}`}>
+                  <i className="fa-solid fa-arrow-left" />
+                  cancel
+                </Link>
+              ) : null}
             </div>
           </form>
         ) : null}

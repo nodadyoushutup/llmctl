@@ -26,16 +26,15 @@ function toInputDateTime(value) {
   if (!normalized || normalized === '-') {
     return ''
   }
-  if (normalized.includes(' ')) {
-    return normalized.replace(' ', 'T')
-  }
-  return normalized
+  const withT = normalized.includes(' ') ? normalized.replace(' ', 'T') : normalized
+  return withT.length >= 16 ? withT.slice(0, 16) : withT
 }
 
 export default function PlanEditPage() {
   const navigate = useNavigate()
   const { planId } = useParams()
   const parsedPlanId = useMemo(() => parseId(planId), [planId])
+
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -98,20 +97,36 @@ export default function PlanEditPage() {
   return (
     <section className="stack" aria-label="Edit plan">
       <article className="card">
-        <div className="title-row">
-          <h2>{plan ? `Edit ${plan.name}` : 'Edit Plan'}</h2>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
-            {plan ? <Link to={`/plans/${plan.id}`} className="btn-link btn-secondary">Back to Plan</Link> : null}
-            <Link to="/plans" className="btn-link btn-secondary">All Plans</Link>
+            {plan ? (
+              <Link to={`/plans/${plan.id}`} className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back to plan
+              </Link>
+            ) : null}
+            <Link to="/plans" className="btn btn-secondary">
+              <i className="fa-solid fa-list" />
+              all plans
+            </Link>
           </div>
         </div>
-        {state.loading ? <p>Loading plan...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+
+        <div className="card-header">
+          <div>
+            {plan ? <p className="eyebrow">plan {plan.id}</p> : null}
+            <h2 className="section-title">Edit Plan</h2>
+          </div>
+        </div>
+
+        {state.loading ? <p style={{ marginTop: '20px' }}>Loading plan...</p> : null}
+        {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
+        {formError ? <p className="error-text" style={{ marginTop: '12px' }}>{formError}</p> : null}
+
         {!state.loading && !state.error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>name</span>
               <input
                 type="text"
                 required
@@ -120,25 +135,31 @@ export default function PlanEditPage() {
               />
             </label>
             <label className="field">
-              <span>Completed at (optional)</span>
+              <span>completed at (optional)</span>
               <input
-                type="text"
-                placeholder="YYYY-MM-DDTHH:MM"
+                type="datetime-local"
                 value={form.completedAt}
                 onChange={(event) => setForm((current) => ({ ...current, completedAt: event.target.value }))}
               />
             </label>
             <label className="field field-span">
-              <span>Description (optional)</span>
+              <span>description (optional)</span>
               <textarea
                 value={form.description}
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               />
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={saving}>
-                {saving ? 'Saving...' : 'Save Plan'}
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                <i className="fa-solid fa-floppy-disk" />
+                {saving ? 'saving changes...' : 'save changes'}
               </button>
+              {plan ? (
+                <Link className="btn btn-secondary" to={`/plans/${plan.id}`}>
+                  <i className="fa-solid fa-arrow-left" />
+                  cancel
+                </Link>
+              ) : null}
             </div>
           </form>
         ) : null}

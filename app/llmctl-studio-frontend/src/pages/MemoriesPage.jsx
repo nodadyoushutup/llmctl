@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
 import { getMemories } from '../lib/studioApi'
@@ -57,7 +57,15 @@ export default function MemoriesPage() {
   const totalPages = Number.isInteger(pagination?.total_pages) && pagination.total_pages > 0
     ? pagination.total_pages
     : 1
-  const totalCount = Number.isInteger(pagination?.total_count) ? pagination.total_count : 0
+  const paginationItems = Array.isArray(pagination?.items) ? pagination.items : []
+
+  function truncateText(value, max = 180) {
+    const text = String(value || '').trim()
+    if (!text || text.length <= max) {
+      return text
+    }
+    return `${text.slice(0, max - 3)}...`
+  }
 
   function updateParams(nextParams) {
     const updated = new URLSearchParams(searchParams)
@@ -80,49 +88,81 @@ export default function MemoriesPage() {
 
   return (
     <section className="stack" aria-label="Memories">
-      <article className="card">
-        <div className="title-row">
+      <article className="card workflow-list-card">
+        <div className="pagination-bar pagination-bar-header">
+          <nav className="pagination" aria-label="Memories pages">
+            {page > 1 ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page - 1, per_page: perPage })}
+              >
+                Prev
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+            )}
+            <div className="pagination-pages">
+              {paginationItems.map((item, index) => {
+                const itemType = String(item?.type || '')
+                if (itemType === 'gap') {
+                  return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
+                }
+                const itemPage = Number.parseInt(String(item?.page || ''), 10)
+                if (!Number.isInteger(itemPage) || itemPage <= 0) {
+                  return null
+                }
+                if (itemPage === page) {
+                  return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
+                }
+                return (
+                  <button
+                    key={itemPage}
+                    type="button"
+                    className="pagination-link"
+                    onClick={() => updateParams({ page: itemPage, per_page: perPage })}
+                  >
+                    {itemPage}
+                  </button>
+                )
+              })}
+            </div>
+            {page < totalPages ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page + 1, per_page: perPage })}
+              >
+                Next
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+            )}
+          </nav>
+        </div>
+        <div className="card-header">
           <div>
-            <h2>Memories</h2>
-            <p>Native React replacement for `/memories` list and detail navigation.</p>
+            <h2 className="section-title">Memories</h2>
           </div>
-          <Link to="/memories/new" className="btn-link btn-secondary">Create Policy</Link>
         </div>
-        <div className="toolbar">
-          <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page <= 1}
-              onClick={() => updateParams({ page: page - 1, per_page: perPage })}
-            >
-              Prev
-            </button>
-            <span className="toolbar-meta">Page {Math.min(page, totalPages)} / {totalPages}</span>
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => updateParams({ page: page + 1, per_page: perPage })}
-            >
-              Next
-            </button>
-          </div>
-          <span className="toolbar-meta">Total memories: {totalCount}</span>
-        </div>
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Capture simple facts to reuse across tasks and workflows.
+        </p>
         {state.loading ? <p>Loading memories...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error && memories.length === 0 ? (
-          <p>No memories found yet. Add a Memory node in a flowchart to create one.</p>
+          <p className="muted" style={{ marginTop: '16px' }}>
+            No memories found yet. Add a Memory node in a flowchart to create one.
+          </p>
         ) : null}
         {!state.loading && !state.error && memories.length > 0 ? (
-          <div className="table-wrap">
+          <div className="workflow-list-table-shell">
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Description</th>
                   <th>Created</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th className="table-actions-cell">Edit</th>
                 </tr>
               </thead>
               <tbody>
@@ -136,20 +176,21 @@ export default function MemoriesPage() {
                       onClick={(event) => handleRowClick(event, href)}
                     >
                       <td>
-                        <Link to={href}>{memory.description}</Link>
+                        <p>{truncateText(memory.description)}</p>
                       </td>
-                      <td>{memory.created_at || '-'}</td>
+                      <td>
+                        <p className="muted" style={{ fontSize: '12px' }}>{memory.created_at || '-'}</p>
+                      </td>
                       <td className="table-actions-cell">
-                        <div className="table-actions">
-                          <Link
-                            to={`/memories/${memory.id}/edit`}
-                            className="icon-button"
-                            aria-label="Edit memory"
-                            title="Edit memory"
-                          >
-                            <ActionIcon name="edit" />
-                          </Link>
-                        </div>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="Edit memory"
+                          title="Edit memory"
+                          onClick={() => navigate(`/memories/${memory.id}/edit`)}
+                        >
+                          <ActionIcon name="edit" />
+                        </button>
                       </td>
                     </tr>
                   )

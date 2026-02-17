@@ -53,6 +53,7 @@ export default function SettingsCorePage() {
             <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
             <Link to="/settings/runtime" className="btn-link btn-secondary">Runtime</Link>
             <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
+            <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
           </div>
         </div>
         {state.loading ? <p>Loading core settings...</p> : null}

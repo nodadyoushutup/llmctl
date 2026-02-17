@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
 import { deleteTaskTemplate, getTaskTemplate } from '../lib/studioApi'
 
@@ -63,7 +62,7 @@ export default function TaskTemplateDetailPage() {
     : {}
 
   async function handleDelete() {
-    if (!template || !window.confirm('Delete this task template?')) {
+    if (!template || !window.confirm('Delete this task?')) {
       return
     }
     setActionError('')
@@ -77,77 +76,81 @@ export default function TaskTemplateDetailPage() {
     }
   }
 
+  const agentName = agentsById[String(template?.agent_id)] || agentsById[template?.agent_id] || 'Unassigned'
+
   return (
     <section className="stack" aria-label="Task template detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{template ? template.name : 'Task Template'}</h2>
-            <p>Native React detail view for `/task-templates/:templateId`.</p>
-          </div>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
+            <Link to="/task-templates" className="btn btn-secondary">
+              <i className="fa-solid fa-arrow-left" />
+              back to tasks
+            </Link>
             {template ? (
-              <Link to={`/task-templates/${template.id}/edit`} className="btn-link btn-secondary">
-                Edit
+              <Link to={`/task-templates/${template.id}/edit`} className="btn btn-secondary">
+                <i className="fa-solid fa-pen-to-square" />
+                edit
               </Link>
             ) : null}
-            <Link to="/task-templates" className="btn-link btn-secondary">All Workflow Nodes</Link>
             {template ? (
               <button
                 type="button"
-                className="icon-button icon-button-danger"
-                aria-label="Delete task template"
-                title="Delete task template"
+                className="btn btn-danger"
                 disabled={busy}
                 onClick={handleDelete}
               >
-                <ActionIcon name="trash" />
+                <i className="fa-solid fa-trash" />
+                delete
               </button>
             ) : null}
           </div>
         </div>
+
         {(!invalidId && state.loading) ? <p>Loading task template...</p> : null}
         {(invalidId || state.error) ? (
           <p className="error-text">{invalidId ? 'Invalid task template id.' : state.error}</p>
         ) : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
+
         {template ? (
           <>
-            <dl className="kv-grid">
+            <div className="card-header">
               <div>
-                <dt>Agent</dt>
-                <dd>{agentsById[String(template.agent_id)] || 'Unassigned'}</dd>
+                <p className="eyebrow">task {template.id}</p>
+                <h2 className="section-title">{template.name}</h2>
               </div>
-              <div>
-                <dt>Description</dt>
-                <dd>{template.description || '-'}</dd>
+            </div>
+
+            <div className="grid grid-2" style={{ marginTop: '20px' }}>
+              <div className="subcard">
+                <p className="eyebrow">details</p>
+                <div className="stack" style={{ marginTop: '12px', fontSize: '12px' }}>
+                  <p className="muted">Agent: {agentName}</p>
+                  <p className="muted">Description: {template.description || '-'}</p>
+                  <p className="muted">Created: {template.created_at || '-'}</p>
+                  <p className="muted">Updated: {template.updated_at || '-'}</p>
+                  <p className="muted">Node runs: {taskCount}</p>
+                  {attachments.length > 0 ? (
+                    <>
+                      <p className="muted">Attachments:</p>
+                      {attachments.map((attachment) => (
+                        <p key={attachment.id} className="muted">
+                          {attachment.file_name}
+                          {attachment.file_path ? ` (${attachment.file_path})` : ''}
+                        </p>
+                      ))}
+                    </>
+                  ) : (
+                    <p className="muted">Attachments: -</p>
+                  )}
+                </div>
               </div>
-              <div>
-                <dt>Node runs</dt>
-                <dd>{taskCount}</dd>
+              <div className="subcard">
+                <p className="eyebrow">prompt</p>
+                <pre style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>{template.prompt || ''}</pre>
               </div>
-              <div>
-                <dt>Created</dt>
-                <dd>{template.created_at || '-'}</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{template.updated_at || '-'}</dd>
-              </div>
-            </dl>
-            <h3>Prompt</h3>
-            <pre>{template.prompt || ''}</pre>
-            <h3>Attachments</h3>
-            {attachments.length === 0 ? <p>No attachments.</p> : null}
-            {attachments.length > 0 ? (
-              <ul>
-                {attachments.map((attachment) => (
-                  <li key={attachment.id}>
-                    {attachment.file_name}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            </div>
           </>
         ) : null}
       </article>

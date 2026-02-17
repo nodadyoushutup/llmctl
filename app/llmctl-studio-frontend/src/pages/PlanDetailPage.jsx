@@ -31,15 +31,18 @@ function errorMessage(error, fallback) {
   return fallback
 }
 
-function parseCompletedAtInput(value) {
+function toDateTimeLocal(value) {
   const normalized = String(value || '').trim()
   if (!normalized || normalized === '-') {
     return ''
   }
-  if (normalized.includes(' ')) {
-    return normalized.replace(' ', 'T')
-  }
-  return normalized
+  const withT = normalized.includes(' ') ? normalized.replace(' ', 'T') : normalized
+  return withT.length >= 16 ? withT.slice(0, 16) : withT
+}
+
+function stopSummaryAction(event) {
+  event.preventDefault()
+  event.stopPropagation()
 }
 
 export default function PlanDetailPage() {
@@ -50,8 +53,11 @@ export default function PlanDetailPage() {
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [openPanels, setOpenPanels] = useState({})
   const [newStage, setNewStage] = useState({ name: '', description: '', completedAt: '' })
+  const [stageEditById, setStageEditById] = useState({})
   const [newTaskByStageId, setNewTaskByStageId] = useState({})
+  const [taskEditById, setTaskEditById] = useState({})
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!parsedPlanId) {
@@ -82,6 +88,76 @@ export default function PlanDetailPage() {
   const stages = plan && Array.isArray(plan.stages) ? plan.stages : []
   const summary = payload && payload.summary && typeof payload.summary === 'object' ? payload.summary : null
 
+  const stageCount = Number.isInteger(summary?.stage_count) ? summary.stage_count : stages.length
+  const taskCount = Number.isInteger(summary?.task_count)
+    ? summary.task_count
+    : stages.reduce((count, stage) => count + (Array.isArray(stage.tasks) ? stage.tasks.length : 0), 0)
+
+  function togglePanel(panelId) {
+    setOpenPanels((current) => ({
+      ...current,
+      [panelId]: !current[panelId],
+    }))
+  }
+
+  function getStageEditDraft(stage) {
+    return stageEditById[stage.id] || {
+      name: String(stage.name || ''),
+      description: String(stage.description || ''),
+      completedAt: toDateTimeLocal(stage.completed_at),
+    }
+  }
+
+  function updateStageEditDraft(stage, patch) {
+    setStageEditById((current) => ({
+      ...current,
+      [stage.id]: {
+        ...(current[stage.id] || {
+          name: String(stage.name || ''),
+          description: String(stage.description || ''),
+          completedAt: toDateTimeLocal(stage.completed_at),
+        }),
+        ...patch,
+      },
+    }))
+  }
+
+  function getTaskEditDraft(task) {
+    return taskEditById[task.id] || {
+      name: String(task.name || ''),
+      description: String(task.description || ''),
+      completedAt: toDateTimeLocal(task.completed_at),
+    }
+  }
+
+  function updateTaskEditDraft(task, patch) {
+    setTaskEditById((current) => ({
+      ...current,
+      [task.id]: {
+        ...(current[task.id] || {
+          name: String(task.name || ''),
+          description: String(task.description || ''),
+          completedAt: toDateTimeLocal(task.completed_at),
+        }),
+        ...patch,
+      },
+    }))
+  }
+
+  function getNewTaskDraft(stageId) {
+    return newTaskByStageId[stageId] || { name: '', description: '', completedAt: '' }
+  }
+
+  function updateNewTaskDraft(stageId, patch) {
+    setNewTaskByStageId((current) => ({
+      ...current,
+      [stageId]: {
+        ...(current[stageId] || { name: '', description: '', completedAt: '' }),
+        ...patch,
+      },
+    }))
+  }
+
   async function handleDeletePlan() {
     if (!plan || !window.confirm('Delete this plan?')) {
       return
@@ -107,6 +183,7 @@ export default function PlanDetailPage() {
     try {
       await createPlanStage(plan.id, newStage)
       setNewStage({ name: '', description: '', completedAt: '' })
+      setOpenPanels((current) => ({ ...current, 'add-stage-panel': false }))
       await refresh({ silent: true })
     } catch (error) {
       setActionError(errorMessage(error, 'Failed to add stage.'))
@@ -115,33 +192,16 @@ export default function PlanDetailPage() {
     }
   }
 
-  async function handleEditStage(stage) {
+  async function handleUpdateStage(event, stage) {
+    event.preventDefault()
     if (!plan || !stage) {
-      return
-    }
-    const nextName = window.prompt('Stage name', String(stage.name || ''))
-    if (nextName == null) {
-      return
-    }
-    const nextDescription = window.prompt('Stage description (optional)', String(stage.description || ''))
-    if (nextDescription == null) {
-      return
-    }
-    const nextCompletedAt = window.prompt(
-      'Completed at (optional, ISO date/time)',
-      parseCompletedAtInput(stage.completed_at),
-    )
-    if (nextCompletedAt == null) {
       return
     }
     setActionError('')
     setBusy(true)
     try {
-      await updatePlanStage(plan.id, stage.id, {
-        name: nextName,
-        description: nextDescription,
-        completedAt: nextCompletedAt,
-      })
+      await updatePlanStage(plan.id, stage.id, getStageEditDraft(stage))
+      setOpenPanels((current) => ({ ...current, [`stage-edit-${stage.id}`]: false }))
       await refresh({ silent: true })
     } catch (error) {
       setActionError(errorMessage(error, 'Failed to update stage.'))
@@ -166,30 +226,17 @@ export default function PlanDetailPage() {
     }
   }
 
-  function updateNewTask(stageId, patch) {
-    setNewTaskByStageId((current) => ({
-      ...current,
-      [stageId]: {
-        name: '',
-        description: '',
-        completedAt: '',
-        ...(current[stageId] || {}),
-        ...patch,
-      },
-    }))
-  }
-
   async function handleCreateTask(event, stageId) {
     event.preventDefault()
     if (!plan) {
       return
     }
-    const draft = newTaskByStageId[stageId] || { name: '', description: '', completedAt: '' }
     setActionError('')
     setBusy(true)
     try {
-      await createPlanTask(plan.id, stageId, draft)
-      updateNewTask(stageId, { name: '', description: '', completedAt: '' })
+      await createPlanTask(plan.id, stageId, getNewTaskDraft(stageId))
+      updateNewTaskDraft(stageId, { name: '', description: '', completedAt: '' })
+      setOpenPanels((current) => ({ ...current, [`stage-add-task-${stageId}`]: false }))
       await refresh({ silent: true })
     } catch (error) {
       setActionError(errorMessage(error, 'Failed to add task.'))
@@ -198,33 +245,16 @@ export default function PlanDetailPage() {
     }
   }
 
-  async function handleEditTask(stageId, task) {
+  async function handleUpdateTask(event, stageId, task) {
+    event.preventDefault()
     if (!plan || !task) {
-      return
-    }
-    const nextName = window.prompt('Task name', String(task.name || ''))
-    if (nextName == null) {
-      return
-    }
-    const nextDescription = window.prompt('Task description (optional)', String(task.description || ''))
-    if (nextDescription == null) {
-      return
-    }
-    const nextCompletedAt = window.prompt(
-      'Completed at (optional, ISO date/time)',
-      parseCompletedAtInput(task.completed_at),
-    )
-    if (nextCompletedAt == null) {
       return
     }
     setActionError('')
     setBusy(true)
     try {
-      await updatePlanTask(plan.id, stageId, task.id, {
-        name: nextName,
-        description: nextDescription,
-        completedAt: nextCompletedAt,
-      })
+      await updatePlanTask(plan.id, stageId, task.id, getTaskEditDraft(task))
+      setOpenPanels((current) => ({ ...current, [`task-edit-${task.id}`]: false }))
       await refresh({ silent: true })
     } catch (error) {
       setActionError(errorMessage(error, 'Failed to update task.'))
@@ -252,15 +282,21 @@ export default function PlanDetailPage() {
   return (
     <section className="stack" aria-label="Plan detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{plan ? plan.name : 'Plan'}</h2>
-            <p>Native React detail for `/plans/:planId` with stage/task mutations.</p>
-          </div>
-          <div className="table-actions">
-            {plan ? <Link to={`/plans/${plan.id}/edit`} className="btn-link btn-secondary">Edit Plan</Link> : null}
-            <Link to="/plans" className="btn-link btn-secondary">All Plans</Link>
-            {plan ? (
+        <div className="title-row" style={{ marginBottom: '16px' }}>
+          <Link to="/plans" className="btn btn-secondary">
+            <i className="fa-solid fa-arrow-left" />
+            back to plans
+          </Link>
+          {plan ? (
+            <div className="table-actions">
+              <Link
+                to={`/plans/${plan.id}/edit`}
+                className="icon-button"
+                aria-label="Edit plan"
+                title="Edit plan"
+              >
+                <ActionIcon name="edit" />
+              </Link>
               <button
                 type="button"
                 className="icon-button icon-button-danger"
@@ -271,200 +307,353 @@ export default function PlanDetailPage() {
               >
                 <ActionIcon name="trash" />
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
+
         {state.loading ? <p>Loading plan...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
+
         {plan ? (
-          <dl className="kv-grid">
-            <div>
-              <dt>Description</dt>
-              <dd>{plan.description || '-'}</dd>
+          <>
+            <div className="card-header">
+              <div>
+                <p className="eyebrow">plan {plan.id}</p>
+                <h2 className="section-title">{plan.name}</h2>
+              </div>
             </div>
-            <div>
-              <dt>Completed</dt>
-              <dd>{plan.completed_at || '-'}</dd>
-            </div>
-            <div>
-              <dt>Stages</dt>
-              <dd>{summary?.stage_count ?? stages.length}</dd>
-            </div>
-            <div>
-              <dt>Tasks</dt>
-              <dd>{summary?.task_count ?? 0}</dd>
-            </div>
-          </dl>
+            <dl className="meta-list meta-list-compact" style={{ marginTop: '20px' }}>
+              <div className="meta-span">
+                <dt>Description</dt>
+                <dd>{plan.description || '-'}</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd>{plan.completed_at || '-'}</dd>
+              </div>
+              <div>
+                <dt>Stages</dt>
+                <dd>{stageCount}</dd>
+              </div>
+              <div>
+                <dt>Tasks</dt>
+                <dd>{taskCount}</dd>
+              </div>
+              <div>
+                <dt>Created</dt>
+                <dd>{plan.created_at || '-'}</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd>{plan.updated_at || '-'}</dd>
+              </div>
+            </dl>
+          </>
         ) : null}
       </article>
 
       <article className="card">
-        <h2>Add Stage</h2>
-        <form className="form-grid" onSubmit={handleCreateStage}>
-          <label className="field">
-            <span>Stage name</span>
-            <input
-              type="text"
-              required
-              value={newStage.name}
-              onChange={(event) => setNewStage((current) => ({ ...current, name: event.target.value }))}
-            />
-          </label>
-          <label className="field">
-            <span>Completed at (optional)</span>
-            <input
-              type="text"
-              value={newStage.completedAt}
-              onChange={(event) => setNewStage((current) => ({ ...current, completedAt: event.target.value }))}
-              placeholder="YYYY-MM-DDTHH:MM"
-            />
-          </label>
-          <label className="field field-span">
-            <span>Description (optional)</span>
-            <textarea
-              value={newStage.description}
-              onChange={(event) => setNewStage((current) => ({ ...current, description: event.target.value }))}
-            />
-          </label>
-          <div className="form-actions">
-            <button type="submit" className="btn-link" disabled={busy}>
-              Add Stage
-            </button>
-          </div>
-        </form>
-      </article>
+        <div className="card-header">
+          <h2 className="section-title">Plan Outline</h2>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => togglePanel('add-stage-panel')}
+          >
+            <i className="fa-solid fa-plus" />
+            add stage
+          </button>
+        </div>
 
-      <article className="card">
-        <h2>Plan Outline</h2>
-        {stages.length === 0 ? <p>No stages yet.</p> : null}
-        {stages.map((stage, index) => {
-          const tasks = Array.isArray(stage.tasks) ? stage.tasks : []
-          const draft = newTaskByStageId[stage.id] || { name: '', description: '', completedAt: '' }
-          return (
-            <details key={stage.id} className="card" open={index === 0}>
-              <summary className="title-row">
-                <strong>{stage.name}</strong>
-                <div className="table-actions">
-                  <span className="chip">{tasks.length} task{tasks.length === 1 ? '' : 's'}</span>
-                  <span className="toolbar-meta">completed: {stage.completed_at || '-'}</span>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label="Edit stage"
-                    title="Edit stage"
-                    disabled={busy}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      handleEditStage(stage)
-                    }}
-                  >
-                    <ActionIcon name="edit" />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button icon-button-danger"
-                    aria-label="Delete stage"
-                    title="Delete stage"
-                    disabled={busy}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      handleDeleteStage(stage.id)
-                    }}
-                  >
-                    <ActionIcon name="trash" />
-                  </button>
-                </div>
-              </summary>
-              {stage.description ? <p>{stage.description}</p> : null}
-              <div className="stack-sm">
-                <h3>Tasks</h3>
-                {tasks.length === 0 ? <p className="toolbar-meta">No tasks for this stage yet.</p> : null}
-                {tasks.length > 0 ? (
-                  <div className="table-wrap">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Task</th>
-                          <th>Completed</th>
-                          <th className="table-actions-cell">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tasks.map((task) => (
-                          <tr key={task.id}>
-                            <td>
-                              <strong>{task.name}</strong>
-                              {task.description ? <p className="table-note">{task.description}</p> : null}
-                            </td>
-                            <td>{task.completed_at || '-'}</td>
-                            <td className="table-actions-cell">
-                              <div className="table-actions">
-                                <button
-                                  type="button"
-                                  className="icon-button"
-                                  aria-label="Edit task"
-                                  title="Edit task"
-                                  disabled={busy}
-                                  onClick={() => handleEditTask(stage.id, task)}
-                                >
-                                  <ActionIcon name="edit" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="icon-button icon-button-danger"
-                                  aria-label="Delete task"
-                                  title="Delete task"
-                                  disabled={busy}
-                                  onClick={() => handleDeleteTask(stage.id, task.id)}
-                                >
-                                  <ActionIcon name="trash" />
-                                </button>
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Expand each stage to browse subtasks, notes, and update progress.
+        </p>
+
+        {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
+        {actionError ? <p className="error-text" style={{ marginTop: '12px' }}>{actionError}</p> : null}
+
+        {stages.length > 0 ? (
+          <div className="stack" style={{ marginTop: '20px' }}>
+            {stages.map((stage, index) => {
+              const tasks = Array.isArray(stage.tasks) ? stage.tasks : []
+              const stageEditDraft = getStageEditDraft(stage)
+              const newTaskDraft = getNewTaskDraft(stage.id)
+              const stageTaskPanelId = `stage-add-task-${stage.id}`
+              const stageEditPanelId = `stage-edit-${stage.id}`
+
+              return (
+                <details
+                  key={stage.id}
+                  className={`subcard plan-stage${stage.completed_at ? ' is-complete' : ''}`}
+                  defaultOpen={index === 0}
+                >
+                  <summary className="plan-stage-summary">
+                    <div>
+                      <p className="eyebrow">stage {index + 1}</p>
+                      <p className="plan-node-title">{stage.name}</p>
+                    </div>
+                    <div className="row" style={{ gap: '10px' }}>
+                      <span className="chip">{tasks.length} task{tasks.length === 1 ? '' : 's'}</span>
+                      <span className={`plan-completed-meta${stage.completed_at ? ' is-complete' : ''}`}>
+                        completed: {stage.completed_at || '-'}
+                      </span>
+                      <div className="plan-stage-actions">
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="Add task"
+                          title="Add task"
+                          onClick={(event) => {
+                            stopSummaryAction(event)
+                            togglePanel(stageTaskPanelId)
+                          }}
+                        >
+                          <ActionIcon name="plus" />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="Edit stage"
+                          title="Edit stage"
+                          onClick={(event) => {
+                            stopSummaryAction(event)
+                            updateStageEditDraft(stage, {})
+                            togglePanel(stageEditPanelId)
+                          }}
+                        >
+                          <ActionIcon name="edit" />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button icon-button-danger"
+                          aria-label="Delete stage"
+                          title="Delete stage"
+                          disabled={busy}
+                          onClick={(event) => {
+                            stopSummaryAction(event)
+                            handleDeleteStage(stage.id)
+                          }}
+                        >
+                          <ActionIcon name="trash" />
+                        </button>
+                      </div>
+                    </div>
+                  </summary>
+
+                  {stage.description ? (
+                    <p className="muted" style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>
+                      {stage.description}
+                    </p>
+                  ) : null}
+
+                  <div className="plan-tree">
+                    {tasks.length > 0 ? (
+                      tasks.map((task) => {
+                        const taskEditPanelId = `task-edit-${task.id}`
+                        const taskEditDraft = getTaskEditDraft(task)
+
+                        return (
+                          <details key={task.id} className={`plan-task${task.completed_at ? ' is-complete' : ''}`}>
+                            <summary className="plan-task-summary">
+                              <span className="plan-node-title">{task.name}</span>
+                              <div className="row" style={{ gap: '10px' }}>
+                                <span className={`plan-completed-meta${task.completed_at ? ' is-complete' : ''}`}>
+                                  completed: {task.completed_at || '-'}
+                                </span>
+                                <div className="plan-task-actions">
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    aria-label="Edit task"
+                                    title="Edit task"
+                                    onClick={(event) => {
+                                      stopSummaryAction(event)
+                                      updateTaskEditDraft(task, {})
+                                      togglePanel(taskEditPanelId)
+                                    }}
+                                  >
+                                    <ActionIcon name="edit" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-button icon-button-danger"
+                                    aria-label="Delete task"
+                                    title="Delete task"
+                                    disabled={busy}
+                                    onClick={(event) => {
+                                      stopSummaryAction(event)
+                                      handleDeleteTask(stage.id, task.id)
+                                    }}
+                                  >
+                                    <ActionIcon name="trash" />
+                                  </button>
+                                </div>
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </summary>
+
+                            {task.description ? (
+                              <p className="muted" style={{ marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+                                {task.description}
+                              </p>
+                            ) : null}
+
+                            <div className={`inline-edit plan-inline-panel${openPanels[taskEditPanelId] ? '' : ' is-hidden'}`}>
+                              <form className="form-grid" style={{ marginTop: '10px' }} onSubmit={(event) => handleUpdateTask(event, stage.id, task)}>
+                                <label className="field">
+                                  <span>task name</span>
+                                  <input
+                                    type="text"
+                                    required
+                                    value={taskEditDraft.name}
+                                    onChange={(event) => updateTaskEditDraft(task, { name: event.target.value })}
+                                  />
+                                </label>
+                                <label className="field">
+                                  <span>completed at (optional)</span>
+                                  <input
+                                    type="datetime-local"
+                                    value={taskEditDraft.completedAt}
+                                    onChange={(event) => updateTaskEditDraft(task, { completedAt: event.target.value })}
+                                  />
+                                </label>
+                                <label className="field field-span">
+                                  <span>description (optional)</span>
+                                  <textarea
+                                    value={taskEditDraft.description}
+                                    onChange={(event) => updateTaskEditDraft(task, { description: event.target.value })}
+                                  />
+                                </label>
+                                <div className="form-actions">
+                                  <button type="submit" className="btn btn-secondary" disabled={busy}>
+                                    <i className="fa-solid fa-floppy-disk" />
+                                    save task
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          </details>
+                        )
+                      })
+                    ) : (
+                      <p className="muted">No tasks for this stage yet.</p>
+                    )}
                   </div>
-                ) : null}
-                <h3>Add Task</h3>
-                <form className="form-grid" onSubmit={(event) => handleCreateTask(event, stage.id)}>
-                  <label className="field">
-                    <span>Task name</span>
-                    <input
-                      type="text"
-                      required
-                      value={draft.name}
-                      onChange={(event) => updateNewTask(stage.id, { name: event.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Completed at (optional)</span>
-                    <input
-                      type="text"
-                      value={draft.completedAt}
-                      placeholder="YYYY-MM-DDTHH:MM"
-                      onChange={(event) => updateNewTask(stage.id, { completedAt: event.target.value })}
-                    />
-                  </label>
-                  <label className="field field-span">
-                    <span>Description (optional)</span>
-                    <textarea
-                      value={draft.description}
-                      onChange={(event) => updateNewTask(stage.id, { description: event.target.value })}
-                    />
-                  </label>
-                  <div className="form-actions">
-                    <button type="submit" className="btn-link" disabled={busy}>
-                      Add Task
-                    </button>
+
+                  <div className={`inline-edit plan-inline-panel${openPanels[stageTaskPanelId] ? '' : ' is-hidden'}`} style={{ marginTop: '12px' }}>
+                    <p className="muted" style={{ fontSize: '12px' }}>add task</p>
+                    <form className="form-grid" style={{ marginTop: '10px' }} onSubmit={(event) => handleCreateTask(event, stage.id)}>
+                      <label className="field">
+                        <span>task name</span>
+                        <input
+                          type="text"
+                          required
+                          value={newTaskDraft.name}
+                          onChange={(event) => updateNewTaskDraft(stage.id, { name: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>completed at (optional)</span>
+                        <input
+                          type="datetime-local"
+                          value={newTaskDraft.completedAt}
+                          onChange={(event) => updateNewTaskDraft(stage.id, { completedAt: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span">
+                        <span>description (optional)</span>
+                        <textarea
+                          value={newTaskDraft.description}
+                          onChange={(event) => updateNewTaskDraft(stage.id, { description: event.target.value })}
+                        />
+                      </label>
+                      <div className="form-actions">
+                        <button type="submit" className="btn btn-secondary" disabled={busy}>
+                          <i className="fa-solid fa-plus" />
+                          add task
+                        </button>
+                      </div>
+                    </form>
                   </div>
-                </form>
-              </div>
-            </details>
-          )
-        })}
+
+                  <div className={`inline-edit plan-inline-panel${openPanels[stageEditPanelId] ? '' : ' is-hidden'}`} style={{ marginTop: '12px' }}>
+                    <p className="muted" style={{ fontSize: '12px' }}>edit stage</p>
+                    <form className="form-grid" style={{ marginTop: '10px' }} onSubmit={(event) => handleUpdateStage(event, stage)}>
+                      <label className="field">
+                        <span>stage name</span>
+                        <input
+                          type="text"
+                          required
+                          value={stageEditDraft.name}
+                          onChange={(event) => updateStageEditDraft(stage, { name: event.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>completed at (optional)</span>
+                        <input
+                          type="datetime-local"
+                          value={stageEditDraft.completedAt}
+                          onChange={(event) => updateStageEditDraft(stage, { completedAt: event.target.value })}
+                        />
+                      </label>
+                      <label className="field field-span">
+                        <span>description (optional)</span>
+                        <textarea
+                          value={stageEditDraft.description}
+                          onChange={(event) => updateStageEditDraft(stage, { description: event.target.value })}
+                        />
+                      </label>
+                      <div className="form-actions">
+                        <button type="submit" className="btn btn-secondary" disabled={busy}>
+                          <i className="fa-solid fa-floppy-disk" />
+                          save stage
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </details>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="muted" style={{ marginTop: '16px' }}>No stages yet.</p>
+        )}
+
+        <div className={`inline-edit plan-inline-panel${openPanels['add-stage-panel'] ? '' : ' is-hidden'}`} style={{ marginTop: '16px' }}>
+          <p className="muted" style={{ fontSize: '12px' }}>add stage</p>
+          <form className="form-grid" style={{ marginTop: '10px' }} onSubmit={handleCreateStage}>
+            <label className="field">
+              <span>stage name</span>
+              <input
+                type="text"
+                required
+                value={newStage.name}
+                onChange={(event) => setNewStage((current) => ({ ...current, name: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>completed at (optional)</span>
+              <input
+                type="datetime-local"
+                value={newStage.completedAt}
+                onChange={(event) => setNewStage((current) => ({ ...current, completedAt: event.target.value }))}
+              />
+            </label>
+            <label className="field field-span">
+              <span>description (optional)</span>
+              <textarea
+                value={newStage.description}
+                onChange={(event) => setNewStage((current) => ({ ...current, description: event.target.value }))}
+              />
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="btn btn-secondary" disabled={busy}>
+                <i className="fa-solid fa-plus" />
+                add stage
+              </button>
+            </div>
+          </form>
+        </div>
       </article>
     </section>
   )

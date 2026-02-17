@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
 import {
   getTaskTemplateEdit,
@@ -34,6 +33,7 @@ export default function TaskTemplateEditPage() {
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [busyAttachmentId, setBusyAttachmentId] = useState(null)
+  const [selectedFiles, setSelectedFiles] = useState([])
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -137,33 +137,48 @@ export default function TaskTemplateEditPage() {
   return (
     <section className="stack" aria-label="Edit task template">
       <article className="card">
-        <div className="title-row">
-          <h2>{template ? `Edit ${template.name}` : 'Edit Task Template'}</h2>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
             {template ? (
-              <Link to={`/task-templates/${template.id}`} className="btn-link btn-secondary">
-                Back to Task Template
+              <Link to={`/task-templates/${template.id}`} className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back to task
               </Link>
             ) : null}
-            <Link to="/task-templates" className="btn-link btn-secondary">All Workflow Nodes</Link>
+            <Link to="/task-templates" className="btn btn-secondary">
+              <i className="fa-solid fa-list" />
+              all tasks
+            </Link>
           </div>
         </div>
-        {state.loading ? <p>Loading task template...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+
+        <div className="card-header">
+          <div>
+            {template ? <p className="eyebrow">task {template.id}</p> : null}
+            <h2 className="section-title">Edit Task</h2>
+          </div>
+        </div>
+
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Update task metadata without running a node.
+        </p>
+
+        {state.loading ? <p style={{ marginTop: '20px' }}>Loading task template...</p> : null}
+        {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
+        {formError ? <p className="error-text" style={{ marginTop: '12px' }}>{formError}</p> : null}
+
         {!state.loading && !state.error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>name</span>
               <input
                 type="text"
-                required
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               />
             </label>
             <label className="field">
-              <span>Description (optional)</span>
+              <span>description (optional)</span>
               <input
                 type="text"
                 value={form.description}
@@ -171,7 +186,7 @@ export default function TaskTemplateEditPage() {
               />
             </label>
             <label className="field">
-              <span>Agent</span>
+              <span>agent</span>
               <select
                 value={form.agentId}
                 onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value }))}
@@ -183,45 +198,73 @@ export default function TaskTemplateEditPage() {
                   </option>
                 ))}
               </select>
+              {agents.length === 0 ? (
+                <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                  Create an agent when you want to attach one.
+                </span>
+              ) : null}
             </label>
             <label className="field field-span">
-              <span>Prompt</span>
+              <span>prompt</span>
               <textarea
-                required
                 value={form.prompt}
                 onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))}
               />
             </label>
+            <label className="field field-span">
+              <span>attachments (optional)</span>
+              <input
+                type="file"
+                multiple
+                onChange={(event) => setSelectedFiles(Array.from(event.target.files || []))}
+              />
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                Paste images into the prompt or choose files. Saved to <code>data/attachments</code>.
+              </span>
+              <div className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                {selectedFiles.length > 0
+                  ? selectedFiles.map((file) => file.name).join(', ')
+                  : ''}
+              </div>
+            </label>
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={saving}>
-                {saving ? 'Saving...' : 'Save Task Template'}
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                <i className="fa-solid fa-floppy-disk" />
+                {saving ? 'saving...' : 'save'}
               </button>
+              {template ? (
+                <Link className="btn btn-secondary" to={`/task-templates/${template.id}`}>
+                  <i className="fa-solid fa-arrow-left" />
+                  cancel
+                </Link>
+              ) : null}
             </div>
           </form>
         ) : null}
-      </article>
-      {attachments.length > 0 ? (
-        <article className="card">
-          <h2>Existing Attachments</h2>
-          <ul className="stack-sm">
+
+        {attachments.length > 0 ? (
+          <div className="stack" style={{ marginTop: '12px' }}>
+            <p className="muted" style={{ fontSize: '12px' }}>Existing attachments:</p>
             {attachments.map((attachment) => (
-              <li key={attachment.id} className="title-row">
-                <span>{attachment.file_name}</span>
+              <div key={attachment.id} className="row" style={{ gap: '8px', alignItems: 'center' }}>
+                <p className="muted" style={{ fontSize: '12px', margin: 0 }}>
+                  {attachment.file_name}
+                  {attachment.file_path ? ` (${attachment.file_path})` : ''}
+                </p>
                 <button
                   type="button"
-                  className="icon-button icon-button-danger"
-                  aria-label="Remove attachment"
-                  title="Remove attachment"
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 10px' }}
                   disabled={busyAttachmentId === attachment.id}
                   onClick={() => handleRemoveAttachment(attachment.id)}
                 >
-                  <ActionIcon name="trash" />
+                  remove
                 </button>
-              </li>
+              </div>
             ))}
-          </ul>
-        </article>
-      ) : null}
+          </div>
+        ) : null}
+      </article>
     </section>
   )
 }

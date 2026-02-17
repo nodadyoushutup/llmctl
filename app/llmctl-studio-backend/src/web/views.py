@@ -30,6 +30,7 @@ from flask import (
 )
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from services.celery_app import HUGGINGFACE_DOWNLOAD_QUEUE, celery_app
 from services.code_review import (
@@ -806,6 +807,7 @@ def _serialize_agent_list_item(
         "role_id": agent.role_id,
         "role_name": role_name or "",
         "status": status,
+        "last_run_at": _human_time(agent.last_run_at),
         "created_at": _human_time(agent.created_at),
         "updated_at": _human_time(agent.updated_at),
     }
@@ -6353,6 +6355,132 @@ def _serialize_task_template_node(item: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _serialize_model(
+    model: LLMModel,
+    *,
+    default_model_id: int | None = None,
+    include_config: bool = False,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": model.id,
+        "name": model.name,
+        "description": model.description or "",
+        "provider": model.provider,
+        "provider_label": LLM_PROVIDER_LABELS.get(model.provider, model.provider),
+        "model_name": _model_display_name(model),
+        "is_default": default_model_id is not None and model.id == default_model_id,
+        "created_at": _human_time(model.created_at),
+        "updated_at": _human_time(model.updated_at),
+    }
+    if include_config:
+        payload["config"] = _decode_model_config(model.config_json)
+        payload["config_json"] = _format_json_object_for_display(model.config_json)
+    return payload
+
+
+def _safe_relationship_count(loader) -> int:
+    try:
+        values = loader()
+    except DetachedInstanceError:
+        return 0
+    return len(values or [])
+
+
+def _serialize_mcp_server(
+    mcp_server: MCPServer,
+    *,
+    include_config: bool = False,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": mcp_server.id,
+        "name": mcp_server.name,
+        "server_key": mcp_server.server_key,
+        "description": mcp_server.description or "",
+        "server_type": mcp_server.server_type or MCP_SERVER_TYPE_CUSTOM,
+        "is_integrated": bool(mcp_server.is_integrated),
+        "binding_count": _safe_relationship_count(lambda: mcp_server.task_templates)
+        + _safe_relationship_count(lambda: mcp_server.flowchart_nodes)
+        + _safe_relationship_count(lambda: mcp_server.tasks),
+        "created_at": _human_time(mcp_server.created_at),
+        "updated_at": _human_time(mcp_server.updated_at),
+    }
+    if include_config:
+        payload["config"] = _parse_json_dict(mcp_server.config_json)
+        payload["config_json"] = _format_json_object_for_display(mcp_server.config_json)
+    return payload
+
+
+def _serialize_script(
+    script: Script,
+    *,
+    include_content: bool = False,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": script.id,
+        "file_name": script.file_name,
+        "description": script.description or "",
+        "script_type": script.script_type,
+        "script_type_label": _script_type_label(script.script_type),
+        "file_path": script.file_path,
+        "binding_count": _safe_relationship_count(lambda: script.tasks)
+        + _safe_relationship_count(lambda: script.task_templates)
+        + _safe_relationship_count(lambda: script.flowchart_nodes),
+        "created_at": _human_time(script.created_at),
+        "updated_at": _human_time(script.updated_at),
+    }
+    if include_content:
+        payload["content"] = _read_script_content(script)
+    return payload
+
+
+def _serialize_skill(skill: Skill) -> dict[str, object]:
+    latest_version = _latest_skill_version(skill)
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "display_name": skill.display_name,
+        "description": skill.description or "",
+        "status": skill.status,
+        "source_type": skill.source_type,
+        "source_ref": skill.source_ref,
+        "is_git_read_only": _is_git_based_skill(skill),
+        "version_count": len(skill.versions or []),
+        "latest_version": latest_version.version if latest_version is not None else None,
+        "binding_count": _safe_relationship_count(lambda: skill.agents),
+        "created_at": _human_time(skill.created_at),
+        "updated_at": _human_time(skill.updated_at),
+    }
+
+
+def _serialize_attachment(attachment: Attachment) -> dict[str, object]:
+    is_image = _is_image_attachment(attachment)
+    preview_url = (
+        url_for("agents.view_attachment_file", attachment_id=attachment.id)
+        if is_image and attachment.file_path
+        else None
+    )
+    return {
+        "id": attachment.id,
+        "file_name": attachment.file_name,
+        "file_path": attachment.file_path,
+        "content_type": attachment.content_type,
+        "size_bytes": attachment.size_bytes,
+        "is_image": is_image,
+        "preview_url": preview_url,
+        "binding_count": _safe_relationship_count(lambda: attachment.tasks)
+        + _safe_relationship_count(lambda: attachment.templates)
+        + _safe_relationship_count(lambda: attachment.flowchart_nodes),
+        "created_at": _human_time(attachment.created_at),
+        "updated_at": _human_time(attachment.updated_at),
+    }
+
+
+def _serialize_choice_options(
+    options: tuple[tuple[str, str], ...],
+) -> list[dict[str, str]]:
+    return [{"value": value, "label": label} for value, label in options]
+
+
 def _flowchart_trace_int(value: object) -> int | None:
     if value is None:
         return None
@@ -8693,6 +8821,7 @@ def api_chat_activity():
     event_class = (request.args.get("event_class") or "").strip() or None
     event_type = (request.args.get("event_type") or "").strip() or None
     reason_code = (request.args.get("reason_code") or "").strip() or None
+    limit = _parse_positive_int(request.args.get("limit"), 200)
     try:
         thread_id = _coerce_optional_int(
             request.args.get("thread_id"),
@@ -8701,13 +8830,24 @@ def api_chat_activity():
         )
     except ValueError:
         return {"error": "thread_id must be an integer."}, 400
+    events = list_chat_activity(
+        event_class=event_class,
+        event_type=event_type,
+        reason_code=reason_code,
+        thread_id=thread_id,
+        limit=limit,
+    )
     return {
-        "events": list_chat_activity(
-            event_class=event_class,
-            event_type=event_type,
-            reason_code=reason_code,
-            thread_id=thread_id,
-        )
+        "events": events,
+        "threads": list_chat_threads(include_archived=True),
+        "filters": {
+            "event_class": event_class or "",
+            "event_type": event_type or "",
+            "reason_code": reason_code or "",
+            "thread_id": thread_id,
+            "limit": limit,
+        },
+        "meta": {"total": len(events)},
     }
 
 
@@ -12196,6 +12336,18 @@ def list_mcps():
     _, summary = _agent_rollup(agents)
     mcp_servers = _load_mcp_servers()
     integrated_mcp_servers, custom_mcp_servers = _split_mcp_servers_by_type(mcp_servers)
+    if _workflow_wants_json():
+        return {
+            "integrated_mcp_servers": [
+                _serialize_mcp_server(server, include_config=True)
+                for server in integrated_mcp_servers
+            ],
+            "custom_mcp_servers": [
+                _serialize_mcp_server(server, include_config=True)
+                for server in custom_mcp_servers
+            ],
+            "summary": summary,
+        }
     return render_template(
         "mcps.html",
         integrated_mcp_servers=integrated_mcp_servers,
@@ -12212,19 +12364,15 @@ def list_models():
     models = _load_llm_models()
     llm_settings = _load_integration_settings("llm")
     default_model_id = resolve_default_model_id(llm_settings)
-    model_rows = []
-    for model in models:
-        model_rows.append(
-            {
-                "id": model.id,
-                "name": model.name,
-                "description": model.description,
-                "provider": model.provider,
-                "provider_label": LLM_PROVIDER_LABELS.get(model.provider, model.provider),
-                "model_name": _model_display_name(model),
-                "is_default": model.id == default_model_id,
-            }
-        )
+    model_rows = [
+        _serialize_model(model, default_model_id=default_model_id)
+        for model in models
+    ]
+    if _workflow_wants_json():
+        return {
+            "models": model_rows,
+            "default_model_id": default_model_id,
+        }
     return render_template(
         "models.html",
         models=model_rows,
@@ -12241,6 +12389,27 @@ def new_model():
     codex_default_model = _codex_default_model(model_options.get("codex"))
     vllm_local_default_model = _vllm_local_default_model(local_vllm_models)
     vllm_remote_default_model = _vllm_remote_default_model()
+    if _workflow_wants_json():
+        return {
+            "provider_options": _provider_options(),
+            "selected_provider": "codex",
+            "codex_config": _codex_model_config_defaults(
+                {},
+                default_model=codex_default_model,
+            ),
+            "gemini_config": _gemini_model_config_defaults({}),
+            "claude_config": _simple_model_config_defaults({}),
+            "vllm_local_config": _vllm_local_model_config_defaults(
+                {},
+                default_model=vllm_local_default_model,
+            ),
+            "vllm_remote_config": _vllm_remote_model_config_defaults(
+                {},
+                default_model=vllm_remote_default_model,
+            ),
+            "vllm_local_models": local_vllm_models,
+            "model_options": model_options,
+        }
     return render_template(
         "model_new.html",
         provider_options=_provider_options(),
@@ -12268,28 +12437,73 @@ def new_model():
 
 @bp.post("/models")
 def create_model():
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    provider = (request.form.get("provider") or "").strip().lower()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    provider_raw = (
+        payload.get("provider")
+        if is_api_request
+        else request.form.get("provider")
+    )
+    name = str(name_raw or "").strip()
+    description = str(description_raw or "").strip()
+    provider = str(provider_raw or "").strip().lower()
 
     if not name:
+        if is_api_request:
+            return {"error": "Model name is required."}, 400
         flash("Model name is required.", "error")
         return redirect(url_for("agents.new_model"))
     if provider not in LLM_PROVIDERS:
+        if is_api_request:
+            return {"error": "Unknown provider selection."}, 400
         flash("Unknown provider selection.", "error")
         return redirect(url_for("agents.new_model"))
 
-    config_payload = _model_config_payload(provider, request.form)
+    config_payload: dict[str, object]
+    if is_api_request and "config" in payload:
+        raw_config = payload.get("config")
+        if isinstance(raw_config, dict):
+            config_payload = raw_config
+        elif isinstance(raw_config, str):
+            try:
+                parsed_config = json.loads(raw_config)
+            except json.JSONDecodeError:
+                return {"error": "config must be valid JSON."}, 400
+            if not isinstance(parsed_config, dict):
+                return {"error": "config must be an object."}, 400
+            config_payload = parsed_config
+        else:
+            return {"error": "config must be an object."}, 400
+    else:
+        config_source = (
+            {key: ("" if value is None else str(value)) for key, value in payload.items()}
+            if is_api_request
+            else request.form
+        )
+        config_payload = _model_config_payload(provider, config_source)
+
     markdown_filename_error = _apply_model_markdown_filename_validation(
         provider,
         config_payload,
     )
     if markdown_filename_error:
+        if is_api_request:
+            return {"error": markdown_filename_error}, 400
         flash(markdown_filename_error, "error")
         return redirect(url_for("agents.new_model"))
     model_options = _provider_model_options()
     model_name = str(config_payload.get("model") or "").strip()
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
+        if is_api_request:
+            return {"error": "Codex model must be selected from the configured options."}, 400
         flash("Codex model must be selected from the configured options.", "error")
         return redirect(url_for("agents.new_model"))
     if provider == "vllm_local" and not _model_option_allowed(
@@ -12297,6 +12511,10 @@ def create_model():
         model_name,
         model_options,
     ):
+        if is_api_request:
+            return {
+                "error": "vLLM Local model must be selected from the discovered local model options."
+            }, 400
         flash(
             "vLLM Local model must be selected from the discovered local model options.",
             "error",
@@ -12313,12 +12531,21 @@ def create_model():
             config_json=config_json,
         )
 
+    if is_api_request:
+        return {"ok": True, "model": _serialize_model(model, include_config=True)}, 201
     flash(f"Model {model.id} created.", "success")
     return redirect(url_for("agents.view_model", model_id=model.id))
 
 
 @bp.get("/models/<int:model_id>")
 def view_model(model_id: int):
+    llm_settings = _load_integration_settings("llm")
+    default_model_id = resolve_default_model_id(llm_settings)
+    model_payload: dict[str, object] | None = None
+    template_payload: list[dict[str, object]] = []
+    node_payload: list[dict[str, object]] = []
+    task_payload: list[dict[str, object]] = []
+    flowcharts_by_id: dict[int, str] = {}
     with session_scope() as session:
         model = session.get(LLMModel, model_id)
         if model is None:
@@ -12359,12 +12586,58 @@ def view_model(model_id: int):
                 select(Flowchart.id, Flowchart.name).where(Flowchart.id.in_(flowchart_ids))
             ).all()
             flowcharts_by_id = {row[0]: row[1] for row in rows}
-    llm_settings = _load_integration_settings("llm")
-    default_model_id = resolve_default_model_id(llm_settings)
-    is_default = default_model_id == model_id
-    config = _decode_model_config(model.config_json)
-    formatted_config = json.dumps(config, indent=2, sort_keys=True)
-    provider_label = LLM_PROVIDER_LABELS.get(model.provider, model.provider)
+        model_payload = _serialize_model(
+            model,
+            default_model_id=default_model_id,
+            include_config=True,
+        )
+        template_payload = [
+            {
+                "id": template.id,
+                "name": template.name,
+                "description": template.description or "",
+                "created_at": _human_time(template.created_at),
+            }
+            for template in attached_templates
+        ]
+        node_payload = [
+            {
+                "id": node.id,
+                "flowchart_id": node.flowchart_id,
+                "flowchart_name": flowcharts_by_id.get(node.flowchart_id or 0, ""),
+                "node_type": node.node_type,
+                "title": node.title,
+                "ref_id": node.ref_id,
+                "created_at": _human_time(node.created_at),
+                "updated_at": _human_time(node.updated_at),
+            }
+            for node in attached_nodes
+        ]
+        task_payload = [
+            {
+                "id": task.id,
+                "agent_id": task.agent_id,
+                "run_id": task.run_id,
+                "status": task.status,
+                "prompt": task.prompt,
+                "created_at": _human_time(task.created_at),
+                "updated_at": _human_time(task.updated_at),
+            }
+            for task in attached_tasks
+        ]
+    assert model_payload is not None
+    if _workflow_wants_json():
+        return {
+            "model": model_payload,
+            "attached_templates": template_payload,
+            "attached_nodes": node_payload,
+            "attached_tasks": task_payload,
+            "flowcharts_by_id": flowcharts_by_id,
+            "is_default": bool(model_payload.get("is_default")),
+        }
+    is_default = bool(model_payload.get("is_default"))
+    formatted_config = str(model_payload.get("config_json") or "{}")
+    provider_label = str(model_payload.get("provider_label") or "")
     return render_template(
         "model_detail.html",
         model=model,
@@ -12393,6 +12666,32 @@ def edit_model(model_id: int):
     codex_default_model = _codex_default_model(model_options.get("codex"))
     vllm_local_default_model = _vllm_local_default_model(local_vllm_models)
     vllm_remote_default_model = _vllm_remote_default_model()
+    if _workflow_wants_json():
+        return {
+            "model": _serialize_model(model, include_config=True),
+            "provider_options": _provider_options(),
+            "selected_provider": model.provider,
+            "codex_config": _codex_model_config_defaults(
+                config if model.provider == "codex" else {},
+                default_model=codex_default_model,
+            ),
+            "gemini_config": _gemini_model_config_defaults(
+                config if model.provider == "gemini" else {}
+            ),
+            "claude_config": _simple_model_config_defaults(
+                config if model.provider == "claude" else {}
+            ),
+            "vllm_local_config": _vllm_local_model_config_defaults(
+                config if model.provider == "vllm_local" else {},
+                default_model=vllm_local_default_model,
+            ),
+            "vllm_remote_config": _vllm_remote_model_config_defaults(
+                config if model.provider == "vllm_remote" else {},
+                default_model=vllm_remote_default_model,
+            ),
+            "vllm_local_models": local_vllm_models,
+            "model_options": model_options,
+        }
     return render_template(
         "model_edit.html",
         model=model,
@@ -12425,28 +12724,73 @@ def edit_model(model_id: int):
 
 @bp.post("/models/<int:model_id>")
 def update_model(model_id: int):
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    provider = (request.form.get("provider") or "").strip().lower()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    provider_raw = (
+        payload.get("provider")
+        if is_api_request
+        else request.form.get("provider")
+    )
+    name = str(name_raw or "").strip()
+    description = str(description_raw or "").strip()
+    provider = str(provider_raw or "").strip().lower()
 
     if not name:
+        if is_api_request:
+            return {"error": "Model name is required."}, 400
         flash("Model name is required.", "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
     if provider not in LLM_PROVIDERS:
+        if is_api_request:
+            return {"error": "Unknown provider selection."}, 400
         flash("Unknown provider selection.", "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
 
-    config_payload = _model_config_payload(provider, request.form)
+    config_payload: dict[str, object]
+    if is_api_request and "config" in payload:
+        raw_config = payload.get("config")
+        if isinstance(raw_config, dict):
+            config_payload = raw_config
+        elif isinstance(raw_config, str):
+            try:
+                parsed_config = json.loads(raw_config)
+            except json.JSONDecodeError:
+                return {"error": "config must be valid JSON."}, 400
+            if not isinstance(parsed_config, dict):
+                return {"error": "config must be an object."}, 400
+            config_payload = parsed_config
+        else:
+            return {"error": "config must be an object."}, 400
+    else:
+        config_source = (
+            {key: ("" if value is None else str(value)) for key, value in payload.items()}
+            if is_api_request
+            else request.form
+        )
+        config_payload = _model_config_payload(provider, config_source)
+
     markdown_filename_error = _apply_model_markdown_filename_validation(
         provider,
         config_payload,
     )
     if markdown_filename_error:
+        if is_api_request:
+            return {"error": markdown_filename_error}, 400
         flash(markdown_filename_error, "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
     model_options = _provider_model_options()
     model_name = str(config_payload.get("model") or "").strip()
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
+        if is_api_request:
+            return {"error": "Codex model must be selected from the configured options."}, 400
         flash("Codex model must be selected from the configured options.", "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
     if provider == "vllm_local" and not _model_option_allowed(
@@ -12454,6 +12798,10 @@ def update_model(model_id: int):
         model_name,
         model_options,
     ):
+        if is_api_request:
+            return {
+                "error": "vLLM Local model must be selected from the discovered local model options."
+            }, 400
         flash(
             "vLLM Local model must be selected from the discovered local model options.",
             "error",
@@ -12470,24 +12818,42 @@ def update_model(model_id: int):
         model.provider = provider
         model.config_json = config_json
 
+    if is_api_request:
+        return {"ok": True, "model": _serialize_model(model, include_config=True)}
     flash("Model updated.", "success")
     return redirect(url_for("agents.view_model", model_id=model_id))
 
 
 @bp.post("/models/default")
 def update_default_model():
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_models")
     )
-    model_raw = request.form.get("model_id", "").strip()
+    model_raw = (
+        str(payload.get("model_id") or "").strip()
+        if is_api_request
+        else request.form.get("model_id", "").strip()
+    )
     if not model_raw.isdigit():
+        if is_api_request:
+            return {"error": "Model selection required."}, 400
         flash("Model selection required.", "error")
         return redirect(next_url)
     model_id = int(model_raw)
-    make_default = _as_bool(request.form.get("is_default"))
+    make_default = (
+        bool(payload.get("is_default"))
+        if is_api_request
+        else _as_bool(request.form.get("is_default"))
+    )
     with session_scope() as session:
         model = session.get(LLMModel, model_id)
         if model is None:
+            if is_api_request:
+                return {"error": "Model not found."}, 404
             flash("Model not found.", "error")
             return redirect(next_url)
     if make_default:
@@ -12496,15 +12862,20 @@ def update_default_model():
             f"provider_enabled_{model.provider}": "true",
         }
         _save_integration_settings("llm", payload)
+        if is_api_request:
+            return {"ok": True, "default_model_id": model_id}
         flash("Default model updated.", "success")
     else:
         _save_integration_settings("llm", {"default_model_id": ""})
+        if is_api_request:
+            return {"ok": True, "default_model_id": None}
         flash("Default model cleared.", "success")
     return redirect(next_url)
 
 
 @bp.post("/models/<int:model_id>/delete")
 def delete_model(model_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_models")
     )
@@ -12535,13 +12906,22 @@ def delete_model(model_id: int):
             task.model_id = None
         session.delete(model)
 
-    flash("Model deleted.", "success")
     detached_count = len(attached_templates) + len(attached_nodes) + len(attached_tasks)
-    if detached_count:
-        flash(f"Detached from {detached_count} binding(s).", "info")
+    default_cleared = False
     llm_settings = _load_integration_settings("llm")
     if resolve_default_model_id(llm_settings) == model_id:
         _save_integration_settings("llm", {"default_model_id": ""})
+        default_cleared = True
+    if is_api_request:
+        return {
+            "ok": True,
+            "detached_count": detached_count,
+            "default_model_cleared": default_cleared,
+        }
+    flash("Model deleted.", "success")
+    if detached_count:
+        flash(f"Detached from {detached_count} binding(s).", "info")
+    if default_cleared:
         flash("Default model cleared.", "info")
     return redirect(next_url)
 
@@ -12550,6 +12930,16 @@ def delete_model(model_id: int):
 def new_mcp():
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
+    if _workflow_wants_json():
+        return {
+            "summary": summary,
+            "mcp": {
+                "name": "",
+                "server_key": "",
+                "description": "",
+                "config_json": "{}",
+            },
+        }
     return render_template(
         "mcp_new.html",
         summary=summary,
@@ -12560,18 +12950,48 @@ def new_mcp():
 
 @bp.post("/mcps")
 def create_mcp():
-    name = request.form.get("name", "").strip()
-    server_key = request.form.get("server_key", "").strip()
-    description = request.form.get("description", "").strip()
-    raw_config = request.form.get("config_json", "").strip()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name = str(payload.get("name") if is_api_request else request.form.get("name", "")).strip()
+    server_key = str(
+        payload.get("server_key") if is_api_request else request.form.get("server_key", "")
+    ).strip()
+    description = str(
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    ).strip()
+    if is_api_request and "config" in payload and "config_json" not in payload:
+        raw_config_value = payload.get("config")
+        raw_config = (
+            json.dumps(raw_config_value, indent=2, sort_keys=True)
+            if isinstance(raw_config_value, dict)
+            else str(raw_config_value or "")
+        )
+    else:
+        raw_config = str(
+            payload.get("config_json")
+            if is_api_request
+            else request.form.get("config_json", "")
+        ).strip()
 
     if not name or not server_key:
+        if is_api_request:
+            return {"error": "Name and server key are required."}, 400
         flash("Name and server key are required.", "error")
         return redirect(url_for("agents.new_mcp"))
     if not raw_config:
+        if is_api_request:
+            return {"error": "MCP config JSON is required."}, 400
         flash("MCP config JSON is required.", "error")
         return redirect(url_for("agents.new_mcp"))
     if server_key in SYSTEM_MANAGED_MCP_SERVER_KEYS:
+        if is_api_request:
+            return {
+                "error": f"Server key '{server_key}' is system-managed and cannot be created manually."
+            }, 400
         flash(
             f"Server key '{server_key}' is system-managed and cannot be created manually.",
             "error",
@@ -12582,6 +13002,8 @@ def create_mcp():
         validate_server_key(server_key)
         formatted_config = format_mcp_config(raw_config, server_key=server_key)
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("agents.new_mcp"))
 
@@ -12590,6 +13012,8 @@ def create_mcp():
             select(MCPServer).where(MCPServer.server_key == server_key)
         ).scalar_one_or_none()
         if existing is not None:
+            if is_api_request:
+                return {"error": "Server key is already in use."}, 409
             flash("Server key is already in use.", "error")
             return redirect(url_for("agents.new_mcp"))
         mcp = MCPServer.create(
@@ -12601,6 +13025,8 @@ def create_mcp():
             server_type=MCP_SERVER_TYPE_CUSTOM,
         )
 
+    if is_api_request:
+        return {"ok": True, "mcp_server": _serialize_mcp_server(mcp, include_config=True)}, 201
     flash(f"MCP server {mcp.id} created.", "success")
     return redirect(url_for("agents.view_mcp", mcp_id=mcp.id))
 
@@ -12609,13 +13035,25 @@ def create_mcp():
 def edit_mcp(mcp_id: int):
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
+    mcp_payload: dict[str, object] | None = None
     with session_scope() as session:
         mcp_server = session.get(MCPServer, mcp_id)
         if mcp_server is None:
             abort(404)
         if mcp_server.is_integrated:
+            if _workflow_wants_json():
+                return {
+                    "error": "Integrated MCP servers are managed from Integrations settings."
+                }, 409
             flash("Integrated MCP servers are managed from Integrations settings.", "error")
             return redirect(url_for("agents.view_mcp", mcp_id=mcp_id))
+        mcp_payload = _serialize_mcp_server(mcp_server, include_config=True)
+    assert mcp_payload is not None
+    if _workflow_wants_json():
+        return {
+            "mcp_server": mcp_payload,
+            "summary": summary,
+        }
     return render_template(
         "mcp_edit.html",
         mcp_server=mcp_server,
@@ -12628,15 +13066,41 @@ def edit_mcp(mcp_id: int):
 
 @bp.post("/mcps/<int:mcp_id>")
 def update_mcp(mcp_id: int):
-    name = request.form.get("name", "").strip()
-    server_key = request.form.get("server_key", "").strip()
-    description = request.form.get("description", "").strip()
-    raw_config = request.form.get("config_json", "").strip()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name = str(payload.get("name") if is_api_request else request.form.get("name", "")).strip()
+    server_key = str(
+        payload.get("server_key") if is_api_request else request.form.get("server_key", "")
+    ).strip()
+    description = str(
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    ).strip()
+    if is_api_request and "config" in payload and "config_json" not in payload:
+        raw_config_value = payload.get("config")
+        raw_config = (
+            json.dumps(raw_config_value, indent=2, sort_keys=True)
+            if isinstance(raw_config_value, dict)
+            else str(raw_config_value or "")
+        )
+    else:
+        raw_config = str(
+            payload.get("config_json")
+            if is_api_request
+            else request.form.get("config_json", "")
+        ).strip()
 
     if not name or not server_key:
+        if is_api_request:
+            return {"error": "Name and server key are required."}, 400
         flash("Name and server key are required.", "error")
         return redirect(url_for("agents.edit_mcp", mcp_id=mcp_id))
     if not raw_config:
+        if is_api_request:
+            return {"error": "MCP config JSON is required."}, 400
         flash("MCP config JSON is required.", "error")
         return redirect(url_for("agents.edit_mcp", mcp_id=mcp_id))
 
@@ -12644,20 +13108,31 @@ def update_mcp(mcp_id: int):
         validate_server_key(server_key)
         formatted_config = format_mcp_config(raw_config, server_key=server_key)
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("agents.edit_mcp", mcp_id=mcp_id))
 
+    updated_payload: dict[str, object] | None = None
     with session_scope() as session:
         mcp = session.get(MCPServer, mcp_id)
         if mcp is None:
             abort(404)
         if mcp.is_integrated:
+            if is_api_request:
+                return {
+                    "error": "Integrated MCP servers are managed from Integrations settings."
+                }, 409
             flash("Integrated MCP servers are managed from Integrations settings.", "error")
             return redirect(url_for("agents.view_mcp", mcp_id=mcp_id))
         if (
             server_key in SYSTEM_MANAGED_MCP_SERVER_KEYS
             and server_key != mcp.server_key
         ):
+            if is_api_request:
+                return {
+                    "error": f"Server key '{server_key}' is system-managed and cannot be edited manually."
+                }, 400
             flash(
                 f"Server key '{server_key}' is system-managed and cannot be edited manually.",
                 "error",
@@ -12673,19 +13148,25 @@ def update_mcp(mcp_id: int):
             .first()
         )
         if existing is not None:
+            if is_api_request:
+                return {"error": "Server key is already in use."}, 409
             flash("Server key is already in use.", "error")
             return redirect(url_for("agents.edit_mcp", mcp_id=mcp_id))
         mcp.name = name
         mcp.server_key = server_key
         mcp.description = description or None
         mcp.config_json = formatted_config
+        updated_payload = _serialize_mcp_server(mcp, include_config=True)
 
+    if is_api_request:
+        return {"ok": True, "mcp_server": updated_payload}
     flash("MCP server updated.", "success")
     return redirect(url_for("agents.view_mcp", mcp_id=mcp_id))
 
 
 @bp.post("/mcps/<int:mcp_id>/delete")
 def delete_mcp(mcp_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_mcps")
     )
@@ -12694,6 +13175,8 @@ def delete_mcp(mcp_id: int):
         if mcp is None:
             abort(404)
         if mcp.is_integrated:
+            if is_api_request:
+                return {"error": "Integrated MCP servers cannot be deleted."}, 409
             flash("Integrated MCP servers cannot be deleted.", "error")
             return redirect(next_url)
         attached_templates = list(mcp.task_templates)
@@ -12707,8 +13190,10 @@ def delete_mcp(mcp_id: int):
             mcp.tasks = []
         session.delete(mcp)
 
-    flash("MCP server deleted.", "success")
     detached_count = len(attached_templates) + len(attached_nodes) + len(attached_tasks)
+    if is_api_request:
+        return {"ok": True, "detached_count": detached_count}
+    flash("MCP server deleted.", "success")
     if detached_count:
         flash(f"Detached from {detached_count} binding(s).", "info")
     return redirect(next_url)
@@ -12718,6 +13203,11 @@ def delete_mcp(mcp_id: int):
 def view_mcp(mcp_id: int):
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
+    mcp_payload: dict[str, object] | None = None
+    template_payload: list[dict[str, object]] = []
+    node_payload: list[dict[str, object]] = []
+    task_payload: list[dict[str, object]] = []
+    flowcharts_by_id: dict[int, str] = {}
     with session_scope() as session:
         mcp_server = (
             session.execute(
@@ -12740,12 +13230,56 @@ def view_mcp(mcp_id: int):
         flowchart_ids = {
             node.flowchart_id for node in attached_nodes if node.flowchart_id is not None
         }
-        flowcharts_by_id: dict[int, str] = {}
         if flowchart_ids:
             rows = session.execute(
                 select(Flowchart.id, Flowchart.name).where(Flowchart.id.in_(flowchart_ids))
             ).all()
             flowcharts_by_id = {row[0]: row[1] for row in rows}
+        mcp_payload = _serialize_mcp_server(mcp_server, include_config=True)
+        template_payload = [
+            {
+                "id": template.id,
+                "name": template.name,
+                "description": template.description or "",
+                "created_at": _human_time(template.created_at),
+            }
+            for template in attached_templates
+        ]
+        node_payload = [
+            {
+                "id": node.id,
+                "flowchart_id": node.flowchart_id,
+                "flowchart_name": flowcharts_by_id.get(node.flowchart_id or 0, ""),
+                "node_type": node.node_type,
+                "title": node.title,
+                "ref_id": node.ref_id,
+                "created_at": _human_time(node.created_at),
+                "updated_at": _human_time(node.updated_at),
+            }
+            for node in attached_nodes
+        ]
+        task_payload = [
+            {
+                "id": task.id,
+                "agent_id": task.agent_id,
+                "run_id": task.run_id,
+                "status": task.status,
+                "prompt": task.prompt,
+                "created_at": _human_time(task.created_at),
+                "updated_at": _human_time(task.updated_at),
+            }
+            for task in attached_tasks
+        ]
+    assert mcp_payload is not None
+    if _workflow_wants_json():
+        return {
+            "mcp_server": mcp_payload,
+            "attached_templates": template_payload,
+            "attached_nodes": node_payload,
+            "attached_tasks": task_payload,
+            "flowcharts_by_id": flowcharts_by_id,
+            "summary": summary,
+        }
     return render_template(
         "mcp_detail.html",
         mcp_server=mcp_server,
@@ -12764,6 +13298,11 @@ def view_mcp(mcp_id: int):
 @bp.get("/scripts")
 def list_scripts():
     scripts = _load_scripts()
+    if _workflow_wants_json():
+        return {
+            "scripts": [_serialize_script(script) for script in scripts],
+            "script_types": _serialize_choice_options(SCRIPT_TYPE_WRITE_CHOICES),
+        }
     return render_template(
         "scripts.html",
         scripts=scripts,
@@ -12776,25 +13315,12 @@ def list_scripts():
 @bp.get("/skills")
 def list_skills():
     skills = _load_skills()
-    skill_rows: list[dict[str, object]] = []
-    for skill in skills:
-        latest_version = _latest_skill_version(skill)
-        skill_rows.append(
-            {
-                "id": skill.id,
-                "name": skill.name,
-                "display_name": skill.display_name,
-                "description": skill.description or "",
-                "status": skill.status,
-                "source_type": skill.source_type,
-                "is_git_read_only": _is_git_based_skill(skill),
-                "version_count": len(skill.versions or []),
-                "latest_version": latest_version.version if latest_version is not None else None,
-                "binding_count": len(skill.agents or []),
-                "created_at": skill.created_at,
-                "updated_at": skill.updated_at,
-            }
-        )
+    skill_rows: list[dict[str, object]] = [_serialize_skill(skill) for skill in skills]
+    if _workflow_wants_json():
+        return {
+            "skills": skill_rows,
+            "skill_status_options": _serialize_choice_options(SKILL_STATUS_OPTIONS),
+        }
     return render_template(
         "skills.html",
         skills=skill_rows,
@@ -12806,6 +13332,12 @@ def list_skills():
 
 @bp.get("/skills/new")
 def new_skill():
+    if _workflow_wants_json():
+        return {
+            "skill_status_options": _serialize_choice_options(SKILL_STATUS_OPTIONS),
+            "upload_conflict_options": ["ask", "replace", "keep_both", "skip"],
+            "max_upload_bytes": SKILL_UPLOAD_MAX_FILE_BYTES,
+        }
     return render_template(
         "skill_new.html",
         skill_status_options=SKILL_STATUS_OPTIONS,
@@ -12818,21 +13350,55 @@ def new_skill():
 
 @bp.post("/skills")
 def create_skill():
-    name = request.form.get("name", "").strip()
-    display_name = request.form.get("display_name", "").strip()
-    description = request.form.get("description", "").strip()
-    version = request.form.get("version", "").strip()
-    status = request.form.get("status", "").strip().lower() or SKILL_STATUS_ACTIVE
-    skill_md = request.form.get("skill_md", "")
-    source_ref = request.form.get("source_ref", "").strip()
-    extra_files_json = request.form.get("extra_files_json", "")
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name = str(payload.get("name") if is_api_request else request.form.get("name", "")).strip()
+    display_name = str(
+        payload.get("display_name")
+        if is_api_request
+        else request.form.get("display_name", "")
+    ).strip()
+    description = str(
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    ).strip()
+    version = str(
+        payload.get("version") if is_api_request else request.form.get("version", "")
+    ).strip()
+    status = str(
+        payload.get("status") if is_api_request else request.form.get("status", "")
+    ).strip().lower() or SKILL_STATUS_ACTIVE
+    skill_md = str(
+        payload.get("skill_md") if is_api_request else request.form.get("skill_md", "")
+    )
+    source_ref = str(
+        payload.get("source_ref")
+        if is_api_request
+        else request.form.get("source_ref", "")
+    ).strip()
+    extra_files_raw = (
+        payload.get("extra_files_json", payload.get("extra_files", ""))
+        if is_api_request
+        else request.form.get("extra_files_json", "")
+    )
+    if isinstance(extra_files_raw, list):
+        extra_files_json = json.dumps(extra_files_raw)
+    else:
+        extra_files_json = str(extra_files_raw or "")
 
     extra_files, parse_error = _parse_skill_extra_files(extra_files_json)
     if parse_error:
+        if is_api_request:
+            return {"error": parse_error}, 400
         flash(parse_error, "error")
         return redirect(url_for("agents.new_skill"))
     upload_entries, upload_error = _collect_skill_upload_entries()
     if upload_error:
+        if is_api_request:
+            return {"error": upload_error}, 400
         flash(upload_error, "error")
         return redirect(url_for("agents.new_skill"))
 
@@ -12849,18 +13415,28 @@ def create_skill():
     for raw_path, content in extra_files:
         normalized_path = _normalize_skill_relative_path(raw_path)
         if not normalized_path:
-            flash("Extra file paths must be relative and path-safe.", "error")
+            message = "Extra file paths must be relative and path-safe."
+            if is_api_request:
+                return {"error": message}, 400
+            flash(message, "error")
             return redirect(url_for("agents.new_skill"))
         path_error = _skill_upload_path_error(normalized_path)
         if path_error:
+            if is_api_request:
+                return {"error": path_error}, 400
             flash(path_error, "error")
             return redirect(url_for("agents.new_skill"))
         if normalized_path in draft_file_map:
-            flash(f"Duplicate file path in extra files: {normalized_path}", "error")
+            message = f"Duplicate file path in extra files: {normalized_path}"
+            if is_api_request:
+                return {"error": message}, 400
+            flash(message, "error")
             return redirect(url_for("agents.new_skill"))
         draft_file_map[normalized_path] = content
     draft_file_map, conflict_error = _apply_skill_upload_conflicts(draft_file_map, upload_entries)
     if conflict_error:
+        if is_api_request:
+            return {"error": conflict_error}, 400
         flash(conflict_error, "error")
         return redirect(url_for("agents.new_skill"))
 
@@ -12878,9 +13454,12 @@ def create_skill():
     except SkillPackageValidationError as exc:
         errors = format_validation_errors(exc.errors)
         message = str(errors[0].get("message") or "Skill package validation failed.")
+        if is_api_request:
+            return {"error": message, "validation_errors": errors}, 400
         flash(message, "error")
         return redirect(url_for("agents.new_skill"))
 
+    created_payload: dict[str, object] | None = None
     try:
         with session_scope() as session:
             result = import_skill_package_to_db(
@@ -12890,17 +13469,31 @@ def create_skill():
                 source_ref=source_ref or "web:create",
                 actor=None,
             )
+            skill = session.get(Skill, result.skill_id)
+            if skill is None:
+                abort(404)
+            created_payload = _serialize_skill(skill)
             skill_id = result.skill_id
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("agents.new_skill"))
 
+    if is_api_request:
+        return {"ok": True, "skill_id": skill_id, "skill": created_payload}, 201
     flash("Skill created.", "success")
     return redirect(url_for("agents.view_skill", skill_id=skill_id))
 
 
 @bp.get("/skills/import")
 def import_skill():
+    if _workflow_wants_json():
+        return {
+            "preview": None,
+            "validation_errors": [],
+            "form_values": {},
+        }
     return render_template(
         "skill_import.html",
         preview=None,
@@ -12913,12 +13506,34 @@ def import_skill():
 
 @bp.post("/skills/import")
 def import_skill_submit():
-    action = (request.form.get("action") or "preview").strip().lower()
-    source_kind = (request.form.get("source_kind") or "upload").strip().lower()
-    local_path = request.form.get("local_path", "").strip()
-    source_ref = request.form.get("source_ref", "").strip()
-    actor = request.form.get("actor", "").strip()
-    git_url = request.form.get("git_url", "").strip()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    action = str(
+        payload.get("action") if is_api_request else (request.form.get("action") or "preview")
+    ).strip().lower()
+    source_kind = str(
+        payload.get("source_kind")
+        if is_api_request
+        else (request.form.get("source_kind") or "upload")
+    ).strip().lower()
+    local_path = str(
+        payload.get("local_path")
+        if is_api_request
+        else request.form.get("local_path", "")
+    ).strip()
+    source_ref = str(
+        payload.get("source_ref")
+        if is_api_request
+        else request.form.get("source_ref", "")
+    ).strip()
+    actor = str(
+        payload.get("actor") if is_api_request else request.form.get("actor", "")
+    ).strip()
+    git_url = str(
+        payload.get("git_url") if is_api_request else request.form.get("git_url", "")
+    ).strip()
 
     form_values = {
         "source_kind": source_kind,
@@ -12931,24 +13546,44 @@ def import_skill_submit():
     package: SkillPackage
     try:
         if source_kind == "upload":
-            uploaded = request.files.get("bundle_file")
-            if uploaded is None or not uploaded.filename:
-                flash("Bundle upload is required.", "error")
-                return redirect(url_for("agents.import_skill"))
-            payload = uploaded.read().decode("utf-8", errors="replace")
-            package = load_skill_bundle(payload)
+            if is_api_request:
+                bundle_payload = str(
+                    payload.get("bundle_payload", payload.get("bundle_json", ""))
+                )
+                if not bundle_payload.strip():
+                    return {"error": "Bundle upload is required."}, 400
+                package = load_skill_bundle(bundle_payload)
+            else:
+                uploaded = request.files.get("bundle_file")
+                if uploaded is None or not uploaded.filename:
+                    flash("Bundle upload is required.", "error")
+                    return redirect(url_for("agents.import_skill"))
+                bundle_payload = uploaded.read().decode("utf-8", errors="replace")
+                package = load_skill_bundle(bundle_payload)
         elif source_kind == "path":
             if not local_path:
+                if is_api_request:
+                    return {"error": "Local path is required."}, 400
                 flash("Local path is required.", "error")
                 return redirect(url_for("agents.import_skill"))
             package = build_skill_package_from_directory(local_path)
         elif source_kind == "git":
+            if is_api_request:
+                return {"error": "Git-based skill import is deferred to v1.1."}, 409
             flash("Git-based skill import is deferred to v1.1.", "error")
             return redirect(url_for("agents.import_skill"))
         else:
+            if is_api_request:
+                return {"error": "Unknown import source."}, 400
             flash("Unknown import source.", "error")
             return redirect(url_for("agents.import_skill"))
     except SkillPackageValidationError as exc:
+        if is_api_request:
+            return {
+                "error": "Skill package validation failed.",
+                "validation_errors": format_validation_errors(exc.errors),
+                "form_values": form_values,
+            }, 400
         return render_template(
             "skill_import.html",
             preview=None,
@@ -12972,6 +13607,13 @@ def import_skill_submit():
                 )
                 skill_id = result.skill_id
         except ValueError as exc:
+            if is_api_request:
+                return {
+                    "error": str(exc),
+                    "preview": preview,
+                    "validation_errors": [],
+                    "form_values": form_values,
+                }, 400
             flash(str(exc), "error")
             return render_template(
                 "skill_import.html",
@@ -12981,9 +13623,17 @@ def import_skill_submit():
                 page_title="Import Skill",
                 active_page="skills",
             )
+        if is_api_request:
+            return {"ok": True, "skill_id": skill_id, "preview": preview}
         flash("Skill imported.", "success")
         return redirect(url_for("agents.view_skill", skill_id=skill_id))
 
+    if is_api_request:
+        return {
+            "preview": preview,
+            "validation_errors": [],
+            "form_values": form_values,
+        }
     return render_template(
         "skill_import.html",
         preview=preview,
@@ -12997,6 +13647,9 @@ def import_skill_submit():
 @bp.get("/skills/<int:skill_id>")
 def view_skill(skill_id: int):
     requested_version = request.args.get("version", "").strip()
+    skill_payload: dict[str, object] | None = None
+    version_payload: list[dict[str, object]] = []
+    attached_agents_payload: list[dict[str, object]] = []
     with session_scope() as session:
         skill = (
             session.execute(
@@ -13027,6 +13680,28 @@ def view_skill(skill_id: int):
             list(skill.agents or []),
             key=lambda item: (item.name or "").lower(),
         )
+        skill_payload = _serialize_skill(skill)
+        version_payload = [
+            {
+                "id": entry.id,
+                "version": entry.version,
+                "manifest_hash": entry.manifest_hash or "",
+                "created_at": _human_time(entry.created_at),
+                "updated_at": _human_time(entry.updated_at),
+            }
+            for entry in versions
+        ]
+        attached_agents_payload = [
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "description": agent.description or "",
+                "status": _agent_status(agent),
+                "created_at": _human_time(agent.created_at),
+                "updated_at": _human_time(agent.updated_at),
+            }
+            for agent in attached_agents
+        ]
 
     preview = None
     if selected_version is not None:
@@ -13048,6 +13723,16 @@ def view_skill(skill_id: int):
             ],
             "skill_md": _skill_file_content(selected_version, "SKILL.md"),
         }
+    assert skill_payload is not None
+    if _workflow_wants_json():
+        return {
+            "skill": skill_payload,
+            "versions": version_payload,
+            "selected_version": selected_version.version if selected_version is not None else None,
+            "preview": preview,
+            "attached_agents": attached_agents_payload,
+            "skill_is_git_read_only": bool(skill_payload.get("is_git_read_only")),
+        }
 
     return render_template(
         "skill_detail.html",
@@ -13065,6 +13750,7 @@ def view_skill(skill_id: int):
 
 @bp.get("/skills/<int:skill_id>/edit")
 def edit_skill(skill_id: int):
+    response_payload: dict[str, object] | None = None
     with session_scope() as session:
         skill = (
             session.execute(
@@ -13078,6 +13764,10 @@ def edit_skill(skill_id: int):
         if skill is None:
             abort(404)
         if _is_git_based_skill(skill):
+            if _workflow_wants_json():
+                return {
+                    "error": "Git-based skills are read-only in Studio. Edit the source repo instead."
+                }, 409
             flash("Git-based skills are read-only in Studio. Edit the source repo instead.", "info")
             return redirect(url_for("agents.view_skill", skill_id=skill_id))
         latest_version = _latest_skill_version(skill)
@@ -13093,6 +13783,27 @@ def edit_skill(skill_id: int):
                         "is_binary": is_binary_skill_content(entry.content or ""),
                     }
                 )
+        response_payload = {
+            "skill": _serialize_skill(skill),
+            "latest_version": (
+                {
+                    "id": latest_version.id,
+                    "version": latest_version.version,
+                    "manifest_hash": latest_version.manifest_hash or "",
+                    "created_at": _human_time(latest_version.created_at),
+                    "updated_at": _human_time(latest_version.updated_at),
+                }
+                if latest_version is not None
+                else None
+            ),
+            "latest_skill_md": _skill_file_content(latest_version, "SKILL.md"),
+            "latest_non_skill_files": latest_non_skill_files,
+            "skill_status_options": _serialize_choice_options(SKILL_STATUS_OPTIONS),
+            "upload_conflict_options": ["ask", "replace", "keep_both", "skip"],
+            "max_upload_bytes": SKILL_UPLOAD_MAX_FILE_BYTES,
+        }
+    if _workflow_wants_json():
+        return response_payload or {}
     return render_template(
         "skill_edit.html",
         skill=skill,
@@ -13109,6 +13820,189 @@ def edit_skill(skill_id: int):
 
 @bp.post("/skills/<int:skill_id>")
 def update_skill(skill_id: int):
+    is_api_request = _workflow_api_request()
+    if is_api_request:
+        payload = request.get_json(silent=True) if request.is_json else {}
+        if payload is None or not isinstance(payload, dict):
+            payload = {}
+        display_name = str(payload.get("display_name", "")).strip()
+        description = str(payload.get("description", "")).strip()
+        status = str(payload.get("status", "")).strip().lower()
+        new_version = str(payload.get("new_version", "")).strip()
+        new_skill_md = str(payload.get("new_skill_md", ""))
+        existing_files_raw = payload.get("existing_files_json", payload.get("existing_files", ""))
+        extra_files_raw = payload.get("extra_files_json", payload.get("extra_files", ""))
+        source_ref = str(payload.get("source_ref", "")).strip()
+
+        existing_files_json = (
+            json.dumps(existing_files_raw)
+            if isinstance(existing_files_raw, list)
+            else str(existing_files_raw or "")
+        )
+        extra_files_json = (
+            json.dumps(extra_files_raw)
+            if isinstance(extra_files_raw, list)
+            else str(extra_files_raw or "")
+        )
+
+        if status not in SKILL_STATUS_CHOICES:
+            return {"error": "Select a valid skill status."}, 400
+        extra_files, parse_error = _parse_skill_extra_files(extra_files_json)
+        if parse_error:
+            return {"error": parse_error}, 400
+        upload_entries: list[dict[str, object]] = []
+
+        try:
+            with session_scope() as session:
+                skill = (
+                    session.execute(
+                        select(Skill)
+                        .options(selectinload(Skill.versions).selectinload(SkillVersion.files))
+                        .where(Skill.id == skill_id)
+                    )
+                    .scalars()
+                    .first()
+                )
+                if skill is None:
+                    abort(404)
+                if _is_git_based_skill(skill):
+                    return {
+                        "error": "Git-based skills are read-only in Studio. Edit the source repo instead."
+                    }, 409
+                if not display_name:
+                    return {"error": "Display name is required."}, 400
+                if not description:
+                    return {"error": "Description is required."}, 400
+
+                latest_version = _latest_skill_version(skill)
+                latest_skill_md = _skill_file_content(latest_version, "SKILL.md")
+                latest_non_skill_map: dict[str, str] = {}
+                if latest_version is not None:
+                    latest_non_skill_map = {
+                        str(entry.path): str(entry.content or "")
+                        for entry in sorted(list(latest_version.files or []), key=lambda item: item.path)
+                        if str(entry.path) != "SKILL.md"
+                    }
+                existing_actions, existing_error = _parse_skill_existing_files_draft(
+                    existing_files_json,
+                    existing_paths=set(latest_non_skill_map.keys()),
+                )
+                if existing_error:
+                    return {"error": existing_error}, 400
+
+                draft_non_skill_map: dict[str, str] = {}
+                occupied_paths: set[str] = set()
+                existing_changed = False
+                for action in existing_actions:
+                    original_path = str(action["original_path"])
+                    delete_flag = bool(action["delete"])
+                    if delete_flag:
+                        existing_changed = True
+                        continue
+                    target_path = str(action["path"])
+                    if target_path in occupied_paths:
+                        return {"error": f"Duplicate target path in existing file draft: {target_path}"}, 400
+                    if target_path != original_path:
+                        existing_changed = True
+                        rename_path_error = _skill_upload_path_error(target_path)
+                        if rename_path_error:
+                            return {"error": rename_path_error}, 400
+                    occupied_paths.add(target_path)
+                    draft_non_skill_map[target_path] = latest_non_skill_map[original_path]
+
+                legacy_extra_changed = False
+                for raw_path, content in extra_files:
+                    normalized_path = _normalize_skill_relative_path(raw_path)
+                    if not normalized_path:
+                        return {"error": "Extra file paths must be relative and path-safe."}, 400
+                    path_error = _skill_upload_path_error(normalized_path)
+                    if path_error:
+                        return {"error": path_error}, 400
+                    if normalized_path in draft_non_skill_map:
+                        return {"error": f"Duplicate file path: {normalized_path}"}, 400
+                    legacy_extra_changed = True
+                    draft_non_skill_map[normalized_path] = content
+
+                pre_upload_map = dict(draft_non_skill_map)
+                draft_non_skill_map, conflict_error = _apply_skill_upload_conflicts(
+                    draft_non_skill_map,
+                    upload_entries,
+                )
+                if conflict_error:
+                    return {"error": conflict_error}, 400
+                upload_changed = draft_non_skill_map != pre_upload_map
+
+                staged_skill_md = new_skill_md
+                if new_version:
+                    if not staged_skill_md.strip():
+                        staged_skill_md = (
+                            latest_skill_md
+                            or _default_skill_markdown(
+                                name=skill.name,
+                                display_name=display_name,
+                                description=description,
+                                version=new_version,
+                                status=status,
+                            )
+                        )
+                    skill.display_name = display_name
+                    skill.description = description
+                    skill.status = status
+                    skill.updated_by = None
+                    files = [("SKILL.md", staged_skill_md), *list(draft_non_skill_map.items())]
+                    package = build_skill_package(
+                        files,
+                        metadata_overrides={
+                            "name": skill.name,
+                            "display_name": display_name,
+                            "description": description,
+                            "version": new_version,
+                            "status": status,
+                        },
+                    )
+                    import_skill_package_to_db(
+                        session,
+                        package,
+                        source_type=(
+                            skill.source_type
+                            if (skill.source_type or "").strip().lower() in SKILL_MUTABLE_SOURCE_TYPES
+                            else "ui"
+                        ),
+                        source_ref=source_ref or skill.source_ref or f"web:skill:{skill_id}",
+                        actor=None,
+                    )
+                else:
+                    staged_skill_md = staged_skill_md or latest_skill_md
+                    changed_non_skill_paths = set(draft_non_skill_map.keys()) != set(latest_non_skill_map.keys())
+                    changed_non_skill_content = any(
+                        draft_non_skill_map.get(path) != latest_non_skill_map.get(path)
+                        for path in set(draft_non_skill_map.keys()) | set(latest_non_skill_map.keys())
+                    )
+                    has_file_changes = (
+                        existing_changed
+                        or changed_non_skill_paths
+                        or changed_non_skill_content
+                        or upload_changed
+                        or legacy_extra_changed
+                        or (staged_skill_md != latest_skill_md)
+                    )
+                    if has_file_changes:
+                        return {
+                            "error": "New version is required to publish SKILL.md or file changes."
+                        }, 400
+                    skill.display_name = display_name
+                    skill.description = description
+                    skill.status = status
+                    skill.updated_by = None
+                updated_payload = _serialize_skill(skill)
+        except SkillPackageValidationError as exc:
+            errors = format_validation_errors(exc.errors)
+            message = str(errors[0].get("message") or "Skill package validation failed.")
+            return {"error": message, "validation_errors": errors}, 400
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+        return {"ok": True, "skill": updated_payload}
+
     display_name = request.form.get("display_name", "").strip()
     description = request.form.get("description", "").strip()
     status = request.form.get("status", "").strip().lower()
@@ -13321,6 +14215,7 @@ def export_skill(skill_id: int):
 
 @bp.post("/skills/<int:skill_id>/delete")
 def delete_skill(skill_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_skills")
     )
@@ -13340,6 +14235,10 @@ def delete_skill(skill_id: int):
         if skill is None:
             abort(404)
         if _is_git_based_skill(skill):
+            if is_api_request:
+                return {
+                    "error": "Git-based skills are read-only in Studio and cannot be deleted here."
+                }, 409
             flash("Git-based skills are read-only in Studio and cannot be deleted here.", "error")
             return redirect(url_for("agents.view_skill", skill_id=skill_id))
         attached_nodes = list(skill.flowchart_nodes or [])
@@ -13350,6 +14249,12 @@ def delete_skill(skill_id: int):
             skill.agents = []
         session.delete(skill)
 
+    if is_api_request:
+        return {
+            "ok": True,
+            "detached_node_count": len(attached_nodes),
+            "detached_agent_count": len(attached_agents),
+        }
     flash("Skill deleted.", "success")
     if attached_nodes:
         flash(f"Detached from {len(attached_nodes)} flowchart node binding(s).", "info")
@@ -13361,6 +14266,10 @@ def delete_skill(skill_id: int):
 @bp.get("/attachments")
 def list_attachments():
     attachments = _load_attachments()
+    if _workflow_wants_json():
+        return {
+            "attachments": [_serialize_attachment(attachment) for attachment in attachments],
+        }
     return render_template(
         "attachments.html",
         attachments=attachments,
@@ -13373,6 +14282,13 @@ def list_attachments():
 
 @bp.get("/attachments/<int:attachment_id>")
 def view_attachment(attachment_id: int):
+    attachment_payload: dict[str, object] | None = None
+    task_payload: list[dict[str, object]] = []
+    template_payload: list[dict[str, object]] = []
+    node_payload: list[dict[str, object]] = []
+    agents_by_id: dict[int, str] = {}
+    templates_by_id: dict[int, str] = {}
+    flowcharts_by_id: dict[int, str] = {}
     with session_scope() as session:
         attachment = (
             session.execute(
@@ -13405,14 +14321,12 @@ def view_attachment(attachment_id: int):
             if node.flowchart_id is not None
         }
 
-        agents_by_id: dict[int, str] = {}
         if agent_ids:
             rows = session.execute(
                 select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
             ).all()
             agents_by_id = {row[0]: row[1] for row in rows}
 
-        templates_by_id: dict[int, str] = {}
         if template_ids:
             rows = session.execute(
                 select(TaskTemplate.id, TaskTemplate.name).where(
@@ -13421,7 +14335,6 @@ def view_attachment(attachment_id: int):
             ).all()
             templates_by_id = {row[0]: row[1] for row in rows}
 
-        flowcharts_by_id: dict[int, str] = {}
         if flowchart_ids:
             rows = session.execute(
                 select(Flowchart.id, Flowchart.name).where(
@@ -13429,6 +14342,44 @@ def view_attachment(attachment_id: int):
                 )
             ).all()
             flowcharts_by_id = {row[0]: row[1] for row in rows}
+        attachment_payload = _serialize_attachment(attachment)
+        task_payload = [
+            {
+                "id": task.id,
+                "agent_id": task.agent_id,
+                "agent_name": agents_by_id.get(task.agent_id or 0, ""),
+                "task_template_id": task.task_template_id,
+                "task_template_name": templates_by_id.get(task.task_template_id or 0, ""),
+                "status": task.status,
+                "prompt": task.prompt,
+                "created_at": _human_time(task.created_at),
+                "updated_at": _human_time(task.updated_at),
+            }
+            for task in tasks
+        ]
+        template_payload = [
+            {
+                "id": template.id,
+                "name": template.name,
+                "description": template.description or "",
+                "created_at": _human_time(template.created_at),
+                "updated_at": _human_time(template.updated_at),
+            }
+            for template in templates
+        ]
+        node_payload = [
+            {
+                "id": node.id,
+                "flowchart_id": node.flowchart_id,
+                "flowchart_name": flowcharts_by_id.get(node.flowchart_id or 0, ""),
+                "node_type": node.node_type,
+                "title": node.title,
+                "ref_id": node.ref_id,
+                "created_at": _human_time(node.created_at),
+                "updated_at": _human_time(node.updated_at),
+            }
+            for node in flowchart_nodes
+        ]
 
     is_image_attachment = _is_image_attachment(attachment)
     attachment_preview_url = None
@@ -13436,6 +14387,18 @@ def view_attachment(attachment_id: int):
         attachment_preview_url = url_for(
             "agents.view_attachment_file", attachment_id=attachment.id
         )
+    if _workflow_wants_json():
+        return {
+            "attachment": attachment_payload,
+            "attachment_preview_url": attachment_preview_url,
+            "is_image_attachment": is_image_attachment,
+            "tasks": task_payload,
+            "templates": template_payload,
+            "flowchart_nodes": node_payload,
+            "agents_by_id": agents_by_id,
+            "templates_by_id": templates_by_id,
+            "flowcharts_by_id": flowcharts_by_id,
+        }
 
     return render_template(
         "attachment_detail.html",
@@ -13486,6 +14449,7 @@ def view_attachment_file(attachment_id: int):
 
 @bp.post("/attachments/<int:attachment_id>/delete")
 def delete_attachment(attachment_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_attachments")
     )
@@ -13499,6 +14463,8 @@ def delete_attachment(attachment_id: int):
         session.delete(attachment)
     if removed_path:
         remove_attachment_file(removed_path)
+    if is_api_request:
+        return {"ok": True}
     flash("Attachment deleted.", "success")
     return redirect(next_url)
 
@@ -13644,6 +14610,18 @@ def delete_memory(memory_id: int):
 
 @bp.get("/scripts/new")
 def new_script():
+    if _workflow_wants_json():
+        return {
+            "script_types": _serialize_choice_options(SCRIPT_TYPE_WRITE_CHOICES),
+            "script": {
+                "file_name": "",
+                "description": "",
+                "script_type": SCRIPT_TYPE_WRITE_CHOICES[0][0]
+                if SCRIPT_TYPE_WRITE_CHOICES
+                else "",
+                "content": "",
+            },
+        }
     return render_template(
         "script_new.html",
         script_types=SCRIPT_TYPE_WRITE_CHOICES,
@@ -13654,30 +14632,58 @@ def new_script():
 
 @bp.post("/scripts")
 def create_script():
-    file_name = request.form.get("file_name", "").strip()
-    description = request.form.get("description", "").strip()
-    script_type = request.form.get("script_type", "").strip()
-    content = request.form.get("content", "")
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    file_name = str(
+        payload.get("file_name")
+        if is_api_request
+        else request.form.get("file_name", "")
+    ).strip()
+    description = str(
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    ).strip()
+    script_type = str(
+        payload.get("script_type")
+        if is_api_request
+        else request.form.get("script_type", "")
+    ).strip()
+    content = str(
+        payload.get("content")
+        if is_api_request
+        else request.form.get("content", "")
+    )
     uploaded_file = request.files.get("script_file")
 
-    if uploaded_file and uploaded_file.filename:
+    if not is_api_request and uploaded_file and uploaded_file.filename:
         file_name = file_name or uploaded_file.filename
         content_bytes = uploaded_file.read()
         content = content_bytes.decode("utf-8", errors="replace")
 
     file_name = Path(file_name).name if file_name else ""
     if not file_name or file_name in {".", ".."}:
+        if is_api_request:
+            return {"error": "File name is required."}, 400
         flash("File name is required.", "error")
         return redirect(url_for("agents.new_script"))
     if script_type not in SCRIPT_TYPE_LABELS:
+        if is_api_request:
+            return {"error": "Select a valid script type."}, 400
         flash("Select a valid script type.", "error")
         return redirect(url_for("agents.new_script"))
     try:
         ensure_legacy_skill_script_writable(script_type)
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("agents.new_script"))
     if not content or not content.strip():
+        if is_api_request:
+            return {"error": "Script content is required."}, 400
         flash("Script content is required.", "error")
         return redirect(url_for("agents.new_script"))
 
@@ -13694,15 +14700,24 @@ def create_script():
             script.file_path = str(path)
     except OSError:
         logger.exception("Failed to write script %s to disk", file_name)
+        if is_api_request:
+            return {"error": "Failed to write the script file."}, 500
         flash("Failed to write the script file.", "error")
         return redirect(url_for("agents.new_script"))
 
+    if is_api_request:
+        return {"ok": True, "script": _serialize_script(script, include_content=True)}, 201
     flash(f"Script {script.id} created.", "success")
     return redirect(url_for("agents.view_script", script_id=script.id))
 
 
 @bp.get("/scripts/<int:script_id>")
 def view_script(script_id: int):
+    script_payload: dict[str, object] | None = None
+    task_payload: list[dict[str, object]] = []
+    template_payload: list[dict[str, object]] = []
+    node_payload: list[dict[str, object]] = []
+    flowcharts_by_id: dict[int, str] = {}
     with session_scope() as session:
         script = (
             session.execute(
@@ -13725,13 +14740,56 @@ def view_script(script_id: int):
         flowchart_ids = {
             node.flowchart_id for node in attached_nodes if node.flowchart_id is not None
         }
-        flowcharts_by_id: dict[int, str] = {}
         if flowchart_ids:
             rows = session.execute(
                 select(Flowchart.id, Flowchart.name).where(Flowchart.id.in_(flowchart_ids))
             ).all()
             flowcharts_by_id = {row[0]: row[1] for row in rows}
         script_content = _read_script_content(script)
+        script_payload = _serialize_script(script, include_content=True)
+        task_payload = [
+            {
+                "id": task.id,
+                "agent_id": task.agent_id,
+                "run_id": task.run_id,
+                "status": task.status,
+                "prompt": task.prompt,
+                "created_at": _human_time(task.created_at),
+                "updated_at": _human_time(task.updated_at),
+            }
+            for task in attached_tasks
+        ]
+        template_payload = [
+            {
+                "id": template.id,
+                "name": template.name,
+                "description": template.description or "",
+                "created_at": _human_time(template.created_at),
+                "updated_at": _human_time(template.updated_at),
+            }
+            for template in attached_templates
+        ]
+        node_payload = [
+            {
+                "id": node.id,
+                "flowchart_id": node.flowchart_id,
+                "flowchart_name": flowcharts_by_id.get(node.flowchart_id or 0, ""),
+                "node_type": node.node_type,
+                "title": node.title,
+                "ref_id": node.ref_id,
+                "created_at": _human_time(node.created_at),
+                "updated_at": _human_time(node.updated_at),
+            }
+            for node in attached_nodes
+        ]
+    if _workflow_wants_json():
+        return {
+            "script": script_payload,
+            "attached_tasks": task_payload,
+            "attached_templates": template_payload,
+            "attached_nodes": node_payload,
+            "flowcharts_by_id": flowcharts_by_id,
+        }
     return render_template(
         "script_detail.html",
         script=script,
@@ -13748,11 +14806,18 @@ def view_script(script_id: int):
 
 @bp.get("/scripts/<int:script_id>/edit")
 def edit_script(script_id: int):
+    script_payload: dict[str, object] | None = None
     with session_scope() as session:
         script = session.get(Script, script_id)
         if script is None:
             abort(404)
         script_content = _read_script_content(script)
+        script_payload = _serialize_script(script, include_content=True)
+    if _workflow_wants_json():
+        return {
+            "script": script_payload,
+            "script_types": _serialize_choice_options(SCRIPT_TYPE_WRITE_CHOICES),
+        }
     return render_template(
         "script_edit.html",
         script=script,
@@ -13765,17 +14830,38 @@ def edit_script(script_id: int):
 
 @bp.post("/scripts/<int:script_id>")
 def update_script(script_id: int):
-    file_name = request.form.get("file_name", "").strip()
-    description = request.form.get("description", "").strip()
-    script_type = request.form.get("script_type", "").strip()
-    content = request.form.get("content", "")
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    file_name = str(
+        payload.get("file_name")
+        if is_api_request
+        else request.form.get("file_name", "")
+    ).strip()
+    description = str(
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    ).strip()
+    script_type = str(
+        payload.get("script_type")
+        if is_api_request
+        else request.form.get("script_type", "")
+    ).strip()
+    content = str(
+        payload.get("content")
+        if is_api_request
+        else request.form.get("content", "")
+    )
     uploaded_file = request.files.get("script_file")
 
-    if uploaded_file and uploaded_file.filename:
+    if not is_api_request and uploaded_file and uploaded_file.filename:
         file_name = file_name or uploaded_file.filename
         content_bytes = uploaded_file.read()
         content = content_bytes.decode("utf-8", errors="replace")
 
+    updated_payload: dict[str, object] | None = None
     try:
         with session_scope() as session:
             script = session.get(Script, script_id)
@@ -13785,17 +14871,25 @@ def update_script(script_id: int):
                 file_name = script.file_name
             file_name = Path(file_name).name if file_name else ""
             if not file_name or file_name in {".", ".."}:
+                if is_api_request:
+                    return {"error": "File name is required."}, 400
                 flash("File name is required.", "error")
                 return redirect(url_for("agents.edit_script", script_id=script_id))
             if script_type not in SCRIPT_TYPE_LABELS:
+                if is_api_request:
+                    return {"error": "Select a valid script type."}, 400
                 flash("Select a valid script type.", "error")
                 return redirect(url_for("agents.edit_script", script_id=script_id))
             try:
                 ensure_legacy_skill_script_writable(script_type)
             except ValueError as exc:
+                if is_api_request:
+                    return {"error": str(exc)}, 400
                 flash(str(exc), "error")
                 return redirect(url_for("agents.edit_script", script_id=script_id))
             if not content or not content.strip():
+                if is_api_request:
+                    return {"error": "Script content is required."}, 400
                 flash("Script content is required.", "error")
                 return redirect(url_for("agents.edit_script", script_id=script_id))
             old_path = script.file_path
@@ -13807,17 +14901,23 @@ def update_script(script_id: int):
             script.file_path = str(path)
             if old_path and old_path != script.file_path:
                 remove_script_file(old_path)
+            updated_payload = _serialize_script(script, include_content=True)
     except OSError:
         logger.exception("Failed to write script %s to disk", script_id)
+        if is_api_request:
+            return {"error": "Failed to write the script file."}, 500
         flash("Failed to write the script file.", "error")
         return redirect(url_for("agents.edit_script", script_id=script_id))
 
+    if is_api_request:
+        return {"ok": True, "script": updated_payload}
     flash("Script updated.", "success")
     return redirect(url_for("agents.view_script", script_id=script_id))
 
 
 @bp.post("/scripts/<int:script_id>/delete")
 def delete_script(script_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_scripts")
     )
@@ -13837,8 +14937,11 @@ def delete_script(script_id: int):
             script.flowchart_nodes = []
         session.delete(script)
 
-    flash("Script deleted.", "success")
     detached_count = len(attached_tasks) + len(attached_templates) + len(attached_nodes)
+    if is_api_request:
+        remove_script_file(script_path)
+        return {"ok": True, "detached_count": detached_count}
+    flash("Script deleted.", "success")
     if detached_count:
         flash(f"Detached from {detached_count} binding(s).", "info")
     remove_script_file(script_path)
@@ -13847,6 +14950,7 @@ def delete_script(script_id: int):
 
 @bp.get("/github")
 def github_workspace():
+    is_api_request = _workflow_api_request()
     settings = _load_integration_settings("github")
     repo = settings.get("repo") or "No repository selected"
     pat = settings.get("pat") or ""
@@ -13914,6 +15018,27 @@ def github_workspace():
                     pass
         except ValueError as exc:
             code_error = str(exc)
+    if is_api_request:
+        return {
+            "workspace": "github",
+            "repo": repo,
+            "repo_selected": bool(settings.get("repo")),
+            "connected": bool(settings.get("pat")),
+            "active_tab": tab,
+            "pull_requests": pull_requests,
+            "pull_request_error": pr_error,
+            "pull_request_status": pr_status,
+            "pull_request_author": pr_author,
+            "pull_request_authors": pr_authors,
+            "actions": actions,
+            "actions_error": actions_error,
+            "code_entries": code_entries,
+            "code_file": code_file,
+            "code_error": code_error,
+            "code_path": code_path,
+            "code_parent": code_parent,
+            "code_selected_path": code_selected_path,
+        }
     return render_template(
         "github.html",
         github_repo=repo,
@@ -13938,11 +15063,15 @@ def github_workspace():
     )
 
 
-def _render_github_pull_request_page(pr_number: int, active_tab: str):
+def _render_github_pull_request_page(
+    pr_number: int, active_tab: str, *, is_api_request: bool = False
+):
     settings = _load_integration_settings("github")
     repo = settings.get("repo") or ""
     pat = settings.get("pat") or ""
     if not repo or not pat:
+        if is_api_request:
+            return {"error": "GitHub repository and PAT are required to view pull requests."}, 400
         flash(
             "GitHub repository and PAT are required to view pull requests.",
             "error",
@@ -13982,6 +15111,20 @@ def _render_github_pull_request_page(pr_number: int, active_tab: str):
         else f"PR #{pr_number}"
     )
     page_title = f"{base_title} - {tab_labels[selected_tab]}"
+    if is_api_request:
+        return {
+            "workspace": "github",
+            "repo": repo or "No repository selected",
+            "connected": bool(pat),
+            "pull_request": pull_request,
+            "pull_request_number": pr_number,
+            "comments": comments,
+            "reviewers": reviewers,
+            "active_tab": selected_tab,
+            "pull_request_error": pr_error,
+            "comments_error": comments_error,
+            "page_title": page_title,
+        }
     return render_template(
         "github_pull_request.html",
         github_repo=repo or "No repository selected",
@@ -14000,26 +15143,46 @@ def _render_github_pull_request_page(pr_number: int, active_tab: str):
 
 @bp.get("/github/pulls/<int:pr_number>")
 def github_pull_request(pr_number: int):
-    return _render_github_pull_request_page(pr_number, "conversation")
+    return _render_github_pull_request_page(
+        pr_number,
+        "conversation",
+        is_api_request=_workflow_api_request(),
+    )
 
 
 @bp.get("/github/pulls/<int:pr_number>/commits")
 def github_pull_request_commits(pr_number: int):
-    return _render_github_pull_request_page(pr_number, "commits")
+    return _render_github_pull_request_page(
+        pr_number,
+        "commits",
+        is_api_request=_workflow_api_request(),
+    )
 
 
 @bp.get("/github/pulls/<int:pr_number>/checks")
 def github_pull_request_checks(pr_number: int):
-    return _render_github_pull_request_page(pr_number, "checks")
+    return _render_github_pull_request_page(
+        pr_number,
+        "checks",
+        is_api_request=_workflow_api_request(),
+    )
 
 
 @bp.get("/github/pulls/<int:pr_number>/files")
 def github_pull_request_files(pr_number: int):
-    return _render_github_pull_request_page(pr_number, "files")
+    return _render_github_pull_request_page(
+        pr_number,
+        "files",
+        is_api_request=_workflow_api_request(),
+    )
 
 
 @bp.post("/github/pulls/<int:pr_number>/code-review")
 def github_pull_request_code_review(pr_number: int):
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
     redirect_target = _safe_redirect_target(
         request.form.get("next"),
         url_for("agents.github_pull_request", pr_number=pr_number),
@@ -14028,14 +15191,24 @@ def github_pull_request_code_review(pr_number: int):
     repo = settings.get("repo") or ""
     pat = settings.get("pat") or ""
     if not repo or not pat:
+        if is_api_request:
+            return {"error": "GitHub repository and PAT are required to run code reviews."}, 400
         flash(
             "GitHub repository and PAT are required to run code reviews.",
             "error",
         )
         return redirect(redirect_target)
 
-    pr_title = request.form.get("pr_title", "").strip() or None
-    pr_url = request.form.get("pr_url", "").strip() or None
+    pr_title = (
+        str(payload.get("pr_title") or "").strip()
+        if is_api_request
+        else request.form.get("pr_title", "").strip()
+    ) or None
+    pr_url = (
+        str(payload.get("pr_url") or "").strip()
+        if is_api_request
+        else request.form.get("pr_url", "").strip()
+    ) or None
     if not pr_url and repo:
         pr_url = f"https://github.com/{repo}/pull/{pr_number}"
 
@@ -14065,12 +15238,20 @@ def github_pull_request_code_review(pr_number: int):
         if task is not None:
             task.celery_task_id = celery_task.id
 
+    if is_api_request:
+        return {
+            "ok": True,
+            "task_id": task_id,
+            "celery_task_id": celery_task.id,
+            "node_url": url_for("agents.view_node", task_id=task_id),
+        }, 202
     flash(f"Code review node {task_id} queued.", "success")
     return redirect(url_for("agents.view_node", task_id=task_id))
 
 
 @bp.get("/jira")
 def jira_workspace():
+    is_api_request = _workflow_api_request()
     settings = _load_integration_settings("jira")
     board = settings.get("board") or "No board selected"
     site = settings.get("site") or "No site configured"
@@ -14136,6 +15317,21 @@ def jira_workspace():
                         board_error = "Selected Jira board is missing an id."
             except ValueError as exc:
                 board_error = str(exc)
+    if is_api_request:
+        return {
+            "workspace": "jira",
+            "board": board,
+            "site": site,
+            "board_selected": bool(settings.get("board")),
+            "connected": bool(settings.get("api_key")),
+            "board_columns": board_columns,
+            "board_unmapped": board_unmapped,
+            "board_error": board_error,
+            "board_issue_total": board_issue_total,
+            "board_type": board_type,
+            "board_url": board_url,
+            "board_column_count": board_column_count,
+        }
     return render_template(
         "jira.html",
         jira_board=board,
@@ -14156,6 +15352,7 @@ def jira_workspace():
 
 @bp.get("/jira/issues/<issue_key>")
 def jira_issue_detail(issue_key: str):
+    is_api_request = _workflow_api_request()
     settings = _load_integration_settings("jira")
     board = settings.get("board") or "No board selected"
     site = settings.get("site") or "No site configured"
@@ -14195,6 +15392,17 @@ def jira_issue_detail(issue_key: str):
         if issue
         else f"{issue_key} - Jira"
     )
+    if is_api_request:
+        return {
+            "workspace": "jira",
+            "board": board,
+            "site": site,
+            "issue": issue,
+            "issue_error": issue_error,
+            "comments": comments,
+            "comments_error": comments_error,
+            "page_title": page_title,
+        }
     return render_template(
         "jira_issue.html",
         jira_board=board,
@@ -14210,6 +15418,7 @@ def jira_issue_detail(issue_key: str):
 
 @bp.get("/confluence")
 def confluence_workspace():
+    is_api_request = _workflow_api_request()
     settings = _load_integration_settings("confluence")
     selected_space = (settings.get("space") or "").strip()
     selected_space_name = selected_space or "No space selected"
@@ -14261,6 +15470,20 @@ def confluence_workspace():
                     )
             except ValueError as exc:
                 confluence_error = str(exc)
+    if is_api_request:
+        return {
+            "workspace": "confluence",
+            "space": selected_space or "No space selected",
+            "space_name": selected_space_name,
+            "space_key": selected_space,
+            "pages": pages,
+            "selected_page": page,
+            "selected_page_id": selected_page_id or (page.get("id") if page else ""),
+            "error": confluence_error,
+            "site": site,
+            "space_selected": bool(selected_space),
+            "connected": bool(settings.get("api_key")),
+        }
     return render_template(
         "confluence.html",
         confluence_space=selected_space or "No space selected",
@@ -14280,13 +15503,18 @@ def confluence_workspace():
 
 @bp.get("/chroma")
 def chroma_workspace():
+    if _workflow_api_request():
+        return redirect(url_for("agents.chroma_collections"))
     return redirect(url_for("agents.chroma_collections"))
 
 
 @bp.get("/chroma/collections")
 def chroma_collections():
+    is_api_request = _workflow_api_request()
     chroma_settings = _resolved_chroma_settings()
     if not _chroma_connected(chroma_settings):
+        if is_api_request:
+            return {"error": "Configure ChromaDB host and port in Integrations first."}, 400
         flash("Configure ChromaDB host and port in Integrations first.", "error")
         return redirect(url_for("agents.settings_integrations_chroma"))
 
@@ -14336,6 +15564,23 @@ def chroma_collections():
     paged_collections = collections[offset : offset + per_page]
     pagination_items = _build_pagination_items(page, total_pages)
 
+    if is_api_request:
+        return {
+            "workspace": "chroma",
+            "collections": paged_collections,
+            "chroma_error": chroma_error,
+            "chroma_host": host,
+            "chroma_port": port,
+            "chroma_ssl": "enabled" if _as_bool(chroma_settings.get("ssl")) else "disabled",
+            "chroma_normalized_hint": normalized_hint,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total_pages": total_pages,
+                "per_page_options": PAGINATION_PAGE_SIZES,
+                "total_collections": total_collections,
+            },
+        }
     return render_template(
         "chroma_collections.html",
         collections=paged_collections,
@@ -14357,18 +15602,27 @@ def chroma_collections():
 
 @bp.get("/chroma/collections/detail")
 def chroma_collection_detail():
+    is_api_request = _workflow_api_request()
     collection_name = (request.args.get("name") or "").strip()
     if not collection_name:
+        if is_api_request:
+            return {"error": "Collection name is required."}, 400
         flash("Collection name is required.", "error")
         return redirect(url_for("agents.chroma_collections"))
 
     chroma_settings = _resolved_chroma_settings()
     if not _chroma_connected(chroma_settings):
+        if is_api_request:
+            return {"error": "Configure ChromaDB host and port in Integrations first."}, 400
         flash("Configure ChromaDB host and port in Integrations first.", "error")
         return redirect(url_for("agents.settings_integrations_chroma"))
 
     client, host, port, normalized_hint, error = _chroma_http_client(chroma_settings)
     if error or client is None:
+        if is_api_request:
+            return {
+                "error": f"Failed to connect to Chroma at {_chroma_endpoint_label(host, port)}: {error}"
+            }, 502
         flash(
             f"Failed to connect to Chroma at {_chroma_endpoint_label(host, port)}: {error}",
             "error",
@@ -14381,9 +15635,25 @@ def chroma_collection_detail():
         raw_metadata = getattr(collection, "metadata", None)
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     except Exception as exc:
+        if is_api_request:
+            return {"error": f"Failed to load collection '{collection_name}': {exc}"}, 502
         flash(f"Failed to load collection '{collection_name}': {exc}", "error")
         return redirect(url_for("agents.chroma_collections"))
 
+    if is_api_request:
+        return {
+            "workspace": "chroma",
+            "collection_name": collection_name,
+            "collection_count": count,
+            "collection_metadata": metadata,
+            "collection_metadata_json": json.dumps(metadata, sort_keys=True, indent=2)
+            if metadata
+            else "{}",
+            "chroma_host": host,
+            "chroma_port": port,
+            "chroma_ssl": "enabled" if _as_bool(chroma_settings.get("ssl")) else "disabled",
+            "chroma_normalized_hint": normalized_hint,
+        }
     return render_template(
         "chroma_collection_detail.html",
         collection_name=collection_name,
@@ -14403,19 +15673,39 @@ def chroma_collection_detail():
 
 @bp.post("/chroma/collections/delete")
 def delete_chroma_collection():
-    collection_name = request.form.get("collection_name", "").strip()
-    next_page = request.form.get("next", "").strip().lower()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    collection_name = (
+        str(payload.get("collection_name") or "").strip()
+        if is_api_request
+        else request.form.get("collection_name", "").strip()
+    )
+    next_page = (
+        str(payload.get("next") or "").strip().lower()
+        if is_api_request
+        else request.form.get("next", "").strip().lower()
+    )
     if not collection_name:
+        if is_api_request:
+            return {"error": "Collection name is required."}, 400
         flash("Collection name is required.", "error")
         return redirect(url_for("agents.chroma_collections"))
 
     chroma_settings = _resolved_chroma_settings()
     if not _chroma_connected(chroma_settings):
+        if is_api_request:
+            return {"error": "Configure ChromaDB host and port in Integrations first."}, 400
         flash("Configure ChromaDB host and port in Integrations first.", "error")
         return redirect(url_for("agents.settings_integrations_chroma"))
 
     client, host, port, _, error = _chroma_http_client(chroma_settings)
     if error or client is None:
+        if is_api_request:
+            return {
+                "error": f"Failed to connect to Chroma at {_chroma_endpoint_label(host, port)}: {error}"
+            }, 502
         flash(
             f"Failed to connect to Chroma at {_chroma_endpoint_label(host, port)}: {error}",
             "error",
@@ -14429,6 +15719,8 @@ def delete_chroma_collection():
     try:
         client.delete_collection(name=collection_name)
     except Exception as exc:
+        if is_api_request:
+            return {"error": f"Failed to delete collection '{collection_name}': {exc}"}, 502
         flash(f"Failed to delete collection '{collection_name}': {exc}", "error")
         if next_page == "detail":
             return redirect(
@@ -14436,6 +15728,8 @@ def delete_chroma_collection():
             )
         return redirect(url_for("agents.chroma_collections"))
 
+    if is_api_request:
+        return {"ok": True, "collection_name": collection_name}
     flash("Collection deleted.", "success")
     return redirect(url_for("agents.chroma_collections"))
 
@@ -15783,15 +17077,26 @@ def settings_integrations_git():
 @bp.post("/settings/integrations/git")
 def update_integrations_gitconfig():
     gitconfig_path = _gitconfig_path()
-    gitconfig_content = request.form.get("gitconfig_content", "")
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    gitconfig_content = _settings_form_value(request_payload, "gitconfig_content")
     try:
         gitconfig_path.write_text(gitconfig_content, encoding="utf-8")
     except OSError as exc:
+        if is_api_request:
+            return {"error": f"Unable to write {gitconfig_path}: {exc}"}, 500
         flash(f"Unable to write {gitconfig_path}: {exc}", "error")
         return _render_settings_integrations_page(
             "git",
             gitconfig_content=gitconfig_content,
         )
+    if is_api_request:
+        return {
+            "ok": True,
+            "gitconfig_path": str(gitconfig_path),
+            "gitconfig_exists": gitconfig_path.exists(),
+            "gitconfig_content": gitconfig_content,
+        }
     flash("Git config saved.", "success")
     return redirect(url_for("agents.settings_integrations_git"))
 
@@ -15855,21 +17160,23 @@ def settings_integrations_rag():
 
 @bp.post("/settings/integrations/github")
 def update_github_settings():
-    action = request.form.get("action", "").strip()
-    pat = request.form.get("github_pat", "").strip()
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    action = _settings_form_value(request_payload, "action").strip()
+    pat = _settings_form_value(request_payload, "github_pat").strip()
     current_settings = _load_integration_settings("github")
     existing_key_path = (current_settings.get("ssh_key_path") or "").strip()
     uploaded_key = request.files.get("github_ssh_key")
-    clear_key = request.form.get("github_ssh_key_clear", "").lower() in {"1", "true", "on"}
+    clear_key = _as_bool(_settings_form_value(request_payload, "github_ssh_key_clear"))
     logger.info(
         "GitHub settings update action=%s has_pat=%s has_repo=%s",
         action or "save",
         bool(pat),
-        "github_repo" in request.form,
+        "github_repo" in request.form or "github_repo" in request_payload,
     )
     payload = {"pat": pat}
-    if "github_repo" in request.form:
-        payload["repo"] = request.form.get("github_repo", "").strip()
+    if "github_repo" in request.form or "github_repo" in request_payload:
+        payload["repo"] = _settings_form_value(request_payload, "github_repo").strip()
     if clear_key and existing_key_path:
         existing_path = Path(existing_key_path)
         try:
@@ -15878,12 +17185,17 @@ def update_github_settings():
         except OSError:
             logger.warning("Failed to remove GitHub SSH key at %s", existing_key_path)
         payload["ssh_key_path"] = ""
-        flash("GitHub SSH key removed.", "success")
+        if not is_api_request:
+            flash("GitHub SSH key removed.", "success")
     elif uploaded_key and uploaded_key.filename:
         key_bytes = uploaded_key.read()
         if not key_bytes:
+            if is_api_request:
+                return {"error": "Uploaded SSH key is empty."}, 400
             flash("Uploaded SSH key is empty.", "error")
         elif len(key_bytes) > 256 * 1024:
+            if is_api_request:
+                return {"error": "SSH key is too large."}, 400
             flash("SSH key is too large.", "error")
         else:
             key_path = Path(Config.SSH_KEYS_DIR) / "github_ssh_key.pem"
@@ -15891,9 +17203,12 @@ def update_github_settings():
                 key_path.write_bytes(key_bytes)
                 key_path.chmod(0o600)
                 payload["ssh_key_path"] = str(key_path)
-                flash("GitHub SSH key uploaded.", "success")
+                if not is_api_request:
+                    flash("GitHub SSH key uploaded.", "success")
             except OSError as exc:
                 logger.warning("Failed to save GitHub SSH key: %s", exc)
+                if is_api_request:
+                    return {"error": "Unable to save GitHub SSH key."}, 500
                 flash("Unable to save GitHub SSH key.", "error")
     _save_integration_settings("github", payload)
     sync_integrated_mcp_servers()
@@ -15903,6 +17218,12 @@ def update_github_settings():
             try:
                 logger.info("GitHub refresh: requesting repositories")
                 repo_options = _fetch_github_repos(pat)
+                if is_api_request:
+                    return {
+                        "ok": True,
+                        "github_repo_options": repo_options,
+                        "github_settings": _load_integration_settings("github"),
+                    }
                 if repo_options:
                     logger.info("GitHub refresh: loaded %s repositories", len(repo_options))
                     flash(f"Loaded {len(repo_options)} repositories.", "success")
@@ -15911,14 +17232,29 @@ def update_github_settings():
                     flash("No repositories returned for this PAT.", "info")
             except ValueError as exc:
                 logger.warning("GitHub refresh: failed with error=%s", exc)
+                if is_api_request:
+                    return {"error": str(exc)}, 400
                 flash(str(exc), "error")
         else:
             logger.info("GitHub refresh: missing PAT")
+            if is_api_request:
+                return {"error": "GitHub PAT is required to refresh repositories."}, 400
             flash("GitHub PAT is required to refresh repositories.", "error")
+        if is_api_request:
+            return {
+                "ok": True,
+                "github_repo_options": repo_options,
+                "github_settings": _load_integration_settings("github"),
+            }
         return _render_settings_integrations_page(
             "github",
             github_repo_options=repo_options,
         )
+    if is_api_request:
+        return {
+            "ok": True,
+            "github_settings": _load_integration_settings("github"),
+        }
     flash("GitHub settings updated.", "success")
     return redirect(url_for("agents.settings_integrations_github"))
 
@@ -15930,15 +17266,26 @@ def update_google_drive_settings():
 
 @bp.post("/settings/integrations/google-cloud")
 def update_google_cloud_settings():
-    service_account_json = request.form.get(
-        "google_cloud_service_account_json", ""
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    service_account_json = _settings_form_value(
+        request_payload,
+        "google_cloud_service_account_json",
     ).strip()
     if not service_account_json:
-        service_account_json = request.form.get(
-            "google_drive_service_account_json", ""
+        service_account_json = _settings_form_value(
+            request_payload,
+            "google_drive_service_account_json",
         ).strip()
-    google_cloud_project_id = request.form.get("google_cloud_project_id", "").strip()
-    raw_google_cloud_mcp_enabled = request.form.get("google_cloud_mcp_enabled")
+    google_cloud_project_id = _settings_form_value(
+        request_payload,
+        "google_cloud_project_id",
+    ).strip()
+    raw_google_cloud_mcp_enabled = _settings_form_value(
+        request_payload,
+        "google_cloud_mcp_enabled",
+        default=None,
+    )
     if raw_google_cloud_mcp_enabled is None:
         google_cloud_mcp_enabled = "true"
     else:
@@ -15947,6 +17294,8 @@ def update_google_cloud_settings():
         )
 
     if google_cloud_project_id and any(char.isspace() for char in google_cloud_project_id):
+        if is_api_request:
+            return {"error": "Google Cloud project ID cannot contain spaces."}, 400
         flash("Google Cloud project ID cannot contain spaces.", "error")
         return redirect(url_for("agents.settings_integrations_google_cloud"))
 
@@ -15954,6 +17303,8 @@ def update_google_cloud_settings():
         try:
             _google_drive_service_account_email(service_account_json)
         except ValueError as exc:
+            if is_api_request:
+                return {"error": str(exc)}, 400
             flash(str(exc), "error")
             return redirect(url_for("agents.settings_integrations_google_cloud"))
 
@@ -15966,19 +17317,32 @@ def update_google_cloud_settings():
         },
     )
     sync_integrated_mcp_servers()
+    if is_api_request:
+        return {
+            "ok": True,
+            "google_cloud_settings": _load_integration_settings(GOOGLE_CLOUD_PROVIDER),
+        }
     flash("Google Cloud settings updated.", "success")
     return redirect(url_for("agents.settings_integrations_google_cloud"))
 
 
 @bp.post("/settings/integrations/google-workspace")
 def update_google_workspace_settings():
-    service_account_json = request.form.get(
-        "workspace_service_account_json", ""
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    service_account_json = _settings_form_value(
+        request_payload,
+        "workspace_service_account_json",
     ).strip()
-    delegated_user_email = request.form.get(
-        "workspace_delegated_user_email", ""
+    delegated_user_email = _settings_form_value(
+        request_payload,
+        "workspace_delegated_user_email",
     ).strip()
-    raw_google_workspace_mcp_enabled = request.form.get("google_workspace_mcp_enabled")
+    raw_google_workspace_mcp_enabled = _settings_form_value(
+        request_payload,
+        "google_workspace_mcp_enabled",
+        default=None,
+    )
     if raw_google_workspace_mcp_enabled is None:
         google_workspace_mcp_enabled = "false"
     else:
@@ -15987,6 +17351,8 @@ def update_google_workspace_settings():
         )
 
     if delegated_user_email and any(char.isspace() for char in delegated_user_email):
+        if is_api_request:
+            return {"error": "Workspace delegated user email cannot contain spaces."}, 400
         flash("Workspace delegated user email cannot contain spaces.", "error")
         return redirect(url_for("agents.settings_integrations_google_workspace"))
 
@@ -15994,6 +17360,8 @@ def update_google_workspace_settings():
         try:
             _google_drive_service_account_email(service_account_json)
         except ValueError as exc:
+            if is_api_request:
+                return {"error": str(exc)}, 400
             flash(str(exc), "error")
             return redirect(url_for("agents.settings_integrations_google_workspace"))
 
@@ -16006,31 +17374,48 @@ def update_google_workspace_settings():
         },
     )
     sync_integrated_mcp_servers()
+    if is_api_request:
+        return {
+            "ok": True,
+            "google_workspace_settings": _load_integration_settings(
+                GOOGLE_WORKSPACE_PROVIDER
+            ),
+        }
     flash("Google Workspace settings updated.", "success")
     return redirect(url_for("agents.settings_integrations_google_workspace"))
 
 
 @bp.post("/settings/integrations/huggingface")
 def update_huggingface_settings():
-    token = request.form.get("vllm_local_hf_token", "")
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    token = _settings_form_value(request_payload, "vllm_local_hf_token")
     _save_integration_settings("llm", {"vllm_local_hf_token": token})
+    if is_api_request:
+        return {"ok": True}
     flash("HuggingFace settings updated.", "success")
     return redirect(url_for("agents.settings_integrations_huggingface"))
 
 
 @bp.post("/settings/integrations/chroma")
 def update_chroma_settings():
-    host = request.form.get("chroma_host", "").strip()
-    port = request.form.get("chroma_port", "").strip()
-    ssl = "true" if _as_bool(request.form.get("chroma_ssl")) else "false"
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    host = _settings_form_value(request_payload, "chroma_host").strip()
+    port = _settings_form_value(request_payload, "chroma_port").strip()
+    ssl = "true" if _as_bool(_settings_form_value(request_payload, "chroma_ssl")) else "false"
     normalized_hint = None
     if port:
         try:
             parsed_port = int(port)
         except ValueError:
+            if is_api_request:
+                return {"error": "Chroma port must be a number between 1 and 65535."}, 400
             flash("Chroma port must be a number between 1 and 65535.", "error")
             return redirect(url_for("agents.settings_integrations_chroma"))
         if parsed_port < 1 or parsed_port > 65535:
+            if is_api_request:
+                return {"error": "Chroma port must be a number between 1 and 65535."}, 400
             flash("Chroma port must be a number between 1 and 65535.", "error")
             return redirect(url_for("agents.settings_integrations_chroma"))
         if host:
@@ -16045,6 +17430,12 @@ def update_chroma_settings():
         },
     )
     sync_integrated_mcp_servers()
+    if is_api_request:
+        return {
+            "ok": True,
+            "normalized_hint": normalized_hint or "",
+            "chroma_settings": _resolved_chroma_settings(),
+        }
     if normalized_hint:
         flash(normalized_hint, "info")
     flash("ChromaDB settings updated.", "success")
@@ -16177,11 +17568,13 @@ def update_rag_settings():
 
 @bp.post("/settings/integrations/jira")
 def update_jira_settings():
-    action = request.form.get("action", "").strip()
-    api_key = request.form.get("jira_api_key", "").strip()
-    email = request.form.get("jira_email", "").strip()
-    site = request.form.get("jira_site", "").strip()
-    project_key = request.form.get("jira_project_key", "").strip()
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    action = _settings_form_value(request_payload, "action").strip()
+    api_key = _settings_form_value(request_payload, "jira_api_key").strip()
+    email = _settings_form_value(request_payload, "jira_email").strip()
+    site = _settings_form_value(request_payload, "jira_site").strip()
+    project_key = _settings_form_value(request_payload, "jira_project_key").strip()
     logger.info(
         "Jira settings update action=%s key_len=%s key_has_colon=%s email_domain=%s site_host=%s has_board=%s",
         action or "save",
@@ -16189,7 +17582,7 @@ def update_jira_settings():
         ":" in api_key,
         _safe_email_domain(email),
         _safe_site_label(site),
-        "jira_board" in request.form,
+        "jira_board" in request.form or "jira_board" in request_payload,
     )
     payload = {
         "api_key": api_key,
@@ -16197,8 +17590,8 @@ def update_jira_settings():
         "site": site,
         "project_key": project_key,
     }
-    if "jira_board" in request.form:
-        payload["board"] = request.form.get("jira_board", "").strip()
+    if "jira_board" in request.form or "jira_board" in request_payload:
+        payload["board"] = _settings_form_value(request_payload, "jira_board").strip()
     _save_integration_settings("jira", payload)
     sync_integrated_mcp_servers()
     if action == "refresh":
@@ -16210,12 +17603,20 @@ def update_jira_settings():
                 email_valid = True
                 if email and "@" not in email:
                     email_valid = False
+                    if is_api_request:
+                        return {
+                            "error": "Jira email must include a full address (name@domain)."
+                        }, 400
                     flash(
                         "Jira email must include a full address (name@domain).",
                         "error",
                     )
                 needs_email = ":" not in auth_key
                 if needs_email:
+                    if is_api_request:
+                        return {
+                            "error": "Jira API key needs an Atlassian email. Enter it above or use email:token."
+                        }, 400
                     flash(
                         "Jira API key needs an Atlassian email. Enter it above or use email:token.",
                         "error",
@@ -16228,6 +17629,17 @@ def update_jira_settings():
                     logger.info("Jira refresh: skipped due to email validation")
                 else:
                     project_options = _fetch_jira_projects(auth_key, site)
+                    if is_api_request:
+                        if project_key:
+                            board_options = _fetch_jira_boards(
+                                auth_key, site, project_key
+                            )
+                        return {
+                            "ok": True,
+                            "jira_project_options": project_options,
+                            "jira_board_options": board_options,
+                            "jira_settings": _load_integration_settings("jira"),
+                        }
                     if project_options:
                         logger.info(
                             "Jira refresh: loaded %s projects", len(project_options)
@@ -16261,9 +17673,15 @@ def update_jira_settings():
                         )
             except ValueError as exc:
                 logger.warning("Jira refresh: failed with error=%s", exc)
+                if is_api_request:
+                    return {"error": str(exc)}, 400
                 flash(str(exc), "error")
         else:
             logger.info("Jira refresh: missing api key or site")
+            if is_api_request:
+                return {
+                    "error": "Jira API key and site URL are required to refresh projects and boards."
+                }, 400
             flash(
                 "Jira API key and site URL are required to refresh projects and boards.",
                 "error",
@@ -16274,40 +17692,54 @@ def update_jira_settings():
             project_options.insert(
                 0, {"value": project_key, "label": project_key}
             )
+        if is_api_request:
+            return {
+                "ok": True,
+                "jira_project_options": project_options,
+                "jira_board_options": board_options,
+                "jira_settings": _load_integration_settings("jira"),
+            }
         return _render_settings_integrations_page(
             "jira",
             jira_project_options=project_options,
             jira_board_options=board_options,
         )
+    if is_api_request:
+        return {
+            "ok": True,
+            "jira_settings": _load_integration_settings("jira"),
+        }
     flash("Jira settings updated.", "success")
     return redirect(url_for("agents.settings_integrations_jira"))
 
 
 @bp.post("/settings/integrations/confluence")
 def update_confluence_settings():
-    action = request.form.get("action", "").strip()
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    action = _settings_form_value(request_payload, "action").strip()
     existing_settings = _load_integration_settings("confluence")
     jira_settings = _load_integration_settings("jira")
     jira_site = _normalize_confluence_site((jira_settings.get("site") or "").strip())
     api_key = (
-        request.form.get("confluence_api_key", "").strip()
-        if "confluence_api_key" in request.form
+        _settings_form_value(request_payload, "confluence_api_key").strip()
+        if "confluence_api_key" in request.form or "confluence_api_key" in request_payload
         else (existing_settings.get("api_key") or jira_settings.get("api_key") or "").strip()
     )
     email = (
-        request.form.get("confluence_email", "").strip()
-        if "confluence_email" in request.form
+        _settings_form_value(request_payload, "confluence_email").strip()
+        if "confluence_email" in request.form or "confluence_email" in request_payload
         else (existing_settings.get("email") or jira_settings.get("email") or "").strip()
     )
     site = (
-        request.form.get("confluence_site", "").strip()
-        if "confluence_site" in request.form
+        _settings_form_value(request_payload, "confluence_site").strip()
+        if "confluence_site" in request.form or "confluence_site" in request_payload
         else (existing_settings.get("site") or jira_site or "").strip()
     )
     site = _normalize_confluence_site(site)
     configured_space = (
-        request.form.get("confluence_space", "").strip()
-        if "confluence_space" in request.form
+        _settings_form_value(request_payload, "confluence_space").strip()
+        if "confluence_space" in request.form or "confluence_space" in request_payload
         else (existing_settings.get("space") or "").strip()
     )
     logger.info(
@@ -16336,12 +17768,20 @@ def update_confluence_settings():
                 email_valid = True
                 if email and "@" not in email:
                     email_valid = False
+                    if is_api_request:
+                        return {
+                            "error": "Confluence email must include a full address (name@domain)."
+                        }, 400
                     flash(
                         "Confluence email must include a full address (name@domain).",
                         "error",
                     )
                 needs_email = ":" not in auth_key
                 if needs_email:
+                    if is_api_request:
+                        return {
+                            "error": "Confluence API key needs an Atlassian email. Enter it above or use email:token."
+                        }, 400
                     flash(
                         "Confluence API key needs an Atlassian email. Enter it above or use email:token.",
                         "error",
@@ -16355,6 +17795,14 @@ def update_confluence_settings():
                 else:
                     space_options = _fetch_confluence_spaces(auth_key, site)
                     cache_payload = _serialize_option_entries(space_options)
+                    if is_api_request:
+                        return {
+                            "ok": True,
+                            "confluence_space_options": space_options,
+                            "confluence_settings": _load_integration_settings(
+                                "confluence"
+                            ),
+                        }
                     if space_options:
                         logger.info(
                             "Confluence refresh: loaded %s spaces", len(space_options)
@@ -16365,9 +17813,15 @@ def update_confluence_settings():
                         flash("No spaces returned for this Confluence key.", "info")
             except ValueError as exc:
                 logger.warning("Confluence refresh: failed with error=%s", exc)
+                if is_api_request:
+                    return {"error": str(exc)}, 400
                 flash(str(exc), "error")
         else:
             logger.info("Confluence refresh: missing api key or site")
+            if is_api_request:
+                return {
+                    "error": "Confluence API key and site URL are required to refresh spaces."
+                }, 400
             flash(
                 "Confluence API key and site URL are required to refresh spaces.",
                 "error",
@@ -16381,9 +17835,20 @@ def update_confluence_settings():
             space_options = _merge_selected_option(
                 space_options, confluence_settings.get("space")
             )
+        if is_api_request:
+            return {
+                "ok": True,
+                "confluence_space_options": space_options,
+                "confluence_settings": confluence_settings,
+            }
         return _render_settings_integrations_page(
             "confluence",
             confluence_space_options=space_options,
         )
+    if is_api_request:
+        return {
+            "ok": True,
+            "confluence_settings": _load_integration_settings("confluence"),
+        }
     flash("Confluence settings updated.", "success")
     return redirect(url_for("agents.settings_integrations_confluence"))

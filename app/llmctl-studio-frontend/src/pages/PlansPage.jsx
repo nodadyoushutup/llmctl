@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
-import { deletePlan, getPlans } from '../lib/studioApi'
+import { getPlans } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
 
 function parsePositiveInt(value, fallback) {
@@ -30,28 +30,24 @@ export default function PlansPage() {
   const perPage = parsePositiveInt(searchParams.get('per_page'), 20)
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
-  const [busyPlanId, setBusyPlanId] = useState(null)
-
-  const refresh = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) {
-      setState((current) => ({ ...current, loading: true, error: '' }))
-    }
-    try {
-      const payload = await getPlans({ page, perPage })
-      setState({ loading: false, payload, error: '' })
-    } catch (error) {
-      setState((current) => ({
-        loading: false,
-        payload: silent ? current.payload : null,
-        error: errorMessage(error, 'Failed to load plans.'),
-      }))
-    }
-  }, [page, perPage])
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    let cancelled = false
+    getPlans({ page, perPage })
+      .then((payload) => {
+        if (!cancelled) {
+          setState({ loading: false, payload, error: '' })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load plans.') })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [page, perPage])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const plans = payload && Array.isArray(payload.plans) ? payload.plans : []
@@ -61,7 +57,15 @@ export default function PlansPage() {
   const totalPages = Number.isInteger(pagination?.total_pages) && pagination.total_pages > 0
     ? pagination.total_pages
     : 1
-  const totalCount = Number.isInteger(pagination?.total_count) ? pagination.total_count : 0
+  const paginationItems = Array.isArray(pagination?.items) ? pagination.items : []
+
+  function truncateText(value, max = 140) {
+    const text = String(value || '').trim()
+    if (!text || text.length <= max) {
+      return text
+    }
+    return `${text.slice(0, max - 3)}...`
+  }
 
   function updateParams(nextParams) {
     const updated = new URLSearchParams(searchParams)
@@ -75,22 +79,6 @@ export default function PlansPage() {
     setSearchParams(updated)
   }
 
-  async function handleDelete(planId) {
-    if (!window.confirm('Delete this plan?')) {
-      return
-    }
-    setActionError('')
-    setBusyPlanId(planId)
-    try {
-      await deletePlan(planId)
-      await refresh({ silent: true })
-    } catch (error) {
-      setActionError(errorMessage(error, 'Failed to delete plan.'))
-    } finally {
-      setBusyPlanId(null)
-    }
-  }
-
   function handleRowClick(event, href) {
     if (shouldIgnoreRowClick(event.target)) {
       return
@@ -100,44 +88,75 @@ export default function PlansPage() {
 
   return (
     <section className="stack" aria-label="Plans">
-      <article className="card">
-        <div className="title-row">
+      <article className="card workflow-list-card">
+        <div className="pagination-bar pagination-bar-header">
+          <nav className="pagination" aria-label="Plans pages">
+            {page > 1 ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page - 1, per_page: perPage })}
+              >
+                Prev
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+            )}
+            <div className="pagination-pages">
+              {paginationItems.map((item, index) => {
+                const itemType = String(item?.type || '')
+                if (itemType === 'gap') {
+                  return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
+                }
+                const itemPage = Number.parseInt(String(item?.page || ''), 10)
+                if (!Number.isInteger(itemPage) || itemPage <= 0) {
+                  return null
+                }
+                if (itemPage === page) {
+                  return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
+                }
+                return (
+                  <button
+                    key={itemPage}
+                    type="button"
+                    className="pagination-link"
+                    onClick={() => updateParams({ page: itemPage, per_page: perPage })}
+                  >
+                    {itemPage}
+                  </button>
+                )
+              })}
+            </div>
+            {page < totalPages ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page + 1, per_page: perPage })}
+              >
+                Next
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+            )}
+          </nav>
+        </div>
+        <div className="card-header">
           <div>
-            <h2>Plans</h2>
-            <p>Native React replacement for `/plans` list and plan actions.</p>
+            <h2 className="section-title">Plans</h2>
           </div>
-          <Link to="/plans/new" className="btn-link btn-secondary">Create Policy</Link>
         </div>
-        <div className="toolbar">
-          <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page <= 1}
-              onClick={() => updateParams({ page: page - 1, per_page: perPage })}
-            >
-              Prev
-            </button>
-            <span className="toolbar-meta">Page {Math.min(page, totalPages)} / {totalPages}</span>
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => updateParams({ page: page + 1, per_page: perPage })}
-            >
-              Next
-            </button>
-          </div>
-          <span className="toolbar-meta">Total plans: {totalCount}</span>
-        </div>
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Track multi-stage plans and task completion with explicit completion timestamps.
+        </p>
         {state.loading ? <p>Loading plans...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
         {!state.loading && !state.error && plans.length === 0 ? (
-          <p>No plans found yet. Add a Plan node in a flowchart to create one.</p>
+          <p className="muted" style={{ marginTop: '16px' }}>
+            No plans found yet. Add a Plan node in a flowchart to create one.
+          </p>
         ) : null}
         {!state.loading && !state.error && plans.length > 0 ? (
-          <div className="table-wrap">
+          <div className="workflow-list-table-shell">
             <table className="data-table">
               <thead>
                 <tr>
@@ -145,13 +164,12 @@ export default function PlansPage() {
                   <th>Completed</th>
                   <th>Stages</th>
                   <th>Tasks</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th className="table-actions-cell">Edit</th>
                 </tr>
               </thead>
               <tbody>
                 {plans.map((plan) => {
                   const href = `/plans/${plan.id}`
-                  const busy = busyPlanId === plan.id
                   return (
                     <tr
                       key={plan.id}
@@ -161,32 +179,20 @@ export default function PlansPage() {
                     >
                       <td>
                         <Link to={href}>{plan.name}</Link>
-                        {plan.description ? <p className="table-note">{plan.description}</p> : null}
+                        {plan.description ? <p className="table-note">{truncateText(plan.description)}</p> : null}
                       </td>
-                      <td>{plan.completed_at || '-'}</td>
-                      <td>{plan.stage_count || 0}</td>
-                      <td>{plan.task_count || 0}</td>
+                      <td className="muted">{plan.completed_at || '-'}</td>
+                      <td className="muted">{plan.stage_count || 0}</td>
+                      <td className="muted">{plan.task_count || 0}</td>
                       <td className="table-actions-cell">
-                        <div className="table-actions">
-                          <Link
-                            to={`/plans/${plan.id}/edit`}
-                            className="icon-button"
-                            aria-label="Edit plan"
-                            title="Edit plan"
-                          >
-                            <ActionIcon name="edit" />
-                          </Link>
-                          <button
-                            type="button"
-                            className="icon-button icon-button-danger"
-                            aria-label="Delete plan"
-                            title="Delete plan"
-                            disabled={busy}
-                            onClick={() => handleDelete(plan.id)}
-                          >
-                            <ActionIcon name="trash" />
-                          </button>
-                        </div>
+                        <Link
+                          to={`/plans/${plan.id}/edit`}
+                          className="icon-button"
+                          aria-label="Edit plan"
+                          title="Edit plan"
+                        >
+                          <ActionIcon name="edit" />
+                        </Link>
                       </td>
                     </tr>
                   )

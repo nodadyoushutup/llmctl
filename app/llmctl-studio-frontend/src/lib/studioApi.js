@@ -4,10 +4,32 @@ export function getBackendHealth() {
   return requestJson('/health')
 }
 
-export function getChatActivity({ limit = 10 } = {}) {
+export function getChatActivity({
+  limit = 10,
+  eventClass = '',
+  eventType = '',
+  reasonCode = '',
+  threadId = '',
+} = {}) {
   const params = new URLSearchParams()
   if (Number.isFinite(limit) && limit > 0) {
     params.set('limit', String(Math.floor(limit)))
+  }
+  const classFilter = String(eventClass || '').trim()
+  if (classFilter) {
+    params.set('event_class', classFilter)
+  }
+  const typeFilter = String(eventType || '').trim()
+  if (typeFilter) {
+    params.set('event_type', typeFilter)
+  }
+  const reasonFilter = String(reasonCode || '').trim()
+  if (reasonFilter) {
+    params.set('reason_code', reasonFilter)
+  }
+  const parsedThreadId = Number.parseInt(String(threadId || '').trim(), 10)
+  if (Number.isInteger(parsedThreadId) && parsedThreadId > 0) {
+    params.set('thread_id', String(parsedThreadId))
   }
   const query = params.toString()
   const path = query ? `/chat/activity?${query}` : '/chat/activity'
@@ -761,6 +783,16 @@ export function reorderFlowchartNodeSkills(flowchartId, nodeId, { skillIds = [] 
 }
 
 const SETTINGS_PROVIDER_IDS = ['codex', 'gemini', 'claude', 'vllm_local', 'vllm_remote']
+const SETTINGS_INTEGRATION_IDS = [
+  'git',
+  'github',
+  'jira',
+  'confluence',
+  'google_cloud',
+  'google_workspace',
+  'huggingface',
+  'chroma',
+]
 
 function normalizeProviderSection(section) {
   const normalized = String(section || '').trim().toLowerCase()
@@ -801,6 +833,34 @@ function runtimeSectionPath(section) {
     return '/settings/runtime'
   }
   return `/settings/runtime/${normalized}`
+}
+
+function normalizeIntegrationSection(section) {
+  const normalized = String(section || '').trim().toLowerCase()
+  if (!normalized || normalized === 'git') {
+    return 'git'
+  }
+  if (normalized === 'google-cloud') {
+    return 'google_cloud'
+  }
+  if (normalized === 'google-workspace') {
+    return 'google_workspace'
+  }
+  if (SETTINGS_INTEGRATION_IDS.includes(normalized)) {
+    return normalized
+  }
+  return 'git'
+}
+
+function integrationSectionPath(section) {
+  const normalized = normalizeIntegrationSection(section)
+  if (normalized === 'google_cloud') {
+    return '/settings/integrations/google-cloud'
+  }
+  if (normalized === 'google_workspace') {
+    return '/settings/integrations/google-workspace'
+  }
+  return `/settings/integrations/${normalized}`
 }
 
 export function getSettingsCore() {
@@ -1030,4 +1090,678 @@ export function updateSettingsChatDefaults({
       default_rag_collections: defaultRagCollections,
     },
   })
+}
+
+export function getSettingsIntegrations({ section = 'git' } = {}) {
+  return requestJson(integrationSectionPath(section))
+}
+
+export function updateSettingsIntegrationsGit({ gitconfigContent = '' } = {}) {
+  return requestJson('/settings/integrations/git', {
+    method: 'POST',
+    body: { gitconfig_content: gitconfigContent },
+  })
+}
+
+export function updateSettingsIntegrationsGithub({
+  pat = '',
+  repo = '',
+  clearSshKey = false,
+  action = '',
+} = {}) {
+  const body = {
+    github_pat: pat,
+    github_repo: repo,
+    github_ssh_key_clear: clearSshKey,
+  }
+  if (action) {
+    body.action = action
+  }
+  return requestJson('/settings/integrations/github', {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateSettingsIntegrationsJira({
+  apiKey = '',
+  email = '',
+  site = '',
+  projectKey = '',
+  board = '',
+  action = '',
+} = {}) {
+  const body = {
+    jira_api_key: apiKey,
+    jira_email: email,
+    jira_site: site,
+    jira_project_key: projectKey,
+    jira_board: board,
+  }
+  if (action) {
+    body.action = action
+  }
+  return requestJson('/settings/integrations/jira', {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateSettingsIntegrationsConfluence({
+  apiKey = '',
+  email = '',
+  site = '',
+  space = '',
+  action = '',
+} = {}) {
+  const body = {
+    confluence_api_key: apiKey,
+    confluence_email: email,
+    confluence_site: site,
+    confluence_space: space,
+  }
+  if (action) {
+    body.action = action
+  }
+  return requestJson('/settings/integrations/confluence', {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateSettingsIntegrationsGoogleCloud({
+  serviceAccountJson = '',
+  projectId = '',
+  mcpEnabled = true,
+} = {}) {
+  return requestJson('/settings/integrations/google-cloud', {
+    method: 'POST',
+    body: {
+      google_cloud_service_account_json: serviceAccountJson,
+      google_cloud_project_id: projectId,
+      google_cloud_mcp_enabled: Boolean(mcpEnabled),
+    },
+  })
+}
+
+export function updateSettingsIntegrationsGoogleWorkspace({
+  serviceAccountJson = '',
+  delegatedUserEmail = '',
+  mcpEnabled = false,
+} = {}) {
+  return requestJson('/settings/integrations/google-workspace', {
+    method: 'POST',
+    body: {
+      workspace_service_account_json: serviceAccountJson,
+      workspace_delegated_user_email: delegatedUserEmail,
+      google_workspace_mcp_enabled: Boolean(mcpEnabled),
+    },
+  })
+}
+
+export function updateSettingsIntegrationsHuggingface({ token = '' } = {}) {
+  return requestJson('/settings/integrations/huggingface', {
+    method: 'POST',
+    body: {
+      vllm_local_hf_token: token,
+    },
+  })
+}
+
+export function updateSettingsIntegrationsChroma({
+  host = '',
+  port = '',
+  ssl = false,
+} = {}) {
+  return requestJson('/settings/integrations/chroma', {
+    method: 'POST',
+    body: {
+      chroma_host: host,
+      chroma_port: port,
+      chroma_ssl: Boolean(ssl),
+    },
+  })
+}
+
+export function getSkills() {
+  return requestJson('/skills')
+}
+
+export function getSkillMeta() {
+  return requestJson('/skills/new')
+}
+
+export function createSkill({
+  name = '',
+  displayName = '',
+  description = '',
+  version = '',
+  status = '',
+  skillMd = '',
+  sourceRef = '',
+  extraFiles = [],
+} = {}) {
+  return requestJson('/skills', {
+    method: 'POST',
+    body: {
+      name,
+      display_name: displayName,
+      description,
+      version,
+      status,
+      skill_md: skillMd,
+      source_ref: sourceRef,
+      extra_files: extraFiles,
+    },
+  })
+}
+
+export function getSkillImportMeta() {
+  return requestJson('/skills/import')
+}
+
+export function previewSkillImport({
+  sourceKind = 'upload',
+  localPath = '',
+  sourceRef = '',
+  actor = '',
+  gitUrl = '',
+  bundlePayload = '',
+} = {}) {
+  return requestJson('/skills/import', {
+    method: 'POST',
+    body: {
+      action: 'preview',
+      source_kind: sourceKind,
+      local_path: localPath,
+      source_ref: sourceRef,
+      actor,
+      git_url: gitUrl,
+      bundle_payload: bundlePayload,
+    },
+  })
+}
+
+export function importSkillBundle({
+  sourceKind = 'upload',
+  localPath = '',
+  sourceRef = '',
+  actor = '',
+  gitUrl = '',
+  bundlePayload = '',
+} = {}) {
+  return requestJson('/skills/import', {
+    method: 'POST',
+    body: {
+      action: 'import',
+      source_kind: sourceKind,
+      local_path: localPath,
+      source_ref: sourceRef,
+      actor,
+      git_url: gitUrl,
+      bundle_payload: bundlePayload,
+    },
+  })
+}
+
+export function getSkill(skillId, { version = '' } = {}) {
+  const parsedSkillId = parsePositiveId(skillId, 'skillId')
+  return requestJson(appendQuery(`/skills/${parsedSkillId}`, { version }))
+}
+
+export function getSkillEdit(skillId) {
+  const parsedSkillId = parsePositiveId(skillId, 'skillId')
+  return requestJson(`/skills/${parsedSkillId}/edit`)
+}
+
+export function updateSkill(skillId, {
+  displayName = '',
+  description = '',
+  status = '',
+  newVersion = '',
+  newSkillMd = '',
+  existingFiles = [],
+  extraFiles = [],
+  sourceRef = '',
+} = {}) {
+  const parsedSkillId = parsePositiveId(skillId, 'skillId')
+  return requestJson(`/skills/${parsedSkillId}`, {
+    method: 'POST',
+    body: {
+      display_name: displayName,
+      description,
+      status,
+      new_version: newVersion,
+      new_skill_md: newSkillMd,
+      existing_files: existingFiles,
+      extra_files: extraFiles,
+      source_ref: sourceRef,
+    },
+  })
+}
+
+export function deleteSkill(skillId) {
+  const parsedSkillId = parsePositiveId(skillId, 'skillId')
+  return requestJson(`/skills/${parsedSkillId}/delete`, { method: 'POST' })
+}
+
+export function getScripts() {
+  return requestJson('/scripts')
+}
+
+export function getScriptMeta() {
+  return requestJson('/scripts/new')
+}
+
+export function createScript({
+  fileName = '',
+  description = '',
+  scriptType = '',
+  content = '',
+} = {}) {
+  return requestJson('/scripts', {
+    method: 'POST',
+    body: {
+      file_name: fileName,
+      description,
+      script_type: scriptType,
+      content,
+    },
+  })
+}
+
+export function getScript(scriptId) {
+  const parsedScriptId = parsePositiveId(scriptId, 'scriptId')
+  return requestJson(`/scripts/${parsedScriptId}`)
+}
+
+export function getScriptEdit(scriptId) {
+  const parsedScriptId = parsePositiveId(scriptId, 'scriptId')
+  return requestJson(`/scripts/${parsedScriptId}/edit`)
+}
+
+export function updateScript(scriptId, {
+  fileName = '',
+  description = '',
+  scriptType = '',
+  content = '',
+} = {}) {
+  const parsedScriptId = parsePositiveId(scriptId, 'scriptId')
+  return requestJson(`/scripts/${parsedScriptId}`, {
+    method: 'POST',
+    body: {
+      file_name: fileName,
+      description,
+      script_type: scriptType,
+      content,
+    },
+  })
+}
+
+export function deleteScript(scriptId) {
+  const parsedScriptId = parsePositiveId(scriptId, 'scriptId')
+  return requestJson(`/scripts/${parsedScriptId}/delete`, { method: 'POST' })
+}
+
+export function getAttachments() {
+  return requestJson('/attachments')
+}
+
+export function getAttachment(attachmentId) {
+  const parsedAttachmentId = parsePositiveId(attachmentId, 'attachmentId')
+  return requestJson(`/attachments/${parsedAttachmentId}`)
+}
+
+export function deleteAttachment(attachmentId) {
+  const parsedAttachmentId = parsePositiveId(attachmentId, 'attachmentId')
+  return requestJson(`/attachments/${parsedAttachmentId}/delete`, { method: 'POST' })
+}
+
+export function getModels() {
+  return requestJson('/models')
+}
+
+export function getModelMeta() {
+  return requestJson('/models/new')
+}
+
+export function createModel({
+  name = '',
+  description = '',
+  provider = '',
+  config = {},
+} = {}) {
+  return requestJson('/models', {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      provider,
+      config,
+    },
+  })
+}
+
+export function getModel(modelId) {
+  const parsedModelId = parsePositiveId(modelId, 'modelId')
+  return requestJson(`/models/${parsedModelId}`)
+}
+
+export function getModelEdit(modelId) {
+  const parsedModelId = parsePositiveId(modelId, 'modelId')
+  return requestJson(`/models/${parsedModelId}/edit`)
+}
+
+export function updateModel(modelId, {
+  name = '',
+  description = '',
+  provider = '',
+  config = {},
+} = {}) {
+  const parsedModelId = parsePositiveId(modelId, 'modelId')
+  return requestJson(`/models/${parsedModelId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      provider,
+      config,
+    },
+  })
+}
+
+export function updateDefaultModel(modelId, isDefault) {
+  const parsedModelId = parsePositiveId(modelId, 'modelId')
+  return requestJson('/models/default', {
+    method: 'POST',
+    body: {
+      model_id: parsedModelId,
+      is_default: Boolean(isDefault),
+    },
+  })
+}
+
+export function deleteModel(modelId) {
+  const parsedModelId = parsePositiveId(modelId, 'modelId')
+  return requestJson(`/models/${parsedModelId}/delete`, { method: 'POST' })
+}
+
+export function getMcps() {
+  return requestJson('/mcps')
+}
+
+export function getMcpMeta() {
+  return requestJson('/mcps/new')
+}
+
+export function createMcp({
+  name = '',
+  serverKey = '',
+  description = '',
+  config = {},
+} = {}) {
+  return requestJson('/mcps', {
+    method: 'POST',
+    body: {
+      name,
+      server_key: serverKey,
+      description,
+      config,
+    },
+  })
+}
+
+export function getMcp(mcpId) {
+  const parsedMcpId = parsePositiveId(mcpId, 'mcpId')
+  return requestJson(`/mcps/${parsedMcpId}`)
+}
+
+export function getMcpEdit(mcpId) {
+  const parsedMcpId = parsePositiveId(mcpId, 'mcpId')
+  return requestJson(`/mcps/${parsedMcpId}/edit`)
+}
+
+export function updateMcp(mcpId, {
+  name = '',
+  serverKey = '',
+  description = '',
+  config = {},
+} = {}) {
+  const parsedMcpId = parsePositiveId(mcpId, 'mcpId')
+  return requestJson(`/mcps/${parsedMcpId}`, {
+    method: 'POST',
+    body: {
+      name,
+      server_key: serverKey,
+      description,
+      config,
+    },
+  })
+}
+
+export function deleteMcp(mcpId) {
+  const parsedMcpId = parsePositiveId(mcpId, 'mcpId')
+  return requestJson(`/mcps/${parsedMcpId}/delete`, { method: 'POST' })
+}
+
+export function getGithubWorkspace({
+  tab = 'pulls',
+  prStatus = 'open',
+  prAuthor = '',
+  path = '',
+} = {}) {
+  return requestJson(
+    appendQuery('/github', {
+      tab,
+      pr_status: prStatus,
+      pr_author: prAuthor,
+      path,
+    }),
+  )
+}
+
+export function getGithubPullRequest(prNumber, { tab = 'conversation' } = {}) {
+  const parsedPrNumber = parsePositiveId(prNumber, 'prNumber')
+  if (tab === 'commits') {
+    return requestJson(`/github/pulls/${parsedPrNumber}/commits`)
+  }
+  if (tab === 'checks') {
+    return requestJson(`/github/pulls/${parsedPrNumber}/checks`)
+  }
+  if (tab === 'files') {
+    return requestJson(`/github/pulls/${parsedPrNumber}/files`)
+  }
+  return requestJson(`/github/pulls/${parsedPrNumber}`)
+}
+
+export function runGithubPullRequestCodeReview(
+  prNumber,
+  { prTitle = '', prUrl = '' } = {},
+) {
+  const parsedPrNumber = parsePositiveId(prNumber, 'prNumber')
+  return requestJson(`/github/pulls/${parsedPrNumber}/code-review`, {
+    method: 'POST',
+    body: {
+      pr_title: prTitle,
+      pr_url: prUrl,
+    },
+  })
+}
+
+export function getJiraWorkspace() {
+  return requestJson('/jira')
+}
+
+export function getJiraIssue(issueKey) {
+  const normalized = String(issueKey || '').trim()
+  if (!normalized) {
+    throw new Error('issueKey is required.')
+  }
+  return requestJson(`/jira/issues/${encodeURIComponent(normalized)}`)
+}
+
+export function getConfluenceWorkspace({ page = '' } = {}) {
+  return requestJson(appendQuery('/confluence', { page }))
+}
+
+export function getChromaCollections({ page = 1, perPage = 20 } = {}) {
+  return requestJson(
+    appendQuery('/chroma/collections', {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
+    }),
+  )
+}
+
+export function getChromaCollection(name) {
+  const normalized = String(name || '').trim()
+  if (!normalized) {
+    throw new Error('name is required.')
+  }
+  return requestJson(appendQuery('/chroma/collections/detail', { name: normalized }))
+}
+
+export function deleteChromaCollection(collectionName, { next = '' } = {}) {
+  const normalized = String(collectionName || '').trim()
+  if (!normalized) {
+    throw new Error('collectionName is required.')
+  }
+  return requestJson('/chroma/collections/delete', {
+    method: 'POST',
+    body: {
+      collection_name: normalized,
+      next,
+    },
+  })
+}
+
+export function getRagChatMeta() {
+  return requestJson('/rag/chat')
+}
+
+export function sendRagChat({
+  message = '',
+  collections = [],
+  sourceIds = [],
+  topK = 5,
+  history = [],
+  historyLimit = '',
+  verbosity = '',
+} = {}) {
+  return requestJson('/rag/chat', {
+    method: 'POST',
+    body: {
+      message,
+      collections,
+      source_ids: sourceIds,
+      top_k: topK,
+      history,
+      history_limit: historyLimit,
+      verbosity,
+    },
+  })
+}
+
+export function getRagSources() {
+  return requestJson('/rag/sources')
+}
+
+export function getRagSourceMeta() {
+  return requestJson('/rag/sources/new')
+}
+
+export function createRagSource({
+  name = '',
+  kind = 'local',
+  localPath = '',
+  gitRepo = '',
+  gitBranch = '',
+  driveFolderId = '',
+  indexScheduleValue = '',
+  indexScheduleUnit = '',
+  indexScheduleMode = 'fresh',
+} = {}) {
+  return requestJson('/rag/sources', {
+    method: 'POST',
+    body: {
+      name,
+      kind,
+      local_path: localPath,
+      git_repo: gitRepo,
+      git_branch: gitBranch,
+      drive_folder_id: driveFolderId,
+      index_schedule_value: indexScheduleValue,
+      index_schedule_unit: indexScheduleUnit,
+      index_schedule_mode: indexScheduleMode,
+    },
+  })
+}
+
+export function getRagSource(sourceId) {
+  const parsedSourceId = parsePositiveId(sourceId, 'sourceId')
+  return requestJson(`/rag/sources/${parsedSourceId}`)
+}
+
+export function getRagSourceEdit(sourceId) {
+  const parsedSourceId = parsePositiveId(sourceId, 'sourceId')
+  return requestJson(`/rag/sources/${parsedSourceId}/edit`)
+}
+
+export function updateRagSource(
+  sourceId,
+  {
+    name = '',
+    kind = 'local',
+    localPath = '',
+    gitRepo = '',
+    gitBranch = '',
+    driveFolderId = '',
+    indexScheduleValue = '',
+    indexScheduleUnit = '',
+    indexScheduleMode = 'fresh',
+  } = {},
+) {
+  const parsedSourceId = parsePositiveId(sourceId, 'sourceId')
+  return requestJson(`/rag/sources/${parsedSourceId}`, {
+    method: 'POST',
+    body: {
+      name,
+      kind,
+      local_path: localPath,
+      git_repo: gitRepo,
+      git_branch: gitBranch,
+      drive_folder_id: driveFolderId,
+      index_schedule_value: indexScheduleValue,
+      index_schedule_unit: indexScheduleUnit,
+      index_schedule_mode: indexScheduleMode,
+    },
+  })
+}
+
+export function deleteRagSource(sourceId) {
+  const parsedSourceId = parsePositiveId(sourceId, 'sourceId')
+  return requestJson(`/rag/sources/${parsedSourceId}/delete`, { method: 'POST' })
+}
+
+export function quickIndexRagSource(sourceId) {
+  const parsedSourceId = parsePositiveId(sourceId, 'sourceId')
+  return requestJson(`/rag/sources/${parsedSourceId}/quick-index`, { method: 'POST' })
+}
+
+export function quickDeltaIndexRagSource(sourceId) {
+  const parsedSourceId = parsePositiveId(sourceId, 'sourceId')
+  return requestJson(`/rag/sources/${parsedSourceId}/quick-delta-index`, { method: 'POST' })
+}
+
+export function getRagSourceStatus({ ids = [] } = {}) {
+  const normalizedIds = Array.isArray(ids)
+    ? ids
+        .map((value) => Number.parseInt(String(value ?? ''), 10))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    : []
+  return requestJson(
+    appendQuery('/rag/sources/status', {
+      ids: normalizedIds.length > 0 ? normalizedIds.join(',') : '',
+    }),
+  )
 }

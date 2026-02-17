@@ -512,19 +512,26 @@ export default function FlowchartDetailPage() {
   return (
     <section className="stack" aria-label="Flowchart detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{flowchart ? flowchart.name : 'Flowchart'}</h2>
-            <p>Native React replacement for `/flowcharts/:flowchartId` editor/runtime workspace.</p>
-          </div>
+        <div className="title-row" style={{ marginBottom: '12px' }}>
           <div className="table-actions">
             {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}/edit`} className="btn-link btn-secondary">Edit Metadata</Link>
+              <Link to="/flowcharts" className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back to flowcharts
+              </Link>
             ) : null}
             {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}/history`} className="btn-link btn-secondary">History</Link>
+              <Link to={`/flowcharts/${parsedFlowchartId}/edit`} className="btn btn-secondary">
+                <i className="fa-solid fa-pen-to-square" />
+                edit metadata
+              </Link>
             ) : null}
-            <Link to="/flowcharts" className="btn-link btn-secondary">All Flowcharts</Link>
+            {parsedFlowchartId ? (
+              <Link to={`/flowcharts/${parsedFlowchartId}/history`} className="btn btn-secondary">
+                <i className="fa-solid fa-clock-rotate-left" />
+                history
+              </Link>
+            ) : null}
             <button
               type="button"
               className="icon-button icon-button-danger"
@@ -543,6 +550,9 @@ export default function FlowchartDetailPage() {
         {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
         {flowchart ? (
           <div className="stack-sm">
+            <p className="muted" style={{ marginTop: '4px' }}>
+              flowchart {flowchart.id}: {flowchart.name}
+            </p>
             <dl className="kv-grid">
               <div>
                 <dt>Description</dt>
@@ -582,41 +592,57 @@ export default function FlowchartDetailPage() {
             <div className="table-actions">
               <button
                 type="button"
-                className="btn-link btn-secondary"
-                disabled={isBusy('validate')}
-                onClick={handleValidate}
+                className="btn btn-primary"
+                disabled={isBusy('save-graph')}
+                onClick={handleSaveGraph}
               >
-                Validate
+                <i className="fa-solid fa-floppy-disk" />
+                save graph
               </button>
               <button
                 type="button"
-                className="btn-link"
+                className="btn btn-secondary"
+                disabled={isBusy('validate')}
+                onClick={handleValidate}
+              >
+                <i className="fa-solid fa-check" />
+                validate
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
                 disabled={isBusy('run') || activeRun}
                 onClick={handleRun}
               >
-                Run Flowchart
+                <i className="fa-solid fa-play" />
+                run flowchart
               </button>
               {activeRunId ? (
-                <Link to={`/flowcharts/runs/${activeRunId}`} className="btn-link btn-secondary">Open Active Run</Link>
+                <Link to={`/flowcharts/runs/${activeRunId}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-diagram-project" />
+                  open active run
+                </Link>
               ) : null}
               {activeRunId ? (
                 <button
                   type="button"
-                  className="btn-link btn-secondary"
+                  className="btn btn-secondary"
                   disabled={isBusy('stop')}
                   onClick={() => handleStop(false)}
                 >
-                  Stop
+                  <i className="fa-solid fa-stop" />
+                  stop flowchart
                 </button>
               ) : null}
               {activeRunId ? (
                 <button
                   type="button"
-                  className="btn-link"
+                  className="btn btn-danger"
                   disabled={isBusy('force-stop')}
                   onClick={() => handleStop(true)}
                 >
-                  Force Stop
+                  <i className="fa-solid fa-ban" />
+                  force stop
                 </button>
               ) : null}
             </div>
@@ -700,20 +726,22 @@ export default function FlowchartDetailPage() {
               onChange={(event) => setGraphDraft((current) => ({ ...current, edgesText: event.target.value }))}
             />
           </label>
-          <div className="form-actions">
-            <button
-              type="button"
-              className="btn-link"
-              disabled={isBusy('save-graph')}
-              onClick={handleSaveGraph}
-            >
-              Save Graph
-            </button>
-            <button type="button" className="btn-link btn-secondary" onClick={handleResetGraph}>
-              Reset JSON
-            </button>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={isBusy('save-graph')}
+                onClick={handleSaveGraph}
+              >
+                <i className="fa-solid fa-floppy-disk" />
+                save graph
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={handleResetGraph}>
+                <i className="fa-solid fa-rotate-left" />
+                reset json
+              </button>
+            </div>
           </div>
-        </div>
       </article>
 
       <article className="card">

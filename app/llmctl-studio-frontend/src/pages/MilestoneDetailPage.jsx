@@ -72,21 +72,24 @@ export default function MilestoneDetailPage() {
     }
   }
 
+  const statusClass = milestone?.status_class || 'status status-idle'
+  const healthClass = milestone?.health_class || 'status status-idle'
+
   return (
     <section className="stack" aria-label="Milestone detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{milestone ? milestone.name : 'Milestone'}</h2>
-            <p>Native React detail view for `/milestones/:milestoneId`.</p>
-          </div>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
+            <Link to="/milestones" className="btn btn-secondary">
+              <i className="fa-solid fa-arrow-left" />
+              back
+            </Link>
             {milestone ? (
-              <Link to={`/milestones/${milestone.id}/edit`} className="btn-link btn-secondary">
-                Edit
+              <Link to={`/milestones/${milestone.id}/edit`} className="btn btn-secondary">
+                <i className="fa-solid fa-pen-to-square" />
+                edit
               </Link>
             ) : null}
-            <Link to="/milestones" className="btn-link btn-secondary">All Milestones</Link>
             {milestone ? (
               <button
                 type="button"
@@ -101,52 +104,80 @@ export default function MilestoneDetailPage() {
             ) : null}
           </div>
         </div>
+
         {(!invalidId && state.loading) ? <p>Loading milestone...</p> : null}
         {(invalidId || state.error) ? (
           <p className="error-text">{invalidId ? 'Invalid milestone id.' : state.error}</p>
         ) : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
+
         {milestone ? (
           <>
-            <div className="table-actions">
-              <span className={milestone.status_class || 'status-chip status-idle'}>
-                {milestone.status_label || milestone.status || '-'}
-              </span>
-              <span className={milestone.health_class || 'status-chip status-idle'}>
-                health: {milestone.health_label || milestone.health || '-'}
-              </span>
+            <div className="card-header">
+              <div>
+                <p className="eyebrow">milestone</p>
+                <h2 className="section-title">{milestone.name}</h2>
+              </div>
+              <div className="row" style={{ gap: '8px' }}>
+                <span className={statusClass}>{milestone.status_label || milestone.status || '-'}</span>
+                <span className={healthClass}>health: {milestone.health_label || milestone.health || '-'}</span>
+              </div>
             </div>
-            <dl className="kv-grid">
-              <div>
-                <dt>Owner</dt>
-                <dd>{milestone.owner || '-'}</dd>
+
+            <div className="grid grid-2" style={{ marginTop: '20px' }}>
+              <div className="subcard">
+                <p className="eyebrow">details</p>
+                <div className="stack" style={{ marginTop: '12px', fontSize: '12px' }}>
+                  <p className="muted">Owner: {milestone.owner || '-'}</p>
+                  <p className="muted">Priority: {milestone.priority_label || '-'}</p>
+                  <p className="muted">Progress: {milestone.progress_percent ?? 0}%</p>
+                  <p className="muted">Start date: {milestone.start_date || '-'}</p>
+                  <p className="muted">Due date: {milestone.due_date || '-'}</p>
+                  <p className="muted">Created: {milestone.created_at || '-'}</p>
+                  <p className="muted">Updated: {milestone.updated_at || '-'}</p>
+                </div>
               </div>
-              <div>
-                <dt>Priority</dt>
-                <dd>{milestone.priority_label || '-'}</dd>
+              <div className="subcard">
+                <p className="eyebrow">description</p>
+                {milestone.description ? (
+                  <p className="muted" style={{ marginTop: '12px', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+                    {milestone.description}
+                  </p>
+                ) : (
+                  <p className="muted" style={{ marginTop: '12px' }}>No description yet.</p>
+                )}
               </div>
-              <div>
-                <dt>Progress</dt>
-                <dd>{milestone.progress_percent ?? 0}%</dd>
+            </div>
+
+            <div className="grid grid-2" style={{ marginTop: '16px' }}>
+              <div className="subcard">
+                <p className="eyebrow">success criteria</p>
+                <p className="muted" style={{ marginTop: '12px', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+                  {milestone.success_criteria || 'No success criteria yet.'}
+                </p>
               </div>
-              <div>
-                <dt>Start date</dt>
-                <dd>{milestone.start_date || '-'}</dd>
+              <div className="subcard">
+                <p className="eyebrow">latest update</p>
+                <p className="muted" style={{ marginTop: '12px', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+                  {milestone.latest_update || 'No updates yet.'}
+                </p>
               </div>
-              <div>
-                <dt>Due date</dt>
-                <dd>{milestone.due_date || '-'}</dd>
+            </div>
+
+            <div className="grid grid-2" style={{ marginTop: '16px' }}>
+              <div className="subcard">
+                <p className="eyebrow">dependencies</p>
+                <p className="muted" style={{ marginTop: '12px', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+                  {milestone.dependencies || 'No dependencies noted.'}
+                </p>
               </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{milestone.updated_at || '-'}</dd>
+              <div className="subcard">
+                <p className="eyebrow">links</p>
+                <p className="muted" style={{ marginTop: '12px', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+                  {milestone.links || 'No links added.'}
+                </p>
               </div>
-            </dl>
-            <p><strong>Description:</strong> {milestone.description || '-'}</p>
-            <p><strong>Success criteria:</strong> {milestone.success_criteria || '-'}</p>
-            <p><strong>Dependencies:</strong> {milestone.dependencies || '-'}</p>
-            <p><strong>Links:</strong> {milestone.links || '-'}</p>
-            <p><strong>Latest update:</strong> {milestone.latest_update || '-'}</p>
+            </div>
           </>
         ) : null}
       </article>

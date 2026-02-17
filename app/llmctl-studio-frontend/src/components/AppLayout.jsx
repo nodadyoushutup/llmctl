@@ -1,76 +1,191 @@
-import { NavLink } from 'react-router-dom'
-import { runtimeConfig, resolveSocketUrl } from '../config/runtime'
+import { useMemo, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 
-const navItems = [
-  { to: '/migration', label: 'Migration Hub' },
-  { to: '/agents', label: 'Agents' },
-  { to: '/runs', label: 'Runs' },
-  { to: '/nodes', label: 'Nodes' },
-  { to: '/quick', label: 'Quick Task' },
-  { to: '/plans', label: 'Plans' },
-  { to: '/milestones', label: 'Milestones' },
-  { to: '/memories', label: 'Memories' },
-  { to: '/task-templates', label: 'Templates' },
-  { to: '/flowcharts', label: 'Flowcharts' },
-  { to: '/overview', label: 'Legacy UI' },
-  { to: '/parity-checklist', label: 'Parity Tracker' },
-  { to: '/chat/activity', label: 'Chat Activity' },
-  { to: '/execution-monitor', label: 'Execution Monitor' },
-  { to: '/api-diagnostics', label: 'API Diagnostics' },
+const navSections = [
+  {
+    id: 'agent',
+    label: 'Agent',
+    items: [
+      { id: 'agents', to: '/agents', label: 'Agents', icon: 'fa-solid fa-robot' },
+      { id: 'skills', to: '/skills', label: 'Skills', icon: 'fa-solid fa-wand-magic-sparkles' },
+    ],
+  },
+  {
+    id: 'launch',
+    label: 'Launch',
+    items: [
+      { id: 'chat', to: '/chat/activity', label: 'Chat', icon: 'fa-solid fa-comments', matchPrefixes: ['/chat/activity', '/chat/threads/'] },
+      { id: 'flowcharts', to: '/flowcharts', label: 'Flowcharts', icon: 'fa-solid fa-diagram-project' },
+      { id: 'quick', to: '/quick', label: 'Quick Nodes', icon: 'fa-solid fa-comment-dots' },
+    ],
+  },
+  {
+    id: 'workflow',
+    label: 'Workflow',
+    items: [
+      { id: 'task-templates', to: '/task-templates', label: 'Tasks', icon: 'fa-solid fa-layer-group' },
+      { id: 'plans', to: '/plans', label: 'Plans', icon: 'fa-solid fa-map' },
+      { id: 'milestones', to: '/milestones', label: 'Milestones', icon: 'fa-solid fa-flag-checkered' },
+      { id: 'memories', to: '/memories', label: 'Memories', icon: 'fa-solid fa-brain' },
+    ],
+  },
+  {
+    id: 'activity',
+    label: 'Activity',
+    items: [
+      { id: 'nodes', to: '/nodes', label: 'Nodes', icon: 'fa-solid fa-list-check' },
+      { id: 'runs', to: '/runs', label: 'Autoruns', icon: 'fa-solid fa-bolt' },
+      { id: 'execution-monitor', to: '/execution-monitor', label: 'Monitor', icon: 'fa-solid fa-wave-square' },
+    ],
+  },
+  {
+    id: 'rag',
+    label: 'RAG',
+    items: [
+      { id: 'rag-sources', to: '/rag/sources', label: 'Sources', icon: 'fa-solid fa-database' },
+      { id: 'rag-chat', to: '/rag/chat', label: 'Chat', icon: 'fa-solid fa-comments' },
+    ],
+  },
+  {
+    id: 'resources',
+    label: 'Node Resources',
+    items: [
+      { id: 'mcps', to: '/mcps', label: 'MCP Servers', icon: 'fa-solid fa-network-wired' },
+      { id: 'models', to: '/models', label: 'Models', icon: 'fa-solid fa-cubes' },
+      { id: 'scripts', to: '/scripts', label: 'Scripts', icon: 'fa-solid fa-code' },
+      { id: 'attachments', to: '/attachments', label: 'Attachments', icon: 'fa-solid fa-paperclip' },
+    ],
+  },
+  {
+    id: 'integration',
+    label: 'Integration',
+    items: [
+      { id: 'github', to: '/github', label: 'GitHub', icon: 'fa-brands fa-github' },
+      { id: 'jira', to: '/jira', label: 'Jira', icon: 'fa-brands fa-jira' },
+      { id: 'confluence', to: '/confluence', label: 'Confluence', icon: 'fa-brands fa-confluence' },
+      { id: 'chroma', to: '/chroma/collections', label: 'ChromaDB', icon: 'fa-solid fa-layer-group' },
+    ],
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    items: [
+      { id: 'settings-core', to: '/settings/core', label: 'Core', icon: 'fa-solid fa-gear' },
+      { id: 'settings-provider', to: '/settings/provider', label: 'Providers', icon: 'fa-solid fa-wave-square' },
+      { id: 'settings-integrations', to: '/settings/integrations', label: 'Integrations', icon: 'fa-solid fa-plug' },
+      { id: 'settings-runtime', to: '/settings/runtime', label: 'Runtime', icon: 'fa-solid fa-circle-info' },
+      { id: 'settings-chat', to: '/settings/chat', label: 'Chat', icon: 'fa-solid fa-comments' },
+    ],
+  },
+  {
+    id: 'system',
+    label: 'System',
+    items: [
+      { id: 'overview', to: '/overview', label: 'Overview', icon: 'fa-solid fa-gauge-high' },
+      { id: 'parity', to: '/parity-checklist', label: 'Parity', icon: 'fa-solid fa-list-check' },
+      { id: 'api-diagnostics', to: '/api-diagnostics', label: 'API', icon: 'fa-solid fa-heart-pulse' },
+    ],
+  },
 ]
 
-function navClassName({ isActive }) {
-  return isActive ? 'top-nav-link top-nav-link-active' : 'top-nav-link'
+function isItemActive(pathname, item) {
+  const matches = item.matchPrefixes || [item.to, `${item.to}/`]
+  return matches.some((prefix) => pathname === prefix || pathname.startsWith(prefix))
+}
+
+function findActive(pathname) {
+  for (const section of navSections) {
+    for (const item of section.items) {
+      if (isItemActive(pathname, item)) {
+        return { sectionId: section.id, item }
+      }
+    }
+  }
+  return null
+}
+
+function initialExpanded(pathname) {
+  const active = findActive(pathname)
+  const state = {}
+  for (const section of navSections) {
+    state[section.id] = active ? section.id === active.sectionId : section.id === 'agent'
+  }
+  return state
 }
 
 export default function AppLayout({ children }) {
+  const location = useLocation()
+  const active = useMemo(() => findActive(location.pathname), [location.pathname])
+  const [expandedBySection, setExpandedBySection] = useState(() => initialExpanded(location.pathname))
+
+  const title = active?.item?.label || 'LLMCTL-Studio'
+
   return (
-    <div className="app-shell">
-      <header className="top-bar">
-        <div>
-          <p className="eyebrow">llmctl Studio</p>
-          <h1>Frontend Migration Hub</h1>
+    <div className="app-shell page">
+      <div className="layout">
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-icon">
+              <i className="fa-solid fa-robot" />
+            </div>
+            <div>
+              <p className="brand-title">LLMCTL</p>
+            </div>
+          </div>
+          <nav className="nav" aria-label="Primary">
+            {navSections.map((section, index) => {
+              const expanded = section.id === active?.sectionId || Boolean(expandedBySection[section.id])
+              return (
+                <div key={section.id} className="nav-section" data-nav-section>
+                  <button
+                    className="nav-section-toggle"
+                    type="button"
+                    data-nav-section-toggle
+                    aria-expanded={expanded ? 'true' : 'false'}
+                    aria-controls={`nav-section-${index + 1}`}
+                    onClick={() => setExpandedBySection((current) => ({ ...current, [section.id]: !expanded }))}
+                  >
+                    <span className="nav-section-title">{section.label}</span>
+                    <i className="fa-solid fa-chevron-right nav-section-chevron" aria-hidden="true" />
+                  </button>
+                  <div
+                    className="nav-section-items"
+                    id={`nav-section-${index + 1}`}
+                    data-nav-section-items
+                    hidden={!expanded}
+                  >
+                    {section.items.map((item) => {
+                      const itemIsActive = isItemActive(location.pathname, item)
+                      return (
+                        <Link key={item.id} to={item.to} className={`nav-item${itemIsActive ? ' is-active' : ''}`}>
+                          <span className="row">
+                            <span className="nav-icon">
+                              <i className={item.icon} />
+                            </span>
+                            {item.label}
+                          </span>
+                          <i className="fa-solid fa-chevron-right" />
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </nav>
+        </aside>
+
+        <div className="main">
+          <header className="topbar content-header" id="content-header">
+            <div className="topbar-row">
+              <div>
+                <h1 className="title">{title}</h1>
+              </div>
+            </div>
+          </header>
+          <main className="content">{children}</main>
         </div>
-        <nav className="top-nav" aria-label="Primary">
-          {navItems.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className={navClassName}>
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-      </header>
-
-      <main className="main-panel">{children}</main>
-
-      <footer className="runtime-panel">
-        <h2>Runtime wiring</h2>
-        <ul>
-          <li>
-            <span>Web base</span>
-            <code>{runtimeConfig.webBasePath}</code>
-          </li>
-          <li>
-            <span>API base URL</span>
-            <code>{runtimeConfig.apiBaseUrl || '(same origin)'}</code>
-          </li>
-          <li>
-            <span>API base path</span>
-            <code>{runtimeConfig.apiBasePath}</code>
-          </li>
-          <li>
-            <span>Socket path</span>
-            <code>{runtimeConfig.socketPath}</code>
-          </li>
-          <li>
-            <span>Socket namespace</span>
-            <code>{runtimeConfig.socketNamespace}</code>
-          </li>
-          <li>
-            <span>Resolved socket URL</span>
-            <code>{resolveSocketUrl()}</code>
-          </li>
-        </ul>
-      </footer>
+      </div>
     </div>
   )
 }

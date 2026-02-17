@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getTaskTemplates } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -56,7 +56,7 @@ export default function TaskTemplatesPage() {
   const totalPages = Number.isInteger(pagination?.total_pages) && pagination.total_pages > 0
     ? pagination.total_pages
     : 1
-  const totalCount = Number.isInteger(pagination?.total_count) ? pagination.total_count : 0
+  const paginationItems = Array.isArray(pagination?.items) ? pagination.items : []
 
   function updateParams(nextParams) {
     const updated = new URLSearchParams(searchParams)
@@ -79,43 +79,72 @@ export default function TaskTemplatesPage() {
 
   return (
     <section className="stack" aria-label="Task templates">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Workflow Nodes</h2>
-            <p>Native React replacement for `/task-templates` node list surface.</p>
-          </div>
-          <Link to="/task-templates/new" className="btn-link btn-secondary">Create Policy</Link>
+      <article className="card workflow-list-card">
+        <div className="pagination-bar pagination-bar-header">
+          <nav className="pagination" aria-label="Tasks pages">
+            {page > 1 ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page - 1, per_page: perPage })}
+              >
+                Prev
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+            )}
+            <div className="pagination-pages">
+              {paginationItems.map((item, index) => {
+                const itemType = String(item?.type || '')
+                if (itemType === 'gap') {
+                  return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
+                }
+                const itemPage = Number.parseInt(String(item?.page || ''), 10)
+                if (!Number.isInteger(itemPage) || itemPage <= 0) {
+                  return null
+                }
+                if (itemPage === page) {
+                  return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
+                }
+                return (
+                  <button
+                    key={itemPage}
+                    type="button"
+                    className="pagination-link"
+                    onClick={() => updateParams({ page: itemPage, per_page: perPage })}
+                  >
+                    {itemPage}
+                  </button>
+                )
+              })}
+            </div>
+            {page < totalPages ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page + 1, per_page: perPage })}
+              >
+                Next
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+            )}
+          </nav>
         </div>
-        <div className="toolbar">
-          <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page <= 1}
-              onClick={() => updateParams({ page: page - 1, per_page: perPage })}
-            >
-              Prev
-            </button>
-            <span className="toolbar-meta">Page {Math.min(page, totalPages)} / {totalPages}</span>
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => updateParams({ page: page + 1, per_page: perPage })}
-            >
-              Next
-            </button>
+        <div className="card-header">
+          <div>
+            <h2 className="section-title">Workflow Nodes</h2>
           </div>
-          <span className="toolbar-meta">Total nodes: {totalCount}</span>
         </div>
         {state.loading ? <p>Loading workflow nodes...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error && taskNodes.length === 0 ? (
-          <p>No workflow nodes found yet. Add a Task or RAG node in any flowchart.</p>
+          <p className="muted">
+            No workflow nodes found yet. Add a Task or RAG node in any flowchart.
+          </p>
         ) : null}
         {!state.loading && !state.error && taskNodes.length > 0 ? (
-          <div className="table-wrap">
+          <div className="workflow-list-table-shell">
             <table className="data-table">
               <thead>
                 <tr>
@@ -136,11 +165,13 @@ export default function TaskTemplatesPage() {
                       onClick={(event) => handleRowClick(event, href)}
                     >
                       <td>
-                        <a href={href}>{node.task_name}</a>
+                        <p>
+                          <a href={href}>{node.task_name}</a>
+                        </p>
                       </td>
-                      <td>{node.node_type || '-'}</td>
-                      <td>{node.flowchart_name || '-'}</td>
-                      <td>{node.prompt_preview || '-'}</td>
+                      <td className="muted">{node.node_type || '-'}</td>
+                      <td className="muted">{node.flowchart_name || '-'}</td>
+                      <td className="muted">{node.prompt_preview || '-'}</td>
                     </tr>
                   )
                 })}

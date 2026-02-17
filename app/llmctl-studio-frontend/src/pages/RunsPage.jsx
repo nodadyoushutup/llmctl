@@ -86,6 +86,7 @@ export default function RunsPage() {
   const perPageOptions = Array.isArray(pagination?.per_page_options) && pagination.per_page_options.length > 0
     ? pagination.per_page_options
     : [10, 25, 50]
+  const paginationItems = Array.isArray(pagination?.items) ? pagination.items : []
 
   function updateParams(nextParams) {
     const updated = new URLSearchParams(searchParams)
@@ -153,52 +154,76 @@ export default function RunsPage() {
   return (
     <section className="stack" aria-label="Runs">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Autoruns</h2>
-            <p>Native React replacement for the legacy `/runs` list and row actions.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/runs/new" className="btn-link btn-secondary">Autorun Policy</Link>
+        <div className="pagination-bar pagination-bar-header">
+          <nav className="pagination" aria-label="Autoruns pages">
+            {page > 1 ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page - 1 })}
+              >
+                Prev
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+            )}
+            <div className="pagination-pages">
+              {paginationItems.map((item, index) => {
+                const itemType = String(item?.type || '')
+                if (itemType === 'gap') {
+                  return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
+                }
+                const itemPage = Number.parseInt(String(item?.page || ''), 10)
+                if (!Number.isInteger(itemPage) || itemPage <= 0) {
+                  return null
+                }
+                if (itemPage === page) {
+                  return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
+                }
+                return (
+                  <button
+                    key={itemPage}
+                    type="button"
+                    className="pagination-link"
+                    onClick={() => updateParams({ page: itemPage })}
+                  >
+                    {itemPage}
+                  </button>
+                )
+              })}
+            </div>
+            {page < totalPages ? (
+              <button
+                type="button"
+                className="pagination-btn"
+                onClick={() => updateParams({ page: page + 1 })}
+              >
+                Next
+              </button>
+            ) : (
+              <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+            )}
+          </nav>
+          <div className="pagination-bar-actions">
+            <div className="pagination-size">
+              <label htmlFor="runs-per-page">Rows per page</label>
+              <select
+                id="runs-per-page"
+                value={String(perPage)}
+                onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
+              >
+                {perPageOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
-        <div className="toolbar">
-          <div className="toolbar-group">
-            <label htmlFor="runs-per-page">Rows per page</label>
-            <select
-              id="runs-per-page"
-              value={String(perPage)}
-              onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
-            >
-              {perPageOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page <= 1}
-              onClick={() => updateParams({ page: page - 1 })}
-            >
-              Prev
-            </button>
-            <span className="toolbar-meta">
-              Page {Math.min(page, totalPages)} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => updateParams({ page: page + 1 })}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Autoruns are created automatically when you enable autorun on an agent.
+        </p>
         {state.loading ? <p>Loading autoruns...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
@@ -217,7 +242,8 @@ export default function RunsPage() {
                   <th>Autorun task</th>
                   <th>Started</th>
                   <th>Finished</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th className="table-actions-cell">Stop</th>
+                  <th className="table-actions-cell">Delete</th>
                 </tr>
               </thead>
               <tbody>
@@ -243,9 +269,9 @@ export default function RunsPage() {
                       <td>
                         <span className={status.className}>{status.label}</span>
                       </td>
-                      <td>{taskId}</td>
-                      <td>{run.last_started_at || '-'}</td>
-                      <td>{run.last_stopped_at || '-'}</td>
+                      <td className="muted" style={{ fontSize: '12px' }}>{taskId}</td>
+                      <td className="muted">{run.last_started_at || '-'}</td>
+                      <td className="muted">{run.last_stopped_at || '-'}</td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
                           {active ? (
@@ -259,7 +285,11 @@ export default function RunsPage() {
                             >
                               <ActionIcon name="stop" />
                             </button>
-                          ) : null}
+                          ) : <span className="muted">-</span>}
+                        </div>
+                      </td>
+                      <td className="table-actions-cell">
+                        <div className="table-actions">
                           <button
                             type="button"
                             className="icon-button icon-button-danger"

@@ -197,11 +197,7 @@ export default function NodesPage() {
         <div className="title-row">
           <div>
             <h2>Nodes</h2>
-            <p>Native React replacement for `/nodes` list, filters, and task lifecycle actions.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/quick" className="btn-link btn-secondary">Quick Task</Link>
-            <Link to="/nodes/new" className="btn-link">New Node</Link>
+            <p>Queued, running, and completed node execution records.</p>
           </div>
         </div>
         <div className="toolbar toolbar-wrap">
@@ -308,7 +304,8 @@ export default function NodesPage() {
                   <th>Autorun task</th>
                   <th>Started</th>
                   <th>Finished</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th className="table-actions-cell">Cancel</th>
+                  <th className="table-actions-cell">Delete</th>
                 </tr>
               </thead>
               <tbody>
@@ -329,13 +326,13 @@ export default function NodesPage() {
                         <div className="table-note">#{task.id}</div>
                       </td>
                       <td>{task.agent_name || '-'}</td>
-                      <td>{task.node_type || '-'}</td>
+                      <td className="muted">{task.node_type || '-'}</td>
                       <td>
                         <span className={statusMeta.className}>{statusMeta.label}</span>
                       </td>
-                      <td>{task.run_task_id || '-'}</td>
-                      <td>{task.started_at || '-'}</td>
-                      <td>{task.finished_at || '-'}</td>
+                      <td className="muted" style={{ fontSize: '12px' }}>{task.run_task_id || '-'}</td>
+                      <td className="muted">{task.started_at || '-'}</td>
+                      <td className="muted">{task.finished_at || '-'}</td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
                           {allowCancel ? (
@@ -349,7 +346,11 @@ export default function NodesPage() {
                             >
                               <ActionIcon name="stop" />
                             </button>
-                          ) : null}
+                          ) : <span className="muted">-</span>}
+                        </div>
+                      </td>
+                      <td className="table-actions-cell">
+                        <div className="table-actions">
                           <button
                             type="button"
                             className="icon-button icon-button-danger"

@@ -3,7 +3,7 @@
 Goal: split Studio into separate backend/frontend services for Kubernetes deployment:
 - Backend: existing Flask app (later renamed to `app/llmctl-studio-backend`).
 - Frontend: new `app/llmctl-studio-frontend` Vite/React (`.jsx`) app.
-- Keep existing backend-rendered GUI until React frontend reaches functional parity and is validated.
+- Keep existing backend-rendered GUI until React frontend reaches functional and visual parity and is validated.
 
 ## Stage 0 - Requirements Gathering
 - [x] Capture initial objective and constraints from the request.
@@ -163,26 +163,28 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 ## React-Only Completion Plan (Current Active Scope)
 
 This section supersedes bridge-first execution for all remaining UI migration work.  
-Objective: complete full React parity, then remove legacy Jinja/UI paths with no bridge fallback.
+Objective: complete full React parity (functional + legacy-accurate visual recreation), then remove legacy Jinja/UI paths with no bridge fallback.
 
 ## Stage 0 - Requirements Gathering (React-Only Addendum)
 - [x] Confirm cutover strategy: parity-first cutover, then hard switch.
 - [x] Confirm legacy policy after parity: remove all backend Jinja/UI routes and templates immediately.
 - [x] Confirm migration order: core ops first.
-- [x] Confirm parity bar: functional parity with selective redesign allowed.
+- [x] Confirm parity bar: legacy-accurate visual + functional parity (no redesign drift).
 - [x] Confirm execution approval to proceed with planning before implementation.
 
 ## Stage 0 - Interview Notes (React-Only Addendum)
 - [x] User selected parity-first cutover (no big-bang cut now).
 - [x] User selected hard removal of legacy UI after parity is complete.
 - [x] User selected migration order: Core ops first.
-- [x] User selected parity bar: functional parity + selective redesign.
+- [x] User selected parity bar: recreate legacy as closely as possible (visual + functional), not selective redesign.
 - [x] User requested plan update first so implementation progress can be tracked cleanly.
+- [x] User clarified visual parity should be near pixel-exact before cutover.
 
 ## Stage 1 - Code Planning (React-Only Execution Design)
 - [x] Define execution stages for remaining React migration.
 - [x] Define route/domain tracker to mark what is built and verified.
 - [x] Define cutover gate criteria before deleting legacy UI.
+- [x] Define visual parity gate criteria with screenshot-based signoff per route/state.
 - [x] Ensure final two stages are `Automated Testing` then `Docs Updates`.
 
 ## Stage 1 - Execution Order (React-Only)
@@ -190,13 +192,14 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [x] Stage 3: Runs, quick tasks, and node execution surfaces.
 - [x] Stage 4: Task templates, plans, milestones, and memories.
 - [x] Stage 5: Flowcharts (editor, runtime, history, run detail, node operations).
-- [ ] Stage 6: Settings, provider/runtime/chat config, and integrations.
-- [ ] Stage 7: Skills, scripts, attachments, models, MCP servers.
-- [ ] Stage 8: RAG pages and external tools surfaces (GitHub/Jira/Confluence/Chroma).
-- [ ] Stage 9: React-only routing hardening and bridge decommission prep.
-- [ ] Stage 10: Legacy backend GUI removal and backend API-only cleanup.
-- [ ] Stage 11: Automated Testing.
-- [ ] Stage 12: Docs Updates.
+- [x] Stage 6: Settings, provider/runtime/chat config, and integrations.
+- [x] Stage 7: Skills, scripts, attachments, models, MCP servers.
+- [x] Stage 8: RAG pages and external tools surfaces (GitHub/Jira/Confluence/Chroma).
+- [ ] Stage 9: Visual parity recreation and screenshot signoff (legacy-exact target).
+- [ ] Stage 10: React-only routing hardening and bridge decommission prep.
+- [ ] Stage 11: Legacy backend GUI removal and backend API-only cleanup.
+- [ ] Stage 12: Automated Testing.
+- [ ] Stage 13: Docs Updates.
 
 ## React Baseline Already Implemented
 - [x] Migration hub shell route (`/migration`).
@@ -257,54 +260,172 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [x] Updated parity tracker entries/docs to mark Wave 4 flowchart system as `Native React`.
 
 ## Stage 6 - Settings and Integrations
-- [ ] Migrate settings core/provider/runtime/chat pages to React.
-- [ ] Migrate integrations settings and validation UX.
-- [ ] Preserve functional behavior for provider-specific controls and runtime flags.
-- [ ] Mark Settings/Integrations parity complete in tracker.
+- [x] Migrate settings core/provider/runtime/chat pages to React.
+- [x] Migrate integrations settings and validation UX.
+- [x] Preserve functional behavior for provider-specific controls and runtime flags.
+- [x] Mark Settings/Integrations parity complete in tracker.
+
+## Stage 6 - Completion Notes
+- [x] Added native React routes/pages for `/settings/core`, `/settings/provider/:section?`, `/settings/runtime/:section?`, `/settings/chat`, and `/settings/integrations/:section?`.
+- [x] Added frontend API client coverage and tests for settings + integrations reads/mutations.
+- [x] Added backend JSON/API-mode handling for integration settings POST routes (git, github, jira, confluence, google cloud/workspace, huggingface, chroma) so React mutations do not depend on Jinja form redirects.
+- [x] Updated React shell defaults to native overview + React 404 fallback (legacy mirror removed from active router paths).
 
 ## Stage 7 - Skills/Scripts/Attachments/Models/MCP
-- [ ] Migrate skills management flows.
-- [ ] Migrate scripts and attachments CRUD/detail flows.
-- [ ] Migrate model and MCP server management pages.
-- [ ] Mark these domains parity complete in tracker.
+- [x] Migrate skills management flows.
+- [x] Migrate scripts and attachments CRUD/detail flows.
+- [x] Migrate model and MCP server management pages.
+- [x] Mark these domains parity complete in tracker.
+
+## Stage 7 - Completion Notes
+- [x] Added backend JSON/API-mode coverage for `/skills*`, `/scripts*`, `/attachments*`, `/models*`, and `/mcps*` read/write routes while preserving legacy template behavior for non-API requests.
+- [x] Added native React routes/pages for:
+- [x] Skills: `/skills`, `/skills/new`, `/skills/import`, `/skills/:skillId`, `/skills/:skillId/edit`.
+- [x] Scripts: `/scripts`, `/scripts/new`, `/scripts/:scriptId`, `/scripts/:scriptId/edit`.
+- [x] Attachments: `/attachments`, `/attachments/:attachmentId`.
+- [x] Models: `/models`, `/models/new`, `/models/:modelId`, `/models/:modelId/edit`.
+- [x] MCP servers: `/mcps`, `/mcps/new`, `/mcps/:mcpId`, `/mcps/:mcpId/edit`.
+- [x] Added frontend API client methods and automated route/API mapping tests for Stage 7 domains.
+- [x] Updated parity tracker/checklist entries to mark Wave 5 domains as `Native React`.
 
 ## Stage 8 - RAG and External Tools
-- [ ] Migrate RAG chat and source management pages.
-- [ ] Migrate GitHub/Jira/Confluence/Chroma surfaces to React.
-- [ ] Preserve connectivity validation and error handling parity.
-- [ ] Mark RAG/External parity complete in tracker.
+- [x] Migrate RAG chat and source management pages.
+- [x] Migrate GitHub/Jira/Confluence/Chroma surfaces to React.
+- [x] Preserve connectivity validation and error handling parity.
+- [x] Mark RAG/External parity complete in tracker.
 
-## Stage 9 - React-Only Routing Hardening
+## Stage 8 - Completion Notes
+- [x] Added backend API-mode JSON coverage for external tool routes (`/github*`, `/jira*`, `/confluence`, `/chroma*`) while preserving legacy template behavior for non-API requests.
+- [x] Added backend API aliases and JSON payload support for RAG page routes (`/api/rag/chat`, `/api/rag/sources*`) so React can run native source CRUD and chat flows without template redirects.
+- [x] Added native React routes/pages for:
+- [x] GitHub: `/github`, `/github/pulls/:prNumber`, `/github/pulls/:prNumber/commits`, `/github/pulls/:prNumber/checks`, `/github/pulls/:prNumber/files`.
+- [x] Jira: `/jira`, `/jira/issues/:issueKey`.
+- [x] Confluence: `/confluence`.
+- [x] Chroma: `/chroma/collections`, `/chroma/collections/detail`.
+- [x] RAG: `/rag/chat`, `/rag/sources`, `/rag/sources/new`, `/rag/sources/:sourceId`, `/rag/sources/:sourceId/edit`.
+- [x] Added frontend API client methods and automated route/API mapping tests for Stage 8 domains.
+- [x] Added backend Stage 8 API route tests at `app/llmctl-studio-backend/tests/test_react_stage8_api_routes.py`.
+- [x] Updated parity tracker/checklist entries to mark Wave 7 domains as `Native React`.
+
+## Stage 9 - Visual + Behavioral Parity Recreation (Legacy-Exact)
+- [x] Lock Stage 9 scope and artifact naming conventions for baseline/current/diff screenshot sets.
+- [x] Maintain a route/state signoff matrix in `docs/planning/active/STUDIO_FRONTEND_PARITY_CHECKLIST.md`.
+- [ ] Enforce hard gate: no Stage 9 checkbox may remain open at cutover.
+
+## Stage 9 - Parallel Execution Model (Two Agents, Same Plan)
+- [x] Use route-family ownership (not visual-vs-functional ownership): each agent delivers both visual and behavioral parity for assigned slices.
+- [ ] Run two concurrent branches/worktrees from current HEAD (`stage9-agent-a`, `stage9-agent-b`) and keep all slice work isolated until merge.
+- [ ] Enforce no-overlap rule: one agent owns each open slice until that slice reaches visual + behavioral signoff.
+- [ ] Enforce shared-file lock rule for cross-cutting files:
+- [ ] `app/llmctl-studio-frontend/src/components/AppLayout.jsx`
+- [ ] `app/llmctl-studio-frontend/src/styles.css`
+- [ ] `app/llmctl-studio-frontend/src/App.jsx`
+- [ ] `app/llmctl-studio-frontend/src/lib/studioApi.js`
+- [ ] `app/llmctl-studio-frontend/src/lib/studioApi.test.js`
+- [ ] `app/llmctl-studio-frontend/src/parity/checklist.js`
+- [ ] Merge cadence: complete one slice PR per agent, merge, rebase the other agent, then continue to next assigned slice.
+- [ ] After every merge, run `npm run lint`, `npm run test -- --run`, and `npm run build` in `app/llmctl-studio-frontend` before next handoff.
+
+## Stage 9 - Parallel Slice Ownership
+- [ ] Agent A owns Slice 2 + Slice 6 (execution surfaces and settings/integrations).
+- [ ] Agent B owns Slice 1 + Slice 5 + Slice 7 (core/chat, asset catalogs, and RAG/external tooling).
+- [x] Slice 3 + Slice 4 are completed and should stay locked unless a parity regression is discovered during Stage 9D audit.
+
+## Stage 9A - Baseline and Diff Tooling
+- [ ] Capture legacy baseline screenshots for all cutover routes at desktop (`1920x1080`) and mobile (`390x844`).
+- [ ] Capture React current screenshots for the same route/state matrix.
+- [ ] Store baseline/current captures under `docs/screenshots` with deterministic naming and route/state labels.
+- [ ] Track every visual mismatch as an explicit delta item with target file/component and closure note.
+
+## Stage 9B - Shell and Shared UI Parity
+- [x] Recreate legacy shell frame in React (left navigation, header, content container, spacing, and breakpoints).
+- [x] Match global typography (family, size scale, weights, letter spacing, line height).
+- [x] Match global visual tokens (colors, gradients, borders, shadows, radius, icon size).
+- [ ] Match shared component primitives (cards, tables, forms, badges, icon-only action buttons, empty/loading/error panels).
+
+## Stage 9C - Route Family Visual Parity Slices
+- [ ] Slice 1 (Agent B): Core shell routes (`/overview`, `/parity-checklist`, `/api-diagnostics`).
+- [ ] Slice 2 (Agent A): Execution routes (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`).
+- [x] Slice 3 (Complete, lock): Planning/knowledge routes (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`).
+- [x] Slice 4 (Complete, lock): Flowchart routes (`/flowcharts*`, history/run detail/runtime views).
+- [ ] Slice 5 (Agent B): Settings routes (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`).
+- [ ] Slice 6 (Agent A): Asset/catalog routes (`/skills*`, `/scripts*`, `/attachments*`, `/models*`, `/mcps*`).
+- [ ] Slice 7 (Agent B): RAG + external tool routes (`/rag*`, `/github*`, `/jira*`, `/confluence`, `/chroma*`).
+
+## Stage 9 - Current Slice Notes (2026-02-17)
+- [x] Migrated `/chat/activity` from migration placeholder copy to legacy-style filter/table layout.
+- [x] Fixed chat-activity payload parity (`events` list consumption in React) and added filter query support to the frontend API client.
+- [x] Expanded backend `/api/chat/activity` payload to include `threads` and selected filter metadata for parity controls.
+- [x] Removed `execution-monitor` auto-load defaults that produced immediate `404` errors on page entry.
+- [x] Captured Stage 9 Slice 3 screenshots for `/chat/activity` and refreshed `/execution-monitor` artifacts.
+- [x] Reworked planning list pages (`/plans`, `/milestones`, `/memories`, `/task-templates`) to legacy-style pagination shell and table structure.
+- [x] Removed non-legacy list-level controls on planning pages (extra create/delete actions) to align with legacy list surfaces.
+- [x] Captured Stage 9 Slice 3 screenshots for planning list routes (`/plans`, `/milestones`, `/memories`, `/task-templates`).
+- [x] Reworked planning detail/edit routes to legacy template structure and copy:
+- [x] `/plans/:planId` + `/plans/:planId/edit` now use legacy-style metadata cards and inline stage/task add-edit panels (replacing prompt-driven edits).
+- [x] `/milestones/:milestoneId` + `/milestones/:milestoneId/edit` now mirror legacy detail grids, status/health chips, and edit form ordering/labels.
+- [x] `/memories/:memoryId` + `/memories/:memoryId/edit` now mirror legacy detail/edit card layout and action labels.
+- [x] `/task-templates/:templateId` + `/task-templates/:templateId/edit` now mirror legacy detail/edit card layout, attachment sections, and action labels.
+- [x] Added shared React styles for legacy parity structures (`meta-list`, plan stage/task summary tree, inline panel visibility).
+- [x] Captured Stage 9 Slice 3 screenshots for planning detail/edit routes (`/plans/:planId`, `/plans/:planId/edit`, `/milestones/:milestoneId`, `/milestones/:milestoneId/edit`, `/memories/:memoryId`, `/memories/:memoryId/edit`, `/task-templates/:templateId`, `/task-templates/:templateId/edit`).
+- [x] Reworked flowchart list/new/edit/history/run-detail pages to legacy template structure and copy:
+- [x] `/flowcharts` now mirrors legacy list shell, copy, row navigation, and delete-only row action.
+- [x] `/flowcharts/new` and `/flowcharts/:flowchartId/edit` now mirror legacy metadata forms, action labels, and top actions.
+- [x] `/flowcharts/:flowchartId/history` and `/flowcharts/:flowchartId/history/:runId` now mirror legacy history/run table structures and run controls.
+- [x] Updated `/flowcharts/:flowchartId` top action and control labels to match legacy terminology (`back to flowcharts`, `edit metadata`, `history`, `save graph`, `run flowchart`, `stop flowchart`, `force stop`).
+- [x] Captured Stage 9 Slice 4 screenshots for flowchart routes (`/flowcharts`, `/flowcharts/new`, `/flowcharts/:flowchartId`, `/flowcharts/:flowchartId/edit`, `/flowcharts/:flowchartId/history`, `/flowcharts/:flowchartId/history/:runId`, `/flowcharts/runs/:runId`).
+
+## Stage 9D - Behavioral Parity Audit
+- [ ] Agent A closes Stage 9D checks for Slice 2 + Slice 6 routes.
+- [ ] Agent B closes Stage 9D checks for Slice 1 + Slice 5 + Slice 7 routes.
+- [ ] Verify list-row behavior parity (`table-row-link` navigation + interactive element click exclusion).
+- [ ] Verify CRUD mutation behavior parity (success/error messaging, validation errors, disabled/busy states).
+- [ ] Verify destructive action parity (icon-only trash actions, confirmation prompts, post-action redirects).
+- [ ] Verify pagination/filter/search/sort parity on all list-heavy routes.
+- [ ] Verify long-running/polling/realtime feedback parity (runs, nodes, flowcharts, RAG quick index).
+- [ ] Verify keyboard/focus/tab-order parity for primary forms and table actions.
+
+## Stage 9E - Signoff and Exit Criteria
+- [ ] Desktop screenshot signoff complete for all Stage 9 route families.
+- [ ] Mobile screenshot signoff complete for all Stage 9 route families.
+- [ ] Behavioral signoff complete for all Stage 9 route families.
+- [ ] All visual delta items are closed and documented with artifact references.
+
+## Stage 10 - React-Only Routing Hardening
 - [ ] Remove React iframe bridge route usage from app router.
 - [ ] Remove bridge-focused frontend navigation/runtime notes.
 - [ ] Ensure unknown routes use React 404 handling.
 - [ ] Verify all previously bridged routes are now native React routes.
 
-## Stage 10 - Legacy Backend GUI Removal
+## Stage 11 - Legacy Backend GUI Removal
 - [ ] Delete backend template-rendered GUI route handlers.
 - [ ] Delete backend Jinja templates and legacy static UI assets.
 - [ ] Remove frontend nginx legacy route proxy fallback behavior.
 - [ ] Keep backend focused on API/realtime/service responsibilities only.
 - [ ] Validate no user-facing GUI route is served from Flask templates.
 
-## Stage 10 - Hard Cutover Gate
+## Stage 11 - Hard Cutover Gate
 - [ ] Every legacy page/flow has a native React equivalent.
 - [ ] Every legacy mutation flow has React parity coverage.
+- [ ] Every legacy page/flow has legacy-accurate visual parity signoff from screenshot review.
+- [ ] Typography, spacing, colors, component geometry, iconography, and responsive behavior match legacy baseline.
 - [ ] Realtime and long-running feedback parity is verified.
 - [ ] Bridge/iframe fallback is removed from runtime behavior.
 - [ ] Backend GUI template surface is removed.
 
-## Stage 11 - Automated Testing
+## Stage 12 - Automated Testing
 - [ ] Add/update backend API tests for all newly migrated domains.
 - [ ] Add/update frontend route/component/API integration tests across migrated domains.
+- [ ] Add/update frontend visual regression checks against approved legacy baseline screenshots.
 - [ ] Add/update split deployment integration tests for React-only runtime.
 - [ ] Run automated suite and resolve regressions.
 - [ ] Acceptance criteria: backend, frontend, and split integration suites pass.
 
-## Stage 12 - Docs Updates
+## Stage 13 - Docs Updates
 - [ ] Update docs to declare React as the only Studio UI.
 - [ ] Remove bridge/legacy UI documentation and migration-temporary guidance.
 - [ ] Update Sphinx/Read the Docs architecture and route documentation.
+- [ ] Document visual parity standards and screenshot signoff workflow for future UI changes.
 - [ ] Update developer workflows for React-only Studio operations.
 - [ ] Acceptance criteria: docs match final React-only architecture and runtime.
 
@@ -317,13 +438,24 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [x] Milestones
 - [x] Memories
 - [x] Flowcharts
-- [ ] Settings Core/Provider
-- [ ] Settings Runtime/Chat
-- [ ] Integrations
-- [ ] Skills
-- [ ] Scripts
-- [ ] Attachments
-- [ ] Models
-- [ ] MCP Servers
-- [ ] RAG Chat/Sources
-- [ ] External Tools (GitHub/Jira/Confluence/Chroma)
+- [x] Settings Core/Provider
+- [x] Settings Runtime/Chat
+- [x] Integrations
+- [x] Skills
+- [x] Scripts
+- [x] Attachments
+- [x] Models
+- [x] MCP Servers
+- [x] RAG Chat/Sources
+- [x] External Tools (GitHub/Jira/Confluence/Chroma)
+
+## React Visual Signoff Tracker (Legacy-Exact)
+- [ ] Wave 1 visual+behavior signoff (core shell + chat read flows).
+- [ ] Wave 2 visual+behavior signoff (agents/runs/quick/nodes/execution monitor).
+- [ ] Wave 3 visual+behavior signoff (plans/milestones/memories/templates).
+- [ ] Wave 4 visual+behavior signoff (flowcharts).
+- [ ] Wave 5 visual+behavior signoff (skills/scripts/attachments/models/mcps).
+- [ ] Wave 6 visual+behavior signoff (settings/runtime/integrations controls).
+- [ ] Wave 7 visual+behavior signoff (RAG + GitHub/Jira/Confluence/Chroma).
+- [ ] Desktop + mobile responsive signoff complete across all waves.
+- [ ] Interactive states signoff complete across all waves (hover/focus/active/disabled/loading/error).

@@ -6,8 +6,10 @@ function summarizeActivity(payload) {
   if (!payload || typeof payload !== 'object') {
     return { label: 'No payload', value: '-' }
   }
-  const total = Array.isArray(payload.items) ? payload.items.length : 0
-  const hasNext = Boolean(payload.has_next)
+  const total = Array.isArray(payload.events)
+    ? payload.events.length
+    : (Array.isArray(payload.items) ? payload.items.length : 0)
+  const hasNext = Boolean(payload.has_next || payload.hasNext)
   return {
     label: 'Recent chat events',
     value: `${total}${hasNext ? '+' : ''}`,

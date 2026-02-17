@@ -107,25 +107,36 @@ export default function FlowchartEditPage() {
   return (
     <section className="stack" aria-label="Edit flowchart">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{flowchart ? `Edit ${flowchart.name}` : 'Edit Flowchart'}</h2>
-            <p>Native React replacement for `/flowcharts/:flowchartId/edit` metadata edits.</p>
-          </div>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
             {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn-link btn-secondary">Back to Flowchart</Link>
+              <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back to flowchart
+              </Link>
             ) : null}
-            <Link to="/flowcharts" className="btn-link btn-secondary">All Flowcharts</Link>
+            <Link to="/flowcharts" className="btn btn-secondary">
+              <i className="fa-solid fa-list" />
+              all flowcharts
+            </Link>
           </div>
         </div>
+        <div className="card-header">
+          <div>
+            {flowchart ? <p className="eyebrow">flowchart {flowchart.id}</p> : null}
+            <h2 className="section-title">Edit Flowchart</h2>
+          </div>
+        </div>
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Update flowchart metadata and guardrails without leaving the flowchart workspace.
+        </p>
         {loading ? <p>Loading flowchart metadata...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {!loading && !error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>name</span>
               <input
                 type="text"
                 required
@@ -134,14 +145,14 @@ export default function FlowchartEditPage() {
               />
             </label>
             <label className="field field-span">
-              <span>Description (optional)</span>
+              <span>description (optional)</span>
               <textarea
                 value={form.description}
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               />
             </label>
             <label className="field">
-              <span>Max node executions (optional)</span>
+              <span>max node executions (optional)</span>
               <input
                 type="number"
                 min="1"
@@ -151,7 +162,7 @@ export default function FlowchartEditPage() {
               />
             </label>
             <label className="field">
-              <span>Max runtime minutes (optional)</span>
+              <span>max runtime minutes (optional)</span>
               <input
                 type="number"
                 min="1"
@@ -161,7 +172,7 @@ export default function FlowchartEditPage() {
               />
             </label>
             <label className="field">
-              <span>Max parallel nodes</span>
+              <span>max parallel nodes</span>
               <input
                 type="number"
                 min="1"
@@ -172,7 +183,16 @@ export default function FlowchartEditPage() {
               />
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={busy}>Save Flowchart</button>
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                <i className="fa-solid fa-floppy-disk" />
+                save changes
+              </button>
+              {parsedFlowchartId ? (
+                <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  cancel
+                </Link>
+              ) : null}
             </div>
           </form>
         ) : null}

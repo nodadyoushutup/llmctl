@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { createFlowchart, getFlowchartMeta } from '../lib/studioApi'
@@ -64,14 +64,6 @@ export default function FlowchartNewPage() {
     }
   }, [])
 
-  const defaults = state.payload?.defaults && typeof state.payload.defaults === 'object'
-    ? state.payload.defaults
-    : null
-  const nodeTypes = useMemo(
-    () => (Array.isArray(defaults?.node_types) ? defaults.node_types : []),
-    [defaults],
-  )
-
   async function handleSubmit(event) {
     event.preventDefault()
     setActionError('')
@@ -99,38 +91,43 @@ export default function FlowchartNewPage() {
   return (
     <section className="stack" aria-label="Create flowchart">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Create Flowchart</h2>
-            <p>Native React replacement for `/flowcharts/new` metadata creation flow.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/flowcharts" className="btn-link btn-secondary">All Flowcharts</Link>
-          </div>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
+          <Link to="/flowcharts" className="btn btn-secondary">
+            <i className="fa-solid fa-arrow-left" />
+            back to flowcharts
+          </Link>
         </div>
+        <div className="card-header">
+          <h2 className="section-title">Create Flowchart</h2>
+        </div>
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Start with workflow metadata now. Add nodes and edges in the visual editor after creation.
+        </p>
         {state.loading ? <p>Loading flowchart defaults...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {!state.loading && !state.error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>name</span>
               <input
                 type="text"
+                placeholder="Release readiness"
                 required
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               />
             </label>
             <label className="field field-span">
-              <span>Description (optional)</span>
+              <span>description (optional)</span>
               <textarea
+                placeholder="Flowchart for validating and shipping weekly release."
                 value={form.description}
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               />
             </label>
             <label className="field">
-              <span>Max node executions (optional)</span>
+              <span>max node executions (optional)</span>
               <input
                 type="number"
                 min="1"
@@ -140,7 +137,7 @@ export default function FlowchartNewPage() {
               />
             </label>
             <label className="field">
-              <span>Max runtime minutes (optional)</span>
+              <span>max runtime minutes (optional)</span>
               <input
                 type="number"
                 min="1"
@@ -150,7 +147,7 @@ export default function FlowchartNewPage() {
               />
             </label>
             <label className="field">
-              <span>Max parallel nodes</span>
+              <span>max parallel nodes</span>
               <input
                 type="number"
                 min="1"
@@ -160,11 +157,15 @@ export default function FlowchartNewPage() {
                 onChange={(event) => setForm((current) => ({ ...current, maxParallelNodes: event.target.value }))}
               />
             </label>
-            {nodeTypes.length > 0 ? (
-              <p className="toolbar-meta">Supported node types: {nodeTypes.join(', ')}</p>
-            ) : null}
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={busy}>Create Flowchart</button>
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                <i className="fa-solid fa-plus" />
+                create flowchart
+              </button>
+              <Link to="/flowcharts" className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                cancel
+              </Link>
             </div>
           </form>
         ) : null}

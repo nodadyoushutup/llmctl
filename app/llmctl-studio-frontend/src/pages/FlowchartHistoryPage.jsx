@@ -25,15 +25,15 @@ function errorMessage(error, fallback) {
 function statusClass(status) {
   const normalized = String(status || '').toLowerCase()
   if (normalized === 'running' || normalized === 'queued') {
-    return 'status-chip status-running'
+    return 'status status-running'
   }
   if (normalized === 'stopping') {
-    return 'status-chip status-warning'
+    return 'status status-warning'
   }
   if (normalized === 'failed' || normalized === 'error') {
-    return 'status-chip status-failed'
+    return 'status status-failed'
   }
-  return 'status-chip status-idle'
+  return 'status status-idle'
 }
 
 export default function FlowchartHistoryPage() {
@@ -80,24 +80,32 @@ export default function FlowchartHistoryPage() {
   return (
     <section className="stack" aria-label="Flowchart history">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{flowchart ? `${flowchart.name} History` : 'Flowchart History'}</h2>
-            <p>Native React replacement for `/flowcharts/:flowchartId/history`.</p>
-          </div>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
             {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn-link btn-secondary">Open Flowchart</Link>
+              <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back to flowchart
+              </Link>
             ) : null}
-            <Link to="/flowcharts" className="btn-link btn-secondary">All Flowcharts</Link>
           </div>
         </div>
+        <div className="card-header">
+          <h2 className="section-title">Flowchart History</h2>
+        </div>
+        <p className="muted" style={{ marginTop: '12px' }}>
+          {flowchart
+            ? `${flowchart.name}. Each run begins at Start. If execution routes back to Start, the current run completes and a new run is queued.`
+            : 'Each run begins at Start. If execution routes back to Start, the current run completes and a new run is queued.'}
+        </p>
         {loading ? <p>Loading run history...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
-        {!loading && !error && runs.length === 0 ? <p>No flowchart runs yet.</p> : null}
+        {!loading && !error && runs.length === 0 ? (
+          <p className="muted" style={{ marginTop: '16px' }}>No flowchart history yet.</p>
+        ) : null}
         {!loading && !error && runs.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
+          <div style={{ marginTop: '20px', overflowX: 'auto' }}>
+            <table className="table">
               <thead>
                 <tr>
                   <th>Run</th>
@@ -120,16 +128,16 @@ export default function FlowchartHistoryPage() {
                       onClick={(event) => handleRowClick(event, href)}
                     >
                       <td>
-                        <Link to={href}>Run {run.id}</Link>
+                        <Link to={href}>run {run.id}</Link>
                       </td>
                       <td>
                         <span className={statusClass(run.status)}>{run.status || '-'}</span>
                       </td>
-                      <td>{run.cycle_count ?? 0}</td>
-                      <td>{run.node_run_count ?? 0}</td>
-                      <td>{run.created_at || '-'}</td>
-                      <td>{run.started_at || '-'}</td>
-                      <td>{run.finished_at || '-'}</td>
+                      <td className="muted">{run.cycle_count ?? 0}</td>
+                      <td className="muted">{run.node_run_count ?? 0}</td>
+                      <td className="muted">{run.created_at || '-'}</td>
+                      <td className="muted">{run.started_at || '-'}</td>
+                      <td className="muted">{run.finished_at || '-'}</td>
                     </tr>
                   )
                 })}

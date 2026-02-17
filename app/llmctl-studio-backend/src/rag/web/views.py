@@ -375,11 +375,111 @@ def _fetch_github_repos(pat: str) -> list[str]:
     return sorted(set(repos), key=str.lower)
 
 
+def _source_iso_datetime(value: datetime | None) -> str | None:
+    dt = _coerce_datetime_utc(value)
+    if not dt:
+        return None
+    return dt.isoformat()
+
+
+def _source_file_types(source: Any) -> list[dict[str, Any]]:
+    file_types: list[dict[str, Any]] = []
+    raw_types = getattr(source, "indexed_file_types", None)
+    if not raw_types:
+        return file_types
+    try:
+        parsed = json.loads(raw_types)
+    except json.JSONDecodeError:
+        return file_types
+    if isinstance(parsed, dict):
+        for key, value in sorted(parsed.items(), key=lambda item: str(item[0])):
+            file_types.append({"type": str(key), "count": int(value or 0)})
+    return file_types
+
+
+def _serialize_source(source: Any, *, has_active_job: bool) -> dict[str, Any]:
+    return {
+        "id": int(getattr(source, "id")),
+        "name": str(getattr(source, "name") or ""),
+        "kind": str(getattr(source, "kind") or ""),
+        "collection": str(getattr(source, "collection") or ""),
+        "local_path": str(getattr(source, "local_path") or ""),
+        "git_repo": str(getattr(source, "git_repo") or ""),
+        "git_branch": str(getattr(source, "git_branch") or ""),
+        "drive_folder_id": str(getattr(source, "drive_folder_id") or ""),
+        "index_schedule_value": getattr(source, "index_schedule_value", None),
+        "index_schedule_unit": getattr(source, "index_schedule_unit", None),
+        "index_schedule_mode": str(getattr(source, "index_schedule_mode") or "fresh"),
+        "indexed_file_count": getattr(source, "indexed_file_count", None),
+        "indexed_chunk_count": getattr(source, "indexed_chunk_count", None),
+        "last_error": str(getattr(source, "last_error") or ""),
+        "last_indexed_at": _source_iso_datetime(getattr(source, "last_indexed_at", None)),
+        "next_index_at": _source_iso_datetime(getattr(source, "next_index_at", None)),
+        "created_at": _source_iso_datetime(getattr(source, "created_at", None)),
+        "updated_at": _source_iso_datetime(getattr(source, "updated_at", None)),
+        "has_active_job": bool(has_active_job),
+        "status": _source_status_label(source, has_active_job=has_active_job),
+        "location": _source_location(source),
+        "schedule_text": _source_schedule_text(source),
+        "file_types": _source_file_types(source),
+    }
+
+
+def _source_form_meta() -> dict[str, Any]:
+    github_settings = load_integration_settings("github")
+    drive_settings = load_integration_settings("google_workspace")
+    service_email = None
+    service_json = (drive_settings.get("service_account_json") or "").strip()
+    if service_json:
+        try:
+            service_email = service_account_email(service_json)
+        except ValueError:
+            service_email = None
+    return {
+        "github_connected": bool((github_settings.get("pat") or "").strip()),
+        "google_drive_connected": bool(service_json),
+        "google_drive_service_email": service_email,
+        "source_kind_local": "local",
+        "source_kind_github": "github",
+        "source_kind_google_drive": "google_drive",
+        "index_mode_fresh": "fresh",
+        "index_mode_delta": "delta",
+    }
+
+
+def _source_input_from_request() -> RAGSourceInput:
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+
+    def _value(form_key: str, json_key: str | None = None) -> str:
+        if request.is_json:
+            key = json_key or form_key
+            if key in payload:
+                return str(payload.get(key) or "")
+            if form_key in payload:
+                return str(payload.get(form_key) or "")
+        return request.form.get(form_key, "")
+
+    return RAGSourceInput(
+        name=_value("source_name", "name"),
+        kind=_value("source_kind", "kind"),
+        local_path=_value("source_local_path", "local_path"),
+        git_repo=_value("source_git_repo", "git_repo"),
+        git_branch=_value("source_git_branch", "git_branch"),
+        drive_folder_id=_value("source_drive_folder_id", "drive_folder_id"),
+        index_schedule_value=_value("source_index_schedule_value", "index_schedule_value"),
+        index_schedule_unit=_value("source_index_schedule_unit", "index_schedule_unit"),
+        index_schedule_mode=_value("source_index_schedule_mode", "index_schedule_mode"),
+    )
+
+
 @bp.get("/rag")
 def rag_root():
     return redirect(url_for("rag.chat_page"))
 
 
+@bp.get("/api/rag/chat")
 @bp.get(RAG_PAGE_CHAT)
 def chat_page():
     config = load_config()
@@ -387,6 +487,18 @@ def chat_page():
     missing_api_key = None
     if not has_chat_api_key(config):
         missing_api_key = missing_api_key_message(get_chat_provider(config), "Chat")
+
+    if _wants_json_response():
+        return {
+            "collections": collection_contract.get("collections", []),
+            "chat_top_k": config.chat_top_k,
+            "chat_verbosity": config.chat_response_style,
+            "chat_context_budget_tokens": config.chat_context_budget_tokens,
+            "chat_max_history": config.chat_max_history,
+            "rag_health": rag_health_snapshot(),
+            "missing_api_key": missing_api_key,
+            "page_title": "RAG Chat",
+        }
 
     return render_template(
         "rag/chat.html",
@@ -402,10 +514,21 @@ def chat_page():
     )
 
 
+@bp.get("/api/rag/sources")
 @bp.get(RAG_PAGE_SOURCES)
 def sources_page():
     sources = list_sources(limit=None)
     active_source_ids = _active_quick_rag_source_ids()
+    if _wants_json_response():
+        return {
+            "sources": [
+                _serialize_source(source, has_active_job=int(source.id) in active_source_ids)
+                for source in sources
+            ],
+            "active_source_ids": sorted(active_source_ids),
+            "rag_health": rag_health_snapshot(),
+            "page_title": "RAG Sources",
+        }
     return render_template(
         "rag/sources.html",
         sources=sources,
@@ -420,75 +543,73 @@ def sources_page():
     )
 
 
+@bp.get("/api/rag/sources/new")
 @bp.get(f"{RAG_PAGE_SOURCES}/new")
 def new_source_page():
-    github_settings = load_integration_settings("github")
-    drive_settings = load_integration_settings("google_workspace")
-    service_email = None
-    service_json = (drive_settings.get("service_account_json") or "").strip()
-    if service_json:
-        try:
-            service_email = service_account_email(service_json)
-        except ValueError:
-            service_email = None
+    form_meta = _source_form_meta()
+
+    if _wants_json_response():
+        return {
+            **form_meta,
+            "page_title": "New RAG Source",
+        }
 
     return render_template(
         "rag/source_new.html",
-        github_connected=bool((github_settings.get("pat") or "").strip()),
-        google_drive_connected=bool(service_json),
-        google_drive_service_email=service_email,
-        source_kind_local="local",
-        source_kind_github="github",
-        source_kind_google_drive="google_drive",
-        index_mode_fresh="fresh",
-        index_mode_delta="delta",
+        github_connected=form_meta["github_connected"],
+        google_drive_connected=form_meta["google_drive_connected"],
+        google_drive_service_email=form_meta["google_drive_service_email"],
+        source_kind_local=form_meta["source_kind_local"],
+        source_kind_github=form_meta["source_kind_github"],
+        source_kind_google_drive=form_meta["source_kind_google_drive"],
+        index_mode_fresh=form_meta["index_mode_fresh"],
+        index_mode_delta=form_meta["index_mode_delta"],
         page_title="New RAG Source",
         active_page="rag_sources",
     )
 
 
+@bp.post("/api/rag/sources")
 @bp.post(RAG_PAGE_SOURCES)
 def create_source_page():
-    payload = RAGSourceInput(
-        name=request.form.get("source_name", ""),
-        kind=request.form.get("source_kind", ""),
-        local_path=request.form.get("source_local_path", ""),
-        git_repo=request.form.get("source_git_repo", ""),
-        git_branch=request.form.get("source_git_branch", ""),
-        drive_folder_id=request.form.get("source_drive_folder_id", ""),
-        index_schedule_value=request.form.get("source_index_schedule_value", ""),
-        index_schedule_unit=request.form.get("source_index_schedule_unit", ""),
-        index_schedule_mode=request.form.get("source_index_schedule_mode", ""),
-    )
+    payload = _source_input_from_request()
     try:
         source = create_source(payload)
     except ValueError as exc:
+        if _wants_json_response():
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("rag.new_source_page"))
 
+    if _wants_json_response():
+        return {
+            "ok": True,
+            "source": _serialize_source(source, has_active_job=False),
+        }, 201
     flash("Source created.", "success")
     return redirect(url_for("rag.source_detail_page", source_id=source.id))
 
 
+@bp.get("/api/rag/sources/<int:source_id>")
 @bp.get(f"{RAG_PAGE_SOURCES}/<int:source_id>")
 def source_detail_page(source_id: int):
     source = get_source(source_id)
     if not source:
+        if _wants_json_response():
+            return {"error": "Source not found."}, 404
         flash("Source not found.", "error")
         return redirect(url_for("rag.sources_page"))
     active_source_ids = _active_quick_rag_source_ids()
     has_active_job = source_id in active_source_ids
 
-    file_types: list[dict[str, Any]] = []
-    raw_types = getattr(source, "indexed_file_types", None)
-    if raw_types:
-        try:
-            parsed = json.loads(raw_types)
-        except json.JSONDecodeError:
-            parsed = {}
-        if isinstance(parsed, dict):
-            for key, value in sorted(parsed.items(), key=lambda item: str(item[0])):
-                file_types.append({"type": str(key), "count": int(value or 0)})
+    file_types = _source_file_types(source)
+    if _wants_json_response():
+        return {
+            "source": _serialize_source(source, has_active_job=has_active_job),
+            "file_types": file_types,
+            "rag_health": rag_health_snapshot(),
+            "page_title": f"RAG Source - {source.name}",
+        }
 
     return render_template(
         "rag/source_detail.html",
@@ -504,75 +625,85 @@ def source_detail_page(source_id: int):
     )
 
 
+@bp.get("/api/rag/sources/<int:source_id>/edit")
 @bp.get(f"{RAG_PAGE_SOURCES}/<int:source_id>/edit")
 def edit_source_page(source_id: int):
     source = get_source(source_id)
     if not source:
+        if _wants_json_response():
+            return {"error": "Source not found."}, 404
         flash("Source not found.", "error")
         return redirect(url_for("rag.sources_page"))
 
-    github_settings = load_integration_settings("github")
-    drive_settings = load_integration_settings("google_workspace")
-    service_email = None
-    service_json = (drive_settings.get("service_account_json") or "").strip()
-    if service_json:
-        try:
-            service_email = service_account_email(service_json)
-        except ValueError:
-            service_email = None
+    form_meta = _source_form_meta()
+    if _wants_json_response():
+        return {
+            "source": _serialize_source(source, has_active_job=False),
+            **form_meta,
+            "page_title": f"Edit RAG Source - {source.name}",
+        }
 
     return render_template(
         "rag/source_edit.html",
         source=source,
-        github_connected=bool((github_settings.get("pat") or "").strip()),
-        google_drive_connected=bool(service_json),
-        google_drive_service_email=service_email,
-        source_kind_local="local",
-        source_kind_github="github",
-        source_kind_google_drive="google_drive",
-        index_mode_fresh="fresh",
-        index_mode_delta="delta",
+        github_connected=form_meta["github_connected"],
+        google_drive_connected=form_meta["google_drive_connected"],
+        google_drive_service_email=form_meta["google_drive_service_email"],
+        source_kind_local=form_meta["source_kind_local"],
+        source_kind_github=form_meta["source_kind_github"],
+        source_kind_google_drive=form_meta["source_kind_google_drive"],
+        index_mode_fresh=form_meta["index_mode_fresh"],
+        index_mode_delta=form_meta["index_mode_delta"],
         page_title=f"Edit RAG Source - {source.name}",
         active_page="rag_sources",
     )
 
 
+@bp.post("/api/rag/sources/<int:source_id>")
 @bp.post(f"{RAG_PAGE_SOURCES}/<int:source_id>")
 def update_source_page(source_id: int):
     source = get_source(source_id)
     if not source:
+        if _wants_json_response():
+            return {"error": "Source not found."}, 404
         flash("Source not found.", "error")
         return redirect(url_for("rag.sources_page"))
 
-    payload = RAGSourceInput(
-        name=request.form.get("source_name", ""),
-        kind=request.form.get("source_kind", ""),
-        local_path=request.form.get("source_local_path", ""),
-        git_repo=request.form.get("source_git_repo", ""),
-        git_branch=request.form.get("source_git_branch", ""),
-        drive_folder_id=request.form.get("source_drive_folder_id", ""),
-        index_schedule_value=request.form.get("source_index_schedule_value", ""),
-        index_schedule_unit=request.form.get("source_index_schedule_unit", ""),
-        index_schedule_mode=request.form.get("source_index_schedule_mode", ""),
-    )
+    payload = _source_input_from_request()
     try:
-        update_source(source_id, payload)
+        updated = update_source(source_id, payload)
     except ValueError as exc:
+        if _wants_json_response():
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("rag.edit_source_page", source_id=source_id))
 
+    if _wants_json_response():
+        active_source_ids = _active_quick_rag_source_ids()
+        return {
+            "ok": True,
+            "source": _serialize_source(
+                updated,
+                has_active_job=int(updated.id) in active_source_ids,
+            ),
+        }
     flash("Source updated.", "success")
     return redirect(url_for("rag.source_detail_page", source_id=source_id))
 
 
+@bp.post("/api/rag/sources/<int:source_id>/delete")
 @bp.post(f"{RAG_PAGE_SOURCES}/<int:source_id>/delete")
 def delete_source_page(source_id: int):
     source = get_source(source_id)
     if not source:
+        if _wants_json_response():
+            return {"error": "Source not found."}, 404
         flash("Source not found.", "error")
         return redirect(url_for("rag.sources_page"))
 
     delete_source(source_id)
+    if _wants_json_response():
+        return {"ok": True, "source_id": source_id}
     flash("Source deleted.", "success")
     return redirect(url_for("rag.sources_page"))
 
@@ -662,11 +793,13 @@ def _start_source_quick_run_response(*, source_id: int, index_mode: str):
     return redirect(url_for("rag.source_detail_page", source_id=source_id))
 
 
+@bp.post("/api/rag/sources/<int:source_id>/quick-index")
 @bp.post(f"{RAG_PAGE_SOURCES}/<int:source_id>/quick-index")
 def quick_index_source_page(source_id: int):
     return _start_source_quick_run_response(source_id=source_id, index_mode="fresh")
 
 
+@bp.post("/api/rag/sources/<int:source_id>/quick-delta-index")
 @bp.post(f"{RAG_PAGE_SOURCES}/<int:source_id>/quick-delta-index")
 def quick_delta_index_source_page(source_id: int):
     return _start_source_quick_run_response(source_id=source_id, index_mode="delta")

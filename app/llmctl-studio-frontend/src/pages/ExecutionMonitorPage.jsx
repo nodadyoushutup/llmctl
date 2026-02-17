@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import LegacyFallbackNote from '../components/LegacyFallbackNote'
+import { Link } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getNodeStatus, getRun } from '../lib/studioApi'
 
@@ -50,8 +50,8 @@ function errorMessage(error, fallback) {
 
 export default function ExecutionMonitorPage() {
   const urlParams = new URLSearchParams(window.location.search)
-  const initialRunId = urlParams.get('runId') || '1'
-  const initialNodeId = urlParams.get('nodeId') || '1'
+  const initialRunId = urlParams.get('runId') || ''
+  const initialNodeId = urlParams.get('nodeId') || ''
   const autoRunId = parsePositiveInt(initialRunId)
   const autoNodeId = parsePositiveInt(initialNodeId)
 
@@ -164,13 +164,16 @@ export default function ExecutionMonitorPage() {
   return (
     <section className="stack" aria-label="Execution monitor">
       <article className="card">
-        <h2>Wave 2 execution monitor (React)</h2>
-        <p>
-          This Wave 2 migration surface uses existing read endpoints while full list/detail/create/edit
-          routes are being migrated.
-        </p>
-        <LegacyFallbackNote path="/runs" label="Open /runs" />
-        <LegacyFallbackNote path="/nodes" label="Open /nodes" />
+        <div className="title-row">
+          <div>
+            <h2>Execution Monitor</h2>
+            <p>Inspect run and node execution status by id using live API responses.</p>
+          </div>
+          <div className="table-actions">
+            <Link className="btn btn-secondary" to="/runs">Autoruns</Link>
+            <Link className="btn btn-secondary" to="/nodes">Nodes</Link>
+          </div>
+        </div>
       </article>
 
       <section className="card-grid" aria-label="Execution reads">

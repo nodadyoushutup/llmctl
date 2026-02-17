@@ -29,15 +29,15 @@ function errorMessage(error, fallback) {
 function runStatusClass(status) {
   const normalized = String(status || '').toLowerCase()
   if (normalized === 'running' || normalized === 'queued') {
-    return 'status-chip status-running'
+    return 'status status-running'
   }
   if (normalized === 'stopping') {
-    return 'status-chip status-warning'
+    return 'status status-warning'
   }
   if (normalized === 'failed' || normalized === 'error') {
-    return 'status-chip status-failed'
+    return 'status status-failed'
   }
-  return 'status-chip status-idle'
+  return 'status status-idle'
 }
 
 function isRunActive(status) {
@@ -146,86 +146,101 @@ export default function FlowchartRunDetailPage() {
   return (
     <section className="stack" aria-label="Flowchart run detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{flowchartRun ? `Run ${flowchartRun.id}` : 'Flowchart Run'}</h2>
-            <p>Native React replacement for flowchart run detail and run controls.</p>
-          </div>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
             {resolvedFlowchartId ? (
-              <Link to={`/flowcharts/${resolvedFlowchartId}`} className="btn-link btn-secondary">Open Flowchart</Link>
+              <Link to={`/flowcharts/${resolvedFlowchartId}/history`} className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back to history
+              </Link>
             ) : null}
             {resolvedFlowchartId ? (
-              <Link to={`/flowcharts/${resolvedFlowchartId}/history`} className="btn-link btn-secondary">Run History</Link>
+              <Link to={`/flowcharts/${resolvedFlowchartId}`} className="btn btn-secondary">
+                <i className="fa-solid fa-diagram-project" />
+                open flowchart
+              </Link>
             ) : null}
-            <Link to="/flowcharts" className="btn-link btn-secondary">All Flowcharts</Link>
           </div>
+        </div>
+        <div className="card-header">
+          <h2 className="section-title">{flowchartRun ? `Run ${flowchartRun.id}` : 'Flowchart Run'}</h2>
         </div>
         {state.loading ? <p>Loading flowchart run...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {flowchartRun ? (
-          <div className="stack-sm">
-            <div className="table-actions">
-              <span className={runStatusClass(flowchartRun.status)}>{flowchartRun.status || '-'}</span>
-              {active ? (
-                <button
-                  type="button"
-                  className="btn-link btn-secondary"
-                  disabled={busy}
-                  onClick={() => handleStop(false)}
-                >
-                  Stop After Current Node
-                </button>
-              ) : null}
-              {active ? (
-                <button
-                  type="button"
-                  className="btn-link"
-                  disabled={busy}
-                  onClick={() => handleStop(true)}
-                >
-                  Force Stop
-                </button>
-              ) : null}
-            </div>
-            <dl className="kv-grid">
-              <div>
-                <dt>Flowchart</dt>
-                <dd>{flowchart?.name || `Flowchart ${flowchartRun.flowchart_id}`}</dd>
-              </div>
-              <div>
-                <dt>Cycles</dt>
-                <dd>{flowchartRun.cycle_count ?? '-'}</dd>
-              </div>
-              <div>
-                <dt>Node runs</dt>
-                <dd>{flowchartRun.node_run_count ?? nodeRuns.length}</dd>
-              </div>
-              <div>
-                <dt>Created</dt>
-                <dd>{flowchartRun.created_at || '-'}</dd>
-              </div>
-              <div>
-                <dt>Started</dt>
-                <dd>{flowchartRun.started_at || '-'}</dd>
-              </div>
-              <div>
-                <dt>Finished</dt>
-                <dd>{flowchartRun.finished_at || '-'}</dd>
-              </div>
-            </dl>
-            {active ? <p className="toolbar-meta">Polling every 5s while run is active.</p> : null}
+          <div style={{ marginTop: '20px', overflowX: 'auto' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Cycles</th>
+                  <th>Node runs</th>
+                  <th>Created</th>
+                  <th>Started</th>
+                  <th>Finished</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <span className={runStatusClass(flowchartRun.status)}>{flowchartRun.status || '-'}</span>
+                  </td>
+                  <td className="muted">{flowchartRun.cycle_count ?? '-'}</td>
+                  <td className="muted">{flowchartRun.node_run_count ?? nodeRuns.length}</td>
+                  <td className="muted">{flowchartRun.created_at || '-'}</td>
+                  <td className="muted">{flowchartRun.started_at || '-'}</td>
+                  <td className="muted">{flowchartRun.finished_at || '-'}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         ) : null}
       </article>
 
+      {active ? (
+        <article className="card">
+          <div className="card-header">
+            <h2 className="section-title">Run Controls</h2>
+          </div>
+          <div className="row" style={{ marginTop: '16px', gap: '10px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={() => handleStop(false)}
+            >
+              <i className="fa-solid fa-stop" />
+              stop after current node
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              disabled={busy}
+              onClick={() => handleStop(true)}
+            >
+              <i className="fa-solid fa-power-off" />
+              force stop now
+            </button>
+          </div>
+          {String(flowchartRun?.status || '').toLowerCase() === 'stopping' ? (
+            <p className="muted" style={{ marginTop: '12px' }}>
+              Stop requested. This run will stop after the current node finishes.
+            </p>
+          ) : null}
+        </article>
+      ) : null}
+
       <article className="card">
-        <h2>Node Runs</h2>
-        {nodeRuns.length === 0 ? <p>No node runs recorded for this run yet.</p> : null}
+        <div className="card-header">
+          <h2 className="section-title">Node Runs</h2>
+        </div>
+        {nodeRuns.length === 0 ? (
+          <p className="muted" style={{ marginTop: '12px' }}>No node runs recorded for this flowchart run yet.</p>
+        ) : null}
         {nodeRuns.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
+          <div style={{ marginTop: '20px', overflowX: 'auto' }}>
+            <table className="table">
               <thead>
                 <tr>
                   <th>Node run</th>
@@ -235,8 +250,9 @@ export default function FlowchartRunDetailPage() {
                   <th>Execution</th>
                   <th>Runtime</th>
                   <th>Dispatch / Fallback</th>
-                  <th>Triggered by</th>
-                  <th>Pulled context</th>
+                  <th>Triggered By (Solid)</th>
+                  <th>Pulled Context (Dotted)</th>
+                  <th>Node task</th>
                   <th>Started</th>
                   <th>Finished</th>
                 </tr>
@@ -255,7 +271,7 @@ export default function FlowchartRunDetailPage() {
                       <td>
                         {href ? <Link to={href}>{nodeRun.id}</Link> : nodeRun.id}
                       </td>
-                      <td>{nodeRun.cycle_index ?? '-'}</td>
+                      <td className="muted">{nodeRun.cycle_index ?? '-'}</td>
                       <td>
                         <strong>{nodeRun.node_title || `Node ${nodeRun.flowchart_node_id || '-'}`}</strong>
                         <p className="table-note">{nodeRun.node_type || '-'}</p>
@@ -263,7 +279,7 @@ export default function FlowchartRunDetailPage() {
                       <td>
                         <span className={runStatusClass(nodeRun.status)}>{nodeRun.status || '-'}</span>
                       </td>
-                      <td>{nodeRun.execution_index ?? '-'}</td>
+                      <td className="muted">{nodeRun.execution_index ?? '-'}</td>
                       <td>
                         <p className="table-note">{nodeRun.provider_route || '-'}</p>
                         <p className="table-note">dispatch id: {nodeRun.provider_dispatch_id || '-'}</p>
@@ -292,8 +308,11 @@ export default function FlowchartRunDetailPage() {
                       <td>
                         <p className="table-note">{sourceSummary(nodeRun.pulled_dotted_sources)}</p>
                       </td>
-                      <td>{nodeRun.started_at || '-'}</td>
-                      <td>{nodeRun.finished_at || '-'}</td>
+                      <td>
+                        {href ? <Link to={href}>{nodeRun.agent_task_id}</Link> : <span className="muted">-</span>}
+                      </td>
+                      <td className="muted">{nodeRun.started_at || '-'}</td>
+                      <td className="muted">{nodeRun.finished_at || '-'}</td>
                     </tr>
                   )
                 })}

@@ -120,130 +120,177 @@ export default function QuickTaskPage() {
   }
 
   return (
-    <section className="stack" aria-label="Quick task">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Quick Task</h2>
-            <p>Native React replacement for `/quick` one-off node execution.</p>
+    <section className="quick-node-shell" aria-label="Quick task">
+      {state.loading ? <p className="muted">Loading quick task metadata...</p> : null}
+      {state.error ? <p className="error-text">{state.error}</p> : null}
+      {formError ? <p className="error-text">{formError}</p> : null}
+      <form className="quick-node-form" id="quick-task-form" onSubmit={handleSubmit}>
+        <article className="quick-node-panel quick-node-controls">
+          <div className="quick-node-controls-header">
+            <div className="quick-node-controls-copy">
+              <h2 className="section-title">Quick Node</h2>
+              <p className="muted">
+                Run one-off prompts with the default Quick Node profile, or pick an agent override.
+              </p>
+            </div>
+            <Link to="/nodes" className="btn btn-secondary">
+              Back to Nodes
+            </Link>
           </div>
-          <div className="table-actions">
-            <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
-          </div>
-        </div>
-        {state.loading ? <p>Loading quick task metadata...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
-        {!state.loading && !state.error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
-            <label className="field field-span">
-              <span>Prompt</span>
+
+          <label className="label">
+            Agent override (optional)
+            <select
+              className="input"
+              value={form.agentId}
+              disabled={agents.length === 0}
+              onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value }))}
+            >
+              <option value="">Default Quick Node</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+            {agents.length > 0 ? (
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                Leave blank to use the hard-coded Quick Node profile.
+              </span>
+            ) : (
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                No override agents created yet. Quick Node default is still available.
+              </span>
+            )}
+          </label>
+
+          <label className="label">
+            Model
+            <select
+              required
+              className="input"
+              value={form.modelId}
+              disabled={models.length === 0}
+              onChange={(event) => setForm((current) => ({ ...current, modelId: event.target.value }))}
+            >
+              <option value="">Select model</option>
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.provider})
+                </option>
+              ))}
+            </select>
+            {models.length > 0 ? (
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                Defaults to Settings default model, otherwise the first model on this list.
+              </span>
+            ) : (
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                No models available. Create a model before sending a quick node.
+              </span>
+            )}
+          </label>
+
+          <label className="label">
+            MCP servers (optional)
+            {mcpServers.length > 0 ? (
+              <div className="quick-node-options-list">
+                {mcpServers.map((server) => {
+                  const serverId = String(server.id)
+                  const checked = form.mcpServerIds.includes(serverId)
+                  return (
+                    <label key={server.id} className="quick-node-option">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setForm((current) => ({
+                            ...current,
+                            mcpServerIds: toggleListValue(current.mcpServerIds, serverId),
+                          }))
+                        }
+                      />
+                      <span>
+                        {server.name} <span className="muted">({server.server_key})</span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            ) : (
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                No MCP servers available.
+              </span>
+            )}
+          </label>
+
+          <label className="label">
+            Integrations (optional)
+            {integrationOptions.length > 0 ? (
+              <div className="quick-node-options-list">
+                {integrationOptions.map((option) => {
+                  const key = String(option.key)
+                  const checked = form.integrationKeys.includes(key)
+                  return (
+                    <label key={key} className="quick-node-option">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setForm((current) => ({
+                            ...current,
+                            integrationKeys: toggleListValue(current.integrationKeys, key),
+                          }))
+                        }
+                      />
+                      <span>
+                        {option.label}{' '}
+                        <span className="muted">({option.connected ? 'configured' : 'not configured'})</span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            ) : (
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                No integrations available.
+              </span>
+            )}
+            <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+              Selected integrations are injected into prompt context.
+            </span>
+          </label>
+        </article>
+
+        <article className="quick-node-panel quick-node-prompt">
+          <div className="quick-node-prompt-body">
+            <label className="label">
+              Prompt
               <textarea
                 required
+                className="textarea"
                 value={form.prompt}
                 placeholder="Ask anything."
                 onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))}
               />
             </label>
-            <label className="field">
-              <span>Agent override (optional)</span>
-              <select
-                value={form.agentId}
-                onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value }))}
-              >
-                <option value="">Default Quick Node</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
+
+            <label className="label">
+              Attachments (optional)
+              <input type="file" className="input" multiple disabled />
+              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                Attachment upload parity is still in progress. Quick Task currently submits prompt/config only.
+              </span>
             </label>
-            <label className="field">
-              <span>Model</span>
-              <select
-                required
-                value={form.modelId}
-                onChange={(event) => setForm((current) => ({ ...current, modelId: event.target.value }))}
-              >
-                <option value="">Select model</option>
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name} ({model.provider})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <fieldset className="field field-span">
-              <span>MCP servers (optional)</span>
-              {mcpServers.length > 0 ? (
-                <div className="checkbox-grid">
-                  {mcpServers.map((server) => {
-                    const serverId = String(server.id)
-                    const checked = form.mcpServerIds.includes(serverId)
-                    return (
-                      <label key={server.id} className="checkbox-item">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setForm((current) => ({
-                              ...current,
-                              mcpServerIds: toggleListValue(current.mcpServerIds, serverId),
-                            }))
-                          }
-                        />
-                        <span>{server.name} <span className="toolbar-meta">({server.server_key})</span></span>
-                      </label>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="toolbar-meta">No MCP servers available.</p>
-              )}
-            </fieldset>
-            <fieldset className="field field-span">
-              <span>Integrations (optional)</span>
-              {integrationOptions.length > 0 ? (
-                <div className="checkbox-grid">
-                  {integrationOptions.map((option) => {
-                    const key = String(option.key)
-                    const checked = form.integrationKeys.includes(key)
-                    return (
-                      <label key={key} className="checkbox-item">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setForm((current) => ({
-                              ...current,
-                              integrationKeys: toggleListValue(current.integrationKeys, key),
-                            }))
-                          }
-                        />
-                        <span>
-                          {option.label}{' '}
-                          <span className="toolbar-meta">({option.connected ? 'configured' : 'not configured'})</span>
-                        </span>
-                      </label>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="toolbar-meta">No integrations available.</p>
-              )}
-            </fieldset>
-            <p className="toolbar-meta">
-              Attachment upload parity is still handled by the legacy form path. API-mode quick tasks currently submit prompt/config only.
-            </p>
+
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={saving || models.length === 0}>
-                {saving ? 'Sending...' : 'Send to Worker'}
+              <button type="submit" className="btn btn-primary" disabled={saving || models.length === 0}>
+                {saving ? 'Sending...' : 'Send to CLI'}
               </button>
             </div>
-          </form>
-        ) : null}
-      </article>
+          </div>
+        </article>
+      </form>
     </section>
   )
 }

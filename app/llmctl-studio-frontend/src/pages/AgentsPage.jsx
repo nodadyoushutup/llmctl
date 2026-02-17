@@ -134,8 +134,8 @@ export default function AgentsPage() {
       <article className="card">
         <div className="title-row">
           <div>
-            <h2>Agents</h2>
-            <p>Native React replacement for the legacy agents list and row actions.</p>
+            <h2>All Agents</h2>
+            <p>Open an agent to see its autorun history, connections, and prompt configuration.</p>
           </div>
           <Link to="/agents/new" className="btn-link">New Agent</Link>
         </div>
@@ -152,7 +152,8 @@ export default function AgentsPage() {
                   <th>Type</th>
                   <th>Role</th>
                   <th>Autorun</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th className="table-actions-cell">Autorun</th>
+                  <th className="table-actions-cell">Delete</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,6 +206,10 @@ export default function AgentsPage() {
                               <ActionIcon name="play" />
                             </button>
                           )}
+                        </div>
+                      </td>
+                      <td className="table-actions-cell">
+                        <div className="table-actions">
                           <button
                             type="button"
                             className="icon-button icon-button-danger"

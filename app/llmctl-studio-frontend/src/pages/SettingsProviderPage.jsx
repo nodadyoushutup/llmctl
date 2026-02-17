@@ -187,6 +187,7 @@ export default function SettingsProviderPage() {
             <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>
             <Link to="/settings/runtime" className="btn-link btn-secondary">Runtime</Link>
             <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
+            <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
           </div>
         </div>
         <div className="toolbar">

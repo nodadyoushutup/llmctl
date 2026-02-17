@@ -81,30 +81,56 @@ export default function MemoryEditPage() {
   return (
     <section className="stack" aria-label="Edit memory">
       <article className="card">
-        <div className="title-row">
-          <h2>{memory ? `Edit Memory ${memory.id}` : 'Edit Memory'}</h2>
+        <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
-            {memory ? <Link to={`/memories/${memory.id}`} className="btn-link btn-secondary">Back to Memory</Link> : null}
-            <Link to="/memories" className="btn-link btn-secondary">All Memories</Link>
+            {memory ? (
+              <Link to={`/memories/${memory.id}`} className="btn btn-secondary">
+                <i className="fa-solid fa-arrow-left" />
+                back to memory
+              </Link>
+            ) : null}
+            <Link to="/memories" className="btn btn-secondary">
+              <i className="fa-solid fa-list" />
+              all memories
+            </Link>
           </div>
         </div>
-        {state.loading ? <p>Loading memory...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+
+        <div className="card-header">
+          <div>
+            {memory ? <p className="eyebrow">memory {memory.id}</p> : null}
+            <h2 className="section-title">Edit Memory</h2>
+          </div>
+        </div>
+
+        <p className="muted" style={{ marginTop: '12px' }}>
+          Update the stored memory description.
+        </p>
+
+        {state.loading ? <p style={{ marginTop: '20px' }}>Loading memory...</p> : null}
+        {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
+        {formError ? <p className="error-text" style={{ marginTop: '12px' }}>{formError}</p> : null}
+
         {!state.loading && !state.error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>
             <label className="field field-span">
-              <span>Description</span>
+              <span>description</span>
               <textarea
-                required
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
               />
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={saving}>
-                {saving ? 'Saving...' : 'Save Memory'}
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                <i className="fa-solid fa-floppy-disk" />
+                {saving ? 'saving...' : 'save'}
               </button>
+              {memory ? (
+                <Link className="btn btn-secondary" to={`/memories/${memory.id}`}>
+                  <i className="fa-solid fa-arrow-left" />
+                  cancel
+                </Link>
+              ) : null}
             </div>
           </form>
         ) : null}

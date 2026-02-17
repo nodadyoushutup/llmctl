@@ -1,56 +1,171 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { HttpError } from '../lib/httpClient'
+import { getAgents } from '../lib/studioApi'
+
+function errorMessage(error) {
+  if (error instanceof HttpError) {
+    if (error.isAuthError) {
+      return `${error.message} Sign in to Studio if authentication is enabled.`
+    }
+    return error.message
+  }
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return 'Failed to load dashboard overview.'
+}
+
+function isActiveStatus(status) {
+  const normalized = String(status || '').toLowerCase()
+  return normalized === 'starting' || normalized === 'running' || normalized === 'stopping'
+}
 
 export default function OverviewPage() {
+  const [state, setState] = useState({ loading: true, agents: [], error: '' })
+
+  useEffect(() => {
+    let active = true
+
+    async function load() {
+      try {
+        const payload = await getAgents()
+        const items = payload && typeof payload === 'object' && Array.isArray(payload.agents)
+          ? payload.agents
+          : []
+        if (!active) {
+          return
+        }
+        setState({ loading: false, agents: items, error: '' })
+      } catch (error) {
+        if (!active) {
+          return
+        }
+        setState({ loading: false, agents: [], error: errorMessage(error) })
+      }
+    }
+
+    load()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const activeAgents = useMemo(
+    () => state.agents.filter((agent) => isActiveStatus(agent.status)).slice(0, 5),
+    [state.agents],
+  )
+
+  const recentAgents = useMemo(
+    () => [...state.agents].sort((left, right) => Number(right.id || 0) - Number(left.id || 0)).slice(0, 5),
+    [state.agents],
+  )
+
+  const recentRuns = useMemo(
+    () => [...state.agents]
+      .filter((agent) => String(agent.last_run_at || '').trim())
+      .sort((left, right) => Number(right.id || 0) - Number(left.id || 0))
+      .slice(0, 5),
+    [state.agents],
+  )
+
+  const summary = {
+    total: state.agents.length,
+    active: activeAgents.length,
+    lastRunAt: recentRuns[0]?.last_run_at || '-',
+  }
+
   return (
-    <section className="card-grid" aria-label="Overview">
-      <article className="card">
-        <h2>Stage 5 scope</h2>
-        <ul>
-          <li>Stage 4 bootstrap remains the foundation for migration waves.</li>
-          <li>Parity tracker now maps legacy Flask routes to React migration targets.</li>
-          <li>Wave 1/2/3 domains now have native React coverage for core ops, planning, and memory/task surfaces.</li>
-          <li>Wave 4 flowchart system is now on native React route coverage.</li>
-        </ul>
-      </article>
-      <article className="card">
-        <h2>Wave links</h2>
-        <p>
-          <Link to="/parity-checklist">Open Stage 5 parity checklist</Link>
-        </p>
-        <p>
-          <Link to="/chat/activity">Open migrated chat activity flow</Link>
-        </p>
-        <p>
-          <Link to="/execution-monitor">Open Wave 2 execution monitor</Link>
-        </p>
-        <p>
-          <Link to="/agents">Open native agents domain</Link>
-        </p>
-        <p>
-          <Link to="/runs">Open native runs domain</Link>
-        </p>
-        <p>
-          <Link to="/nodes">Open native nodes domain</Link>
-        </p>
-        <p>
-          <Link to="/quick">Open native quick task flow</Link>
-        </p>
-        <p>
-          <Link to="/plans">Open native plans domain</Link>
-        </p>
-        <p>
-          <Link to="/milestones">Open native milestones domain</Link>
-        </p>
-        <p>
-          <Link to="/memories">Open native memories domain</Link>
-        </p>
-        <p>
-          <Link to="/task-templates">Open native task templates domain</Link>
-        </p>
-        <p>
-          <Link to="/flowcharts">Open native flowcharts domain</Link>
-        </p>
-      </article>
+    <section className="stack" aria-label="Overview">
+      {state.loading ? <p className="muted">Loading overview...</p> : null}
+      {state.error ? <p className="error-text">{state.error}</p> : null}
+
+      <section className="grid grid-3">
+        <article className="card">
+          <div className="card-header">
+            <h2 className="section-title">Overview</h2>
+          </div>
+          <p className="muted" style={{ marginTop: '12px' }}>
+            Track agent density, active load, and the last known autorun signal.
+          </p>
+          <div className="grid grid-2" style={{ marginTop: '20px' }}>
+            <div className="stat-card">
+              <p className="eyebrow">total</p>
+              <p style={{ marginTop: '8px', fontSize: '24px' }}>{summary.total}</p>
+            </div>
+            <div className="stat-card">
+              <p className="eyebrow">active</p>
+              <p style={{ marginTop: '8px', fontSize: '24px' }}>{summary.active}</p>
+            </div>
+          </div>
+          <div className="subcard" style={{ marginTop: '18px' }}>
+            <p className="eyebrow">last autorun</p>
+            <p style={{ marginTop: '8px' }}>{summary.lastRunAt}</p>
+          </div>
+        </article>
+
+        <article className="card">
+          <div className="card-header">
+            <h2 className="section-title">Newest Agents</h2>
+          </div>
+          <div className="stack" style={{ marginTop: '20px' }}>
+            {recentAgents.length > 0 ? recentAgents.map((agent) => (
+              <div key={agent.id} className="row-between">
+                <div>
+                  <p>
+                    <Link to={`/agents/${agent.id}`}>{agent.name}</Link>
+                  </p>
+                  <p className="muted" style={{ marginTop: '4px', fontSize: '12px' }}>
+                    created {agent.created_at || '-'}
+                  </p>
+                </div>
+              </div>
+            )) : <p className="muted">No agents created yet.</p>}
+          </div>
+        </article>
+
+        <article className="card">
+          <div className="card-header">
+            <h2 className="section-title">Autorun Feed</h2>
+          </div>
+          <div className="stack" style={{ marginTop: '20px' }}>
+            {recentRuns.length > 0 ? recentRuns.map((agent) => (
+              <div key={agent.id} className="subcard">
+                <div className="row-between">
+                  <p>
+                    <Link to={`/agents/${agent.id}`}>{agent.name}</Link>
+                  </p>
+                </div>
+                <p className="muted" style={{ marginTop: '8px', fontSize: '12px' }}>
+                  last autorun {agent.last_run_at}
+                </p>
+              </div>
+            )) : <p className="muted">No autoruns recorded yet.</p>}
+          </div>
+        </article>
+      </section>
+
+      <section className="grid">
+        <article className="card">
+          <div className="card-header">
+            <h2 className="section-title">Active Agents</h2>
+          </div>
+          <div className="stack" style={{ marginTop: '20px' }}>
+            {activeAgents.length > 0 ? activeAgents.map((agent) => (
+              <div key={agent.id} className="subcard">
+                <div className="row-between">
+                  <p>
+                    <Link to={`/agents/${agent.id}`}>{agent.name}</Link>
+                  </p>
+                </div>
+                <p className="muted" style={{ marginTop: '8px', fontSize: '12px' }}>
+                  status {String(agent.status || 'off')}
+                </p>
+              </div>
+            )) : <p className="muted">No active agents right now.</p>}
+          </div>
+        </article>
+      </section>
     </section>
   )
 }
