@@ -2187,8 +2187,8 @@ fieldset.field {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
+  gap: 0;
+  padding: 0;
   overflow: hidden;
 }
 
@@ -2196,7 +2196,7 @@ fieldset.field {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 12px;
   display: grid;
   align-content: start;
   gap: 12px;
@@ -2205,6 +2205,26 @@ fieldset.field {
 .node-detail-header {
   display: grid;
   gap: 10px;
+}
+
+.node-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+}
+
+.node-panel-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.node-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .node-detail-section {
@@ -2280,7 +2300,6 @@ fieldset.field {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
 .node-stage-list {
@@ -2290,7 +2309,11 @@ fieldset.field {
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 12px;
+}
+
+.node-stage-empty {
+  padding: 12px;
 }
 
 .node-stage-card {
@@ -2585,23 +2608,44 @@ fieldset.field {
 
 .flow-ws-sidebar,
 .flow-ws-inspector {
-  padding: 10px;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
-.flow-ws-inspector-header {
+.flow-ws-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+  box-sizing: border-box;
 }
 
-.flow-ws-inspector-header h3 {
+.flow-ws-panel-header h3 {
   margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+
+.flow-ws-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.flow-ws-inspector-header .table-actions {
+  flex-wrap: nowrap;
 }
 
 .flow-ws-palette {
-  margin-top: 10px;
+  margin-top: 0;
   display: grid;
   gap: 8px;
 }
@@ -2627,8 +2671,10 @@ fieldset.field {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-height: 56px;
   border-bottom: 1px solid var(--line);
   padding: 10px 12px;
+  box-sizing: border-box;
 }
 
 .flow-ws-toolbar-actions {
@@ -2906,8 +2952,11 @@ pre {
     height: 100%;
   }
 
-  .node-detail-panel {
-    padding: 12px;
+  .node-panel-toolbar,
+  .node-detail-scroll,
+  .node-stage-list,
+  .node-stage-empty {
+    padding: 10px;
   }
 
   .flowchart-fixed-page {
@@ -3042,8 +3091,15 @@ pre {
     grid-template-rows: minmax(0, 1fr) minmax(200px, 44%);
   }
 
-  .node-detail-panel {
-    padding: 10px;
+  .node-panel-title {
+    font-size: 16px;
+  }
+
+  .node-panel-toolbar,
+  .node-detail-scroll,
+  .node-stage-list,
+  .node-stage-empty {
+    padding: 8px;
   }
 
   .grid-2,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import FlowchartWorkspaceEditor from '../components/FlowchartWorkspaceEditor'
@@ -91,6 +91,7 @@ export default function FlowchartDetailPage() {
   const [catalogWarning, setCatalogWarning] = useState('')
   const [areToolbarToolsExpanded, setAreToolbarToolsExpanded] = useState(false)
   const [isMetaExpanded, setIsMetaExpanded] = useState(false)
+  const workspaceEditorRef = useRef(null)
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!parsedFlowchartId) {
@@ -324,7 +325,10 @@ export default function FlowchartDetailPage() {
         }
       })
       setEditorGraph({ nodes: nextNodes, edges: nextEdges })
-      setEditorRevision((current) => current + 1)
+      const applied = workspaceEditorRef.current?.applyServerGraph?.(nextNodes, nextEdges)
+      if (!applied) {
+        setEditorRevision((current) => current + 1)
+      }
       setValidationState(nextValidation)
       setActionInfo('Graph saved.')
     })
@@ -588,6 +592,7 @@ export default function FlowchartDetailPage() {
 
         <div className="flowchart-fixed-workspace">
           <FlowchartWorkspaceEditor
+            ref={workspaceEditorRef}
             key={`flowchart-workspace-${editorRevision}`}
             initialNodes={nodes}
             initialEdges={edges}

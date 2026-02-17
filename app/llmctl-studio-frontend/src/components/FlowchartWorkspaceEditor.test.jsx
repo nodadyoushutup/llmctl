@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createRef } from 'react'
 import { describe, expect, test, vi } from 'vitest'
 import FlowchartWorkspaceEditor from './FlowchartWorkspaceEditor'
 
@@ -152,5 +153,44 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
 
     fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
     expect(screen.getByText('Task nodes require a non-empty task prompt before save/validate.')).toBeTruthy()
+  })
+
+  test('keeps selected node selected when applying saved graph response', async () => {
+    const onGraphChange = vi.fn()
+    const editorRef = createRef()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        ref={editorRef}
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200, title: 'Start' },
+          { client_id: 41, node_type: 'task', x: 500, y: 220, title: 'Draft Task' },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 41, source_handle_id: 'r1', target_handle_id: 'l1' }]}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="client:41"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="client:41"]'))
+    expect(container.querySelector('.flow-ws-node[data-node-token="client:41"].is-selected')).toBeTruthy()
+
+    let applied = false
+    act(() => {
+      applied = editorRef.current.applyServerGraph(
+        [
+          { id: 1, node_type: 'start', x: 200, y: 200, title: 'Start' },
+          { id: 7, node_type: 'task', x: 500, y: 220, title: 'Draft Task' },
+        ],
+        [{ id: 99, source_node_id: 1, target_node_id: 7, source_handle_id: 'r1', target_handle_id: 'l1' }],
+      )
+    })
+    expect(applied).toBe(true)
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:7"].is-selected')).toBeTruthy()
+    })
   })
 })

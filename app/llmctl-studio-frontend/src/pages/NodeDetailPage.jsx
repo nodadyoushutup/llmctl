@@ -178,6 +178,7 @@ export default function NodeDetailPage() {
   const isQuickTask = Boolean(payload?.is_quick_task)
   const active = canCancel(task?.status)
   const status = nodeStatusMeta(task?.status)
+  const nodeTitle = task?.id ? `Node ${task.id}` : (parsedNodeId ? `Node ${parsedNodeId}` : 'Node')
 
   useEffect(() => {
     if (!stageEntries.length) {
@@ -274,17 +275,26 @@ export default function NodeDetailPage() {
     <section className="node-detail-fixed-page" aria-label="Node detail">
       <div className="node-detail-fixed-layout">
         <article className="card node-detail-panel node-detail-panel-main">
+          <div className="node-panel-toolbar">
+            <h2 className="node-panel-title">{nodeTitle}</h2>
+            <div className="node-panel-actions">
+              <Link to="/nodes" className="icon-button" aria-label="All nodes" title="All nodes">
+                <i className="fa-solid fa-list" />
+              </Link>
+              <button
+                type="button"
+                className="icon-button icon-button-danger"
+                aria-label="Delete node"
+                title="Delete node"
+                disabled={busy || !task}
+                onClick={handleDelete}
+              >
+                <ActionIcon name="trash" />
+              </button>
+            </div>
+          </div>
           <div className="node-detail-scroll">
             <header className="node-detail-header">
-              <div className="title-row">
-                <div>
-                  <h2>{task ? `Node ${task.id}` : 'Node'}</h2>
-                  <p>{task?.kind || 'Node'} details and realtime execution state.</p>
-                </div>
-                <div className="table-actions">
-                  <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
-                </div>
-              </div>
               {state.loading ? <p>Loading node...</p> : null}
               {state.error ? <p className="error-text">{state.error}</p> : null}
               {actionError ? <p className="error-text">{actionError}</p> : null}
@@ -345,16 +355,6 @@ export default function NodeDetailPage() {
                         <ActionIcon name="stop" />
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      className="icon-button icon-button-danger"
-                      aria-label="Delete node"
-                      title="Delete node"
-                      disabled={busy}
-                      onClick={handleDelete}
-                    >
-                      <ActionIcon name="trash" />
-                    </button>
                   </div>
                   <dl className="kv-grid">
                     <div>
@@ -470,12 +470,12 @@ export default function NodeDetailPage() {
         </article>
 
         <article className="card node-detail-panel node-detail-panel-stages">
+          <div className="node-panel-toolbar">
+            <h2 className="node-panel-title">Stages</h2>
+            {stageEntries.length > 0 ? <p className="toolbar-meta">{stageEntries.length} total</p> : null}
+          </div>
           <div className="node-stage-shell">
-            <div className="title-row">
-              <h2>Stages</h2>
-              {stageEntries.length > 0 ? <p className="toolbar-meta">{stageEntries.length} total</p> : null}
-            </div>
-            {stageEntries.length === 0 ? <p className="toolbar-meta">No stage data yet.</p> : null}
+            {stageEntries.length === 0 ? <p className="toolbar-meta node-stage-empty">No stage data yet.</p> : null}
             {stageEntries.length > 0 ? (
               <div className="node-stage-list">
                 {stageEntries.map((stage, index) => {

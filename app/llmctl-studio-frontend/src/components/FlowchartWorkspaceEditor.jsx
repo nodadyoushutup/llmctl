@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import ActionIcon from './ActionIcon'
 
 const DEFAULT_NODE_TYPES = ['start', 'end', 'flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag']
@@ -696,7 +696,123 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
   }
 }
 
-export default function FlowchartWorkspaceEditor({
+function buildNodeSelectionSnapshot(node) {
+  if (!node || typeof node !== 'object') {
+    return null
+  }
+  return {
+    persistedId: parsePositiveInt(node.persistedId),
+    clientId: parsePositiveInt(node.clientId),
+    nodeType: normalizeNodeType(node.node_type),
+    title: String(node.title || '').trim(),
+    x: toNumber(node.x, 0),
+    y: toNumber(node.y, 0),
+  }
+}
+
+function resolveNodeTokenFromSnapshot(nodes, snapshot) {
+  if (!Array.isArray(nodes) || !snapshot || typeof snapshot !== 'object') {
+    return ''
+  }
+  if (snapshot.persistedId) {
+    const byId = nodes.find((node) => node.persistedId === snapshot.persistedId)
+    if (byId) {
+      return byId.token
+    }
+  }
+  if (snapshot.clientId) {
+    const byClientId = nodes.find((node) => node.clientId === snapshot.clientId)
+    if (byClientId) {
+      return byClientId.token
+    }
+  }
+  const nextType = normalizeNodeType(snapshot.nodeType)
+  const nextTitle = String(snapshot.title || '').trim()
+  const nextX = toNumber(snapshot.x, 0)
+  const nextY = toNumber(snapshot.y, 0)
+  const byPositionAndTitle = nodes.find((node) => (
+    normalizeNodeType(node.node_type) === nextType
+    && Math.abs(toNumber(node.x, 0) - nextX) < 0.01
+    && Math.abs(toNumber(node.y, 0) - nextY) < 0.01
+    && String(node.title || '').trim() === nextTitle
+  ))
+  if (byPositionAndTitle) {
+    return byPositionAndTitle.token
+  }
+  const byPosition = nodes.find((node) => (
+    normalizeNodeType(node.node_type) === nextType
+    && Math.abs(toNumber(node.x, 0) - nextX) < 0.01
+    && Math.abs(toNumber(node.y, 0) - nextY) < 0.01
+  ))
+  return byPosition ? byPosition.token : ''
+}
+
+function buildEdgeSelectionSnapshot(edge, nodesByToken) {
+  if (!edge || typeof edge !== 'object' || !nodesByToken) {
+    return null
+  }
+  const sourceNode = nodesByToken.get(edge.sourceToken)
+  const targetNode = nodesByToken.get(edge.targetToken)
+  if (!sourceNode || !targetNode) {
+    return null
+  }
+  return {
+    persistedId: parsePositiveInt(edge.persistedId),
+    sourcePersistedId: parsePositiveInt(sourceNode.persistedId),
+    sourceClientId: parsePositiveInt(sourceNode.clientId),
+    targetPersistedId: parsePositiveInt(targetNode.persistedId),
+    targetClientId: parsePositiveInt(targetNode.clientId),
+    sourceHandleId: String(edge.sourceHandleId || ''),
+    targetHandleId: String(edge.targetHandleId || ''),
+    edgeMode: normalizeEdgeMode(edge.edge_mode),
+    conditionKey: String(edge.condition_key || ''),
+    label: String(edge.label || ''),
+  }
+}
+
+function matchesEdgeNode(node, persistedId, clientId) {
+  if (!node || typeof node !== 'object') {
+    return false
+  }
+  if (persistedId && node.persistedId === persistedId) {
+    return true
+  }
+  if (clientId && node.clientId === clientId) {
+    return true
+  }
+  return false
+}
+
+function resolveEdgeIdFromSnapshot(edges, nodesByToken, snapshot) {
+  if (!Array.isArray(edges) || !nodesByToken || !snapshot || typeof snapshot !== 'object') {
+    return ''
+  }
+  if (snapshot.persistedId) {
+    const byId = edges.find((edge) => edge.persistedId === snapshot.persistedId)
+    if (byId) {
+      return byId.localId
+    }
+  }
+  const byShape = edges.find((edge) => {
+    const sourceNode = nodesByToken.get(edge.sourceToken)
+    const targetNode = nodesByToken.get(edge.targetToken)
+    if (!sourceNode || !targetNode) {
+      return false
+    }
+    return (
+      matchesEdgeNode(sourceNode, snapshot.sourcePersistedId, snapshot.sourceClientId)
+      && matchesEdgeNode(targetNode, snapshot.targetPersistedId, snapshot.targetClientId)
+      && String(edge.sourceHandleId || '') === snapshot.sourceHandleId
+      && String(edge.targetHandleId || '') === snapshot.targetHandleId
+      && normalizeEdgeMode(edge.edge_mode) === snapshot.edgeMode
+      && String(edge.condition_key || '') === snapshot.conditionKey
+      && String(edge.label || '') === snapshot.label
+    )
+  })
+  return byShape ? byShape.localId : ''
+}
+
+const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   initialNodes = [],
   initialEdges = [],
   catalog = null,
@@ -707,7 +823,7 @@ export default function FlowchartWorkspaceEditor({
   onNotice,
   onSaveGraph,
   saveGraphBusy = false,
-}) {
+}, ref) {
   const initialWorkspace = useMemo(
     () => buildInitialWorkspace(initialNodes, initialEdges),
     [initialNodes, initialEdges],
@@ -901,6 +1017,9 @@ export default function FlowchartWorkspaceEditor({
     && selectedNodeType === 'task'
     && !hasTaskPrompt(selectedNode.config),
   )
+  const inspectorTitle = selectedNode
+    ? 'Node Inspector'
+    : (selectedEdge ? 'Edge Inspector' : 'Inspector')
 
   const emitNotice = useCallback((message) => {
     if (typeof onNotice === 'function') {
@@ -1006,6 +1125,34 @@ export default function FlowchartWorkspaceEditor({
     setEdges((current) => current.filter((edge) => edge.localId !== localId))
     setSelectedEdgeId('')
   }, [])
+
+  const applyServerGraph = useCallback((nextNodesRaw, nextEdgesRaw) => {
+    const nextWorkspace = buildInitialWorkspace(nextNodesRaw, nextEdgesRaw)
+    const selectedNodeSnapshot = buildNodeSelectionSnapshot(
+      selectedNodeToken ? nodesByToken.get(selectedNodeToken) : null,
+    )
+    const selectedEdge = selectedEdgeId
+      ? edges.find((edge) => edge.localId === selectedEdgeId) || null
+      : null
+    const selectedEdgeSnapshot = buildEdgeSelectionSnapshot(selectedEdge, nodesByToken)
+    const nextNodesByToken = new Map(nextWorkspace.nodes.map((node) => [node.token, node]))
+    const nextSelectedNodeToken = resolveNodeTokenFromSnapshot(nextWorkspace.nodes, selectedNodeSnapshot)
+    const nextSelectedEdgeId = nextSelectedNodeToken
+      ? ''
+      : resolveEdgeIdFromSnapshot(nextWorkspace.edges, nextNodesByToken, selectedEdgeSnapshot)
+
+    nextClientNodeIdRef.current = nextWorkspace.nextClientNodeId
+    nextClientEdgeIdRef.current = nextWorkspace.nextClientEdgeId
+    setNodes(nextWorkspace.nodes)
+    setEdges(nextWorkspace.edges)
+    setSelectedNodeToken(nextSelectedNodeToken)
+    setSelectedEdgeId(nextSelectedEdgeId)
+    return true
+  }, [edges, nodesByToken, selectedEdgeId, selectedNodeToken])
+
+  useImperativeHandle(ref, () => ({
+    applyServerGraph,
+  }), [applyServerGraph])
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -1430,22 +1577,26 @@ export default function FlowchartWorkspaceEditor({
   return (
     <div className="flow-ws-layout">
       <aside className="flow-ws-sidebar">
-        <p className="eyebrow">Node Bar</p>
-        <div className="flow-ws-palette">
-          {paletteNodeTypes.map((nodeType) => {
-            return (
-              <button
-                key={nodeType}
-                type="button"
-                className="btn btn-secondary flow-ws-palette-item"
-                draggable
-                onDragStart={(event) => handlePaletteDragStart(event, nodeType)}
-                onClick={() => addNode(nodeType)}
-              >
-                {nodeType}
-              </button>
-            )
-          })}
+        <div className="flow-ws-panel-header">
+          <h3>Node Bar</h3>
+        </div>
+        <div className="flow-ws-panel-body">
+          <div className="flow-ws-palette">
+            {paletteNodeTypes.map((nodeType) => {
+              return (
+                <button
+                  key={nodeType}
+                  type="button"
+                  className="btn btn-secondary flow-ws-palette-item"
+                  draggable
+                  onDragStart={(event) => handlePaletteDragStart(event, nodeType)}
+                  onClick={() => addNode(nodeType)}
+                >
+                  {nodeType}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </aside>
 
@@ -1636,32 +1787,39 @@ export default function FlowchartWorkspaceEditor({
       </div>
 
       <aside className="flow-ws-inspector">
+        <div className="flow-ws-panel-header flow-ws-inspector-header">
+          <h3>{inspectorTitle}</h3>
+          {selectedNode ? (
+            <div className="table-actions">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Save graph"
+                title="Save graph"
+                disabled={saveButtonDisabled}
+                onClick={() => {
+                  if (typeof onSaveGraph === 'function') {
+                    onSaveGraph()
+                  }
+                }}
+              >
+                <ActionIcon name="save" />
+              </button>
+              <button
+                type="button"
+                className="icon-button icon-button-danger"
+                aria-label="Delete node"
+                title="Delete node"
+                onClick={() => confirmAndRemoveNode(selectedNode)}
+              >
+                <ActionIcon name="trash" />
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="flow-ws-panel-body">
         {selectedNode ? (
           <div className="stack-sm">
-            <div className="flow-ws-inspector-header">
-              <h3>Node Inspector</h3>
-              <div className="table-actions">
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Save graph"
-                  title="Save graph"
-                  disabled={saveButtonDisabled}
-                  onClick={onSaveGraph}
-                >
-                  <ActionIcon name="save" />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button icon-button-danger"
-                  aria-label="Delete node"
-                  title="Delete node"
-                  onClick={() => confirmAndRemoveNode(selectedNode)}
-                >
-                  <ActionIcon name="trash" />
-                </button>
-              </div>
-            </div>
             <label className="field">
               <span>title</span>
               <input
@@ -1768,7 +1926,6 @@ export default function FlowchartWorkspaceEditor({
 
         {!selectedNode && selectedEdge ? (
           <div className="stack-sm">
-            <h3>Edge Inspector</h3>
             <label className="field">
               <span>mode</span>
               <select
@@ -1813,12 +1970,16 @@ export default function FlowchartWorkspaceEditor({
 
         {!selectedNode && !selectedEdge ? (
           <div className="stack-sm">
-            <h3>Inspector</h3>
             <p className="toolbar-meta">Select a node or edge to edit.</p>
             <p className="toolbar-meta">Keyboard: Delete/Backspace removes selected node or edge.</p>
           </div>
         ) : null}
+        </div>
       </aside>
     </div>
   )
-}
+})
+
+FlowchartWorkspaceEditor.displayName = 'FlowchartWorkspaceEditor'
+
+export default FlowchartWorkspaceEditor
