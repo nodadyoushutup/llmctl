@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 def _bootstrap() -> Path:
     repo_root = Path(__file__).resolve().parents[3]
-    studio_src = repo_root / "app" / "llmctl-studio" / "src"
+    studio_src = repo_root / "app" / "llmctl-studio-backend" / "src"
     sys.path.insert(0, str(studio_src))
     os.chdir(repo_root)
     return repo_root

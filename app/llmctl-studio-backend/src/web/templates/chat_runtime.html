@@ -435,14 +435,19 @@
         <summary>
           <span>session controls</span>
           <span class="chat-session-summary">
-            <span>{{ selected_thread.model_name or "default model" }}</span>
-            <span>{{ selected_response_complexity_label }}</span>
-            <span>rag {{ selected_rag_count }}</span>
-            <span>mcp {{ selected_mcp_count }}</span>
+            <span data-chat-summary-model>{{ selected_thread.model_name or "default model" }}</span>
+            <span data-chat-summary-complexity>{{ selected_response_complexity_label }}</span>
+            <span data-chat-summary-rag-count>rag {{ selected_rag_count }}</span>
+            <span data-chat-summary-mcp-count>mcp {{ selected_mcp_count }}</span>
           </span>
         </summary>
         <div class="chat-session-content">
-          <form method="post" action="{{ url_for('agents.update_chat_thread_route', thread_id=selected_thread.id) }}" class="chat-session-controls">
+          <form
+            method="post"
+            action="{{ url_for('agents.update_chat_thread_route', thread_id=selected_thread.id) }}"
+            class="chat-session-controls"
+            id="chat-session-controls-form"
+          >
             <label class="chat-control">
               model
               <select name="model_id">
@@ -470,7 +475,7 @@
                 <summary>
                   <span class="chat-picker-summary">
                     <i class="fa-solid fa-database"></i>
-                    {{ selected_rag_count }} selected
+                    <span data-chat-rag-picker-count>{{ selected_rag_count }} selected</span>
                   </span>
                 </summary>
                 {% if rag_health.state == 'configured_healthy' and rag_collections %}
@@ -501,7 +506,7 @@
                 <summary>
                   <span class="chat-picker-summary">
                     <i class="fa-solid fa-plug"></i>
-                    {{ selected_mcp_count }} selected
+                    <span data-chat-mcp-picker-count>{{ selected_mcp_count }} selected</span>
                   </span>
                 </summary>
                 <div class="chat-checklist">
@@ -909,6 +914,14 @@
   const threadTitle = document.querySelector(".chat-main-title .section-title");
   const threadUsage = document.querySelector(".chat-main-title .muted");
   const selectedThreadTitle = document.querySelector(".chat-thread-row-selected .chat-thread-title");
+  const sessionControlsForm = document.getElementById("chat-session-controls-form");
+  const summaryModel = document.querySelector("[data-chat-summary-model]");
+  const summaryComplexity = document.querySelector("[data-chat-summary-complexity]");
+  const summaryRagCount = document.querySelector("[data-chat-summary-rag-count]");
+  const summaryMcpCount = document.querySelector("[data-chat-summary-mcp-count]");
+  const ragPickerCount = document.querySelector("[data-chat-rag-picker-count]");
+  const mcpPickerCount = document.querySelector("[data-chat-mcp-picker-count]");
+  let sessionControlsDirty = false;
   if (form && sendButton && messageInput && errorBox) {
     const renderMarkdownInto = (target, raw) => {
       target.dataset.rawMarkdown = raw;
@@ -957,6 +970,105 @@
       }
     };
 
+    const toTitleCase = (value) => {
+      const cleaned = String(value || "").trim();
+      if (!cleaned) {
+        return "";
+      }
+      return cleaned
+        .split("_")
+        .map((part) => part ? `${part[0].toUpperCase()}${part.slice(1).toLowerCase()}` : "")
+        .join(" ")
+        .trim();
+    };
+
+    const updateSessionSummary = (thread) => {
+      if (!thread || typeof thread !== "object") {
+        return;
+      }
+      const modelName = String(thread.model_name || "").trim() || "default model";
+      const complexityLabel =
+        String(thread.response_complexity_label || "").trim()
+        || toTitleCase(thread.response_complexity)
+        || "Medium";
+      const ragCount = Array.isArray(thread.rag_collections) ? thread.rag_collections.length : 0;
+      const mcpCount = Array.isArray(thread.mcp_servers) ? thread.mcp_servers.length : 0;
+      if (summaryModel) {
+        summaryModel.textContent = modelName;
+      }
+      if (summaryComplexity) {
+        summaryComplexity.textContent = complexityLabel;
+      }
+      if (summaryRagCount) {
+        summaryRagCount.textContent = `rag ${ragCount}`;
+      }
+      if (summaryMcpCount) {
+        summaryMcpCount.textContent = `mcp ${mcpCount}`;
+      }
+      if (ragPickerCount) {
+        ragPickerCount.textContent = `${ragCount} selected`;
+      }
+      if (mcpPickerCount) {
+        mcpPickerCount.textContent = `${mcpCount} selected`;
+      }
+    };
+
+    const collectSessionConfigPayload = () => {
+      if (!sessionControlsForm) {
+        return null;
+      }
+      const modelSelect = sessionControlsForm.querySelector("select[name='model_id']");
+      const complexitySelect = sessionControlsForm.querySelector("select[name='response_complexity']");
+      const mcpInputs = sessionControlsForm.querySelectorAll("input[name='mcp_server_ids']:checked");
+      const ragInputs = sessionControlsForm.querySelectorAll("input[name='rag_collections']:checked");
+      const modelRaw = modelSelect ? String(modelSelect.value || "").trim() : "";
+      return {
+        model_id: modelRaw ? Number(modelRaw) : null,
+        response_complexity: complexitySelect ? String(complexitySelect.value || "") : "",
+        mcp_server_ids: Array.from(mcpInputs)
+          .map((input) => Number(String(input.value || "").trim()))
+          .filter((value) => Number.isInteger(value) && value > 0),
+        rag_collections: Array.from(ragInputs)
+          .map((input) => String(input.value || "").trim())
+          .filter((value) => value),
+      };
+    };
+
+    const syncSessionControls = async () => {
+      if (!sessionControlsForm || !sessionControlsDirty) {
+        return true;
+      }
+      const threadId = form.dataset.threadId;
+      if (!threadId) {
+        return true;
+      }
+      const sessionPayload = collectSessionConfigPayload();
+      if (!sessionPayload) {
+        return true;
+      }
+      try {
+        const response = await fetch(`/api/chat/threads/${threadId}/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sessionPayload),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          const failureMessage = payload.error || "Failed to apply session controls.";
+          errorBox.textContent = failureMessage;
+          errorBox.style.display = "";
+          return false;
+        }
+        sessionControlsDirty = false;
+        updateSessionSummary(payload.thread);
+        return true;
+      } catch (_error) {
+        errorBox.textContent = "Failed to apply session controls.";
+        errorBox.style.display = "";
+        return false;
+      }
+    };
+
     const updateThreadMeta = (thread) => {
       if (!thread || typeof thread !== "object") {
         return;
@@ -973,6 +1085,7 @@
 
       const latestTurn = thread.latest_turn;
       const limit = Number(latestTurn && latestTurn.context_limit_tokens);
+      updateSessionSummary(thread);
       if (!threadUsage || !Number.isFinite(limit) || limit <= 0) {
         return;
       }
@@ -998,6 +1111,20 @@
     };
 
     messageInput.addEventListener("input", autosizeMessageInput);
+    if (sessionControlsForm) {
+      const markSessionControlsDirty = () => {
+        sessionControlsDirty = true;
+      };
+      sessionControlsForm
+        .querySelectorAll("select, input[type='checkbox']")
+        .forEach((control) => {
+          control.addEventListener("change", markSessionControlsDirty);
+          control.addEventListener("input", markSessionControlsDirty);
+        });
+      sessionControlsForm.addEventListener("submit", () => {
+        sessionControlsDirty = false;
+      });
+    }
     messageInput.addEventListener("keydown", (event) => {
       if (event.isComposing) {
         return;
@@ -1032,6 +1159,10 @@
       }
       const threadId = form.dataset.threadId;
       if (!threadId) {
+        return;
+      }
+      const controlsSynced = await syncSessionControls();
+      if (!controlsSynced) {
         return;
       }
       const userMessage = message;

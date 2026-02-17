@@ -10,7 +10,7 @@ from flask import Flask
 from sqlalchemy import select
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 

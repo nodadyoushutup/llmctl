@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 
@@ -118,11 +118,14 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
             self.assertIsNotNone(server)
             assert server is not None
             self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
-            self.assertIn('command = "gcloud-mcp"', server.config_json)
-            self.assertIn('GOOGLE_CLOUD_PROJECT = "demo-project"', server.config_json)
+            self.assertEqual("gcloud-mcp", server.config_json.get("command"))
+            env = server.config_json.get("env")
+            self.assertIsInstance(env, dict)
+            assert isinstance(env, dict)
+            self.assertEqual("demo-project", env.get("GOOGLE_CLOUD_PROJECT"))
             self.assertIn(
-                'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE =',
-                server.config_json,
+                "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
+                env,
             )
 
         import core.integrated_mcp as integrated_mcp

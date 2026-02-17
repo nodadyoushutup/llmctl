@@ -261,7 +261,7 @@ def _run_flask_dev_server(host: str, port: int, debug: bool) -> int:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
-    src_path = repo_root / "app" / "llmctl-studio" / "src"
+    src_path = repo_root / "app" / "llmctl-studio-backend" / "src"
     sys.path.insert(0, str(src_path))
 
     os.chdir(repo_root)

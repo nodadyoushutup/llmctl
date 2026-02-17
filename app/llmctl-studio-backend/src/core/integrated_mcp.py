@@ -103,7 +103,7 @@ def sync_integrated_mcp_servers_in_session(session: Session) -> dict[str, int]:
         if (server.server_type or "").strip().lower() != MCP_SERVER_TYPE_INTEGRATED:
             server.server_type = MCP_SERVER_TYPE_INTEGRATED
             changed = True
-        if (server.config_json or "").strip() != config_json.strip():
+        if server.config_json != config_json:
             server.config_json = config_json
             changed = True
         if changed:

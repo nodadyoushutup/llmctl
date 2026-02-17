@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import time
+import tomllib
 
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -229,6 +230,7 @@ def _ensure_schema() -> None:
             "server_type": "TEXT NOT NULL DEFAULT 'custom'",
         }
         _ensure_columns(connection, "mcp_servers", mcp_server_columns)
+        _migrate_mcp_server_configs_to_jsonb(connection)
 
         flowchart_columns = {
             "description": "VARCHAR(512)",
@@ -377,6 +379,104 @@ def _ensure_columns(connection, table: str, columns: dict[str, str]) -> None:
         connection.execute(
             text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
         )
+
+
+def _migrate_mcp_server_configs_to_jsonb(connection) -> None:
+    if connection.dialect.name != "postgresql":
+        return
+    tables = _table_names(connection)
+    if "mcp_servers" not in tables:
+        return
+
+    columns = inspect(connection).get_columns("mcp_servers")
+    config_column = next(
+        (column for column in columns if str(column.get("name")) == "config_json"),
+        None,
+    )
+    if config_column is None:
+        connection.execute(
+            text(
+                "ALTER TABLE mcp_servers "
+                "ADD COLUMN config_json JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+        )
+        return
+
+    visit_name = str(
+        getattr(config_column.get("type"), "__visit_name__", "")
+    ).lower()
+    if visit_name == "jsonb":
+        return
+
+    rows = connection.execute(
+        text("SELECT id, server_key, config_json FROM mcp_servers ORDER BY id ASC")
+    ).all()
+    normalized_payloads: dict[int, str] = {}
+    for row in rows:
+        row_id = int(row[0])
+        server_key = str(row[1] or "").strip()
+        raw_config = row[2]
+        try:
+            normalized = _parse_legacy_mcp_config_for_jsonb_migration(
+                raw_config,
+                server_key=server_key,
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "Failed to migrate mcp_servers.config_json to JSONB for "
+                f"row id={row_id}, server_key='{server_key}': {exc}"
+            ) from exc
+        normalized_payloads[row_id] = json.dumps(normalized, sort_keys=True)
+
+    for row_id, payload in normalized_payloads.items():
+        connection.execute(
+            text(
+                "UPDATE mcp_servers "
+                "SET config_json = :config_json "
+                "WHERE id = :id"
+            ),
+            {"id": row_id, "config_json": payload},
+        )
+
+    connection.execute(
+        text(
+            "ALTER TABLE mcp_servers "
+            "ALTER COLUMN config_json TYPE JSONB "
+            "USING config_json::jsonb"
+        )
+    )
+    connection.execute(
+        text("ALTER TABLE mcp_servers ALTER COLUMN config_json SET NOT NULL")
+    )
+
+
+def _parse_legacy_mcp_config_for_jsonb_migration(
+    raw_config: object,
+    *,
+    server_key: str,
+) -> dict[str, object]:
+    from core.mcp_config import parse_mcp_config, validate_server_key
+
+    validate_server_key(server_key)
+    if isinstance(raw_config, dict):
+        return parse_mcp_config(raw_config, server_key=server_key)
+    if not isinstance(raw_config, str):
+        raise ValueError("config_json must be text or JSON object.")
+
+    stripped = raw_config.strip()
+    if not stripped:
+        raise ValueError("config_json is empty.")
+
+    try:
+        parsed_payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        try:
+            parsed_payload = tomllib.loads(stripped)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(
+                "config_json is neither valid JSON nor valid legacy TOML."
+            ) from exc
+    return parse_mcp_config(parsed_payload, server_key=server_key)
 
 
 def _normalize_postgres_sql(sql: str) -> str:

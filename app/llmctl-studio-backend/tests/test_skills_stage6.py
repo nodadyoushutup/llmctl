@@ -13,7 +13,7 @@ from flask import Flask
 from sqlalchemy import insert, select, text
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 
@@ -219,7 +219,7 @@ class SkillsStage6Tests(StudioDbTestCase):
         result = subprocess.run(
             [
                 sys.executable,
-                "app/llmctl-studio/scripts/backfill_legacy_skills.py",
+                "app/llmctl-studio-backend/scripts/backfill_legacy_skills.py",
                 "--apply",
                 "--report-file",
                 str(report_path),

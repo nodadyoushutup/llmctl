@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import insert
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 MCP_SRC = REPO_ROOT / "app" / "llmctl-mcp" / "src"
 for path in (str(STUDIO_SRC), str(MCP_SRC)):
     if path not in sys.path:

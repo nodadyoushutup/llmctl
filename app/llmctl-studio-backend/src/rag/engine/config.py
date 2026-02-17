@@ -110,7 +110,7 @@ def _find_repo_root() -> Path:
     for parent in [here.parent] + list(here.parents):
         if (parent / ".git").exists():
             return parent
-    # Fallback to repo root estimate from app/llmctl-studio/src/rag/engine.
+    # Fallback to repo root estimate from app/llmctl-studio-backend/src/rag/engine.
     return here.parents[2]
 
 

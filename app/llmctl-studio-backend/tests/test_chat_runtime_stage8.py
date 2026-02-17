@@ -12,8 +12,8 @@ from flask import Flask
 from sqlalchemy import func, select
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
-STUDIO_APP_ROOT = REPO_ROOT / "app" / "llmctl-studio"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
+STUDIO_APP_ROOT = REPO_ROOT / "app" / "llmctl-studio-backend"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 if str(STUDIO_APP_ROOT) not in sys.path:
@@ -285,6 +285,34 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
             self.assertIsNotNone(turn)
             self.assertEqual(CHAT_TURN_STATUS_FAILED, turn.status if turn else None)
 
+    def test_rag_selected_without_retrieval_context_fails_closed(self) -> None:
+        model = self._create_model(name="RAG Empty Context Model")
+        thread = create_thread(
+            title="RAG Empty Context",
+            model_id=model.id,
+            rag_collections=["docs"],
+        )
+        thread_id = int(thread["id"])
+
+        rag_client = StubRAGContractClient()
+        rag_client.health_result.state = RAG_HEALTH_CONFIGURED_HEALTHY
+        rag_client.retrieval_response.retrieval_context = []
+
+        with patch("chat.runtime._run_llm") as mocked_llm:
+            result = execute_turn(
+                thread_id=thread_id,
+                message="Need repo-specific answer",
+                rag_client=rag_client,
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(RAG_REASON_UNAVAILABLE, result.reason_code)
+        self.assertIn(
+            "No retrieval context was found for selected collections.",
+            str(result.error),
+        )
+        mocked_llm.assert_not_called()
+
     def test_citation_metadata_persisted_but_not_prompt_context(self) -> None:
         model = self._create_model(name="Citation Model")
         thread = create_thread(
@@ -421,6 +449,32 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
             self.assertEqual(400, response.status_code)
             body = response.get_json() or {}
             self.assertEqual("CHAT_SESSION_SCOPE_SELECTOR_OVERRIDE", body.get("reason_code"))
+
+    def test_api_chat_thread_config_updates_session_scope_selectors(self) -> None:
+        model = self._create_model(name="Session API Model")
+        mcp_server = self._create_mcp_server(name="Session API MCP")
+        thread = create_thread(title="Session API Thread", model_id=model.id)
+        thread_id = int(thread["id"])
+
+        response = self.client.post(
+            f"/api/chat/threads/{thread_id}/config",
+            json={
+                "model_id": model.id,
+                "response_complexity": "high",
+                "mcp_server_ids": [mcp_server.id],
+                "rag_collections": ["example_1"],
+            },
+        )
+        self.assertEqual(200, response.status_code)
+        body = response.get_json() or {}
+        self.assertTrue(body.get("ok"))
+        payload = get_thread(thread_id) or {}
+        self.assertEqual("high", payload.get("response_complexity"))
+        self.assertEqual(["example_1"], payload.get("rag_collections"))
+        self.assertEqual(
+            [mcp_server.id],
+            [item["id"] for item in payload.get("mcp_servers", [])],
+        )
 
     def test_runtime_settings_route_updates_global_scope(self) -> None:
         response = self.client.post(

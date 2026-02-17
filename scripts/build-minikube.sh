@@ -55,7 +55,7 @@ fi
 echo "Building llmctl-studio:latest and llmctl-executor:latest in minikube profile '${PROFILE}'..."
 (
   eval "$(minikube -p "${PROFILE}" docker-env)"
-  "${REPO_ROOT}/app/llmctl-studio/docker/build-studio.sh"
+  "${REPO_ROOT}/app/llmctl-studio-backend/docker/build-studio.sh"
   "${REPO_ROOT}/app/llmctl-executor/build-executor.sh"
 )
 

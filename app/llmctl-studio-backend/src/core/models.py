@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -9,12 +10,14 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Table,
     Text,
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.db import Base, BaseModel, utcnow
@@ -442,7 +445,10 @@ class MCPServer(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     server_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    config_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        nullable=False,
+    )
     server_type: Mapped[str] = mapped_column(
         String(32), nullable=False, default=MCP_SERVER_TYPE_CUSTOM
     )

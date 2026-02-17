@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 
@@ -93,7 +93,7 @@ class SeedStage11Tests(unittest.TestCase):
             assert skill is not None
             self.assertEqual("seed", skill.source_type)
             self.assertEqual(
-                "app/llmctl-studio/seed-skills/chromium-screenshot",
+                "app/llmctl-studio-backend/seed-skills/chromium-screenshot",
                 skill.source_ref,
             )
 

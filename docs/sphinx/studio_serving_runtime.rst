@@ -44,7 +44,7 @@ Standalone CLI check:
 
 .. code-block:: bash
 
-   python3 app/llmctl-studio/scripts/check_database_health.py
+   python3 app/llmctl-studio-backend/scripts/check_database_health.py
 
 SQLite One-Time Migration Utility
 ---------------------------------
@@ -53,7 +53,7 @@ For existing local SQLite data, use the one-time copy tool:
 
 .. code-block:: bash
 
-   python3 app/llmctl-studio/scripts/migrate_sqlite_to_postgres.py \
+   python3 app/llmctl-studio-backend/scripts/migrate_sqlite_to_postgres.py \
      --sqlite-path data/llmctl-studio.sqlite3 \
      --truncate-target
 

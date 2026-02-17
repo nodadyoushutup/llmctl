@@ -31,3 +31,4 @@ Changelog
 - Added Flask-SocketIO + Redis multi-worker architecture documentation including sticky-session guidance for polling fallback and websocket-first transport recommendations.
 - Added canonical realtime event-contract and room-scoping documentation for Jinja now and React migration compatibility.
 - Added Node Executor runtime documentation covering DB-backed settings, multi-provider architecture (workspace/docker/kubernetes), execution contract versioning, dispatch state machine, fallback semantics, and cancellation behavior.
+- Migrated MCP server configuration storage and APIs to JSON-only semantics, including PostgreSQL ``JSONB`` persistence with fail-fast legacy TOML-to-JSON migration behavior.

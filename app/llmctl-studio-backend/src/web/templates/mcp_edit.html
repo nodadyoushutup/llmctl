@@ -57,7 +57,7 @@
         class="input"
       />
       <span class="muted" style="font-size: 12px; margin-top: 6px;">
-        If you change this, update the config header to match.
+        If you change this, keep the JSON config semantics aligned.
       </span>
     </label>
     <label class="label">
@@ -65,10 +65,10 @@
       <textarea name="description" class="textarea" rows="3">{{ mcp_server.description or "" }}</textarea>
     </label>
     <label class="label">
-      config toml
-      <textarea name="config_json" class="textarea">{{ mcp_server.config_json }}</textarea>
+      config json
+      <textarea name="config_json" class="textarea">{{ mcp_config_json }}</textarea>
       <span class="muted" style="font-size: 12px; margin-top: 6px;">
-        Use a single mcp_servers entry. Arrays must contain scalar values.
+        Use a JSON object for one server config. Arrays must contain scalar values.
       </span>
     </label>
   </form>

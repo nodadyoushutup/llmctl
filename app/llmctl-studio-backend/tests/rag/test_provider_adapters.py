@@ -14,8 +14,8 @@ except ImportError:
     np = None
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
-STUDIO_APP_ROOT = REPO_ROOT / "app" / "llmctl-studio"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
+STUDIO_APP_ROOT = REPO_ROOT / "app" / "llmctl-studio-backend"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 if str(STUDIO_APP_ROOT) not in sys.path:

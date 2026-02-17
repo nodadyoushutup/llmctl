@@ -1,2 +1,2 @@
--r ../llmctl-studio/requirements.txt
+-r ../llmctl-studio-backend/requirements.txt
 fastmcp>=2.3.0,<3

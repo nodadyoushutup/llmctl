@@ -5,7 +5,7 @@ ENV PYTHONPATH="/app/app/llmctl-mcp/src"
 
 WORKDIR /app
 
-COPY app/llmctl-studio/requirements.txt /app/app/llmctl-studio/requirements.txt
+COPY app/llmctl-studio-backend/requirements.txt /app/app/llmctl-studio-backend/requirements.txt
 COPY app/llmctl-mcp/requirements.txt /app/app/llmctl-mcp/requirements.txt
 
 RUN python -m venv /opt/venv

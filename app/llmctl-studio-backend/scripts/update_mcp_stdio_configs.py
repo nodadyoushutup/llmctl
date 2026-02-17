@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 def _bootstrap() -> None:
     repo_root = Path(__file__).resolve().parents[3]
-    studio_src = repo_root / "app" / "llmctl-studio" / "src"
+    studio_src = repo_root / "app" / "llmctl-studio-backend" / "src"
     sys.path.insert(0, str(studio_src))
     os.chdir(repo_root)
 
@@ -21,7 +21,7 @@ def _bootstrap() -> None:
 def _build_target_configs(use_llmctl_tap: bool) -> dict[str, dict[str, object]]:
     repo_root = Path(__file__).resolve().parents[3]
     chroma_wrapper = (
-        repo_root / "app" / "llmctl-studio" / "src" / "core" / "chroma_mcp_stdio_wrapper.py"
+        repo_root / "app" / "llmctl-studio-backend" / "src" / "core" / "chroma_mcp_stdio_wrapper.py"
     )
     return {
         "chroma": {
@@ -64,7 +64,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--print",
         action="store_true",
-        help="Print the rendered config TOML for each target server.",
+        help="Print the rendered config JSON for each target server.",
     )
     return parser.parse_args()
 
@@ -112,14 +112,14 @@ def main() -> int:
             next_config["command"] = target["command"]
             next_config["args"] = target["args"]
             rendered = render_mcp_config(server_key, next_config)
-            if rendered.strip() == (row.config_json or "").strip():
+            if rendered == row.config_json:
                 print(f"No change for {server_key}.")
                 if args.print:
-                    print(rendered)
+                    print(json.dumps(rendered, indent=2, sort_keys=True))
                 continue
             print(f"Updating {server_key}.")
             if args.print:
-                print(rendered)
+                print(json.dumps(rendered, indent=2, sort_keys=True))
             if args.apply:
                 row.config_json = rendered
                 row.updated_at = datetime.now(timezone.utc)

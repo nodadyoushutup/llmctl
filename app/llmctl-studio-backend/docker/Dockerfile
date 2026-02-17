@@ -51,18 +51,18 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY scripts/install /app/scripts/install
-COPY app/llmctl-studio/docker/scripts /app/app/llmctl-studio/docker/scripts
+COPY app/llmctl-studio-backend/docker/scripts /app/app/llmctl-studio-backend/docker/scripts
 RUN /app/scripts/install/install-docker-cli.sh \
     && /app/scripts/install/install-kubectl.sh \
-    && /app/app/llmctl-studio/docker/scripts/setup-user-groups.sh
+    && /app/app/llmctl-studio-backend/docker/scripts/setup-user-groups.sh
 
-COPY app/llmctl-studio/requirements.txt /app/app/llmctl-studio/requirements.txt
+COPY app/llmctl-studio-backend/requirements.txt /app/app/llmctl-studio-backend/requirements.txt
 COPY app/llmctl-mcp/requirements.txt /app/app/llmctl-mcp/requirements.txt
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     LLMCTL_STUDIO_USE_GUNICORN=true
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio/requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt \
     && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-mcp/requirements.txt \
     && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm>=0.8.5"; fi
 
@@ -73,4 +73,4 @@ EXPOSE 5055
 
 USER llmctl-studio
 
-CMD ["python3", "app/llmctl-studio/run.py"]
+CMD ["python3", "app/llmctl-studio-backend/run.py"]

@@ -22,9 +22,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--idle", action="store_true")
     parser.add_argument("--poll", type=float)
     parser.add_argument(
-        "--agent-cli", default="app/llmctl-studio/src/cli/agent-cli.py"
+        "--agent-cli", default="app/llmctl-studio-backend/src/cli/agent-cli.py"
     )
-    parser.add_argument("--loop", default="app/llmctl-studio/src/cli/agent-loop.py")
+    parser.add_argument("--loop", default="app/llmctl-studio-backend/src/cli/agent-loop.py")
     parser.add_argument(
         "--verbose",
         action="store_true",

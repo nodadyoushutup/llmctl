@@ -13,7 +13,7 @@ from core.config import Config
 from core.db import init_db, init_engine, session_scope
 from core.models import Role
 
-AGENT_CLI = os.getenv("AGENT_CLI", "app/llmctl-studio/src/cli/agent-cli.py")
+AGENT_CLI = os.getenv("AGENT_CLI", "app/llmctl-studio-backend/src/cli/agent-cli.py")
 DEFAULT_ROLE = os.getenv("DEFAULT_ROLE", "business-analyst")
 
 

@@ -1366,8 +1366,8 @@ TASK_TEMPLATE_SEEDS = [
 
 SKILL_PACKAGE_SEEDS = [
     {
-        "path": REPO_ROOT / "app" / "llmctl-studio" / "seed-skills" / "chromium-screenshot",
-        "source_ref": "app/llmctl-studio/seed-skills/chromium-screenshot",
+        "path": REPO_ROOT / "app" / "llmctl-studio-backend" / "seed-skills" / "chromium-screenshot",
+        "source_ref": "app/llmctl-studio-backend/seed-skills/chromium-screenshot",
         "actor": "system:seed",
     },
 ]
@@ -1555,9 +1555,11 @@ def _seed_mcp_servers(session) -> None:
             continue
         name = payload.get("name")
         description = payload.get("description")
-        raw_config = payload.get("config_toml")
+        raw_config = payload.get("config_json")
         config_json = None
-        if isinstance(raw_config, str) and raw_config.strip():
+        if isinstance(raw_config, dict):
+            config_json = format_mcp_config(raw_config, server_key=server_key)
+        elif isinstance(raw_config, str) and raw_config.strip():
             config_json = format_mcp_config(raw_config, server_key=server_key)
         server = existing.get(server_key)
         if server is None:
@@ -1580,7 +1582,10 @@ def _seed_mcp_servers(session) -> None:
             server.description = description
         if (
             config_json is not None
-            and (not server.config_json or not server.config_json.strip())
+            and (
+                server.config_json is None
+                or (isinstance(server.config_json, dict) and not server.config_json)
+            )
         ):
             server.config_json = config_json
 

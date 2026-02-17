@@ -5670,7 +5670,9 @@ def _load_milestones() -> list[Milestone]:
         )
 
 
-def _parse_json_dict(raw: str | None) -> dict[str, object]:
+def _parse_json_dict(raw: str | dict[str, object] | None) -> dict[str, object]:
+    if isinstance(raw, dict):
+        return raw
     if not raw:
         return {}
     try:
@@ -5678,6 +5680,11 @@ def _parse_json_dict(raw: str | None) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _format_json_object_for_display(raw: str | dict[str, object] | None) -> str:
+    payload = _parse_json_dict(raw)
+    return json.dumps(payload, indent=2, sort_keys=True)
 
 
 def _flowchart_request_payload() -> dict[str, object]:
@@ -7947,6 +7954,68 @@ def api_chat_thread(thread_id: int):
     if payload is None:
         return {"error": "Thread not found."}, 404
     return payload
+
+
+@bp.post("/api/chat/threads/<int:thread_id>/config")
+def api_chat_thread_config(thread_id: int):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return {"error": "Invalid JSON payload."}, 400
+
+    model_id_raw = payload.get("model_id")
+    try:
+        model_id = _coerce_optional_int(
+            model_id_raw if model_id_raw is not None else None,
+            field_name="model_id",
+            minimum=1,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    response_complexity = normalize_chat_response_complexity(
+        payload.get("response_complexity"),
+        default=CHAT_RESPONSE_COMPLEXITY_DEFAULT,
+    )
+
+    mcp_raw = payload.get("mcp_server_ids")
+    if mcp_raw is None:
+        mcp_values: list[object] = []
+    elif isinstance(mcp_raw, list):
+        mcp_values = list(mcp_raw)
+    else:
+        return {"error": "mcp_server_ids must be an array."}, 400
+    try:
+        mcp_server_ids = _coerce_chat_id_list(
+            mcp_values,
+            field_name="mcp_server_id",
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    rag_raw = payload.get("rag_collections")
+    if rag_raw is None:
+        rag_values: list[object] = []
+    elif isinstance(rag_raw, list):
+        rag_values = list(rag_raw)
+    else:
+        return {"error": "rag_collections must be an array."}, 400
+    rag_collections = _coerce_chat_collection_list(rag_values)
+
+    try:
+        update_chat_thread_config(
+            thread_id,
+            model_id=model_id,
+            mcp_server_ids=mcp_server_ids,
+            rag_collections=rag_collections,
+            response_complexity=response_complexity,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    thread_payload = get_chat_thread(thread_id)
+    if thread_payload is None:
+        return {"error": "Thread not found."}, 404
+    return {"ok": True, "thread": thread_payload}
 
 
 @bp.get("/api/chat/activity")
@@ -11398,7 +11467,7 @@ def create_mcp():
         flash("Name and server key are required.", "error")
         return redirect(url_for("agents.new_mcp"))
     if not raw_config:
-        flash("MCP config TOML is required.", "error")
+        flash("MCP config JSON is required.", "error")
         return redirect(url_for("agents.new_mcp"))
     if server_key in SYSTEM_MANAGED_MCP_SERVER_KEYS:
         flash(
@@ -11448,6 +11517,7 @@ def edit_mcp(mcp_id: int):
     return render_template(
         "mcp_edit.html",
         mcp_server=mcp_server,
+        mcp_config_json=_format_json_object_for_display(mcp_server.config_json),
         summary=summary,
         page_title=f"Edit Custom MCP Server - {mcp_server.name}",
         active_page="mcps",
@@ -11465,7 +11535,7 @@ def update_mcp(mcp_id: int):
         flash("Name and server key are required.", "error")
         return redirect(url_for("agents.edit_mcp", mcp_id=mcp_id))
     if not raw_config:
-        flash("MCP config TOML is required.", "error")
+        flash("MCP config JSON is required.", "error")
         return redirect(url_for("agents.edit_mcp", mcp_id=mcp_id))
 
     try:
@@ -11577,6 +11647,7 @@ def view_mcp(mcp_id: int):
     return render_template(
         "mcp_detail.html",
         mcp_server=mcp_server,
+        mcp_config_json=_format_json_object_for_display(mcp_server.config_json),
         attached_templates=attached_templates,
         attached_nodes=attached_nodes,
         attached_tasks=attached_tasks,

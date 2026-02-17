@@ -107,7 +107,7 @@ kubectl -n llmctl rollout status deploy/llmctl-studio
 
 Notes:
 
-- This overlay mounts `/workspace/llmctl` from the Minikube node into `/app/app/llmctl-studio/run.py`, `/app/app/llmctl-studio/src`, and `/app/app/llmctl-mcp`.
+- This overlay mounts `/workspace/llmctl` from the Minikube node into `/app/app/llmctl-studio-backend/run.py`, `/app/app/llmctl-studio-backend/src`, and `/app/app/llmctl-mcp`.
 - Keep the `minikube mount` process running; if it stops, the pod cannot read mounted code paths.
 - This is intended for local Minikube development, not shared/remote clusters.
 

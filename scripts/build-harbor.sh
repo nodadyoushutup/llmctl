@@ -391,7 +391,7 @@ login_harbor
 ensure_harbor_project
 
 if [ "${SELECTED_STUDIO}" = true ]; then
-  build_and_push "llmctl-studio" "${REPO_ROOT}/app/llmctl-studio/docker/build-studio.sh"
+  build_and_push "llmctl-studio" "${REPO_ROOT}/app/llmctl-studio-backend/docker/build-studio.sh"
 fi
 
 if [ "${SELECTED_MCP}" = true ]; then

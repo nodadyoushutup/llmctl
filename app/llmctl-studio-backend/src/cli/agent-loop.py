@@ -27,13 +27,13 @@ PLANNING_DIR = os.getenv("PLANNING_DIR", "framework/docs/planning")
 REQUIREMENTS_DIR = os.getenv("REQUIREMENTS_DIR", "framework/docs/requirements")
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1"))
 AGENT_ROLE = os.getenv("AGENT_ROLE", "business-analyst")
-AGENT_CLI = os.getenv("AGENT_CLI", "app/llmctl-studio/src/cli/agent-cli.py")
+AGENT_CLI = os.getenv("AGENT_CLI", "app/llmctl-studio-backend/src/cli/agent-cli.py")
 STATE_DIR = os.getenv("STATE_DIR", "data/.agent-state")
 LOCK_DIR = os.getenv("LOCK_DIR", "data/.agent-locks")
 ALLOW_IDLE_PROMPTS = os.getenv("ALLOW_IDLE_PROMPTS", "false").lower() == "true"
 AGENT_NAME = os.getenv("AGENT_NAME")
 AGENT_VERBOSE = os.getenv("AGENT_VERBOSE", "true").lower() == "true"
-AGENT_LOG_FILE = os.getenv("AGENT_LOG_FILE", "app/llmctl-studio/llmctl-studio.log")
+AGENT_LOG_FILE = os.getenv("AGENT_LOG_FILE", "app/llmctl-studio-backend/llmctl-studio.log")
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
 LOG_COLOR = os.getenv("AGENT_LOG_COLOR", "auto").lower()
 

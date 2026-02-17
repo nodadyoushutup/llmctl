@@ -30,14 +30,14 @@
       ></textarea>
     </label>
     <label class="label">
-      config toml
+      config json
       <textarea
         name="config_json"
-        placeholder='[mcp_servers.search_tools]&#10;command = "python3"&#10;args = ["app/search_tools/run.py"]'
+        placeholder='{"command":"python3","args":["app/search_tools/run.py"]}'
         class="textarea"
       ></textarea>
       <span class="muted" style="font-size: 12px; margin-top: 6px;">
-        Use a single mcp_servers entry. Arrays must contain scalar values.
+        Use a JSON object for one server config. Arrays must contain scalar values.
       </span>
     </label>
     <div class="form-actions">

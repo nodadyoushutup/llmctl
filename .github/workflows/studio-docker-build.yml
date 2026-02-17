@@ -53,7 +53,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: app/llmctl-studio/docker/Dockerfile
+          file: app/llmctl-studio-backend/docker/Dockerfile
           push: true
           build-args: |
             DOCKER_GID=999

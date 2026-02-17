@@ -762,7 +762,7 @@ def _resolve_claude_auth_key(
 def _resolve_claude_install_script() -> Path:
     raw = str(Config.CLAUDE_CLI_INSTALL_SCRIPT or "").strip()
     candidate = Path(raw) if raw else Path("scripts/install/install-claude-cli.sh")
-    if candidate == Path("app/llmctl-studio/scripts/install-claude.sh"):
+    if candidate == Path("app/llmctl-studio-backend/scripts/install-claude.sh"):
         candidate = Path("scripts/install/install-claude-cli.sh")
     if candidate.is_absolute():
         return candidate

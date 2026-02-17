@@ -7,7 +7,7 @@ from pathlib import Path
 
 DOCS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DOCS_DIR.parent.parent
-STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio" / "src"
+STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 API_OUTPUT = DOCS_DIR / "api"
 STUDIO_PACKAGES = ["chat", "core", "rag", "services", "storage", "web"]
 APIDOC_EXCLUDES = {

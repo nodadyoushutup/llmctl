@@ -721,6 +721,7 @@ def _build_prompt(
     *,
     history_block: str,
     retrieval_context: list[str],
+    selected_rag_collections: list[str],
     selected_mcp_server_keys: list[str],
     response_complexity: str,
     user_message: str,
@@ -758,6 +759,13 @@ def _build_prompt(
     ]
     if history_block:
         sections.append(history_block)
+    if selected_rag_collections:
+        sections.append(
+            "RAG collections are selected for this session. Use only the retrieved "
+            "context for repository/file facts. Do not inspect local files, tools, "
+            "or prior knowledge for those facts. If retrieved context is missing or "
+            "insufficient, say so explicitly."
+        )
     if retrieval_context:
         blocks = [f"[{idx}] {text}" for idx, text in enumerate(retrieval_context, start=1)]
         sections.append("Retrieved context:\n" + "\n".join(blocks))
@@ -954,6 +962,39 @@ def execute_turn(
                     "citation_count": len(citation_records),
                 },
             )
+            if not retrieval_context:
+                turn.reason_code = RAG_REASON_UNAVAILABLE
+                turn.error_message = "No retrieval context was found for selected collections."
+                turn.runtime_metadata_json = _safe_json_dump(
+                    {
+                        "selected_collections": selected_rag_collections,
+                        "retrieval_stats": retrieval_stats,
+                    }
+                )
+                _record_activity(
+                    session,
+                    thread_id=thread.id,
+                    turn_id=turn.id,
+                    event_class=CHAT_EVENT_CLASS_FAILURE,
+                    event_type=CHAT_EVENT_TYPE_FAILED,
+                    reason_code=turn.reason_code,
+                    message=turn.error_message,
+                    metadata={
+                        "selected_collections": selected_rag_collections,
+                        "retrieval_stats": retrieval_stats,
+                    },
+                )
+                thread.last_activity_at = _now()
+                return TurnResult(
+                    ok=False,
+                    thread_id=thread.id,
+                    turn_id=turn.id,
+                    request_id=request_id,
+                    reason_code=turn.reason_code,
+                    error=turn.error_message,
+                    rag_health_state=rag_health.state,
+                    selected_collections=selected_rag_collections,
+                )
 
         if selected_mcp_keys:
             _record_activity(
@@ -1041,6 +1082,7 @@ def execute_turn(
         prompt = _build_prompt(
             history_block=history_block,
             retrieval_context=retrieval_context,
+            selected_rag_collections=selected_rag_collections,
             selected_mcp_server_keys=selected_mcp_keys,
             response_complexity=selected_response_complexity,
             user_message=cleaned_message,

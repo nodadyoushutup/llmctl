@@ -16,6 +16,6 @@ cd "${REPO_ROOT}"
 
 docker build \
   --build-arg DOCKER_GID="${DOCKER_GID}" \
-  -f app/llmctl-studio/docker/Dockerfile \
+  -f app/llmctl-studio-backend/docker/Dockerfile \
   -t "${IMAGE_NAME}" \
   .

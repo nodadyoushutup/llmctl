@@ -46,13 +46,13 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] Stage 11: Docs Updates.
 
 ## Stage 2 - Backend Rename and Path Migration
-- [ ] Move Flask app from `app/llmctl-studio` to `app/llmctl-studio-backend`.
-- [ ] Update all path references across runtime/build tooling:
-- [ ] Update `docker/docker-compose.yml` bind mounts and build Dockerfile path.
-- [ ] Update `kubernetes-overlays/minikube-live-code/studio-live-code-patch.yaml` mount paths.
-- [ ] Update script paths and any direct references in repo configs and docs.
-- [ ] Validate backend still boots after rename with no behavior change.
-- [ ] Acceptance criteria: backend starts successfully from renamed path, and no stale `app/llmctl-studio` runtime dependency remains.
+- [x] Move Flask app from `app/llmctl-studio` to `app/llmctl-studio-backend`.
+- [x] Update all path references across runtime/build tooling:
+- [x] Update `docker/docker-compose.yml` bind mounts and build Dockerfile path.
+- [x] Update `kubernetes-overlays/minikube-live-code/studio-live-code-patch.yaml` mount paths.
+- [x] Update script paths and any direct references in repo configs and docs.
+- [x] Validate backend still boots after rename with no behavior change.
+- [x] Acceptance criteria: backend starts successfully from renamed path, and no stale `app/llmctl-studio` runtime dependency remains.
 
 ## Stage 3 - Backend API Boundary Hardening (`/api`) with Legacy GUI Retained
 - [ ] Introduce or enforce `/api` prefix for backend programmatic endpoints used by React.
