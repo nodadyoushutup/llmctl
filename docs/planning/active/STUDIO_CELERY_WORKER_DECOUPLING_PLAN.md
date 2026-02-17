@@ -140,11 +140,19 @@ Goal: decouple Celery worker and beat execution from `llmctl-studio` by introduc
 - [x] `kubectl apply --dry-run=client -k kubernetes-overlays/harbor-images` succeeds and includes both celery deployments.
 
 ## Stage 5 - Studio Runtime Decoupling
-- [ ] Remove Celery worker/beat process startup from Studio runtime scripts/config.
-- [ ] Update Studio deployment manifests/env to run backend API/web process only.
-- [ ] Remove obsolete Studio-side Celery runtime knobs that no longer apply.
-- [ ] Ensure task producers in Studio still enqueue jobs to Redis without local worker dependency.
-- [ ] Acceptance criteria: Studio pods no longer run Celery worker/beat processes, while task submission behavior remains functional.
+- [x] Remove Celery worker/beat process startup from Studio runtime scripts/config.
+- [x] Update Studio deployment manifests/env to run backend API/web process only.
+- [x] Remove obsolete Studio-side Celery runtime knobs that no longer apply.
+- [x] Ensure task producers in Studio still enqueue jobs to Redis without local worker dependency.
+- [x] Acceptance criteria: Studio pods no longer run Celery worker/beat processes, while task submission behavior remains functional.
+
+## Stage 5 - Implementation Notes
+- [x] Updated `app/llmctl-studio-backend/run.py` to remove all Celery subprocess startup paths from Studio runtime:
+- [x] Removed worker startup (`llmctl_studio`, RAG worker queues, HuggingFace downloads worker).
+- [x] Removed beat startup (`celery beat`) and related autostart gating logic.
+- [x] Studio runtime now performs DB preflight and runs only the API/web process (Gunicorn or Flask dev server).
+- [x] Updated `kubernetes/studio-deployment.yaml` to pin Studio container command to `python3 app/llmctl-studio-backend/run.py` so the deployment path is explicitly the web/API runtime entrypoint.
+- [x] Kept Celery producer/client code in Studio application modules unchanged (`services.celery_app`, `services.tasks`, and web task enqueue paths), preserving Redis-backed enqueue/revoke behavior without local consumer dependency.
 
 ## Stage 6 - Single-Step Cutover and Operational Validation
 - [ ] Prepare one release change set containing:

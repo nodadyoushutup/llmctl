@@ -102,7 +102,7 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] Add frontend-specific manifests (deployment/service and frontend runtime config as needed).
 - [x] Update `kubernetes/kustomization.yaml` to include both backend and frontend resources.
 - [x] Keep existing dependent services (redis/postgres/chromadb/pgadmin/rbac/pvc) correctly referenced.
-- [ ] Acceptance criteria: both pods/services deploy cleanly and are independently restartable/scalable.
+- [x] Acceptance criteria: both pods/services deploy cleanly and are independently restartable/scalable.
 
 ## Stage 8 - Kubernetes Ingress and Overlay Updates (`/web`, `/api`)
 - [x] Add ingress manifest routing same host:
@@ -110,7 +110,12 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] `/api` -> `llmctl-studio-backend` service.
 - [x] Update backend/frontend env vars for forwarded headers, external URL scheme, and API/realtime pathing behind ingress.
 - [x] Update Minikube live-code overlay to mount renamed backend paths and frontend code paths.
-- [ ] Acceptance criteria: one host serves frontend at `/web` and backend API at `/api` with stable routing in cluster.
+- [x] Acceptance criteria: one host serves frontend at `/web` and backend API at `/api` with stable routing in cluster.
+
+## Stage 8 - Validation Notes
+- [x] Verified backend/frontend deployments are healthy with `kubectl -n llmctl rollout status deploy/llmctl-studio-backend` and `kubectl -n llmctl rollout status deploy/llmctl-studio-frontend`.
+- [x] Verified split services are active as `NodePort` resources (`llmctl-studio-backend`, `llmctl-studio-frontend`).
+- [x] Verified routing on one host: `http://192.168.49.2:30157/web/` returns frontend shell and `http://192.168.49.2:30157/api/health` returns `{"ok":true,"service":"llmctl-studio-backend"}`.
 
 ## Stage 9 - Full-Parity Gate and Backend GUI Decommission
 - [ ] Execute final parity audit against all legacy backend GUI pages/routes.

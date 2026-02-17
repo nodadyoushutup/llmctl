@@ -78,6 +78,9 @@ spec:
         - name: studio
           image: llmctl-studio-backend:latest
           imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - app/llmctl-studio-backend/run.py
           ports:
             - containerPort: 5155
               name: http

@@ -64,157 +64,6 @@ def _run_database_preflight() -> None:
     )
 
 
-def _should_start_worker(debug: bool) -> bool:
-    if not _env_flag("CELERY_AUTOSTART", True):
-        return False
-    if debug and os.getenv("WERKZEUG_RUN_MAIN") != "true":
-        return False
-    return True
-
-
-def _should_start_rag_worker(debug: bool) -> bool:
-    if not _env_flag("RAG_CELERY_AUTOSTART", _env_flag("CELERY_AUTOSTART", True)):
-        return False
-    if debug and os.getenv("WERKZEUG_RUN_MAIN") != "true":
-        return False
-    return True
-
-
-def _should_start_beat(debug: bool) -> bool:
-    if not _env_flag("CELERY_BEAT_AUTOSTART", _env_flag("CELERY_AUTOSTART", True)):
-        return False
-    if debug and os.getenv("WERKZEUG_RUN_MAIN") != "true":
-        return False
-    return True
-
-
-def _start_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | None:
-    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
-    if not _should_start_worker(debug):
-        return None
-
-    queue_name = "llmctl_studio"
-    concurrency = os.getenv("CELERY_WORKER_CONCURRENCY", "6")
-    loglevel = os.getenv("CELERY_WORKER_LOGLEVEL", "info")
-    env = _build_runtime_env(src_path)
-    command = [
-        sys.executable,
-        "-m",
-        "celery",
-        "-A",
-        "services.celery_app:celery_app",
-        "worker",
-        "--loglevel",
-        loglevel,
-        "--concurrency",
-        concurrency,
-        "--queues",
-        queue_name,
-        "--hostname",
-        "llmctl-studio-default@%h",
-    ]
-    return subprocess.Popen(command, cwd=repo_root, env=env)
-
-
-def _start_rag_celery_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | None:
-    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
-    if not _should_start_rag_worker(debug):
-        return None
-
-    queue_name = os.getenv(
-        "RAG_CELERY_WORKER_QUEUES",
-        "llmctl_studio.rag.index,llmctl_studio.rag.drive,llmctl_studio.rag.git",
-    )
-    concurrency = os.getenv(
-        "RAG_CELERY_WORKER_CONCURRENCY",
-        os.getenv("CELERY_WORKER_CONCURRENCY", "6"),
-    )
-    loglevel = os.getenv(
-        "RAG_CELERY_WORKER_LOGLEVEL",
-        os.getenv("CELERY_WORKER_LOGLEVEL", "info"),
-    )
-    env = _build_runtime_env(src_path)
-    command = [
-        sys.executable,
-        "-m",
-        "celery",
-        "-A",
-        "services.celery_app:celery_app",
-        "worker",
-        "--loglevel",
-        loglevel,
-        "--concurrency",
-        concurrency,
-        "--queues",
-        queue_name,
-        "--hostname",
-        "llmctl-studio-rag@%h",
-    ]
-    return subprocess.Popen(command, cwd=repo_root, env=env)
-
-
-def _start_huggingface_download_worker(src_path: Path, repo_root: Path) -> subprocess.Popen | None:
-    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
-    if not _should_start_worker(debug):
-        return None
-
-    queue_name = os.getenv(
-        "HUGGINGFACE_DOWNLOAD_CELERY_WORKER_QUEUE",
-        "llmctl_studio.downloads.huggingface",
-    )
-    concurrency = os.getenv("HUGGINGFACE_DOWNLOAD_CELERY_WORKER_CONCURRENCY", "1")
-    loglevel = os.getenv(
-        "HUGGINGFACE_DOWNLOAD_CELERY_WORKER_LOGLEVEL",
-        os.getenv("CELERY_WORKER_LOGLEVEL", "info"),
-    )
-    env = _build_runtime_env(src_path)
-    command = [
-        sys.executable,
-        "-m",
-        "celery",
-        "-A",
-        "services.celery_app:celery_app",
-        "worker",
-        "--loglevel",
-        loglevel,
-        "--concurrency",
-        concurrency,
-        "--queues",
-        queue_name,
-        "--hostname",
-        "llmctl-studio-hf-download@%h",
-    ]
-    return subprocess.Popen(command, cwd=repo_root, env=env)
-
-
-def _start_celery_beat(src_path: Path, repo_root: Path) -> subprocess.Popen | None:
-    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
-    if not _should_start_beat(debug):
-        return None
-
-    loglevel = os.getenv("CELERY_BEAT_LOGLEVEL", "info")
-    data_dir = Path(os.getenv("LLMCTL_STUDIO_DATA_DIR", repo_root / "data"))
-    data_dir.mkdir(parents=True, exist_ok=True)
-    schedule_file = data_dir / "celerybeat-schedule"
-    pid_file = data_dir / "celerybeat.pid"
-    env = _build_runtime_env(src_path)
-    command = [
-        sys.executable,
-        "-m",
-        "celery",
-        "-A",
-        "services.celery_app:celery_app",
-        "beat",
-        "--loglevel",
-        loglevel,
-        "--schedule",
-        str(schedule_file),
-        "--pidfile",
-        str(pid_file),
-    ]
-    return subprocess.Popen(command, cwd=repo_root, env=env)
-
-
 def _terminate_process(process: subprocess.Popen | None) -> None:
     if process is None:
         return
@@ -271,10 +120,6 @@ def main() -> int:
     host = os.getenv("FLASK_HOST", "0.0.0.0")
     port = int(os.getenv("FLASK_PORT", "5055"))
     debug = _env_flag("FLASK_DEBUG", False)
-    worker = _start_celery_worker(src_path, repo_root)
-    rag_worker = _start_rag_celery_worker(src_path, repo_root)
-    hf_download_worker = _start_huggingface_download_worker(src_path, repo_root)
-    beat = _start_celery_beat(src_path, repo_root)
     web_process: subprocess.Popen | None = None
     try:
         if _should_use_gunicorn(debug):
@@ -285,11 +130,6 @@ def main() -> int:
         if web_process is not None:
             _terminate_process(web_process)
         return 0
-    finally:
-        _terminate_process(hf_download_worker)
-        _terminate_process(rag_worker)
-        _terminate_process(worker)
-        _terminate_process(beat)
 
 
 if __name__ == "__main__":

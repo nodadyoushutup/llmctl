@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import AppLayout from './components/AppLayout'
 import OverviewPage from './pages/OverviewPage'
 import ApiDiagnosticsPage from './pages/ApiDiagnosticsPage'
@@ -10,16 +10,15 @@ import ParityChecklistPage from './pages/ParityChecklistPage'
 
 export default function App() {
   return (
-    <AppLayout>
-      <Routes>
-        <Route path="/" element={<OverviewPage />} />
-        <Route path="/parity-checklist" element={<ParityChecklistPage />} />
-        <Route path="/chat/activity" element={<ChatActivityPage />} />
-        <Route path="/chat/threads/:threadId" element={<ChatThreadPage />} />
-        <Route path="/execution-monitor" element={<ExecutionMonitorPage />} />
-        <Route path="/api-diagnostics" element={<ApiDiagnosticsPage />} />
-        <Route path="*" element={<LegacyMirrorPage />} />
-      </Routes>
-    </AppLayout>
+    <Routes>
+      <Route path="/" element={<Navigate to="/overview" replace />} />
+      <Route path="/migration" element={<AppLayout><OverviewPage /></AppLayout>} />
+      <Route path="/parity-checklist" element={<AppLayout><ParityChecklistPage /></AppLayout>} />
+      <Route path="/chat/activity" element={<AppLayout><ChatActivityPage /></AppLayout>} />
+      <Route path="/chat/threads/:threadId" element={<AppLayout><ChatThreadPage /></AppLayout>} />
+      <Route path="/execution-monitor" element={<AppLayout><ExecutionMonitorPage /></AppLayout>} />
+      <Route path="/api-diagnostics" element={<AppLayout><ApiDiagnosticsPage /></AppLayout>} />
+      <Route path="*" element={<LegacyMirrorPage />} />
+    </Routes>
   )
 }

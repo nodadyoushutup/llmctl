@@ -19,7 +19,6 @@ body {
 
 #root {
   min-height: 100vh;
-  padding: 1.5rem;
 }
 
 .app-shell {
@@ -27,6 +26,7 @@ body {
   margin: 0 auto;
   display: grid;
   gap: 1rem;
+  padding: 1.5rem;
 }
 
 .top-bar {
@@ -196,8 +196,10 @@ body {
   font-size: 0.92rem;
 }
 
-.legacy-frame-card {
-  padding: 0.4rem;
+.legacy-mirror-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr;
 }
 
 .legacy-frame {
@@ -206,6 +208,12 @@ body {
   border: 1px solid rgba(172, 205, 234, 0.3);
   border-radius: 0.7rem;
   background: #08131f;
+}
+
+.legacy-frame-full {
+  min-height: 100vh;
+  border: 0;
+  border-radius: 0;
 }
 
 .activity-list {

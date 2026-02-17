@@ -2,7 +2,8 @@ import { NavLink } from 'react-router-dom'
 import { runtimeConfig, resolveSocketUrl } from '../config/runtime'
 
 const navItems = [
-  { to: '/', label: 'Overview', end: true },
+  { to: '/migration', label: 'Migration Hub' },
+  { to: '/overview', label: 'Legacy UI' },
   { to: '/parity-checklist', label: 'Parity Tracker' },
   { to: '/chat/activity', label: 'Chat Activity' },
   { to: '/execution-monitor', label: 'Execution Monitor' },
@@ -19,7 +20,7 @@ export default function AppLayout({ children }) {
       <header className="top-bar">
         <div>
           <p className="eyebrow">llmctl Studio</p>
-          <h1>Frontend Bootstrap</h1>
+          <h1>Frontend Migration Hub</h1>
         </div>
         <nav className="top-nav" aria-label="Primary">
           {navItems.map((item) => (
