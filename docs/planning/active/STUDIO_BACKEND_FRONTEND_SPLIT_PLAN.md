@@ -186,7 +186,7 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [x] Ensure final two stages are `Automated Testing` then `Docs Updates`.
 
 ## Stage 1 - Execution Order (React-Only)
-- [ ] Stage 2: Agents migration (full list/detail/create/edit/delete + role/priority/skill bindings).
+- [x] Stage 2: Agents migration (full list/detail/create/edit/delete + role/priority/skill bindings).
 - [ ] Stage 3: Runs, quick tasks, and node execution surfaces.
 - [ ] Stage 4: Task templates, plans, milestones, and memories.
 - [ ] Stage 5: Flowcharts (editor, runtime, history, run detail, node operations).
@@ -207,11 +207,11 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [x] Backend/frontend split runtime (`/web` + `/api`) is already in place.
 
 ## Stage 2 - Agents Migration
-- [ ] Add/verify API contracts for agent list/detail/create/update/delete and related bindings.
-- [ ] Implement React routes/pages for agents list/detail/new/edit.
-- [ ] Implement React mutations for create/update/delete and relation updates.
-- [ ] Preserve list behavior requirements (clickable rows, interactive element exclusions, icon-only actions).
-- [ ] Mark Agents parity complete in tracker.
+- [x] Add/verify API contracts for agent list/detail/create/update/delete and related bindings.
+- [x] Implement React routes/pages for agents list/detail/new/edit.
+- [x] Implement React mutations for create/update/delete and relation updates.
+- [x] Preserve list behavior requirements (clickable rows, interactive element exclusions, icon-only actions).
+- [x] Mark Agents parity complete in tracker.
 
 ## Stage 3 - Runs, Quick Tasks, Nodes
 - [ ] Migrate `/runs` list/detail/new/edit to fully native React.
@@ -284,7 +284,7 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [ ] Acceptance criteria: docs match final React-only architecture and runtime.
 
 ## React Domain Tracker
-- [ ] Agents
+- [x] Agents
 - [ ] Runs
 - [ ] Quick Tasks / Nodes
 - [ ] Task Templates

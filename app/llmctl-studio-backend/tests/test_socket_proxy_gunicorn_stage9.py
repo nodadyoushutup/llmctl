@@ -136,6 +136,38 @@ class GunicornConfigStage9Tests(unittest.TestCase):
         self.assertEqual(0o660, module.control_socket_mode)
         self.assertTrue(module.control_socket_disable)
 
+    def test_control_socket_falls_back_when_configured_path_is_unwritable(self) -> None:
+        def fake_access(path: object, mode: int) -> bool:
+            if str(path) == "/app":
+                return False
+            return True
+
+        with patch("pathlib.Path.mkdir"), patch("os.access", side_effect=fake_access):
+            module = self._reload_module(
+                {
+                    "GUNICORN_CONTROL_SOCKET": "/app/gunicorn.ctl",
+                    "GUNICORN_CONTROL_SOCKET_DISABLE": "false",
+                }
+            )
+        self.assertEqual("/tmp/gunicorn.ctl", module.control_socket)
+        self.assertFalse(module.control_socket_disable)
+
+    def test_control_socket_auto_disables_when_no_usable_path_exists(self) -> None:
+        def fake_access(path: object, mode: int) -> bool:
+            if str(path) in {"/app", "/tmp"}:
+                return False
+            return True
+
+        with patch("pathlib.Path.mkdir"), patch("os.access", side_effect=fake_access):
+            module = self._reload_module(
+                {
+                    "GUNICORN_CONTROL_SOCKET": "/app/gunicorn.ctl",
+                    "GUNICORN_CONTROL_SOCKET_DISABLE": "false",
+                }
+            )
+        self.assertEqual("/app/gunicorn.ctl", module.control_socket)
+        self.assertTrue(module.control_socket_disable)
+
 
 class ProxyFixStage9Tests(unittest.TestCase):
     def _build_app(self, *, proxy_fix_enabled: bool) -> Flask:

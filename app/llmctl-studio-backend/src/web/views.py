@@ -7060,10 +7060,23 @@ def update_agent(agent_id: int):
         agent.prompt_text = None
         agent.autonomous_prompt = None
         agent.role_id = role_id
+        active_run_status = (
+            session.execute(
+                select(Run.status)
+                .where(
+                    Run.agent_id == agent.id,
+                    Run.status.in_(RUN_ACTIVE_STATUSES),
+                )
+                .order_by(Run.created_at.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
         payload = _serialize_agent_list_item(
             agent,
             role_name=role_name,
-            status=_agent_status_by_id([agent.id]).get(agent.id, "stopped"),
+            status=active_run_status or "stopped",
         )
 
     if is_api_request:
@@ -7315,6 +7328,7 @@ def move_agent_priority(agent_id: int, priority_id: int):
 
 @bp.post("/agents/<int:agent_id>/priorities/<int:priority_id>/delete")
 def delete_agent_priority(agent_id: int, priority_id: int):
+    is_api_request = _agent_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
     )
@@ -7337,6 +7351,8 @@ def delete_agent_priority(agent_id: int, priority_id: int):
         session.delete(priority)
         priorities = [item for item in priorities if item.id != priority_id]
         _reindex_agent_priorities(priorities)
+    if is_api_request:
+        return {"ok": True}
     flash("Priority deleted.", "success")
     return redirect(redirect_target)
 
@@ -7378,6 +7394,7 @@ def create_role():
 
 @bp.post("/agents/<int:agent_id>/start")
 def start_agent(agent_id: int):
+    is_api_request = _agent_api_request()
     fallback_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_agents")
     )
@@ -7395,6 +7412,11 @@ def start_agent(agent_id: int):
             .limit(1)
         ).scalar_one_or_none()
         if active_run_id:
+            if is_api_request:
+                return {
+                    "error": "Autorun is already enabled for this agent.",
+                    "run_id": active_run_id,
+                }, 409
             flash("Autorun is already enabled for this agent.", "info")
             return redirect(url_for("agents.view_run", run_id=active_run_id))
         run = Run.create(
@@ -7415,18 +7437,23 @@ def start_agent(agent_id: int):
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
+            if is_api_request:
+                return {"error": "Run not found after start."}, 500
             return redirect(fallback_target)
         run.task_id = task.id
         agent = session.get(Agent, run.agent_id)
         if agent is not None:
             agent.task_id = task.id
 
+    if is_api_request:
+        return {"ok": True, "run_id": run_id, "task_id": task.id}
     flash("Autorun enabled.", "success")
     return redirect(url_for("agents.view_run", run_id=run_id))
 
 
 @bp.post("/agents/<int:agent_id>/stop")
 def stop_agent(agent_id: int):
+    is_api_request = _agent_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_agents")
     )
@@ -7450,6 +7477,8 @@ def stop_agent(agent_id: int):
         )
         if run is None:
             agent.run_end_requested = False
+            if is_api_request:
+                return {"ok": True, "already_stopped": True}
             flash("Autorun is already off.", "info")
             return redirect(redirect_target)
         if run.task_id:
@@ -7469,12 +7498,20 @@ def stop_agent(agent_id: int):
     if task_id and Config.CELERY_REVOKE_ON_STOP:
         celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
 
+    if is_api_request:
+        return {
+            "ok": True,
+            "already_stopped": False,
+            "task_id": task_id,
+            "revoke_requested": bool(task_id and Config.CELERY_REVOKE_ON_STOP),
+        }
     flash("Autorun disable requested.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/agents/<int:agent_id>/delete")
 def delete_agent(agent_id: int):
+    is_api_request = _agent_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_agents")
     )
@@ -7496,6 +7533,8 @@ def delete_agent(agent_id: int):
             .first()
         )
         if active_run_id:
+            if is_api_request:
+                return {"error": "Disable autorun before deleting."}, 409
             flash("Disable autorun before deleting.", "error")
             return redirect(next_url)
         runs = (
@@ -7522,6 +7561,8 @@ def delete_agent(agent_id: int):
                 session.delete(run)
         session.delete(agent)
 
+    if is_api_request:
+        return {"ok": True, "detached_task_count": task_count}
     flash("Agent deleted.", "success")
     if task_count:
         flash(f"Detached from {task_count} task(s).", "info")

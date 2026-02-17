@@ -24,9 +24,14 @@ describe('App routing', () => {
     expect(screen.getByText('Stage 5 scope')).toBeInTheDocument()
   })
 
-  test('legacy routes bridge through backend api path', async () => {
+  test('agents route is native react', async () => {
     renderAt('/agents')
+    expect(await screen.findByText('Native React replacement for the legacy agents list and row actions.')).toBeInTheDocument()
+  })
+
+  test('unknown route still bridges through backend api path', async () => {
+    renderAt('/does-not-exist')
     const iframe = await screen.findByTitle('Legacy Studio page')
-    expect(iframe).toHaveAttribute('src', '/api/agents')
+    expect(iframe).toHaveAttribute('src', '/api/does-not-exist')
   })
 })

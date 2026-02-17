@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import sys
 from multiprocessing import cpu_count
+from pathlib import Path
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
@@ -65,6 +67,46 @@ def _default_workers() -> int:
     return max(2, min(8, (cores * 2) + 1))
 
 
+def _warn(message: str) -> None:
+    print(f"[gunicorn-config] {message}", file=sys.stderr)
+
+
+def _socket_path_is_usable(path: str) -> bool:
+    socket_path = Path(path)
+    parent = socket_path.parent if str(socket_path.parent) else Path(".")
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+
+    if not os.access(parent, os.W_OK | os.X_OK):
+        return False
+
+    if socket_path.exists() and not os.access(socket_path, os.W_OK):
+        return False
+
+    return True
+
+
+def _resolve_control_socket(path: str) -> tuple[str, bool]:
+    if _socket_path_is_usable(path):
+        return path, False
+
+    fallback = "/tmp/gunicorn.ctl"
+    if path != fallback and _socket_path_is_usable(fallback):
+        _warn(
+            f"control socket path '{path}' is not writable; "
+            f"falling back to '{fallback}'."
+        )
+        return fallback, False
+
+    _warn(
+        f"control socket path '{path}' is not writable and fallback "
+        f"'{fallback}' is unavailable; disabling Gunicorn control socket."
+    )
+    return path, True
+
+
 bind = _as_str("GUNICORN_BIND", _default_bind())
 workers = _as_int("GUNICORN_WORKERS", _default_workers(), minimum=1)
 threads = _as_int("GUNICORN_THREADS", 4, minimum=1)
@@ -84,3 +126,8 @@ ca_certs = _as_optional_str("GUNICORN_CA_CERTS")
 control_socket = _as_str("GUNICORN_CONTROL_SOCKET", "/tmp/gunicorn.ctl")
 control_socket_mode = _as_mode("GUNICORN_CONTROL_SOCKET_MODE", 0o660)
 control_socket_disable = _as_bool("GUNICORN_CONTROL_SOCKET_DISABLE", False)
+
+if not control_socket_disable:
+    control_socket, auto_disable = _resolve_control_socket(control_socket)
+    if auto_disable:
+        control_socket_disable = True

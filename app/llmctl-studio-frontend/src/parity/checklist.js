@@ -41,8 +41,8 @@ export const parityChecklist = [
     area: 'Agents',
     legacyPath: '/agents',
     reactPath: '/agents',
-    status: 'bridged',
-    notes: 'Served through Stage 5 legacy bridge.',
+    status: 'migrated',
+    notes: 'Native React list/detail/new/edit with priority and skill binding operations.',
   },
   {
     wave: 'Wave 2',

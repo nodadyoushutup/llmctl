@@ -5,9 +5,9 @@ export default function NotFoundPage() {
     <section className="card-grid">
       <article className="card">
         <h2>Route not found</h2>
-        <p>This route is not part of the current migration wave.</p>
+        <p>This route is not mapped in the React router.</p>
         <p>
-          <Link to="/">Return to overview</Link>
+          <Link to="/agents">Open agents</Link>
         </p>
       </article>
     </section>
