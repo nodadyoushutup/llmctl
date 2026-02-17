@@ -131,7 +131,7 @@ export default function RagSourcesPage() {
         <div className="title-row">
           <div>
             <h2>RAG Sources</h2>
-            <p>Native React replacement for `/rag/sources*` list, detail navigation, and quick indexing flows.</p>
+            <p>Configure retrieval sources and run quick index operations.</p>
           </div>
           <div className="table-actions">
             <Link to="/rag/chat" className="btn-link btn-secondary">RAG Chat</Link>
@@ -155,11 +155,14 @@ export default function RagSourcesPage() {
                   <tr>
                     <th>Name</th>
                     <th>Kind</th>
-                    <th>Status</th>
-                    <th>Collection</th>
+                    <th>Location</th>
                     <th>Schedule</th>
-                    <th>Indexed</th>
-                    <th className="table-actions-cell">Actions</th>
+                    <th>Last indexed</th>
+                    <th>Status</th>
+                    <th className="table-actions-cell">Index</th>
+                    <th className="table-actions-cell">Delta</th>
+                    <th className="table-actions-cell">Edit</th>
+                    <th className="table-actions-cell">Delete</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -171,25 +174,29 @@ export default function RagSourcesPage() {
                       <tr key={sourceId} className="table-row-link" data-href={href} onClick={(event) => handleRowClick(event, href)}>
                         <td><Link to={href}>{source.name || `Source ${sourceId}`}</Link></td>
                         <td>{source.kind || '-'}</td>
-                        <td>{source.status || '-'}</td>
-                        <td>{source.collection || '-'}</td>
+                        <td className="mono">{source.location || source.local_path || source.git_repo || source.drive_folder_id || '-'}</td>
                         <td>{source.schedule_text || '-'}</td>
-                        <td>{source.indexed_file_count ?? 0} files / {source.indexed_chunk_count ?? 0} chunks</td>
+                        <td>{source.last_indexed_at || '-'}</td>
+                        <td>{source.status || '-'}</td>
                         <td className="table-actions-cell">
-                          <div className="table-actions">
-                            <button type="button" className="icon-button" title="Quick index" aria-label="Quick index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'fresh')}>
-                              <ActionIcon name="play" />
-                            </button>
-                            <button type="button" className="icon-button" title="Quick delta index" aria-label="Quick delta index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'delta')}>
-                              D
-                            </button>
-                            <Link to={`/rag/sources/${sourceId}/edit`} className="icon-button" title="Edit source" aria-label="Edit source">
-                              <ActionIcon name="edit" />
-                            </Link>
-                            <button type="button" className="icon-button icon-button-danger" title="Delete source" aria-label="Delete source" disabled={busy} onClick={() => handleDelete(sourceId)}>
-                              <ActionIcon name="trash" />
-                            </button>
-                          </div>
+                          <button type="button" className="icon-button" title="Quick index" aria-label="Quick index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'fresh')}>
+                            <ActionIcon name="play" />
+                          </button>
+                        </td>
+                        <td className="table-actions-cell">
+                          <button type="button" className="icon-button" title="Quick delta index" aria-label="Quick delta index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'delta')}>
+                            <i className="fa-solid fa-rotate-right" />
+                          </button>
+                        </td>
+                        <td className="table-actions-cell">
+                          <Link to={`/rag/sources/${sourceId}/edit`} className="icon-button" title="Edit source" aria-label="Edit source">
+                            <ActionIcon name="edit" />
+                          </Link>
+                        </td>
+                        <td className="table-actions-cell">
+                          <button type="button" className="icon-button icon-button-danger" title="Delete source" aria-label="Delete source" disabled={busy} onClick={() => handleDelete(sourceId)}>
+                            <ActionIcon name="trash" />
+                          </button>
                         </td>
                       </tr>
                     )

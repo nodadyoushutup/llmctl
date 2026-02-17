@@ -62,7 +62,7 @@ export default function ModelDetailPage() {
         <div className="title-row">
           <div>
             <h2>{model ? model.name : 'Model'}</h2>
-            <p>{model?.description || 'Native React replacement for `/models/:modelId` model detail and bindings.'}</p>
+            <p>{model?.description || 'Model settings and binding usage.'}</p>
           </div>
           <div className="table-actions">
             {model ? <Link to={`/models/${model.id}/edit`} className="btn-link">Edit</Link> : null}

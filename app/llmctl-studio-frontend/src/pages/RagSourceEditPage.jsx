@@ -100,7 +100,7 @@ export default function RagSourceEditPage() {
         <div className="title-row">
           <div>
             <h2>Edit RAG Source</h2>
-            <p>Native React replacement for `/rag/sources/:sourceId/edit` update flow and validation errors.</p>
+            <p>Update source configuration and schedule settings.</p>
           </div>
           <div className="table-actions">
             <Link to={`/rag/sources/${parsedSourceId}`} className="btn-link btn-secondary">Back to Source</Link>

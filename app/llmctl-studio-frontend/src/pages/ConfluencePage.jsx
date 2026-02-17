@@ -63,7 +63,7 @@ export default function ConfluencePage() {
         <div className="title-row">
           <div>
             <h2>Confluence Workspace</h2>
-            <p>Native React replacement for `/confluence` space browser and page content surfaces.</p>
+            <p>Select pages in a space and preview their rendered content.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/integrations/confluence" className="btn-link btn-secondary">Confluence Settings</Link>

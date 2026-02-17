@@ -79,7 +79,7 @@ export default function AttachmentDetailPage() {
         <div className="title-row">
           <div>
             <h2>{attachment ? attachment.file_name : 'Attachment'}</h2>
-            <p>Native React replacement for `/attachments/:attachmentId` detail and relationships.</p>
+            <p>Attachment metadata and relationship usage.</p>
           </div>
           <Link to="/attachments" className="btn-link btn-secondary">All Attachments</Link>
         </div>

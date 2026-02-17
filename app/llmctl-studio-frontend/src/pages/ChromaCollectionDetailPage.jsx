@@ -95,7 +95,7 @@ export default function ChromaCollectionDetailPage() {
         <div className="title-row">
           <div>
             <h2>Chroma Collection Detail</h2>
-            <p>Native React replacement for `/chroma/collections/detail` metadata and delete controls.</p>
+            <p>Collection metadata and delete controls.</p>
           </div>
           <div className="table-actions">
             <Link to="/chroma/collections" className="btn-link btn-secondary">Back to Collections</Link>

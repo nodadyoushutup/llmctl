@@ -241,13 +241,64 @@ export function getNodeMeta() {
   return requestJson('/nodes/new')
 }
 
+const SCRIPT_TYPE_FORM_FIELDS = {
+  pre_init: 'pre_init_script_ids',
+  init: 'init_script_ids',
+  post_init: 'post_init_script_ids',
+  post_run: 'post_run_script_ids',
+}
+
+function appendFormValue(formData, key, value) {
+  if (value == null || value === '') {
+    return
+  }
+  formData.append(key, String(value))
+}
+
+function appendFormValues(formData, key, values) {
+  if (!Array.isArray(values)) {
+    return
+  }
+  for (const value of values) {
+    if (value == null || value === '') {
+      continue
+    }
+    formData.append(key, String(value))
+  }
+}
+
 export function createNode({
   agentId,
   prompt,
   integrationKeys = [],
   scriptIdsByType = null,
   scriptIds = [],
+  attachments = [],
 } = {}) {
+  const files = Array.isArray(attachments) ? attachments.filter((file) => file != null) : []
+  if (files.length > 0) {
+    const formData = new FormData()
+    appendFormValue(formData, 'agent_id', agentId)
+    appendFormValue(formData, 'prompt', prompt)
+    appendFormValues(formData, 'integration_keys', integrationKeys)
+    if (scriptIdsByType && typeof scriptIdsByType === 'object') {
+      for (const [scriptType, values] of Object.entries(scriptIdsByType)) {
+        const fieldName = SCRIPT_TYPE_FORM_FIELDS[String(scriptType)]
+        if (!fieldName) {
+          continue
+        }
+        appendFormValues(formData, fieldName, values)
+      }
+    }
+    appendFormValues(formData, 'script_ids', scriptIds)
+    for (const file of files) {
+      formData.append('attachments', file)
+    }
+    return requestJson('/nodes/new', {
+      method: 'POST',
+      body: formData,
+    })
+  }
   return requestJson('/nodes/new', {
     method: 'POST',
     body: {
@@ -270,6 +321,12 @@ export function deleteNode(nodeId) {
   return requestJson(`/nodes/${parsedNodeId}/delete`, { method: 'POST' })
 }
 
+export function removeNodeAttachment(nodeId, attachmentId) {
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  const parsedAttachmentId = parsePositiveId(attachmentId, 'attachmentId')
+  return requestJson(`/nodes/${parsedNodeId}/attachments/${parsedAttachmentId}/remove`, { method: 'POST' })
+}
+
 export function getQuickTaskMeta() {
   return requestJson('/quick')
 }
@@ -280,7 +337,24 @@ export function createQuickTask({
   modelId = null,
   mcpServerIds = [],
   integrationKeys = [],
+  attachments = [],
 } = {}) {
+  const files = Array.isArray(attachments) ? attachments.filter((file) => file != null) : []
+  if (files.length > 0) {
+    const formData = new FormData()
+    appendFormValue(formData, 'prompt', prompt)
+    appendFormValue(formData, 'agent_id', agentId)
+    appendFormValue(formData, 'model_id', modelId)
+    appendFormValues(formData, 'mcp_server_ids', mcpServerIds)
+    appendFormValues(formData, 'integration_keys', integrationKeys)
+    for (const file of files) {
+      formData.append('attachments', file)
+    }
+    return requestJson('/quick', {
+      method: 'POST',
+      body: formData,
+    })
+  }
   return requestJson('/quick', {
     method: 'POST',
     body: {

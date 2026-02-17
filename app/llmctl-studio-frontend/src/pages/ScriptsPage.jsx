@@ -88,7 +88,7 @@ export default function ScriptsPage() {
         <div className="title-row">
           <div>
             <h2>Scripts</h2>
-            <p>Native React replacement for `/scripts` list and row actions.</p>
+            <p>Upload helper scripts and bind them to task templates or flowchart nodes.</p>
           </div>
           <Link to="/scripts/new" className="btn-link">New Script</Link>
         </div>
@@ -101,11 +101,10 @@ export default function ScriptsPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>File</th>
+                  <th>File name</th>
                   <th>Type</th>
-                  <th>Bindings</th>
-                  <th>Updated</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th>Description</th>
+                  <th className="table-actions-cell">Delete</th>
                 </tr>
               </thead>
               <tbody>
@@ -123,18 +122,11 @@ export default function ScriptsPage() {
                         <Link to={href}>{script.file_name || `Script ${script.id}`}</Link>
                       </td>
                       <td>{script.script_type_label || script.script_type || '-'}</td>
-                      <td>{script.binding_count ?? 0}</td>
-                      <td>{script.updated_at || '-'}</td>
+                      <td>
+                        <p className="muted" style={{ fontSize: '12px' }}>{script.description || '-'}</p>
+                      </td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
-                          <Link
-                            to={`/scripts/${script.id}/edit`}
-                            className="icon-button"
-                            aria-label="Edit script"
-                            title="Edit script"
-                          >
-                            <ActionIcon name="edit" />
-                          </Link>
                           <button
                             type="button"
                             className="icon-button icon-button-danger"

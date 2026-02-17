@@ -28,12 +28,27 @@ function toggleListValue(currentValues, value) {
   return [...currentValues, value]
 }
 
+function mergeAttachments(current, incoming) {
+  const merged = [...current]
+  const seen = new Set(merged.map((file) => `${file.name}:${file.size}:${file.lastModified}`))
+  for (const file of incoming) {
+    const key = `${file.name}:${file.size}:${file.lastModified}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    merged.push(file)
+  }
+  return merged
+}
+
 export default function QuickTaskPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [initialized, setInitialized] = useState(false)
+  const [attachments, setAttachments] = useState([])
   const [form, setForm] = useState({
     prompt: '',
     agentId: '',
@@ -105,6 +120,7 @@ export default function QuickTaskPage() {
         modelId,
         mcpServerIds: form.mcpServerIds.map((value) => Number(value)),
         integrationKeys: form.integrationKeys,
+        attachments,
       })
       const taskId = payload && Number.isInteger(payload.task_id) ? payload.task_id : null
       if (taskId) {
@@ -117,6 +133,31 @@ export default function QuickTaskPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  function handleAttachmentInputChange(event) {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) {
+      return
+    }
+    setAttachments((current) => mergeAttachments(current, files))
+    event.target.value = ''
+  }
+
+  function handlePromptPaste(event) {
+    const files = Array.from(event.clipboardData?.files || [])
+    if (files.length === 0) {
+      return
+    }
+    setAttachments((current) => mergeAttachments(current, files))
+  }
+
+  function handlePromptKeyDown(event) {
+    if (event.isComposing || event.key !== 'Enter' || event.shiftKey || saving) {
+      return
+    }
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
   }
 
   return (
@@ -271,16 +312,23 @@ export default function QuickTaskPage() {
                 className="textarea"
                 value={form.prompt}
                 placeholder="Ask anything."
+                onPaste={handlePromptPaste}
+                onKeyDown={handlePromptKeyDown}
                 onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))}
               />
             </label>
 
             <label className="label">
               Attachments (optional)
-              <input type="file" className="input" multiple disabled />
+              <input type="file" className="input" multiple onChange={handleAttachmentInputChange} />
               <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                Attachment upload parity is still in progress. Quick Task currently submits prompt/config only.
+                Paste images into the prompt or choose files. Saved to <code>data/attachments</code>.
               </span>
+              {attachments.length > 0 ? (
+                <div className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                  {attachments.map((file) => file.name).join(', ')}
+                </div>
+              ) : null}
             </label>
 
             <div className="form-actions">

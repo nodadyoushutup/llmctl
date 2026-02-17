@@ -88,7 +88,7 @@ export default function ScriptEditPage() {
         <div className="title-row">
           <div>
             <h2>Edit Script</h2>
-            <p>Native React replacement for `/scripts/:scriptId/edit` metadata and content edits.</p>
+            <p>Update file metadata and content.</p>
           </div>
           <div className="table-actions">
             {parsedScriptId ? <Link to={`/scripts/${parsedScriptId}`} className="btn-link btn-secondary">Back to Script</Link> : null}

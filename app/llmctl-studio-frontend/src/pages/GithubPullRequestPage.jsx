@@ -121,7 +121,7 @@ export default function GithubPullRequestPage() {
         <div className="title-row">
           <div>
             <h2>GitHub Pull Request</h2>
-            <p>Native React replacement for `/github/pulls/:prNumber` conversation/commits/checks/files details.</p>
+            <p>Conversation, commits, checks, and changed-file context.</p>
           </div>
           <div className="table-actions">
             <Link to="/github" className="btn-link btn-secondary">Back to GitHub</Link>

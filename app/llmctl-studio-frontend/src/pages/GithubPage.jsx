@@ -83,7 +83,7 @@ export default function GithubPage() {
         <div className="title-row">
           <div>
             <h2>GitHub Workspace</h2>
-            <p>Native React replacement for `/github` browser, pull-request, actions, and code explorer surfaces.</p>
+            <p>Browse pull requests, workflow runs, and repository files.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/integrations/github" className="btn-link btn-secondary">GitHub Settings</Link>

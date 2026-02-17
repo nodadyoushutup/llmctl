@@ -147,8 +147,8 @@ export default function SettingsChatPage() {
       <article className="card">
         <div className="title-row">
           <div>
-            <h2>Settings Chat</h2>
-            <p>Native React replacement for `/settings/chat` defaults and runtime values.</p>
+            <h2>Chat Defaults</h2>
+            <p>Defaults here are applied when creating a new chat thread.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>
@@ -161,6 +161,11 @@ export default function SettingsChatPage() {
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
+        {!state.loading && !state.error ? (
+          <p className="toolbar-meta">
+            Runtime controls (compaction, context budget, retrieval) are managed in Runtime Chat.
+          </p>
+        ) : null}
       </article>
 
       {!state.loading && !state.error ? (

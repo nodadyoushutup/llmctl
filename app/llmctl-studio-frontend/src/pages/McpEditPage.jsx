@@ -100,7 +100,7 @@ export default function McpEditPage() {
         <div className="title-row">
           <div>
             <h2>Edit MCP Server</h2>
-            <p>Native React replacement for `/mcps/:mcpId/edit` custom MCP updates.</p>
+            <p>Update server details and config JSON.</p>
           </div>
           <div className="table-actions">
             {parsedMcpId ? <Link to={`/mcps/${parsedMcpId}`} className="btn-link btn-secondary">Back to MCP</Link> : null}

@@ -81,7 +81,7 @@ export default function McpNewPage() {
         <div className="title-row">
           <div>
             <h2>New MCP Server</h2>
-            <p>Native React replacement for `/mcps/new` custom MCP creation.</p>
+            <p>Define a custom server config and attach it later.</p>
           </div>
           <Link to="/mcps" className="btn-link btn-secondary">All MCP Servers</Link>
         </div>

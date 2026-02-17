@@ -91,7 +91,7 @@ export default function ModelNewPage() {
         <div className="title-row">
           <div>
             <h2>New Model</h2>
-            <p>Native React replacement for `/models/new` model creation.</p>
+            <p>Bind a provider with model and reasoning policies.</p>
           </div>
           <Link to="/models" className="btn-link btn-secondary">All Models</Link>
         </div>

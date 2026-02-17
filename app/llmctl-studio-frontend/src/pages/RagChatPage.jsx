@@ -127,7 +127,7 @@ export default function RagChatPage() {
         <div className="title-row">
           <div>
             <h2>RAG Chat</h2>
-            <p>Native React replacement for `/rag/chat` retrieval chat flow and context controls.</p>
+            <p>Ask questions against indexed collections with retrieval controls.</p>
           </div>
           <div className="table-actions">
             <Link to="/rag/sources" className="btn-link btn-secondary">RAG Sources</Link>

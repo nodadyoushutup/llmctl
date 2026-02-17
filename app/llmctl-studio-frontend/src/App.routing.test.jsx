@@ -75,82 +75,82 @@ describe('App routing', () => {
 
   test('skills route is native react', async () => {
     renderAt('/skills')
-    expect(await screen.findByText('Native React replacement for `/skills` list plus CRUD/import/export flows.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Skills' })).length).toBeGreaterThan(0)
   })
 
   test('scripts route is native react', async () => {
     renderAt('/scripts')
-    expect(await screen.findByText('Native React replacement for `/scripts` list and row actions.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Scripts' })).length).toBeGreaterThan(0)
   })
 
   test('attachments route is native react', async () => {
     renderAt('/attachments')
-    expect(await screen.findByText('Native React replacement for `/attachments` list and row actions.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Attachments' })).length).toBeGreaterThan(0)
   })
 
   test('models route is native react', async () => {
     renderAt('/models')
-    expect(await screen.findByText('Native React replacement for `/models` list and default model controls.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Models' })).length).toBeGreaterThan(0)
   })
 
   test('mcps route is native react', async () => {
     renderAt('/mcps')
-    expect(await screen.findByText('Native React replacement for `/mcps` list/detail/edit flows.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'MCP Servers' })).length).toBeGreaterThan(0)
   })
 
   test('github route is native react', async () => {
     renderAt('/github')
-    expect(await screen.findByText('Native React replacement for `/github` browser, pull-request, actions, and code explorer surfaces.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'GitHub Workspace' })).toBeInTheDocument()
   })
 
   test('jira route is native react', async () => {
     renderAt('/jira')
-    expect(await screen.findByText('Native React replacement for `/jira` board explorer and issue drill-down routes.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Jira Workspace' })).toBeInTheDocument()
   })
 
   test('confluence route is native react', async () => {
     renderAt('/confluence')
-    expect(await screen.findByText('Native React replacement for `/confluence` space browser and page content surfaces.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Confluence Workspace' })).toBeInTheDocument()
   })
 
   test('chroma collections route is native react', async () => {
     renderAt('/chroma/collections')
-    expect(await screen.findByText('Native React replacement for `/chroma/collections` explorer, pagination, detail navigation, and delete.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Chroma Collections' })).toBeInTheDocument()
   })
 
   test('rag chat route is native react', async () => {
     renderAt('/rag/chat')
-    expect(await screen.findByText('Native React replacement for `/rag/chat` retrieval chat flow and context controls.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'RAG Chat' })).toBeInTheDocument()
   })
 
   test('rag sources route is native react', async () => {
     renderAt('/rag/sources')
-    expect(await screen.findByText('Native React replacement for `/rag/sources*` list, detail navigation, and quick indexing flows.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'RAG Sources' })).toBeInTheDocument()
   })
 
   test('settings core route is native react', async () => {
     renderAt('/settings/core')
-    expect(await screen.findByText('Native React replacement for `/settings/core` runtime and path metadata.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Core Settings' })).toBeInTheDocument()
   })
 
   test('settings provider route is native react', async () => {
     renderAt('/settings/provider')
-    expect(await screen.findByText('Native React replacement for provider controls and auth settings.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Settings Provider' })).toBeInTheDocument()
   })
 
   test('settings runtime route is native react', async () => {
     renderAt('/settings/runtime')
-    expect(await screen.findByText('Native React replacement for runtime node, RAG, and chat settings flows.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Settings Runtime' })).toBeInTheDocument()
   })
 
   test('settings chat route is native react', async () => {
     renderAt('/settings/chat')
-    expect(await screen.findByText('Native React replacement for `/settings/chat` defaults and runtime values.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Chat Defaults' })).toBeInTheDocument()
   })
 
   test('settings integrations route is native react', async () => {
     renderAt('/settings/integrations')
-    expect(await screen.findByText('Native React replacement for `/settings/integrations/*` configuration and validation controls.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Settings Integrations' })).toBeInTheDocument()
   })
 
   test('unknown route renders react not-found view', async () => {

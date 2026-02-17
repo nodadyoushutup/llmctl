@@ -101,7 +101,7 @@ export default function ModelsPage() {
         <div className="title-row">
           <div>
             <h2>Models</h2>
-            <p>Native React replacement for `/models` list and default model controls.</p>
+            <p>Create model profiles that bind provider selection and runtime policies.</p>
           </div>
           <Link to="/models/new" className="btn-link">New Model</Link>
         </div>
@@ -118,7 +118,7 @@ export default function ModelsPage() {
                   <th>Provider</th>
                   <th>Model</th>
                   <th>Default</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th className="table-actions-cell">Delete</th>
                 </tr>
               </thead>
               <tbody>
@@ -134,6 +134,11 @@ export default function ModelsPage() {
                     >
                       <td>
                         <Link to={href}>{model.name || `Model ${model.id}`}</Link>
+                        {model.description ? (
+                          <p className="muted" style={{ marginTop: '6px', fontSize: '12px' }}>
+                            {model.description}
+                          </p>
+                        ) : null}
                       </td>
                       <td>{model.provider_label || model.provider || '-'}</td>
                       <td>{model.model_name || '-'}</td>
@@ -149,14 +154,6 @@ export default function ModelsPage() {
                       </td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
-                          <Link
-                            to={`/models/${model.id}/edit`}
-                            className="icon-button"
-                            aria-label="Edit model"
-                            title="Edit model"
-                          >
-                            <ActionIcon name="edit" />
-                          </Link>
                           <button
                             type="button"
                             className="icon-button icon-button-danger"

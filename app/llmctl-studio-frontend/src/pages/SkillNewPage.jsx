@@ -92,7 +92,7 @@ export default function SkillNewPage() {
         <div className="title-row">
           <div>
             <h2>New Skill</h2>
-            <p>Native React replacement for `/skills/new` skill package creation.</p>
+            <p>Create a new skill package and initial immutable version.</p>
           </div>
           <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
         </div>

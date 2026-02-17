@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
-import { cancelNode, deleteNode, getNode, getNodeStatus } from '../lib/studioApi'
+import { cancelNode, deleteNode, getNode, getNodeStatus, removeNodeAttachment } from '../lib/studioApi'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -31,7 +31,7 @@ function nodeStatusMeta(status) {
     return { className: 'status-chip status-warning', label: normalized }
   }
   if (normalized === 'succeeded' || normalized === 'completed') {
-    return { className: 'status-chip status-running', label: normalized }
+    return { className: 'status-chip status-success', label: normalized }
   }
   if (normalized === 'failed' || normalized === 'error') {
     return { className: 'status-chip status-failed', label: normalized }
@@ -71,6 +71,7 @@ export default function NodeDetailPage() {
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [busyAttachmentId, setBusyAttachmentId] = useState(null)
 
   const refreshDetail = useCallback(async ({ silent = false } = {}) => {
     if (!parsedNodeId) {
@@ -144,6 +145,7 @@ export default function NodeDetailPage() {
   const selectedIntegrationLabels = payload && Array.isArray(payload.selected_integration_labels)
     ? payload.selected_integration_labels
     : []
+  const isQuickTask = Boolean(payload?.is_quick_task)
   const active = canCancel(task?.status)
   const status = nodeStatusMeta(task?.status)
 
@@ -190,13 +192,29 @@ export default function NodeDetailPage() {
     }
   }
 
+  async function handleAttachmentRemove(attachmentId) {
+    if (!task || !window.confirm('Remove this attachment?')) {
+      return
+    }
+    setActionError('')
+    setBusyAttachmentId(attachmentId)
+    try {
+      await removeNodeAttachment(task.id, attachmentId)
+      await refreshDetail({ silent: true })
+    } catch (error) {
+      setActionError(errorMessage(error, 'Failed to remove attachment.'))
+    } finally {
+      setBusyAttachmentId(null)
+    }
+  }
+
   return (
     <section className="stack" aria-label="Node detail">
       <article className="card">
         <div className="title-row">
           <div>
             <h2>{task ? `Node ${task.id}` : 'Node'}</h2>
-            <p>Native React replacement for `/nodes/:id` with active polling while queued/running.</p>
+            <p>{task?.kind || 'Node'} details and realtime execution state.</p>
           </div>
           <div className="table-actions">
             <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
@@ -277,7 +295,7 @@ export default function NodeDetailPage() {
               </div>
             </dl>
             {task.error ? <p className="error-text">{task.error}</p> : null}
-            {active ? <p className="toolbar-meta">Active task detected. Refreshing status every 5s.</p> : null}
+            {active ? <p className="toolbar-meta">Realtime updates active. Polling fallback starts only if socket connectivity fails.</p> : null}
           </div>
         ) : null}
       </article>
@@ -314,7 +332,20 @@ export default function NodeDetailPage() {
             <ul>
               {attachments.map((attachment) => (
                 <li key={attachment.id}>
-                  {attachment.file_name}
+                  <span>{attachment.file_name}</span>
+                  {isQuickTask ? (
+                    <button
+                      type="button"
+                      className="icon-button icon-button-danger"
+                      aria-label={`Remove ${attachment.file_name}`}
+                      title="Remove attachment"
+                      disabled={busyAttachmentId === attachment.id}
+                      onClick={() => handleAttachmentRemove(attachment.id)}
+                      style={{ marginLeft: '8px' }}
+                    >
+                      <ActionIcon name="trash" />
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>

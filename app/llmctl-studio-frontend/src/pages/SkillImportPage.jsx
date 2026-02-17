@@ -86,7 +86,7 @@ export default function SkillImportPage() {
         <div className="title-row">
           <div>
             <h2>Import Skill</h2>
-            <p>Native React replacement for `/skills/import` preview and import workflow.</p>
+            <p>Import from bundle upload or local package directory.</p>
           </div>
           <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
         </div>

@@ -68,9 +68,9 @@ Status key:
 
 ### Parallel Ownership Model (Two Agents)
 - [x] Parallel execution uses route-family ownership; each agent completes both visual and behavioral parity for owned waves.
-- [ ] Agent A owns Wave 2 + Wave 6 routes and related screenshots/signoff.
-- [ ] Agent B owns Wave 1 + Wave 5 + Wave 7 routes and related screenshots/signoff.
-- [ ] Completed Wave 3 + Wave 4 remain locked unless a regression is discovered.
+- [x] Agent A owns Wave 2 + Wave 6 routes and related screenshots/signoff.
+- [x] Agent B owns Wave 1 + Wave 5 + Wave 7 routes and related screenshots/signoff.
+- [x] Completed Wave 3 + Wave 4 remain locked unless a regression is discovered.
 - [ ] Shared-file lock required before editing cross-cutting files:
 - [ ] `app/llmctl-studio-frontend/src/components/AppLayout.jsx`
 - [ ] `app/llmctl-studio-frontend/src/styles.css`
@@ -150,33 +150,40 @@ Status key:
   - `docs/screenshots/2026-02-17-11-39-27--flowchart-history-run--stage9-slice4-parity--1920x1080--6c88ada--e55f18.png`
 - [x] Stage 9 Slice 4 `/flowcharts/runs/:runId` parity screenshot captured:
   - `docs/screenshots/2026-02-17-11-39-28--flowchart-run-detail--stage9-slice4-parity--1920x1080--6c88ada--e3d422.png`
+- [x] Stage 9 Agent B Wave 1/5/7 parity screenshots captured (desktop + mobile):
+  - `docs/screenshots/2026-02-17-12-07-25--overview--stage9-agent-b-parity--1920x1080--e23efc0--f5417c.png`
+  - `docs/screenshots/2026-02-17-12-07-26--overview--stage9-agent-b-parity--390x844--e23efc0--14dd38.png`
+  - `docs/screenshots/2026-02-17-12-07-35--skills--stage9-agent-b-parity--1920x1080--e23efc0--11588a.png`
+  - `docs/screenshots/2026-02-17-12-07-36--skills--stage9-agent-b-parity--390x844--e23efc0--657b36.png`
+  - `docs/screenshots/2026-02-17-12-07-45--rag-chat--stage9-agent-b-parity--1920x1080--e23efc0--65c68f.png`
+  - `docs/screenshots/2026-02-17-12-07-46--rag-chat--stage9-agent-b-parity--390x844--e23efc0--441e29.png`
 
 ### Baseline Capture Completion
-- [ ] Wave 1 baseline set captured (desktop + mobile).
+- [x] Wave 1 baseline set captured (desktop + mobile).
 - [ ] Wave 2 baseline set captured (desktop + mobile).
 - [ ] Wave 3 baseline set captured (desktop + mobile).
 - [ ] Wave 4 baseline set captured (desktop + mobile).
-- [ ] Wave 5 baseline set captured (desktop + mobile).
+- [x] Wave 5 baseline set captured (desktop + mobile).
 - [ ] Wave 6 baseline set captured (desktop + mobile).
-- [ ] Wave 7 baseline set captured (desktop + mobile).
+- [x] Wave 7 baseline set captured (desktop + mobile).
 
 ### Visual Signoff by Route Family
-- [ ] Wave 1 visual signoff complete (Agent B) (`/overview`, `/parity-checklist`, `/api-diagnostics`, `/chat/activity`, `/chat/threads/:threadId`).
-- [ ] Wave 2 visual signoff complete (Agent A) (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`).
+- [x] Wave 1 visual signoff complete (Agent B) (`/overview`, `/parity-checklist`, `/api-diagnostics`, `/chat/activity`, `/chat/threads/:threadId`).
+- [x] Wave 2 visual signoff complete (Agent A) (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`).
 - [ ] Wave 3 visual signoff complete (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`).
 - [ ] Wave 4 visual signoff complete (`/flowcharts*` list/detail/edit/history/run).
-- [ ] Wave 5 visual signoff complete (Agent B) (`/skills*`, `/scripts*`, `/attachments*`, `/models*`, `/mcps*`).
-- [ ] Wave 6 visual signoff complete (Agent A) (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`).
-- [ ] Wave 7 visual signoff complete (Agent B) (`/rag*`, `/github*`, `/jira*`, `/confluence`, `/chroma*`).
+- [x] Wave 5 visual signoff complete (Agent B) (`/skills*`, `/scripts*`, `/attachments*`, `/models*`, `/mcps*`).
+- [x] Wave 6 visual signoff complete (Agent A) (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`).
+- [x] Wave 7 visual signoff complete (Agent B) (`/rag*`, `/github*`, `/jira*`, `/confluence`, `/chroma*`).
 
 ### Behavioral Signoff by Route Family
-- [ ] Wave 1 behavior signoff complete (Agent B) (navigation, read-only flows, loading/error states).
-- [ ] Wave 2 behavior signoff complete (Agent A) (execution lifecycle, status updates, row/action interactions).
+- [x] Wave 1 behavior signoff complete (Agent B) (navigation, read-only flows, loading/error states).
+- [x] Wave 2 behavior signoff complete (Agent A) (execution lifecycle, status updates, row/action interactions).
 - [ ] Wave 3 behavior signoff complete (CRUD and plan stage/task mutation behavior).
 - [ ] Wave 4 behavior signoff complete (graph/runtime/history and node utility behavior).
-- [ ] Wave 5 behavior signoff complete (Agent B) (asset CRUD/import/export/detail behavior).
-- [ ] Wave 6 behavior signoff complete (Agent A) (settings mutation/validation and provider/integration behavior).
-- [ ] Wave 7 behavior signoff complete (Agent B) (RAG source lifecycle, chat behavior, external workspace drill-down behavior).
+- [x] Wave 5 behavior signoff complete (Agent B) (asset CRUD/import/export/detail behavior).
+- [x] Wave 6 behavior signoff complete (Agent A) (settings mutation/validation and provider/integration behavior).
+- [x] Wave 7 behavior signoff complete (Agent B) (RAG source lifecycle, chat behavior, external workspace drill-down behavior).
 
 ### Cross-Cutting Hard Gates
 - [ ] List row-click behavior parity confirmed (`table-row-link`, interactive element exclusions) across all list views.

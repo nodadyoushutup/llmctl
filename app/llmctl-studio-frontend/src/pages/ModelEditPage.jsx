@@ -110,7 +110,7 @@ export default function ModelEditPage() {
         <div className="title-row">
           <div>
             <h2>Edit Model</h2>
-            <p>Native React replacement for `/models/:modelId/edit` metadata and config updates.</p>
+            <p>Update provider selection and model policies.</p>
           </div>
           <div className="table-actions">
             {parsedModelId ? <Link to={`/models/${parsedModelId}`} className="btn-link btn-secondary">Back to Model</Link> : null}

@@ -46,8 +46,8 @@ export default function SettingsCorePage() {
       <article className="card">
         <div className="title-row">
           <div>
-            <h2>Settings Core</h2>
-            <p>Native React replacement for `/settings/core` runtime and path metadata.</p>
+            <h2>Core Settings</h2>
+            <p>Paths, polling, and provider defaults.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
@@ -59,14 +59,16 @@ export default function SettingsCorePage() {
         {state.loading ? <p>Loading core settings...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (
-          <dl className="kv-grid">
+          <div className="stack">
             {Object.entries(coreConfig).map(([key, value]) => (
-              <div key={key}>
-                <dt>{key}</dt>
-                <dd>{String(value ?? '') || '-'}</dd>
+              <div key={key} className="subcard">
+                <p className="eyebrow">{key}</p>
+                <p className="muted" style={{ marginTop: '8px', fontSize: '12px' }}>
+                  {String(value ?? '') || '-'}
+                </p>
               </div>
             ))}
-          </dl>
+          </div>
         ) : null}
       </article>
     </section>

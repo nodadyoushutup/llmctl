@@ -181,7 +181,7 @@ export default function SettingsProviderPage() {
         <div className="title-row">
           <div>
             <h2>Settings Provider</h2>
-            <p>Native React replacement for provider controls and auth settings.</p>
+            <p>Enable providers and configure provider-specific authentication/runtime controls.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>

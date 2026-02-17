@@ -28,6 +28,12 @@ function runStatusMeta(status) {
   if (normalized === 'running' || normalized === 'starting') {
     return { className: 'status-chip status-running', label: 'active' }
   }
+  if (normalized === 'queued' || normalized === 'pending') {
+    return { className: 'status-chip status-warning', label: normalized }
+  }
+  if (normalized === 'succeeded' || normalized === 'completed') {
+    return { className: 'status-chip status-success', label: normalized }
+  }
   if (normalized === 'stopping') {
     return { className: 'status-chip status-warning', label: 'stopping' }
   }
@@ -137,7 +143,7 @@ export default function RunDetailPage() {
         <div className="title-row">
           <div>
             <h2>{run ? run.name || `Autorun ${run.id}` : 'Autorun'}</h2>
-            <p>Native React detail view for `/runs/:id` with polling while autorun is active.</p>
+            <p>Autoruns are created automatically when you enable autorun on the agent.</p>
           </div>
           <div className="table-actions">
             <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
@@ -214,7 +220,7 @@ export default function RunDetailPage() {
               <p className="toolbar-meta">End requested. This autorun will stop after the current node run.</p>
             ) : null}
             {active ? (
-              <p className="toolbar-meta">Realtime parity fallback: this page polls every 5s while autorun is active.</p>
+              <p className="toolbar-meta">Realtime updates active. Timed reload fallback starts only if socket connectivity fails.</p>
             ) : null}
           </div>
         ) : null}

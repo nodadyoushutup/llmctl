@@ -62,7 +62,7 @@ export default function ScriptDetailPage() {
         <div className="title-row">
           <div>
             <h2>{script ? script.file_name : 'Script'}</h2>
-            <p>{script?.description || 'Native React replacement for `/scripts/:scriptId` detail and bindings.'}</p>
+            <p>{script?.description || 'Script metadata, content, and bindings.'}</p>
           </div>
           <div className="table-actions">
             {script ? <Link to={`/scripts/${script.id}/edit`} className="btn-link">Edit</Link> : null}

@@ -62,7 +62,7 @@ export default function McpDetailPage() {
         <div className="title-row">
           <div>
             <h2>{mcp ? mcp.name : 'MCP Server'}</h2>
-            <p>{mcp?.description || 'Native React replacement for `/mcps/:mcpId` detail and bindings.'}</p>
+            <p>{mcp?.description || 'Server metadata, config, and binding usage.'}</p>
           </div>
           <div className="table-actions">
             {mcp && !mcp.is_integrated ? <Link to={`/mcps/${mcp.id}/edit`} className="btn-link">Edit</Link> : null}

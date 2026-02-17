@@ -327,7 +327,7 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [ ] After every merge, run `npm run lint`, `npm run test -- --run`, and `npm run build` in `app/llmctl-studio-frontend` before next handoff.
 
 ## Stage 9 - Parallel Slice Ownership
-- [ ] Agent A owns Slice 2 + Slice 6 (execution surfaces and settings/integrations).
+- [x] Agent A owns Slice 2 + Slice 6 (execution surfaces and settings/integrations).
 - [ ] Agent B owns Slice 1 + Slice 5 + Slice 7 (core/chat, asset catalogs, and RAG/external tooling).
 - [x] Slice 3 + Slice 4 are completed and should stay locked unless a parity regression is discovered during Stage 9D audit.
 
@@ -345,7 +345,7 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 
 ## Stage 9C - Route Family Visual Parity Slices
 - [ ] Slice 1 (Agent B): Core shell routes (`/overview`, `/parity-checklist`, `/api-diagnostics`).
-- [ ] Slice 2 (Agent A): Execution routes (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`).
+- [x] Slice 2 (Agent A): Execution routes (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`).
 - [x] Slice 3 (Complete, lock): Planning/knowledge routes (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`).
 - [x] Slice 4 (Complete, lock): Flowchart routes (`/flowcharts*`, history/run detail/runtime views).
 - [ ] Slice 5 (Agent B): Settings routes (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`).
@@ -376,7 +376,7 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Captured Stage 9 Slice 4 screenshots for flowchart routes (`/flowcharts`, `/flowcharts/new`, `/flowcharts/:flowchartId`, `/flowcharts/:flowchartId/edit`, `/flowcharts/:flowchartId/history`, `/flowcharts/:flowchartId/history/:runId`, `/flowcharts/runs/:runId`).
 
 ## Stage 9D - Behavioral Parity Audit
-- [ ] Agent A closes Stage 9D checks for Slice 2 + Slice 6 routes.
+- [x] Agent A closes Stage 9D checks for Slice 2 + Slice 6 routes.
 - [ ] Agent B closes Stage 9D checks for Slice 1 + Slice 5 + Slice 7 routes.
 - [ ] Verify list-row behavior parity (`table-row-link` navigation + interactive element click exclusion).
 - [ ] Verify CRUD mutation behavior parity (success/error messaging, validation errors, disabled/busy states).

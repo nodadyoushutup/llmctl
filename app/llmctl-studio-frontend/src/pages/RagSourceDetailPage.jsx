@@ -131,7 +131,7 @@ export default function RagSourceDetailPage() {
         <div className="title-row">
           <div>
             <h2>RAG Source Detail</h2>
-            <p>Native React replacement for `/rag/sources/:sourceId` detail, status, quick index, and delete actions.</p>
+            <p>Source detail and indexing status.</p>
           </div>
           <div className="table-actions">
             <Link to="/rag/sources" className="btn-link btn-secondary">Back to Sources</Link>

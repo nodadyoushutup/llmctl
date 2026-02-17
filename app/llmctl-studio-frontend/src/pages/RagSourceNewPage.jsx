@@ -83,7 +83,7 @@ export default function RagSourceNewPage() {
         <div className="title-row">
           <div>
             <h2>New RAG Source</h2>
-            <p>Native React replacement for `/rag/sources/new` create flow and validation errors.</p>
+            <p>Configure a source and optional indexing schedule.</p>
           </div>
           <div className="table-actions">
             <Link to="/rag/sources" className="btn-link btn-secondary">Back to Sources</Link>

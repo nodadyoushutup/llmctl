@@ -36,10 +36,9 @@ function McpTable({ title, rows, onDelete, busyById, navigate, allowDelete }) {
             <tr>
               <th>Name</th>
               <th>Key</th>
-              <th>Type</th>
+              <th>Description</th>
               <th>Bindings</th>
-              <th>Updated</th>
-              <th className="table-actions-cell">Actions</th>
+              {allowDelete ? <th className="table-actions-cell">Delete</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -62,22 +61,11 @@ function McpTable({ title, rows, onDelete, busyById, navigate, allowDelete }) {
                     <Link to={href}>{mcp.name || `MCP ${mcp.id}`}</Link>
                   </td>
                   <td>{mcp.server_key || '-'}</td>
-                  <td>{mcp.is_integrated ? 'integrated' : 'custom'}</td>
+                  <td className="muted">{mcp.description || '-'}</td>
                   <td>{mcp.binding_count ?? 0}</td>
-                  <td>{mcp.updated_at || '-'}</td>
-                  <td className="table-actions-cell">
-                    <div className="table-actions">
-                      {!mcp.is_integrated ? (
-                        <Link
-                          to={`/mcps/${mcp.id}/edit`}
-                          className="icon-button"
-                          aria-label="Edit MCP server"
-                          title="Edit MCP server"
-                        >
-                          <ActionIcon name="edit" />
-                        </Link>
-                      ) : null}
-                      {allowDelete && !mcp.is_integrated ? (
+                  {allowDelete ? (
+                    <td className="table-actions-cell">
+                      <div className="table-actions">
                         <button
                           type="button"
                           className="icon-button icon-button-danger"
@@ -88,9 +76,9 @@ function McpTable({ title, rows, onDelete, busyById, navigate, allowDelete }) {
                         >
                           <ActionIcon name="trash" />
                         </button>
-                      ) : null}
-                    </div>
-                  </td>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               )
             })}
@@ -167,7 +155,7 @@ export default function McpsPage() {
         <div className="title-row">
           <div>
             <h2>MCP Servers</h2>
-            <p>Native React replacement for `/mcps` list/detail/edit flows.</p>
+            <p>User-managed and system-managed servers for task templates and flowchart nodes.</p>
           </div>
           <Link to="/mcps/new" className="btn-link">New MCP Server</Link>
         </div>
@@ -178,23 +166,23 @@ export default function McpsPage() {
 
       {!state.loading && !state.error ? (
         <McpTable
-          title="Custom MCP servers"
-          rows={custom}
-          onDelete={handleDelete}
-          busyById={busyById}
-          navigate={navigate}
-          allowDelete
-        />
-      ) : null}
-
-      {!state.loading && !state.error ? (
-        <McpTable
           title="Integrated MCP servers"
           rows={integrated}
           onDelete={handleDelete}
           busyById={busyById}
           navigate={navigate}
           allowDelete={false}
+        />
+      ) : null}
+
+      {!state.loading && !state.error ? (
+        <McpTable
+          title="Custom MCP servers"
+          rows={custom}
+          onDelete={handleDelete}
+          busyById={busyById}
+          navigate={navigate}
+          allowDelete
         />
       ) : null}
     </section>

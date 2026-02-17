@@ -222,7 +222,7 @@ export default function SettingsIntegrationsPage() {
         <div className="title-row">
           <div>
             <h2>Settings Integrations</h2>
-            <p>Native React replacement for `/settings/integrations/*` configuration and validation controls.</p>
+            <p>Configuration and validation controls for Git, provider integrations, and Chroma.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>

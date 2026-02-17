@@ -8595,7 +8595,7 @@ def create_quick_task():
         flash(message, "error")
         return redirect(url_for("agents.quick_task"))
 
-    if is_api_request:
+    if request.is_json:
         agent_id_raw = str(payload.get("agent_id") or "").strip()
         model_id_raw = str(payload.get("model_id") or "").strip()
         mcp_raw = payload.get("mcp_server_ids")
@@ -9455,7 +9455,7 @@ def create_node():
         flash(message, "error")
         return redirect(url_for("agents.new_node"))
 
-    if is_api_request:
+    if request.is_json:
         agent_id_raw = str(payload.get("agent_id") or "").strip()
         prompt = str(payload.get("prompt") or "").strip()
         uploads = []

@@ -127,6 +127,7 @@ import {
   previewSkillImport,
   reorderFlowchartNodeScripts,
   reorderFlowchartNodeSkills,
+  removeNodeAttachment,
   removeTaskTemplateAttachment,
   runFlowchart,
   setFlowchartNodeModel,
@@ -317,6 +318,7 @@ describe('studioApi', () => {
     })
     cancelNode(8)
     deleteNode(8)
+    removeNodeAttachment(8, 12)
 
     expect(requestJson).toHaveBeenNthCalledWith(1, '/nodes?page=1&per_page=10')
     expect(requestJson).toHaveBeenNthCalledWith(2, '/nodes?page=3&per_page=50&agent_id=7&node_type=task&status=running')
@@ -334,6 +336,35 @@ describe('studioApi', () => {
     })
     expect(requestJson).toHaveBeenNthCalledWith(6, '/nodes/8/cancel', { method: 'POST' })
     expect(requestJson).toHaveBeenNthCalledWith(7, '/nodes/8/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(8, '/nodes/8/attachments/12/remove', { method: 'POST' })
+  })
+
+  test('stage 3 node create uses multipart payload when attachments are present', () => {
+    const attachment = new File(['node attachment'], 'node.txt', { type: 'text/plain' })
+    createNode({
+      agentId: 3,
+      prompt: 'run this',
+      integrationKeys: ['github', 'jira'],
+      scriptIdsByType: { pre_init: [1, 2] },
+      scriptIds: [9],
+      attachments: [attachment],
+    })
+
+    expect(requestJson).toHaveBeenCalledTimes(1)
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/nodes/new', {
+      method: 'POST',
+      body: expect.any(FormData),
+    })
+
+    const call = requestJson.mock.calls[0]
+    const options = call[1]
+    const formData = options.body
+    expect(formData.get('agent_id')).toBe('3')
+    expect(formData.get('prompt')).toBe('run this')
+    expect(formData.getAll('integration_keys')).toEqual(['github', 'jira'])
+    expect(formData.getAll('pre_init_script_ids')).toEqual(['1', '2'])
+    expect(formData.getAll('script_ids')).toEqual(['9'])
+    expect(formData.getAll('attachments')).toEqual([attachment])
   })
 
   test('stage 3 quick endpoint maps to expected api paths', () => {
@@ -357,6 +388,34 @@ describe('studioApi', () => {
         integration_keys: ['github'],
       },
     })
+  })
+
+  test('stage 3 quick create uses multipart payload when attachments are present', () => {
+    const attachment = new File(['quick attachment'], 'quick.txt', { type: 'text/plain' })
+    createQuickTask({
+      prompt: 'hello',
+      agentId: 2,
+      modelId: 3,
+      mcpServerIds: [4],
+      integrationKeys: ['github'],
+      attachments: [attachment],
+    })
+
+    expect(requestJson).toHaveBeenCalledTimes(1)
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/quick', {
+      method: 'POST',
+      body: expect.any(FormData),
+    })
+
+    const call = requestJson.mock.calls[0]
+    const options = call[1]
+    const formData = options.body
+    expect(formData.get('prompt')).toBe('hello')
+    expect(formData.get('agent_id')).toBe('2')
+    expect(formData.get('model_id')).toBe('3')
+    expect(formData.getAll('mcp_server_ids')).toEqual(['4'])
+    expect(formData.getAll('integration_keys')).toEqual(['github'])
+    expect(formData.getAll('attachments')).toEqual([attachment])
   })
 
   test('stage 4 plans endpoints map to expected api paths', () => {

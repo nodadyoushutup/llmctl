@@ -27,12 +27,27 @@ function formatScriptTypeLabel(value) {
     .trim()
 }
 
+function mergeAttachments(current, incoming) {
+  const merged = [...current]
+  const seen = new Set(merged.map((file) => `${file.name}:${file.size}:${file.lastModified}`))
+  for (const file of incoming) {
+    const key = `${file.name}:${file.size}:${file.lastModified}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    merged.push(file)
+  }
+  return merged
+}
+
 export default function NodeNewPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [initialized, setInitialized] = useState(false)
+  const [attachments, setAttachments] = useState([])
   const [form, setForm] = useState({
     agentId: '',
     prompt: '',
@@ -176,6 +191,7 @@ export default function NodeNewPage() {
         prompt,
         integrationKeys: form.integrationKeys,
         scriptIdsByType: form.scriptIdsByType,
+        attachments,
       })
       const taskId = payload && Number.isInteger(payload.task_id) ? payload.task_id : null
       if (taskId) {
@@ -190,13 +206,30 @@ export default function NodeNewPage() {
     }
   }
 
+  function handleAttachmentInputChange(event) {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) {
+      return
+    }
+    setAttachments((current) => mergeAttachments(current, files))
+    event.target.value = ''
+  }
+
+  function handlePromptPaste(event) {
+    const files = Array.from(event.clipboardData?.files || [])
+    if (files.length === 0) {
+      return
+    }
+    setAttachments((current) => mergeAttachments(current, files))
+  }
+
   return (
     <section className="stack" aria-label="Create node">
       <article className="card">
         <div className="title-row">
           <div>
             <h2>Create Node</h2>
-            <p>Native React replacement for `/nodes/new` queue form.</p>
+            <p>Queue a single run and trigger the celery worker.</p>
           </div>
           <div className="table-actions">
             <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
@@ -229,8 +262,17 @@ export default function NodeNewPage() {
                 required
                 value={form.prompt}
                 placeholder="Write the node prompt."
+                onPaste={handlePromptPaste}
                 onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))}
               />
+            </label>
+            <label className="field field-span">
+              <span>Attachments (optional)</span>
+              <input type="file" multiple onChange={handleAttachmentInputChange} />
+              <span className="toolbar-meta">Paste images into the prompt or choose files. Saved to <code>data/attachments</code>.</span>
+              {attachments.length > 0 ? (
+                <span className="toolbar-meta">{attachments.map((file) => file.name).join(', ')}</span>
+              ) : null}
             </label>
             <fieldset className="field field-span">
               <span>Integrations (optional)</span>

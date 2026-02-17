@@ -70,7 +70,7 @@ export default function SkillDetailPage() {
         <div className="title-row">
           <div>
             <h2>{skill ? skill.display_name || skill.name : 'Skill'}</h2>
-            <p>{skill?.description || 'Native React replacement for `/skills/:skillId` version/detail view.'}</p>
+            <p>{skill?.description || 'Skill metadata, versions, and bindings.'}</p>
           </div>
           <div className="table-actions">
             {skill ? <Link to={`/skills/${skill.id}/edit`} className="btn-link">Edit</Link> : null}

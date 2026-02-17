@@ -100,7 +100,7 @@ export default function ChromaCollectionsPage() {
         <div className="title-row">
           <div>
             <h2>Chroma Collections</h2>
-            <p>Native React replacement for `/chroma/collections` explorer, pagination, detail navigation, and delete.</p>
+            <p>Browse collections, inspect metadata, and remove stale datasets.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/integrations/chroma" className="btn-link btn-secondary">Chroma Settings</Link>

@@ -126,7 +126,7 @@ export default function SkillEditPage() {
         <div className="title-row">
           <div>
             <h2>Edit Skill</h2>
-            <p>Native React replacement for `/skills/:skillId/edit` metadata/version updates.</p>
+            <p>Update metadata and publish new immutable versions.</p>
           </div>
           <div className="table-actions">
             {parsedSkillId ? <Link to={`/skills/${parsedSkillId}`} className="btn-link btn-secondary">Back to Skill</Link> : null}

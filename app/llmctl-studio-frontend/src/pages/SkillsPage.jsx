@@ -88,7 +88,7 @@ export default function SkillsPage() {
         <div className="title-row">
           <div>
             <h2>Skills</h2>
-            <p>Native React replacement for `/skills` list plus CRUD/import/export flows.</p>
+            <p>First-class skill packages assigned to Agents.</p>
           </div>
           <div className="table-actions">
             <Link to="/skills/import" className="btn-link btn-secondary">Import Skill</Link>
@@ -98,17 +98,18 @@ export default function SkillsPage() {
         {state.loading ? <p>Loading skills...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
-        {!state.loading && !state.error && skills.length === 0 ? <p>No skills found.</p> : null}
+        {!state.loading && !state.error && skills.length === 0 ? <p>No skills created yet.</p> : null}
         {!state.loading && !state.error && skills.length > 0 ? (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Slug</th>
                   <th>Status</th>
                   <th>Latest version</th>
-                  <th>Bindings</th>
-                  <th className="table-actions-cell">Actions</th>
+                  <th>Agent bindings</th>
+                  <th className="table-actions-cell">Delete</th>
                 </tr>
               </thead>
               <tbody>
@@ -125,29 +126,30 @@ export default function SkillsPage() {
                       <td>
                         <Link to={href}>{skill.display_name || skill.name || `Skill ${skill.id}`}</Link>
                       </td>
+                      <td>
+                        <p className="muted">{skill.name || '-'}</p>
+                      </td>
                       <td>{skill.status || '-'}</td>
                       <td>{skill.latest_version || '-'}</td>
                       <td>{skill.binding_count ?? 0}</td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
-                          <Link
-                            to={`/skills/${skill.id}/edit`}
-                            className="icon-button"
-                            aria-label="Edit skill"
-                            title="Edit skill"
-                          >
-                            <ActionIcon name="edit" />
-                          </Link>
-                          <button
-                            type="button"
-                            className="icon-button icon-button-danger"
-                            aria-label="Delete skill"
-                            title="Delete skill"
-                            disabled={busy || skill.is_git_read_only}
-                            onClick={() => handleDelete(skill.id)}
-                          >
-                            <ActionIcon name="trash" />
-                          </button>
+                          {skill.is_git_read_only ? (
+                            <span className="icon-button" aria-label="Git-based skill is read-only" title="Git-based skill is read-only">
+                              <i className="fa-solid fa-lock" />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="icon-button icon-button-danger"
+                              aria-label="Delete skill"
+                              title="Delete skill"
+                              disabled={busy}
+                              onClick={() => handleDelete(skill.id)}
+                            >
+                              <ActionIcon name="trash" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

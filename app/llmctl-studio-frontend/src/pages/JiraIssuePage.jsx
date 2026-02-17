@@ -78,7 +78,7 @@ export default function JiraIssuePage() {
         <div className="title-row">
           <div>
             <h2>Jira Issue</h2>
-            <p>Native React replacement for `/jira/issues/:issueKey` detail and comment surfaces.</p>
+            <p>Issue details, status metadata, and comment activity.</p>
           </div>
           <div className="table-actions">
             <Link to="/jira" className="btn-link btn-secondary">Back to Jira</Link>

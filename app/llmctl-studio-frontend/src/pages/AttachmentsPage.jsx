@@ -102,7 +102,7 @@ export default function AttachmentsPage() {
         <div className="title-row">
           <div>
             <h2>Attachments</h2>
-            <p>Native React replacement for `/attachments` list and row actions.</p>
+            <p>Files attached to tasks, templates, and flowchart nodes.</p>
           </div>
         </div>
         {state.loading ? <p>Loading attachments...</p> : null}
@@ -117,8 +117,8 @@ export default function AttachmentsPage() {
                   <th>File</th>
                   <th>Type</th>
                   <th>Size</th>
-                  <th>Bindings</th>
-                  <th>Updated</th>
+                  <th>Linked</th>
+                  <th>Created</th>
                   <th className="table-actions-cell">Actions</th>
                 </tr>
               </thead>
@@ -139,7 +139,7 @@ export default function AttachmentsPage() {
                       <td>{attachment.content_type || '-'}</td>
                       <td>{formatSize(attachment.size_bytes)}</td>
                       <td>{attachment.binding_count ?? 0}</td>
-                      <td>{attachment.updated_at || '-'}</td>
+                      <td>{attachment.created_at || attachment.updated_at || '-'}</td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
                           <button

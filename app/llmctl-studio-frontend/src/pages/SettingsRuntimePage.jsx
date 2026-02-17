@@ -255,7 +255,7 @@ export default function SettingsRuntimePage() {
         <div className="title-row">
           <div>
             <h2>Settings Runtime</h2>
-            <p>Native React replacement for runtime node, RAG, and chat settings flows.</p>
+            <p>Node executor, RAG runtime, and chat runtime controls.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>

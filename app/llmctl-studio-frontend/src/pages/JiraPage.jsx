@@ -67,7 +67,7 @@ export default function JiraPage() {
         <div className="title-row">
           <div>
             <h2>Jira Workspace</h2>
-            <p>Native React replacement for `/jira` board explorer and issue drill-down routes.</p>
+            <p>Browse board columns and drill into issue details.</p>
           </div>
           <div className="table-actions">
             <Link to="/settings/integrations/jira" className="btn-link btn-secondary">Jira Settings</Link>

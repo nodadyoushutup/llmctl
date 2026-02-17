@@ -71,7 +71,7 @@ export default function ScriptNewPage() {
         <div className="title-row">
           <div>
             <h2>New Script</h2>
-            <p>Native React replacement for `/scripts/new` creation flow.</p>
+            <p>Upload a script file or paste content to attach to agents.</p>
           </div>
           <Link to="/scripts" className="btn-link btn-secondary">All Scripts</Link>
         </div>

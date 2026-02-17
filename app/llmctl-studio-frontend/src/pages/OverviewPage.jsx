@@ -159,7 +159,7 @@ export default function OverviewPage() {
                   </p>
                 </div>
                 <p className="muted" style={{ marginTop: '8px', fontSize: '12px' }}>
-                  status {String(agent.status || 'off')}
+                  last autorun {agent.last_run_at || '-'}
                 </p>
               </div>
             )) : <p className="muted">No active agents right now.</p>}
