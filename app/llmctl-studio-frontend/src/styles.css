@@ -2873,12 +2873,6 @@ fieldset.field {
   box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.28), 0 14px 28px rgba(9, 14, 21, 0.35);
 }
 
-.flow-ws-node.is-running .flow-ws-node-shape {
-  border-color: rgba(255, 122, 24, 0.95);
-  box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.34), 0 14px 28px rgba(9, 14, 21, 0.35);
-  background: linear-gradient(140deg, rgba(93, 42, 8, 0.96), rgba(27, 18, 13, 0.99));
-}
-
 .flow-ws-node-content {
   position: absolute;
   inset: 10px;
@@ -2963,6 +2957,11 @@ fieldset.field {
 .flow-ws-node.is-type-rag .flow-ws-node-shape {
   border-color: rgba(16, 185, 129, 0.78);
   background: linear-gradient(140deg, rgba(10, 61, 44, 0.95), rgba(17, 24, 33, 0.98));
+}
+
+.flow-ws-node.is-running .flow-ws-node-shape {
+  border-color: rgba(255, 122, 24, 0.95);
+  box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.34), 0 0 0 6px rgba(255, 122, 24, 0.14), 0 14px 28px rgba(9, 14, 21, 0.35);
 }
 
 .flow-ws-node-connector {

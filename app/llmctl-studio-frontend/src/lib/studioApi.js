@@ -520,6 +520,35 @@ export function createQuickTask({
   })
 }
 
+export function updateQuickTaskDefaults({
+  defaultAgentId = null,
+  defaultModelId = null,
+  defaultMcpServerIds = [],
+  defaultIntegrationKeys = [],
+} = {}) {
+  return requestJson('/quick/settings', {
+    method: 'POST',
+    body: {
+      default_agent_id: defaultAgentId == null || String(defaultAgentId).trim() === ''
+        ? null
+        : parsePositiveId(defaultAgentId, 'defaultAgentId'),
+      default_model_id: defaultModelId == null || String(defaultModelId).trim() === ''
+        ? null
+        : parsePositiveId(defaultModelId, 'defaultModelId'),
+      default_mcp_server_ids: Array.isArray(defaultMcpServerIds)
+        ? defaultMcpServerIds
+          .map((value) => Number.parseInt(String(value), 10))
+          .filter((value) => Number.isInteger(value) && value > 0)
+        : [],
+      default_integration_keys: Array.isArray(defaultIntegrationKeys)
+        ? defaultIntegrationKeys
+          .map((value) => String(value || '').trim())
+          .filter((value) => value)
+        : [],
+    },
+  })
+}
+
 export function getPlans({ page = 1, perPage = 20 } = {}) {
   return requestJson(
     appendQuery('/plans', {

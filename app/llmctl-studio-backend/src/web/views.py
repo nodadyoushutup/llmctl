@@ -246,6 +246,7 @@ DEFAULT_RUNS_PER_PAGE = DEFAULT_TASKS_PER_PAGE
 RUNS_PER_PAGE_OPTIONS = TASKS_PER_PAGE_OPTIONS
 FLOWCHART_NODE_TYPE_SET = set(FLOWCHART_NODE_TYPE_CHOICES)
 DOCKER_CHROMA_HOST_ALIASES = {"llmctl-chromadb", "chromadb"}
+QUICK_DEFAULT_SETTINGS_PROVIDER = "quick"
 CODEX_MODEL_PREFERENCE = (
     "gpt-5.2-codex",
     "gpt-5.3-codex",
@@ -1872,6 +1873,93 @@ def _quick_node_default_model_id(models: list[LLMModel]) -> int | None:
     if configured_default in model_ids:
         return configured_default
     return models[0].id
+
+
+def _split_csv_values(raw: str | None) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for part in str(raw or "").split(","):
+        cleaned = part.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        values.append(cleaned)
+    return values
+
+
+def _resolved_quick_default_settings(
+    *,
+    agents: list[Agent],
+    models: list[LLMModel],
+    mcp_servers: list[MCPServer],
+    integration_options: list[dict[str, object]],
+) -> dict[str, object]:
+    settings = _load_integration_settings(QUICK_DEFAULT_SETTINGS_PROVIDER)
+    agent_ids = {agent.id for agent in agents}
+    model_ids = {model.id for model in models}
+    mcp_ids = {server.id for server in mcp_servers}
+    integration_option_keys = {
+        str(option.get("key") or "").strip()
+        for option in integration_options
+        if str(option.get("key") or "").strip()
+    }
+    connected_integration_keys = [
+        str(option.get("key") or "").strip()
+        for option in integration_options
+        if str(option.get("key") or "").strip() and bool(option.get("connected"))
+    ]
+
+    resolved_agent_id: int | None = None
+    try:
+        selected_agent_id = _coerce_optional_int(
+            settings.get("default_agent_id"),
+            field_name="default_agent_id",
+            minimum=1,
+        )
+        if selected_agent_id is not None and selected_agent_id in agent_ids:
+            resolved_agent_id = selected_agent_id
+    except ValueError:
+        resolved_agent_id = None
+
+    resolved_model_id = _quick_node_default_model_id(models)
+    try:
+        selected_model_id = _coerce_optional_int(
+            settings.get("default_model_id"),
+            field_name="default_model_id",
+            minimum=1,
+        )
+        if selected_model_id is not None and selected_model_id in model_ids:
+            resolved_model_id = selected_model_id
+    except ValueError:
+        pass
+
+    selected_mcp_ids = _coerce_chat_id_list(
+        _split_csv_values(settings.get("default_mcp_server_ids")),
+        field_name="default_mcp_server_id",
+    )
+    resolved_mcp_server_ids: list[int] = []
+    for mcp_id in selected_mcp_ids:
+        if mcp_id in mcp_ids and mcp_id not in resolved_mcp_server_ids:
+            resolved_mcp_server_ids.append(mcp_id)
+
+    resolved_integration_keys: list[str] = []
+    if "default_integration_keys" in settings:
+        parsed_integration_keys = _split_csv_values(settings.get("default_integration_keys"))
+        valid_keys, _ = validate_task_integration_keys(parsed_integration_keys)
+        for key in valid_keys:
+            if key in integration_option_keys and key not in resolved_integration_keys:
+                resolved_integration_keys.append(key)
+    else:
+        for key in connected_integration_keys:
+            if key in integration_option_keys and key not in resolved_integration_keys:
+                resolved_integration_keys.append(key)
+
+    return {
+        "default_agent_id": resolved_agent_id,
+        "default_model_id": resolved_model_id,
+        "default_mcp_server_ids": resolved_mcp_server_ids,
+        "default_integration_keys": resolved_integration_keys,
+    }
 
 
 def _load_runs(limit: int | None = None) -> list[Run]:
@@ -8396,13 +8484,13 @@ def quick_task():
     models = _load_llm_models()
     mcp_servers = _load_mcp_servers()
     integration_options = _build_node_integration_options()
-    default_selected_integration_keys = [
-        str(option["key"])
-        for option in integration_options
-        if bool(option.get("connected"))
-    ]
+    quick_default_settings = _resolved_quick_default_settings(
+        agents=agents,
+        models=models,
+        mcp_servers=mcp_servers,
+        integration_options=integration_options,
+    )
     _, summary = _agent_rollup(agents)
-    default_model_id = _quick_node_default_model_id(models)
     if _nodes_wants_json():
         return {
             "agents": [_serialize_agent_list_item(agent) for agent in agents],
@@ -8423,8 +8511,11 @@ def quick_task():
                 for server in mcp_servers
             ],
             "integration_options": integration_options,
-            "selected_integration_keys": default_selected_integration_keys,
-            "default_model_id": default_model_id,
+            "default_agent_id": quick_default_settings["default_agent_id"],
+            "default_model_id": quick_default_settings["default_model_id"],
+            "selected_mcp_server_ids": quick_default_settings["default_mcp_server_ids"],
+            "selected_integration_keys": quick_default_settings["default_integration_keys"],
+            "quick_default_settings": quick_default_settings,
         }
     return render_template(
         "quick_task.html",
@@ -8432,13 +8523,102 @@ def quick_task():
         models=models,
         mcp_servers=mcp_servers,
         integration_options=integration_options,
-        selected_integration_keys=default_selected_integration_keys,
-        default_model_id=default_model_id,
+        default_agent_id=quick_default_settings["default_agent_id"],
+        default_model_id=quick_default_settings["default_model_id"],
+        selected_mcp_server_ids=quick_default_settings["default_mcp_server_ids"],
+        selected_integration_keys=quick_default_settings["default_integration_keys"],
         summary=summary,
         page_title="Quick Node",
         active_page="quick",
         fixed_list_page=True,
     )
+
+
+@bp.post("/quick/settings")
+def update_quick_task_defaults():
+    request_payload = _settings_request_payload()
+    is_api_request = _stage3_api_request()
+
+    def _quick_settings_error(message: str, status_code: int = 400):
+        if is_api_request:
+            return {"error": message}, status_code
+        flash(message, "error")
+        return redirect(url_for("agents.quick_task"))
+
+    agents = _load_agents()
+    models = _load_llm_models()
+    mcp_servers = _load_mcp_servers()
+    integration_options = _build_node_integration_options()
+    agent_ids = {agent.id for agent in agents}
+    model_ids = {model.id for model in models}
+    mcp_ids = {server.id for server in mcp_servers}
+    integration_option_keys = {
+        str(option.get("key") or "").strip()
+        for option in integration_options
+        if str(option.get("key") or "").strip()
+    }
+
+    selected_agent_id = _coerce_optional_int(
+        _settings_form_value(request_payload, "default_agent_id"),
+        field_name="default_agent_id",
+        minimum=1,
+    )
+    if selected_agent_id is not None and selected_agent_id not in agent_ids:
+        return _quick_settings_error("Default agent selection is invalid.")
+
+    selected_model_id = _coerce_optional_int(
+        _settings_form_value(request_payload, "default_model_id"),
+        field_name="default_model_id",
+        minimum=1,
+    )
+    if selected_model_id is not None and selected_model_id not in model_ids:
+        return _quick_settings_error("Default model selection is invalid.")
+
+    selected_mcp_server_ids = _coerce_chat_id_list(
+        _settings_form_list(request_payload, "default_mcp_server_ids"),
+        field_name="default_mcp_server_id",
+    )
+    if any(server_id not in mcp_ids for server_id in selected_mcp_server_ids):
+        return _quick_settings_error("Default MCP server selection is invalid.")
+
+    integration_raw_values: list[str] = []
+    for raw_value in _settings_form_list(request_payload, "default_integration_keys"):
+        for item in str(raw_value or "").split(","):
+            cleaned = item.strip()
+            if cleaned:
+                integration_raw_values.append(cleaned)
+    selected_integration_keys, invalid_integration_keys = validate_task_integration_keys(
+        integration_raw_values
+    )
+    if invalid_integration_keys:
+        return _quick_settings_error("Default integration selection is invalid.")
+    if any(key not in integration_option_keys for key in selected_integration_keys):
+        return _quick_settings_error("Default integration selection is invalid.")
+
+    _save_integration_settings(
+        QUICK_DEFAULT_SETTINGS_PROVIDER,
+        {
+            "default_agent_id": str(selected_agent_id or ""),
+            "default_model_id": str(selected_model_id or ""),
+            "default_mcp_server_ids": ",".join(
+                str(server_id) for server_id in selected_mcp_server_ids
+            ),
+            "default_integration_keys": ",".join(selected_integration_keys),
+        },
+    )
+    quick_default_settings = _resolved_quick_default_settings(
+        agents=agents,
+        models=models,
+        mcp_servers=mcp_servers,
+        integration_options=integration_options,
+    )
+    if is_api_request:
+        return {
+            "ok": True,
+            "quick_default_settings": quick_default_settings,
+        }
+    flash("Quick node defaults updated.", "success")
+    return redirect(url_for("agents.quick_task"))
 
 
 @bp.get("/chat")

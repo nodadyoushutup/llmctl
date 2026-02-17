@@ -170,6 +170,7 @@ import {
   updatePlan,
   updatePlanStage,
   updatePlanTask,
+  updateQuickTaskDefaults,
   updateAgent,
   updateAgentPriority,
   updateRole,
@@ -454,6 +455,12 @@ describe('studioApi', () => {
       mcpServerIds: [4],
       integrationKeys: ['github'],
     })
+    updateQuickTaskDefaults({
+      defaultAgentId: 2,
+      defaultModelId: 3,
+      defaultMcpServerIds: [4],
+      defaultIntegrationKeys: ['github'],
+    })
 
     expect(requestJson).toHaveBeenNthCalledWith(1, '/quick')
     expect(requestJson).toHaveBeenNthCalledWith(2, '/quick', {
@@ -464,6 +471,15 @@ describe('studioApi', () => {
         model_id: 3,
         mcp_server_ids: [4],
         integration_keys: ['github'],
+      },
+    })
+    expect(requestJson).toHaveBeenNthCalledWith(3, '/quick/settings', {
+      method: 'POST',
+      body: {
+        default_agent_id: 2,
+        default_model_id: 3,
+        default_mcp_server_ids: [4],
+        default_integration_keys: ['github'],
       },
     })
   })

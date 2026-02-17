@@ -168,6 +168,24 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('Task nodes require a non-empty task prompt before save/validate.')).toBeTruthy()
   })
 
+  test('highlights running nodes when runtime reports active ids', async () => {
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 500, y: 220 },
+        ]}
+        initialEdges={[]}
+        runningNodeIds={['2']}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"].is-running')).toBeTruthy()
+    })
+    expect(container.querySelector('.flow-ws-node[data-node-token="id:1"].is-running')).toBeFalsy()
+  })
+
   test('keeps selected node selected when applying saved graph response', async () => {
     const onGraphChange = vi.fn()
     const editorRef = createRef()

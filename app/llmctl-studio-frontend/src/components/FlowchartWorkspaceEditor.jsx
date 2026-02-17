@@ -1729,7 +1729,8 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 const dimensions = nodeDimensions(node.node_type)
                 const connectorLayout = connectorLayoutForNodeType(node.node_type)
                 const selected = selectedNodeToken === node.token
-                const running = node.persistedId != null && runningNodeIdSet.has(node.persistedId)
+                const persistedNodeId = parsePositiveInt(node.persistedId)
+                const running = persistedNodeId != null && runningNodeIdSet.has(persistedNodeId)
                 const connecting = Boolean(connectStart || connectDrag)
                 return (
                   <button

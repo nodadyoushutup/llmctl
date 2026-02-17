@@ -89,7 +89,7 @@ export default function FlowchartDetailPage() {
   const [validationState, setValidationState] = useState(null)
   const [runtimeWarning, setRuntimeWarning] = useState('')
   const [catalogWarning, setCatalogWarning] = useState('')
-  const [areToolbarToolsExpanded, setAreToolbarToolsExpanded] = useState(false)
+  const [areToolbarToolsExpanded, setAreToolbarToolsExpanded] = useState(true)
   const [isMetaExpanded, setIsMetaExpanded] = useState(false)
   const workspaceEditorRef = useRef(null)
 

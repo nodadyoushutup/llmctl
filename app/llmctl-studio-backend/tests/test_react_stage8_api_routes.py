@@ -351,6 +351,34 @@ class Stage8ApiRouteTests(unittest.TestCase):
             any(int(item.get("id") or 0) == thread_id for item in runtime_after_archive_payload.get("threads", []))
         )
 
+    def test_quick_settings_defaults_roundtrip_json(self) -> None:
+        model = self._create_model(name="Quick Defaults Model")
+        mcp_server = self._create_mcp_server(name="Quick Defaults MCP")
+
+        save = self.client.post(
+            "/api/quick/settings",
+            json={
+                "default_agent_id": None,
+                "default_model_id": model.id,
+                "default_mcp_server_ids": [mcp_server.id],
+                "default_integration_keys": ["github"],
+            },
+        )
+        self.assertEqual(200, save.status_code)
+        save_payload = save.get_json() or {}
+        self.assertTrue(bool(save_payload.get("ok")))
+        quick_default_settings = save_payload.get("quick_default_settings") or {}
+        self.assertEqual(model.id, quick_default_settings.get("default_model_id"))
+        self.assertEqual([mcp_server.id], quick_default_settings.get("default_mcp_server_ids"))
+        self.assertEqual(["github"], quick_default_settings.get("default_integration_keys"))
+
+        meta = self.client.get("/api/quick")
+        self.assertEqual(200, meta.status_code)
+        meta_payload = meta.get_json() or {}
+        self.assertEqual(model.id, meta_payload.get("default_model_id"))
+        self.assertEqual([mcp_server.id], meta_payload.get("selected_mcp_server_ids"))
+        self.assertEqual(["github"], meta_payload.get("selected_integration_keys"))
+
     def test_flowchart_catalog_handles_memories_without_title_field(self) -> None:
         self._create_memory(description="Remember to validate deployment readiness before promotion.")
 

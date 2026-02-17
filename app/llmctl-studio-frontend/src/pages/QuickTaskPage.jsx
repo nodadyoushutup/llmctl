@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
-import { createQuickTask, getQuickTaskMeta } from '../lib/studioApi'
+import { createQuickTask, getQuickTaskMeta, updateQuickTaskDefaults } from '../lib/studioApi'
 
 function errorMessage(error, fallback) {
   if (error instanceof HttpError) {
@@ -49,6 +49,9 @@ export default function QuickTaskPage() {
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveDefaultsBusy, setSaveDefaultsBusy] = useState(false)
+  const [saveDefaultsMessage, setSaveDefaultsMessage] = useState('')
+  const [saveDefaultsError, setSaveDefaultsError] = useState('')
   const [initialized, setInitialized] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [form, setForm] = useState({
@@ -85,6 +88,15 @@ export default function QuickTaskPage() {
   const defaultModelId = payload && Number.isInteger(payload.default_model_id)
     ? payload.default_model_id
     : null
+  const defaultAgentId = payload && Number.isInteger(payload.default_agent_id)
+    ? payload.default_agent_id
+    : null
+  const selectedMcpServerIds = payload && Array.isArray(payload.selected_mcp_server_ids)
+    ? payload.selected_mcp_server_ids
+      .map((value) => Number.parseInt(String(value), 10))
+      .filter((value) => Number.isInteger(value) && value > 0)
+      .map((value) => String(value))
+    : []
 
   useEffect(() => {
     if (initialized || !payload) {
@@ -95,11 +107,49 @@ export default function QuickTaskPage() {
       : []
     setForm((current) => ({
       ...current,
+      agentId: defaultAgentId ? String(defaultAgentId) : '',
       modelId: defaultModelId ? String(defaultModelId) : '',
+      mcpServerIds: selectedMcpServerIds,
       integrationKeys: selectedIntegrationKeys,
     }))
     setInitialized(true)
-  }, [defaultModelId, initialized, payload])
+  }, [defaultAgentId, defaultModelId, initialized, payload, selectedMcpServerIds])
+
+  async function handleSaveDefaults() {
+    setSaveDefaultsError('')
+    setSaveDefaultsMessage('')
+    setSaveDefaultsBusy(true)
+    try {
+      const response = await updateQuickTaskDefaults({
+        defaultAgentId: parseOptionalId(form.agentId),
+        defaultModelId: parseOptionalId(form.modelId),
+        defaultMcpServerIds: form.mcpServerIds.map((value) => Number(value)),
+        defaultIntegrationKeys: form.integrationKeys,
+      })
+      const defaults = response && typeof response === 'object' && response.quick_default_settings && typeof response.quick_default_settings === 'object'
+        ? response.quick_default_settings
+        : null
+      if (defaults) {
+        const nextPayload = payload && typeof payload === 'object'
+          ? {
+            ...payload,
+            default_agent_id: defaults.default_agent_id ?? null,
+            default_model_id: defaults.default_model_id ?? null,
+            selected_mcp_server_ids: Array.isArray(defaults.default_mcp_server_ids) ? defaults.default_mcp_server_ids : [],
+            selected_integration_keys: Array.isArray(defaults.default_integration_keys) ? defaults.default_integration_keys : [],
+          }
+          : null
+        if (nextPayload) {
+          setState((current) => ({ ...current, payload: nextPayload }))
+        }
+      }
+      setSaveDefaultsMessage('Quick defaults saved.')
+    } catch (error) {
+      setSaveDefaultsError(errorMessage(error, 'Failed to save quick defaults.'))
+    } finally {
+      setSaveDefaultsBusy(false)
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -167,14 +217,28 @@ export default function QuickTaskPage() {
       {state.loading ? <p className="muted">Loading quick task metadata...</p> : null}
       {state.error ? <p className="error-text">{state.error}</p> : null}
       {formError ? <p className="error-text">{formError}</p> : null}
+      {saveDefaultsError ? <p className="error-text">{saveDefaultsError}</p> : null}
+      {saveDefaultsMessage ? <p className="muted">{saveDefaultsMessage}</p> : null}
       <form className="quick-node-form" id="quick-task-form" onSubmit={handleSubmit}>
         <article className="quick-node-panel quick-node-controls">
           <PanelHeader
             title="Quick Node"
             actions={(
-              <Link to="/nodes" className="icon-button" aria-label="Back to nodes" title="Back to nodes">
-                <i className="fa-solid fa-list" />
-              </Link>
+              <>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={saveDefaultsBusy ? 'Saving quick defaults' : 'Save quick defaults'}
+                  title={saveDefaultsBusy ? 'Saving quick defaults' : 'Save quick defaults'}
+                  disabled={saveDefaultsBusy}
+                  onClick={handleSaveDefaults}
+                >
+                  <ActionIcon name="save" />
+                </button>
+                <Link to="/nodes" className="icon-button" aria-label="Back to nodes" title="Back to nodes">
+                  <i className="fa-solid fa-list" />
+                </Link>
+              </>
             )}
           />
           <div className="quick-node-panel-body quick-node-controls-body">
