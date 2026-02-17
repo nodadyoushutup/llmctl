@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_attachments') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+  <form
+    method="post"
+    action="{{ url_for('agents.delete_attachment', attachment_id=attachment.id) }}"
+    onsubmit="return confirm('Delete this attachment?');"
+  >
+    <input type="hidden" name="next" value="{{ url_for('agents.list_attachments') }}" />
+    <button
+      type="submit"
+      class="icon-button icon-button-danger"
+      aria-label="Delete attachment"
+    >
+      <i class="fa-solid fa-trash"></i>
+    </button>
+  </form>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">attachment {{ attachment.id }}</p>
+      <h2 class="section-title">{{ attachment.file_name }}</h2>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">details</p>
+      <div class="stack" style="margin-top: 12px; font-size: 12px;">
+        <p class="muted">Content type: {{ attachment.content_type or "-" }}</p>
+        <p class="muted">Size: {{ format_bytes(attachment.size_bytes) }}</p>
+        <p class="muted">Path: {{ attachment.file_path or "-" }}</p>
+        <p class="muted">Linked tasks: {{ tasks | length }}</p>
+        <p class="muted">Linked templates: {{ templates | length }}</p>
+        <p class="muted">Linked flowchart nodes: {{ flowchart_nodes | length }}</p>
+        <p class="muted">Created: {{ human_time(attachment.created_at) }}</p>
+        <p class="muted">Updated: {{ human_time(attachment.updated_at) }}</p>
+      </div>
+    </div>
+    {% if is_image_attachment and attachment_preview_url %}
+      <div class="subcard attachment-preview-card">
+        <p class="eyebrow">preview</p>
+        <button
+          type="button"
+          class="attachment-preview"
+          data-attachment-preview
+          data-full-src="{{ attachment_preview_url }}"
+          data-alt="{{ attachment.file_name }}"
+        >
+          <img src="{{ attachment_preview_url }}" alt="{{ attachment.file_name }}" />
+        </button>
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          Click to view full screen.
+        </p>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Attached Tasks</h2>
+  </div>
+  {% if tasks %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Status</th>
+            <th>Agent</th>
+            <th>Template</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_node', task_id=task.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_node', task_id=task.id) }}">{{ task.id }}</a>
+              </td>
+              <td>
+                {% if task.status == "running" %}
+                  <span class="status status-running">running</span>
+                {% elif task.status == "queued" %}
+                  <span class="status status-queued">queued</span>
+                {% elif task.status == "pending" %}
+                  <span class="status status-queued">pending</span>
+                {% elif task.status == "succeeded" %}
+                  <span class="status status-success">succeeded</span>
+                {% elif task.status == "failed" %}
+                  <span class="status status-failed">failed</span>
+                {% else %}
+                  <span class="status status-idle">{{ task.status }}</span>
+                {% endif %}
+              </td>
+              <td class="muted">
+                {% if task.agent_id is not none %}
+                  {{ agents_by_id.get(task.agent_id, "Agent " ~ task.agent_id) }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="muted">
+                {% if task.task_template_id %}
+                  <a href="{{ url_for('agents.view_task_template', template_id=task.task_template_id) }}">
+                    {{ templates_by_id.get(task.task_template_id, "Template " ~ task.task_template_id) }}
+                  </a>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="muted">{{ human_time(task.created_at) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No tasks attached yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Attached Templates</h2>
+  </div>
+  {% if templates %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for template in templates %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_task_template', template_id=template.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+                  {{ template.name }}
+                </a>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ template.description or "-" }}
+                </p>
+              </td>
+              <td class="muted">{{ human_time(template.created_at) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No templates attached yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Attached Flowchart Nodes</h2>
+  </div>
+  {% if flowchart_nodes %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Node</th>
+            <th>Type</th>
+            <th>Flowchart</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for node in flowchart_nodes %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id, node=node.id) }}"
+            >
+              <td>
+                <a href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id, node=node.id) }}">
+                  {{ node.title or ("Node " ~ node.id) }}
+                </a>
+              </td>
+              <td class="muted">{{ node.node_type }}</td>
+              <td class="muted">
+                {{ flowcharts_by_id.get(node.flowchart_id, "Flowchart " ~ node.flowchart_id) }}
+              </td>
+              <td class="muted">{{ human_time(node.updated_at) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No flowchart nodes attached yet.</p>
+  {% endif %}
+</section>
+
+{% if is_image_attachment and attachment_preview_url %}
+  <div class="attachment-modal" data-attachment-modal aria-hidden="true">
+    <div class="attachment-modal__backdrop" data-attachment-modal-close></div>
+    <div
+      class="attachment-modal__content"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Attachment preview"
+    >
+      <button
+        type="button"
+        class="attachment-modal__close"
+        data-attachment-modal-close
+        aria-label="Close preview"
+      >
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+      <img class="attachment-modal__image" data-attachment-modal-image alt="" />
+    </div>
+  </div>
+{% endif %}
+
+<style>
+  .attachment-preview-card {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .attachment-preview {
+    margin-top: 12px;
+    border-radius: 18px;
+    border: 1px solid var(--line);
+    background: rgba(11, 15, 20, 0.6);
+    padding: 10px;
+    cursor: zoom-in;
+    display: grid;
+    place-items: center;
+  }
+
+  .attachment-preview img {
+    width: 100%;
+    max-height: 260px;
+    object-fit: contain;
+    border-radius: 14px;
+  }
+
+  .attachment-preview:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+  }
+
+  .attachment-modal {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1200;
+  }
+
+  .attachment-modal.is-open {
+    display: flex;
+  }
+
+  .attachment-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(4, 8, 12, 0.88);
+    backdrop-filter: blur(2px);
+  }
+
+  .attachment-modal__content {
+    position: relative;
+    z-index: 1;
+    max-width: min(1200px, 92vw);
+    max-height: 88vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+  }
+
+  .attachment-modal__image {
+    width: 100%;
+    height: 100%;
+    max-height: 82vh;
+    object-fit: contain;
+    border-radius: 20px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    background: rgba(9, 13, 18, 0.92);
+  }
+
+  .attachment-modal__close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    height: 40px;
+    width: 40px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(12, 16, 22, 0.85);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .attachment-modal__close:hover {
+    border-color: rgba(255, 122, 24, 0.4);
+  }
+</style>
+
+<script>
+  const attachmentRows = document.querySelectorAll(".table-row-link");
+  attachmentRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+
+  const previewButton = document.querySelector("[data-attachment-preview]");
+  const previewModal = document.querySelector("[data-attachment-modal]");
+  const previewImage = document.querySelector("[data-attachment-modal-image]");
+  const closeButtons = document.querySelectorAll("[data-attachment-modal-close]");
+
+  const closePreview = () => {
+    if (!previewModal || !previewImage) {
+      return;
+    }
+    previewModal.classList.remove("is-open");
+    previewModal.setAttribute("aria-hidden", "true");
+    previewImage.removeAttribute("src");
+  };
+
+  if (previewButton && previewModal && previewImage) {
+    previewButton.addEventListener("click", () => {
+      previewImage.src = previewButton.dataset.fullSrc;
+      previewImage.alt = previewButton.dataset.alt || "Attachment preview";
+      previewModal.classList.add("is-open");
+      previewModal.setAttribute("aria-hidden", "false");
+    });
+
+    closeButtons.forEach((button) => {
+      button.addEventListener("click", closePreview);
+    });
+
+    previewModal.addEventListener("click", (event) => {
+      if (event.target === previewModal) {
+        closePreview();
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closePreview();
+      }
+    });
+  }
+</script>
+{% endblock %}

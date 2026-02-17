@@ -197,9 +197,9 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Stage 8: RAG pages and external tools surfaces (GitHub/Jira/Confluence/Chroma).
 - [x] Stage 9: Visual parity recreation and screenshot signoff (legacy-exact target).
 - [x] Stage 10: React-only routing hardening and bridge decommission prep.
-- [ ] Stage 11: Legacy backend GUI removal and backend API-only cleanup.
-- [ ] Stage 12: Automated Testing.
-- [ ] Stage 13: Docs Updates.
+- [x] Stage 11: Legacy backend GUI removal and backend API-only cleanup.
+- [x] Stage 12: Automated Testing.
+- [x] Stage 13: Docs Updates.
 
 ## React Baseline Already Implemented
 - [x] Migration hub shell route (`/migration`).
@@ -416,36 +416,53 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Verify all previously bridged routes are now native React routes.
 
 ## Stage 11 - Legacy Backend GUI Removal
-- [ ] Delete backend template-rendered GUI route handlers.
-- [ ] Delete backend Jinja templates and legacy static UI assets.
-- [ ] Remove frontend nginx legacy route proxy fallback behavior.
-- [ ] Keep backend focused on API/realtime/service responsibilities only.
-- [ ] Validate no user-facing GUI route is served from Flask templates.
+- [x] Delete backend template-rendered GUI route handlers.
+- [x] Delete backend Jinja templates and legacy static UI assets.
+- [x] Remove frontend nginx legacy route proxy fallback behavior.
+- [x] Keep backend focused on API/realtime/service responsibilities only.
+- [x] Validate no user-facing GUI route is served from Flask templates.
 
 ## Stage 11 - Hard Cutover Gate
-- [ ] Every legacy page/flow has a native React equivalent.
-- [ ] Every legacy mutation flow has React parity coverage.
-- [ ] Every legacy page/flow has legacy-accurate visual parity signoff from screenshot review.
-- [ ] Typography, spacing, colors, component geometry, iconography, and responsive behavior match legacy baseline.
-- [ ] Realtime and long-running feedback parity is verified.
-- [ ] Bridge/iframe fallback is removed from runtime behavior.
-- [ ] Backend GUI template surface is removed.
+- [x] Every legacy page/flow has a native React equivalent.
+- [x] Every legacy mutation flow has React parity coverage.
+- [x] Every legacy page/flow has legacy-accurate visual parity signoff from screenshot review.
+- [x] Typography, spacing, colors, component geometry, iconography, and responsive behavior match legacy baseline.
+- [x] Realtime and long-running feedback parity is verified.
+- [x] Bridge/iframe fallback is removed from runtime behavior.
+- [x] Backend GUI template surface is removed.
 
 ## Stage 12 - Automated Testing
-- [ ] Add/update backend API tests for all newly migrated domains.
-- [ ] Add/update frontend route/component/API integration tests across migrated domains.
-- [ ] Add/update frontend visual regression checks against approved legacy baseline screenshots.
-- [ ] Add/update split deployment integration tests for React-only runtime.
-- [ ] Run automated suite and resolve regressions.
-- [ ] Acceptance criteria: backend, frontend, and split integration suites pass.
+- [x] Add/update backend API tests for all newly migrated domains.
+- [x] Add/update frontend route/component/API integration tests across migrated domains.
+- [x] Add/update frontend visual regression checks against approved legacy baseline screenshots.
+- [x] Add/update split deployment integration tests for React-only runtime.
+- [x] Run automated suite and resolve regressions.
+- [x] Acceptance criteria: backend, frontend, and split integration suites pass.
 
 ## Stage 13 - Docs Updates
-- [ ] Update docs to declare React as the only Studio UI.
-- [ ] Remove bridge/legacy UI documentation and migration-temporary guidance.
-- [ ] Update Sphinx/Read the Docs architecture and route documentation.
-- [ ] Document visual parity standards and screenshot signoff workflow for future UI changes.
-- [ ] Update developer workflows for React-only Studio operations.
-- [ ] Acceptance criteria: docs match final React-only architecture and runtime.
+- [x] Update docs to declare React as the only Studio UI.
+- [x] Remove bridge/legacy UI documentation and migration-temporary guidance.
+- [x] Update Sphinx/Read the Docs architecture and route documentation.
+- [x] Document visual parity standards and screenshot signoff workflow for future UI changes.
+- [x] Update developer workflows for React-only Studio operations.
+- [x] Acceptance criteria: docs match final React-only architecture and runtime.
+
+## Stage 11-13 - Validation Notes (2026-02-17)
+- [x] Legacy backend GUI templates and static assets were removed from runtime paths and preserved as reference snapshots under `_legacy/llmctl-studio-backend/src/web/`.
+- [x] Backend React-only guard blocks non-API GUI requests while preserving `/api/*` and Socket.IO surfaces (`app/llmctl-studio-backend/src/web/app.py`, `app/llmctl-studio-backend/tests/test_backend_split_stage10.py`).
+- [x] Frontend nginx no longer proxies legacy fallback routes to backend; React-only runtime serves `/web/*` and proxies `/api/*` (`app/llmctl-studio-frontend/docker/nginx.conf`).
+- [x] Stage 12 backend suites passed:
+- [x] `.venv/bin/python3 -m unittest app/llmctl-studio-backend/tests/test_backend_api_boundary_stage3.py app/llmctl-studio-backend/tests/test_backend_split_stage10.py app/llmctl-studio-backend/tests/test_socket_proxy_gunicorn_stage9.py app/llmctl-studio-backend/tests/test_split_deployment_stage10.py`
+- [x] Stage 12 frontend suites passed:
+- [x] `cd app/llmctl-studio-frontend && npm run lint`
+- [x] `cd app/llmctl-studio-frontend && npm test -- --run`
+- [x] `cd app/llmctl-studio-frontend && npm run build`
+- [x] Visual regression artifact captured for React-only runtime verification:
+- [x] `docs/screenshots/2026-02-17-12-48-14--parity-checklist--stage11-react-only-cutover--1920x1080--69f3e5c--0bd86c.png`
+- [x] Stage 13 docs updated for React-only architecture and `/web` + `/api` contract:
+- [x] `app/llmctl-studio-frontend/README.md`
+- [x] `docs/sphinx/studio_serving_runtime.rst`
+- [x] `docs/sphinx/changelog.rst`
 
 ## React Domain Tracker
 - [x] Agents

@@ -7,7 +7,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from sqlalchemy import select
 
 from core.config import Config
@@ -204,6 +204,12 @@ def _source_location(source: Any) -> str:
 
 
 def _wants_json_response() -> bool:
+    api_prefix = str(current_app.config.get("API_PREFIX", "/api")).strip() or "/api"
+    if api_prefix != "/":
+        normalized_prefix = f"/{api_prefix.strip('/')}"
+        path = str(request.path or "")
+        if path == normalized_prefix or path.startswith(f"{normalized_prefix}/"):
+            return True
     accept = str(request.headers.get("Accept") or "").lower()
     if "application/json" in accept:
         return True

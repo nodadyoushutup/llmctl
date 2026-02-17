@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_milestones') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.edit_milestone', milestone_id=milestone.id) }}">
+    <i class="fa-solid fa-pen-to-square"></i>
+    edit
+  </a>
+  <form
+    method="post"
+    action="{{ url_for('agents.delete_milestone', milestone_id=milestone.id) }}"
+    onsubmit="return confirm('Delete this milestone?');"
+  >
+    <input type="hidden" name="next" value="{{ url_for('agents.list_milestones') }}" />
+    <button
+      type="submit"
+      class="icon-button icon-button-danger"
+      aria-label="Delete milestone"
+    >
+      <i class="fa-solid fa-trash"></i>
+    </button>
+  </form>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">milestone</p>
+      <h2 class="section-title">{{ milestone.name }}</h2>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      {% set status = milestone_status_value(milestone) %}
+      {% set health = milestone_health_value(milestone) %}
+      <span class="status {{ milestone_status_classes.get(status, 'status-idle') }}">
+        {{ milestone_status_labels.get(status, status) }}
+      </span>
+      <span class="status {{ milestone_health_classes.get(health, 'status-idle') }}">
+        health: {{ milestone_health_labels.get(health, health) }}
+      </span>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">details</p>
+      <div class="stack" style="margin-top: 12px; font-size: 12px;">
+        <p class="muted">Owner: {{ milestone.owner | default("-", true) }}</p>
+        <p class="muted">Priority: {{ milestone_priority_labels.get(milestone_priority_value(milestone), "-") }}</p>
+        <p class="muted">Progress: {{ milestone_progress_value(milestone) }}%</p>
+        <p class="muted">Start date: {{ human_time(milestone.start_date) }}</p>
+        <p class="muted">Due date: {{ human_time(milestone.due_date) }}</p>
+        <p class="muted">Created: {{ human_time(milestone.created_at) }}</p>
+        <p class="muted">Updated: {{ human_time(milestone.updated_at) }}</p>
+      </div>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">description</p>
+      {% if milestone.description %}
+        <p class="muted" style="margin-top: 12px; font-size: 12px; white-space: pre-wrap;">
+          {{ milestone.description }}
+        </p>
+      {% else %}
+        <p class="muted" style="margin-top: 12px;">No description yet.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 16px;">
+    <div class="subcard">
+      <p class="eyebrow">success criteria</p>
+      <p class="muted" style="margin-top: 12px; font-size: 12px; white-space: pre-wrap;">
+        {{ milestone.success_criteria | default("No success criteria yet.", true) }}
+      </p>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">latest update</p>
+      <p class="muted" style="margin-top: 12px; font-size: 12px; white-space: pre-wrap;">
+        {{ milestone.latest_update | default("No updates yet.", true) }}
+      </p>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 16px;">
+    <div class="subcard">
+      <p class="eyebrow">dependencies</p>
+      <p class="muted" style="margin-top: 12px; font-size: 12px; white-space: pre-wrap;">
+        {{ milestone.dependencies | default("No dependencies noted.", true) }}
+      </p>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">links</p>
+      <p class="muted" style="margin-top: 12px; font-size: 12px; white-space: pre-wrap;">
+        {{ milestone.links | default("No links added.", true) }}
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}

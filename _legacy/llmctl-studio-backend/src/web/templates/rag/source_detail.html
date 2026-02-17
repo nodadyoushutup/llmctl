@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <form method="post" action="{{ url_for('rag.quick_index_source_page', source_id=source.id) }}">
+      <button
+        class="icon-button"
+        type="submit"
+        aria-label="Index source"
+        title="Index source"
+        {% if has_active_job %}disabled{% endif %}
+      >
+        <i class="fa-solid fa-play"></i>
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('rag.quick_delta_index_source_page', source_id=source.id) }}">
+      <button
+        class="icon-button"
+        type="submit"
+        aria-label="Delta index source"
+        title="Delta index source"
+        {% if has_active_job %}disabled{% endif %}
+      >
+        <i class="fa-solid fa-rotate-right"></i>
+      </button>
+    </form>
+    <a
+      class="icon-button"
+      href="{{ url_for('rag.edit_source_page', source_id=source.id) }}"
+      aria-label="Edit source"
+      title="Edit source"
+    >
+      <i class="fa-solid fa-pen"></i>
+    </a>
+
+    <form
+      method="post"
+      action="{{ url_for('rag.delete_source_page', source_id=source.id) }}"
+      onsubmit="return confirm('Delete this source?');"
+    >
+      <button class="icon-button icon-button-danger" type="submit" aria-label="Delete source" title="Delete source">
+        <i class="fa-solid fa-trash"></i>
+      </button>
+    </form>
+    <a class="btn btn-secondary" href="{{ url_for('rag.sources_page') }}">
+      <i class="fa-solid fa-arrow-left"></i>
+      back
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  {% set source_status = "Not indexed" %}
+  {% if has_active_job %}
+    {% set source_status = "Indexing" %}
+  {% elif source.last_error %}
+    {% set source_status = "Error" %}
+  {% elif source.last_indexed_at %}
+    {% set source_status = "Indexed" %}
+  {% endif %}
+  <div class="card-header">
+    <div>
+      <h2 class="section-title">{{ source.name }}</h2>
+      <p class="muted" style="margin-top: 6px;">Source detail and indexing status.</p>
+    </div>
+  </div>
+  {% if rag_health and rag_health.state == "configured_unhealthy" %}
+    <div class="alert alert-warning" style="margin-top: 12px;">
+      RAG integration is configured but unhealthy. Workflow RAG node execution is disabled until connectivity is restored.
+    </div>
+  {% endif %}
+
+  <div class="grid grid-2" style="margin-top: 16px; gap: 14px;">
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Kind</p>
+      <p><span class="chip">{{ source.kind }}</span></p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Location</p>
+      <p class="mono">{{ source_location(source) }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Collection</p>
+      <p class="mono">{{ source.collection }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Schedule</p>
+      <p>{{ source_schedule_text(source) }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Status</p>
+      <p data-rag-source-status data-source-id="{{ source.id }}">{{ source_status }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Last indexed</p>
+      <p data-rag-source-last-indexed data-source-id="{{ source.id }}">{{ format_source_time(source.last_indexed_at) }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Next index</p>
+      <p>
+        {% if source.index_schedule_value and source.index_schedule_unit %}
+          {{ format_source_time(source.next_index_at) }}
+        {% else %}
+          Not scheduled
+        {% endif %}
+      </p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Last error</p>
+      <p>{{ source.last_error or 'none' }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Indexed files</p>
+      <p>{{ source.indexed_file_count or 0 }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom: 4px;">Indexed chunks</p>
+      <p>{{ source.indexed_chunk_count or 0 }}</p>
+    </div>
+  </div>
+
+  <div style="margin-top: 18px;">
+    <h3 class="section-title" style="font-size: 14px;">Indexed File Types</h3>
+    {% if file_types %}
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+        {% for item in file_types %}
+          <span class="chip mono">{{ item.type }}: {{ item.count }}</span>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted" style="margin-top: 8px;">No file-type stats yet.</p>
+    {% endif %}
+  </div>
+</section>
+
+<script src="{{ url_for('static', filename='rag/app.js') }}"></script>
+{% endblock %}

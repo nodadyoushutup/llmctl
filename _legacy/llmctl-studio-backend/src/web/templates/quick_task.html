@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <button
+      type="submit"
+      class="btn btn-primary"
+      form="quick-task-form"
+      {% if not models %}disabled{% endif %}
+    >
+      <i class="fa-solid fa-paper-plane"></i>
+      send to cli
+    </button>
+  </div>
+{% endblock %}
+
+{% block content %}
+<style>
+  .quick-node-shell {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .quick-node-form {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .quick-node-panel {
+    border-radius: 18px;
+    border: 1px solid var(--line);
+    background: rgba(17, 24, 33, 0.9);
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+    min-height: 0;
+    height: 100%;
+  }
+
+  .quick-node-controls {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+
+  .quick-node-prompt {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .quick-node-controls-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .quick-node-controls-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .quick-node-options-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .quick-node-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .quick-node-prompt-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .quick-node-prompt-body .label {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .quick-node-prompt-body .textarea {
+    flex: 1;
+    min-height: 0;
+    resize: none;
+    overflow-y: auto;
+  }
+
+  @media (max-width: 1100px) {
+    .quick-node-shell {
+      min-height: auto;
+    }
+
+    .quick-node-form {
+      grid-template-columns: minmax(0, 1fr);
+      overflow-y: auto;
+      padding-bottom: 4px;
+    }
+
+    .quick-node-panel {
+      height: auto;
+    }
+
+    .quick-node-controls {
+      overflow: visible;
+    }
+
+    .quick-node-prompt {
+      min-height: 520px;
+    }
+
+    .quick-node-prompt-body .textarea {
+      min-height: 320px;
+    }
+  }
+</style>
+
+<section class="quick-node-shell">
+  <form method="post" action="{{ url_for('agents.create_quick_task') }}" class="quick-node-form" id="quick-task-form" enctype="multipart/form-data">
+    <article class="quick-node-panel quick-node-controls">
+      <div class="quick-node-controls-header">
+        <div class="quick-node-controls-copy">
+          <h2 class="section-title">Quick Node</h2>
+          <p class="muted">
+            Run one-off prompts with the default Quick Node profile, or pick an agent override.
+          </p>
+        </div>
+        <a class="btn btn-secondary" href="{{ url_for('agents.list_nodes') }}">
+          <i class="fa-solid fa-arrow-left"></i>
+          back to nodes
+        </a>
+      </div>
+
+      <label class="label">
+        agent override (optional)
+        <select name="agent_id" class="input" {% if not agents %}disabled{% endif %}>
+          <option value="">Default Quick Node</option>
+          {% for agent in agents %}
+            <option value="{{ agent.id }}">{{ agent.name }}</option>
+          {% endfor %}
+        </select>
+        {% if agents %}
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            Leave blank to use the hard-coded Quick Node profile.
+          </span>
+        {% else %}
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            No override agents created yet. Quick Node default is still available.
+          </span>
+        {% endif %}
+      </label>
+
+      <label class="label">
+        model
+        <select name="model_id" class="input" {% if not models %}disabled{% endif %} required>
+          {% for model in models %}
+            <option value="{{ model.id }}" {% if default_model_id == model.id %}selected{% endif %}>
+              {{ model.name }} ({{ model.provider }})
+            </option>
+          {% endfor %}
+        </select>
+        {% if models %}
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            Defaults to Settings default model, otherwise the first model on this list.
+          </span>
+        {% else %}
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            No models available. Create a model before sending a quick node.
+          </span>
+        {% endif %}
+      </label>
+
+      <label class="label">
+        MCP servers (optional)
+        {% if mcp_servers %}
+          <div class="quick-node-options-list">
+            {% for server in mcp_servers %}
+              <label class="quick-node-option">
+                <input type="checkbox" name="mcp_server_ids" value="{{ server.id }}" />
+                <span>{{ server.name }} <span class="muted">({{ server.server_key }})</span></span>
+              </label>
+            {% endfor %}
+          </div>
+        {% else %}
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            No MCP servers available.
+          </span>
+        {% endif %}
+      </label>
+
+      <label class="label">
+        integrations (optional)
+        {% if integration_options %}
+          <div class="quick-node-options-list">
+            {% for option in integration_options %}
+              <label class="quick-node-option">
+                <input
+                  type="checkbox"
+                  name="integration_keys"
+                  value="{{ option.key }}"
+                  {% if option.key in selected_integration_keys %}checked{% endif %}
+                />
+                <span>
+                  {{ option.label }}
+                  <span class="muted">({% if option.connected %}configured{% else %}not configured{% endif %})</span>
+                </span>
+              </label>
+            {% endfor %}
+          </div>
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            Selected integrations are injected into the prompt context. GitHub also enables repo checkout in the integration stage.
+          </span>
+        {% else %}
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            No integrations available.
+          </span>
+        {% endif %}
+      </label>
+    </article>
+
+    <article class="quick-node-panel quick-node-prompt">
+      <div class="quick-node-prompt-body">
+        <label class="label">
+          prompt
+          <textarea
+            name="prompt"
+            placeholder="Ask anything."
+            class="textarea"
+            data-attachment-paste
+            data-attachment-input-id="quick-attachments"
+          ></textarea>
+        </label>
+
+        <label class="label">
+          attachments (optional)
+          <input
+            type="file"
+            name="attachments"
+            id="quick-attachments"
+            class="input"
+            multiple
+            data-attachment-input
+          />
+          <span class="muted" style="font-size: 12px; margin-top: 6px;">
+            Paste images into the prompt or choose files. Saved to <code>data/attachments</code>.
+          </span>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;" data-attachment-list="quick-attachments"></div>
+        </label>
+      </div>
+    </article>
+  </form>
+</section>
+
+<script>
+  (() => {
+    const form = document.querySelector("#quick-task-form");
+    const textarea = form?.querySelector("textarea[name='prompt']");
+    const submitButton = document.querySelector(
+      "button[form='quick-task-form'][type='submit']"
+    );
+
+    if (!form || !textarea) {
+      return;
+    }
+
+    textarea.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.key !== "Enter" || event.shiftKey) {
+        return;
+      }
+
+      if (submitButton?.disabled) {
+        return;
+      }
+
+      event.preventDefault();
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit(submitButton || undefined);
+      } else {
+        form.submit();
+      }
+    });
+  })();
+</script>
+{% endblock %}

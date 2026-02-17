@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_memories') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    all memories
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Create Memory</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Save a short statement of fact for later recall.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.create_memory') }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+  >
+    <label class="label" style="grid-column: 1 / -1;">
+      description
+      <textarea
+        name="description"
+        placeholder="E.g. The current project focus is onboarding."
+        class="textarea"
+      ></textarea>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-plus"></i>
+        create
+      </button>
+      <button type="reset" class="btn btn-secondary">
+        <i class="fa-solid fa-rotate-right"></i>
+        reset
+      </button>
+    </div>
+  </form>
+</section>
+{% endblock %}

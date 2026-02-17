@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% macro pagination_controls(pagination) %}
+  <nav class="pagination" aria-label="Memories pages">
+    {% if pagination.prev_url %}
+      <a class="pagination-btn" href="{{ pagination.prev_url }}">Prev</a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+    {% endif %}
+    <div class="pagination-pages">
+      {% for item in pagination.page_items %}
+        {% if item.is_gap %}
+          <span class="pagination-ellipsis">&hellip;</span>
+        {% elif item.is_current %}
+          <span class="pagination-link is-active" aria-current="page">{{ item.label }}</span>
+        {% else %}
+          <a class="pagination-link" href="{{ item.url }}">{{ item.label }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if pagination.next_url %}
+      <a class="pagination-btn" href="{{ pagination.next_url }}">Next</a>
+    {% else %}
+      <span class="pagination-btn is-disabled" aria-disabled="true">Next</span>
+    {% endif %}
+  </nav>
+{% endmacro %}
+
+{% block action_header %}
+  <div class="pagination-bar pagination-bar-header">
+    {{ pagination_controls(pagination) }}
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card workflow-list-card">
+  <div class="card-header">
+    <h2 class="section-title">Memories</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Capture simple facts to reuse across tasks and workflows.
+  </p>
+  {% if memories %}
+    <div class="workflow-list-table-shell">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Created</th>
+            <th class="table-actions-cell">Edit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for memory in memories %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_memory', memory_id=memory.id) }}"
+            >
+              <td>
+                <p>{{ memory.description | truncate(180, True, "...") }}</p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ human_time(memory.created_at) }}
+                </p>
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  <a
+                    class="icon-button"
+                    href="{{ url_for('agents.edit_memory', memory_id=memory.id) }}"
+                    aria-label="Edit memory"
+                  >
+                    <i class="fa-solid fa-pen-to-square"></i>
+                  </a>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">
+      No memories found yet. Add a Memory node in a flowchart to create one.
+    </p>
+  {% endif %}
+</section>
+
+<script>
+  const memoryRows = document.querySelectorAll(".table-row-link");
+  memoryRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

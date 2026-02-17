@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_scripts') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+{% endblock %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('agents.edit_script', script_id=script.id) }}">
+      <i class="fa-solid fa-pen-to-square"></i>
+      edit
+    </a>
+    <form
+      method="post"
+      action="{{ url_for('agents.delete_script', script_id=script.id) }}"
+      onsubmit="return confirm('Delete this script?');"
+    >
+      <input
+        type="hidden"
+        name="next"
+        value="{{ url_for('agents.list_scripts') }}"
+      />
+      <button type="submit" class="btn btn-danger">
+        <i class="fa-solid fa-trash"></i>
+        delete
+      </button>
+    </form>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">script {{ script.id }}</p>
+      <h2 class="section-title">{{ script.file_name }}</h2>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">details</p>
+      <div class="stack" style="margin-top: 12px; font-size: 12px;">
+        <p class="muted">Type: {{ script_type_label(script.script_type) }}</p>
+        <p class="muted">Description: {{ script.description or "-" }}</p>
+        <p class="muted">Path: {{ script.file_path or "-" }}</p>
+        <p class="muted">
+          Bindings:
+          {{ (attached_tasks | length) + (attached_templates | length) + (attached_nodes | length) }}
+        </p>
+        <p class="muted">Task runs: {{ attached_tasks | length }}</p>
+        <p class="muted">Task templates: {{ attached_templates | length }}</p>
+        <p class="muted">Flowchart nodes: {{ attached_nodes | length }}</p>
+        <p class="muted">Created: {{ human_time(script.created_at) }}</p>
+        <p class="muted">Updated: {{ human_time(script.updated_at) }}</p>
+      </div>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">content</p>
+      <pre style="margin-top: 12px; white-space: pre-wrap;">{{ script_content }}</pre>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Task Template Bindings</h2>
+  </div>
+  {% if attached_templates %}
+    <div class="grid grid-2" style="margin-top: 20px;">
+      {% for template in attached_templates %}
+        <div class="subcard">
+          <p class="eyebrow">task {{ template.id }}</p>
+          <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">{{ template.name }}</h3>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No task template bindings.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Flowchart Node Bindings</h2>
+  </div>
+  {% if attached_nodes %}
+    <div class="grid grid-2" style="margin-top: 20px;">
+      {% for node in attached_nodes %}
+        <div class="subcard">
+          <p class="eyebrow">node {{ node.id }}</p>
+          <a href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id) }}">
+            <h3 class="section-title" style="font-size: 18px;">
+              {{ flowcharts_by_id.get(node.flowchart_id, "Flowchart " ~ node.flowchart_id) }}
+            </h3>
+          </a>
+          <p class="muted" style="margin-top: 6px; font-size: 12px;">
+            {{ node.title or ("Node " ~ node.id) }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No flowchart node bindings.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Task Run Usage</h2>
+  </div>
+  {% if attached_tasks %}
+    <div style="margin-top: 16px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Node Run</th>
+            <th>Status</th>
+            <th>Started</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in attached_tasks %}
+            <tr>
+              <td><a href="{{ url_for('agents.view_node', task_id=task.id) }}">Node {{ task.id }}</a></td>
+              <td>{{ task.status }}</td>
+              <td>{{ human_time(task.started_at) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No task runs reference this script.</p>
+  {% endif %}
+</section>
+{% endblock %}

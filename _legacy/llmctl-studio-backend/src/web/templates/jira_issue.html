@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.jira_workspace') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to board
+  </a>
+  {% if jira_issue.url %}
+    <a class="btn btn-secondary" href="{{ jira_issue.url }}" target="_blank" rel="noopener">
+      <i class="fa-brands fa-jira"></i>
+      view in jira
+    </a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="card jira-shell jira-issue-shell">
+  <div class="jira-issue-header">
+    <div class="jira-issue-breadcrumbs">
+      <span class="jira-issue-board">{{ jira_board }}</span>
+      <span class="jira-issue-separator">/</span>
+      <a class="jira-issue-breadcrumb-link" href="{{ url_for('agents.jira_workspace') }}">
+        kanban
+      </a>
+      <span class="jira-issue-separator">/</span>
+      <span>{{ jira_issue.key }}</span>
+    </div>
+    <div class="jira-issue-title-row">
+      <div>
+        <h2 class="jira-issue-title">{{ jira_issue.summary }}</h2>
+        <div class="jira-issue-meta-line">
+          {% if jira_issue.status_label %}
+            <span class="status {{ jira_issue.status_class }}">
+              {{ jira_issue.status_label }}
+            </span>
+          {% endif %}
+          {% if jira_issue.issue_type %}
+            <span>{{ jira_issue.issue_type }}</span>
+          {% endif %}
+          {% if jira_issue.priority %}
+            <span>{{ jira_issue.priority }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if jira_issue_error %}
+    <div class="subcard jira-issue-panel">
+      <p class="eyebrow">issue</p>
+      <p class="muted" style="margin-top: 8px; font-size: 12px;">
+        {{ jira_issue_error }}
+      </p>
+    </div>
+  {% else %}
+    <div class="jira-issue-grid">
+      <div class="jira-issue-main">
+        <div class="subcard jira-issue-panel">
+          <div class="jira-issue-panel-header">
+            <p class="eyebrow">description</p>
+          </div>
+          {% if jira_issue.description %}
+            <div class="jira-issue-body">
+              {{ jira_issue.description | e | replace('\n', '<br>') | safe }}
+            </div>
+          {% else %}
+            <p class="muted" style="font-size: 12px;">
+              No description provided.
+            </p>
+          {% endif %}
+        </div>
+
+        {% if jira_issue.subtasks %}
+          <div class="subcard jira-issue-panel">
+            <div class="jira-issue-panel-header">
+              <p class="eyebrow">subtasks</p>
+              <span class="jira-issue-count">{{ jira_issue.subtasks|length }} items</span>
+            </div>
+            <table class="table jira-subtask-table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Summary</th>
+                  <th>Status</th>
+                  <th>Assignee</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for subtask in jira_issue.subtasks %}
+                  <tr class="table-row-link" data-href="{{ url_for('agents.jira_issue_detail', issue_key=subtask.key) }}">
+                    <td>
+                      <a class="jira-subtask-link" href="{{ url_for('agents.jira_issue_detail', issue_key=subtask.key) }}">
+                        {{ subtask.key }}
+                      </a>
+                    </td>
+                    <td>{{ subtask.summary }}</td>
+                    <td>
+                      {% if subtask.status_label %}
+                        <span class="status {{ subtask.status_class }}">
+                          {{ subtask.status_label }}
+                        </span>
+                      {% else %}
+                        <span class="muted">-</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if subtask.assignee %}
+                        <div class="jira-user">
+                          <span class="jira-user-avatar">
+                            {% if subtask.assignee_avatar %}
+                              <img src="{{ subtask.assignee_avatar }}" alt="{{ subtask.assignee }}">
+                            {% else %}
+                              {{ subtask.assignee_initial }}
+                            {% endif %}
+                          </span>
+                          <span>{{ subtask.assignee }}</span>
+                        </div>
+                      {% else %}
+                        <span class="muted">Unassigned</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+
+        <div class="subcard jira-issue-panel">
+          <div class="jira-issue-panel-header">
+            <p class="eyebrow">activity</p>
+            <span class="jira-issue-count">{{ jira_comments|length }} comments</span>
+          </div>
+          {% if jira_comments_error %}
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              {{ jira_comments_error }}
+            </p>
+          {% else %}
+            {% if jira_comments %}
+              <div class="jira-issue-timeline">
+                {% for comment in jira_comments %}
+                  <div class="jira-issue-comment">
+                    <div class="jira-issue-comment-avatar">
+                      {% if comment.author_avatar %}
+                        <img src="{{ comment.author_avatar }}" alt="{{ comment.author }}">
+                      {% else %}
+                        {{ comment.author_initial }}
+                      {% endif %}
+                    </div>
+                    <div class="jira-issue-comment-body">
+                      <div class="jira-issue-comment-header">
+                        <span class="jira-issue-comment-author">{{ comment.author }}</span>
+                        <span class="jira-issue-comment-time">{{ comment.created_at }}</span>
+                      </div>
+                      {% if comment.body %}
+                        <div class="jira-issue-body">
+                          {{ comment.body | e | replace('\n', '<br>') | safe }}
+                        </div>
+                      {% else %}
+                        <p class="muted" style="font-size: 12px;">
+                          No comment text.
+                        </p>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="muted" style="font-size: 12px;">
+                No comments yet.
+              </p>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+
+      <aside class="jira-issue-sidebar">
+        <div class="subcard jira-issue-panel">
+          <div class="jira-issue-panel-header">
+            <p class="eyebrow">details</p>
+          </div>
+          <div class="jira-issue-details">
+            <div class="jira-issue-detail">
+              <span class="jira-issue-detail-label">Assignee</span>
+              <div class="jira-issue-detail-value">
+                {% if jira_issue.assignee %}
+                  <div class="jira-user">
+                    <span class="jira-user-avatar">
+                      {% if jira_issue.assignee_avatar %}
+                        <img src="{{ jira_issue.assignee_avatar }}" alt="{{ jira_issue.assignee }}">
+                      {% else %}
+                        {{ jira_issue.assignee_initial }}
+                      {% endif %}
+                    </span>
+                    <span>{{ jira_issue.assignee }}</span>
+                  </div>
+                {% else %}
+                  <span class="muted">Unassigned</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="jira-issue-detail">
+              <span class="jira-issue-detail-label">Reporter</span>
+              <div class="jira-issue-detail-value">
+                {% if jira_issue.reporter %}
+                  <div class="jira-user">
+                    <span class="jira-user-avatar">
+                      {% if jira_issue.reporter_avatar %}
+                        <img src="{{ jira_issue.reporter_avatar }}" alt="{{ jira_issue.reporter }}">
+                      {% else %}
+                        {{ jira_issue.reporter_initial }}
+                      {% endif %}
+                    </span>
+                    <span>{{ jira_issue.reporter }}</span>
+                  </div>
+                {% else %}
+                  <span class="muted">Unknown</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="jira-issue-detail">
+              <span class="jira-issue-detail-label">Project</span>
+              <span class="jira-issue-detail-value">
+                {{ jira_issue.project_name or jira_issue.project_key or "-" }}
+              </span>
+            </div>
+            <div class="jira-issue-detail">
+              <span class="jira-issue-detail-label">Created</span>
+              <span class="jira-issue-detail-value">
+                {{ jira_issue.created_at or "-" }}
+              </span>
+            </div>
+            <div class="jira-issue-detail">
+              <span class="jira-issue-detail-label">Updated</span>
+              <span class="jira-issue-detail-value">
+                {{ jira_issue.updated_at or "-" }}
+              </span>
+            </div>
+            {% if jira_issue.labels %}
+              <div class="jira-issue-detail">
+                <span class="jira-issue-detail-label">Labels</span>
+                <div class="jira-issue-detail-list">
+                  {% for label in jira_issue.labels %}
+                    <span class="jira-tag">{{ label }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+            {% if jira_issue.components %}
+              <div class="jira-issue-detail">
+                <span class="jira-issue-detail-label">Components</span>
+                <div class="jira-issue-detail-list">
+                  {% for component in jira_issue.components %}
+                    <span class="jira-tag">{{ component }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+            {% if jira_issue.fix_versions %}
+              <div class="jira-issue-detail">
+                <span class="jira-issue-detail-label">Fix versions</span>
+                <div class="jira-issue-detail-list">
+                  {% for version in jira_issue.fix_versions %}
+                    <span class="jira-tag">{{ version }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+            {% if jira_issue.parent and jira_issue.parent.key %}
+              <div class="jira-issue-detail">
+                <span class="jira-issue-detail-label">Parent</span>
+                <a class="jira-issue-parent" href="{{ url_for('agents.jira_issue_detail', issue_key=jira_issue.parent.key) }}">
+                  {{ jira_issue.parent.key }}{% if jira_issue.parent.summary %}: {{ jira_issue.parent.summary }}{% endif %}
+                </a>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </aside>
+    </div>
+  {% endif %}
+</section>
+
+<script>
+  const subtaskRows = document.querySelectorAll(".jira-subtask-table .table-row-link");
+
+  const isInteractiveTarget = (target) =>
+    target.closest(
+      "a, button, input, select, textarea, label, summary, details"
+    );
+
+  subtaskRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (isInteractiveTarget(event.target)) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

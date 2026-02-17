@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_models') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to models
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.edit_model', model_id=model.id) }}">
+    <i class="fa-solid fa-pen-to-square"></i>
+    edit model
+  </a>
+  <form
+    method="post"
+    action="{{ url_for('agents.delete_model', model_id=model.id) }}"
+    onsubmit="return confirm('Delete this model?');"
+  >
+    <input type="hidden" name="next" value="{{ url_for('agents.list_models') }}" />
+    <button type="submit" class="btn btn-danger">
+      <i class="fa-solid fa-trash"></i>
+      delete
+    </button>
+  </form>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">model</p>
+      <h2 class="section-title">{{ model.name }}</h2>
+      {% if model.description %}
+        <p class="muted" style="margin-top: 8px; font-size: 12px;">
+          {{ model.description }}
+        </p>
+      {% endif %}
+    </div>
+    {% if is_default %}
+      <span class="status status-success">default</span>
+    {% endif %}
+  </div>
+  <dl class="meta-list meta-list-compact" style="margin-top: 16px;">
+    <div class="meta-span">
+      <dt>Provider</dt>
+      <dd>{{ provider_label }}</dd>
+    </div>
+    <div class="meta-span">
+      <dt>Model</dt>
+      <dd>{{ model_name }}</dd>
+    </div>
+    <div class="meta-span">
+      <dt>Default</dt>
+      <dd>{{ "yes" if is_default else "no" }}</dd>
+    </div>
+  </dl>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">config</p>
+      <h2 class="section-title">Model Settings</h2>
+    </div>
+  </div>
+  {% if config_json %}
+    <pre class="log-output" style="margin-top: 12px;">{{ config_json }}</pre>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No config saved yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Task Template Bindings</h2>
+  </div>
+  {% if attached_templates %}
+    <div class="grid grid-2" style="margin-top: 16px;">
+      {% for template in attached_templates %}
+        <div class="subcard">
+          <p class="eyebrow">task {{ template.id }}</p>
+          <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">{{ template.name }}</h3>
+          </a>
+          {% if template.description %}
+            <p class="muted" style="margin-top: 8px; font-size: 12px;">
+              {{ template.description | truncate(120, True, "...") }}
+            </p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No task templates bound yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Node Bindings</h2>
+  </div>
+  {% if attached_tasks %}
+    <div class="grid grid-2" style="margin-top: 16px;">
+      {% for task in attached_tasks %}
+        <div class="subcard">
+          <p class="eyebrow">node {{ task.id }}</p>
+          <a href="{{ url_for('agents.view_node', task_id=task.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">{{ task_kind_label(task.kind) }}</h3>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No nodes bound yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Flowchart Node Bindings</h2>
+  </div>
+  {% if attached_nodes %}
+    <div class="grid grid-2" style="margin-top: 16px;">
+      {% for node in attached_nodes %}
+        <div class="subcard">
+          <p class="eyebrow">node {{ node.id }}</p>
+          <a href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id) }}">
+            <h3 class="section-title" style="font-size: 18px;">
+              {{ flowcharts_by_id.get(node.flowchart_id, "Flowchart " ~ node.flowchart_id) }}
+            </h3>
+          </a>
+          <p class="muted" style="margin-top: 8px; font-size: 12px;">
+            {{ node.title or ("Node " ~ node.id) }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No flowchart nodes bound yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

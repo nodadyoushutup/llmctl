@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_mcps') }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back
+  </a>
+{% endblock %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    {% if not mcp_server.is_integrated %}
+      <a class="btn btn-secondary" href="{{ url_for('agents.edit_mcp', mcp_id=mcp_server.id) }}">
+        <i class="fa-solid fa-pen-to-square"></i>
+        edit
+      </a>
+      <form
+        method="post"
+        action="{{ url_for('agents.delete_mcp', mcp_id=mcp_server.id) }}"
+        onsubmit="return confirm('Delete this MCP server?');"
+      >
+        <input
+          type="hidden"
+          name="next"
+          value="{{ url_for('agents.list_mcps') }}"
+        />
+        <button type="submit" class="btn btn-danger">
+          <i class="fa-solid fa-trash"></i>
+          delete
+        </button>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">mcp server {{ mcp_server.id }}</p>
+      <h2 class="section-title">{{ mcp_server.name }}</h2>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="subcard">
+      <p class="eyebrow">details</p>
+      <div class="stack" style="margin-top: 12px; font-size: 12px;">
+        <p class="muted">Key: {{ mcp_server.server_key }}</p>
+        <p class="muted">Type: {{ mcp_server.server_type }}</p>
+        <p class="muted">Description: {{ mcp_server.description or "-" }}</p>
+        <p class="muted">
+          Bindings:
+          {{ (attached_templates | length) + (attached_nodes | length) + (attached_tasks | length) }}
+        </p>
+        <p class="muted">Task templates: {{ attached_templates | length }}</p>
+        <p class="muted">Flowchart nodes: {{ attached_nodes | length }}</p>
+        <p class="muted">Nodes: {{ attached_tasks | length }}</p>
+        <p class="muted">Created: {{ human_time(mcp_server.created_at) }}</p>
+        <p class="muted">Updated: {{ human_time(mcp_server.updated_at) }}</p>
+        {% if mcp_server.is_integrated %}
+          <p class="muted">Managed from Settings -> Integrations.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="subcard">
+      <p class="eyebrow">config json</p>
+      <pre style="margin-top: 12px; white-space: pre-wrap;">{{ mcp_config_json }}</pre>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Task Template Bindings</h2>
+  </div>
+  {% if attached_templates %}
+    <div class="grid grid-2" style="margin-top: 20px;">
+      {% for template in attached_templates %}
+        <div class="subcard">
+          <p class="eyebrow">task {{ template.id }}</p>
+          <a href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">{{ template.name }}</h3>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No task template bindings.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Node Bindings</h2>
+  </div>
+  {% if attached_tasks %}
+    <div class="grid grid-2" style="margin-top: 20px;">
+      {% for task in attached_tasks %}
+        <div class="subcard">
+          <p class="eyebrow">node {{ task.id }}</p>
+          <a href="{{ url_for('agents.view_node', task_id=task.id) }}">
+            <h3 class="section-title" style="font-size: 18px;">
+              {{ task_kind_label(task.kind) }}
+            </h3>
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No node bindings.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Flowchart Node Bindings</h2>
+  </div>
+  {% if attached_nodes %}
+    <div class="grid grid-2" style="margin-top: 20px;">
+      {% for node in attached_nodes %}
+        <div class="subcard">
+          <p class="eyebrow">node {{ node.id }}</p>
+          <a href="{{ url_for('agents.view_flowchart', flowchart_id=node.flowchart_id) }}">
+            <h3 class="section-title" style="font-size: 18px;">
+              {{ flowcharts_by_id.get(node.flowchart_id, "Flowchart " ~ node.flowchart_id) }}
+            </h3>
+          </a>
+          <p class="muted" style="margin-top: 6px; font-size: 12px;">
+            {{ node.title or ("Node " ~ node.id) }}
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No flowchart node bindings.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

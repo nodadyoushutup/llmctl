@@ -23,6 +23,7 @@ from web.views import (  # noqa: E402
     _request_path_uses_api_prefix,
     _run_wants_json,
 )
+from rag.web.views import _wants_json_response as _rag_wants_json_response  # noqa: E402
 
 
 class ApiPrefixBoundaryStage3Tests(unittest.TestCase):
@@ -64,6 +65,16 @@ class ApiPrefixBoundaryStage3Tests(unittest.TestCase):
             self.assertTrue(_request_path_uses_api_prefix())
             self.assertTrue(_flowchart_wants_json())
             self.assertTrue(_run_wants_json())
+
+    def test_api_prefixed_rag_paths_force_json_mode(self) -> None:
+        app = Flask(__name__)
+        app.config.update(API_PREFIX="/api")
+
+        with app.test_request_context("/rag/chat", headers={"Accept": "text/html"}):
+            self.assertFalse(_rag_wants_json_response())
+
+        with app.test_request_context("/api/rag/chat", headers={"Accept": "text/html"}):
+            self.assertTrue(_rag_wants_json_response())
 
 
 if __name__ == "__main__":

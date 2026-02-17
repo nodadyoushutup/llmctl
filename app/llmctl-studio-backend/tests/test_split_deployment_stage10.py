@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-INGRESS_PATH = REPO_ROOT / "kubernetes" / "studio-ingress.yaml"
+INGRESS_PATH = REPO_ROOT / "kubernetes" / "llmctl-studio" / "base" / "studio-ingress.yaml"
 FRONTEND_NGINX_PATH = REPO_ROOT / "app" / "llmctl-studio-frontend" / "docker" / "nginx.conf"
 
 

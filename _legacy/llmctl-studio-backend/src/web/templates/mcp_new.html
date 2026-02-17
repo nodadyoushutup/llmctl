@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Create Custom MCP Server</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Define a custom server config and attach it to agents later.
+  </p>
+  <form method="post" action="{{ url_for('agents.create_mcp') }}" class="form-grid">
+    <label class="label">
+      name
+      <input type="text" name="name" placeholder="Search Tools" class="input" />
+    </label>
+    <label class="label">
+      server key
+      <input type="text" name="server_key" placeholder="search_tools" class="input" />
+      <span class="muted" style="font-size: 12px; margin-top: 6px;">
+        Use letters, numbers, underscores, or dashes.
+      </span>
+    </label>
+    <label class="label">
+      description (optional)
+      <textarea
+        name="description"
+        placeholder="What this server provides."
+        class="textarea"
+        rows="3"
+      ></textarea>
+    </label>
+    <label class="label">
+      config json
+      <textarea
+        name="config_json"
+        placeholder='{"command":"python3","args":["app/search_tools/run.py"]}'
+        class="textarea"
+      ></textarea>
+      <span class="muted" style="font-size: 12px; margin-top: 6px;">
+        Use a JSON object for one server config. Arrays must contain scalar values.
+      </span>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-plus"></i>
+        create
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.list_mcps') }}">
+        <i class="fa-solid fa-arrow-left"></i>
+        back
+      </a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -146,6 +146,7 @@ Backend policy:
 
 - Flask no longer serves Jinja templates for user-facing pages.
 - Legacy backend static/template GUI assets are removed.
+- Legacy GUI assets are retained for reference under ``_legacy/llmctl-studio-backend/src/web/``.
 - Non-API GUI routes are blocked in React-only runtime mode.
 
 Frontend nginx policy:

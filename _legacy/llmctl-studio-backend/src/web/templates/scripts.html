@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-primary" href="{{ url_for('agents.new_script') }}">
+      <i class="fa-solid fa-plus"></i>
+      create script
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Scripts</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Upload helper scripts and bind them to task templates or flowchart nodes.
+  </p>
+  {% if scripts %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>File name</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for script in scripts %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_script', script_id=script.id) }}"
+            >
+              <td>
+                <p>{{ script.file_name }}</p>
+              </td>
+              <td>
+                <p>{{ script_type_label(script.script_type) }}</p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ script.description or "-" }}
+                </p>
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.delete_script', script_id=script.id) }}"
+                    onsubmit="return confirm('Delete this script?');"
+                  >
+                    <input type="hidden" name="next" value="{{ request.path }}" />
+                    <button type="submit" class="btn btn-danger" aria-label="Delete script">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No scripts created yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const scriptRows = document.querySelectorAll(".table-row-link");
+  scriptRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

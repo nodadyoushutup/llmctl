@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Attachments</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Files attached to tasks, templates, and flowchart nodes.
+  </p>
+  {% if attachments %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>File name</th>
+            <th>Content type</th>
+            <th>Size</th>
+            <th>Linked</th>
+            <th>Created</th>
+            <th class="table-actions-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for attachment in attachments %}
+            {% set linked_count = (attachment.tasks | length) + (attachment.templates | length) + (attachment.flowchart_nodes | length) %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_attachment', attachment_id=attachment.id) }}"
+            >
+              <td>
+                <p>{{ attachment.file_name }}</p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ attachment.content_type or "-" }}
+                </p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ format_bytes(attachment.size_bytes) }}
+                </p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ linked_count }}
+                </p>
+              </td>
+              <td>
+                <p class="muted" style="font-size: 12px;">
+                  {{ human_time(attachment.created_at) }}
+                </p>
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  <form
+                    method="post"
+                    action="{{ url_for('agents.delete_attachment', attachment_id=attachment.id) }}"
+                    onsubmit="return confirm('Delete this attachment?');"
+                  >
+                    <input type="hidden" name="next" value="{{ url_for('agents.list_attachments') }}" />
+                    <button
+                      type="submit"
+                      class="icon-button icon-button-danger"
+                      aria-label="Delete attachment"
+                    >
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No attachments uploaded yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const attachmentRows = document.querySelectorAll(".table-row-link");
+  attachmentRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

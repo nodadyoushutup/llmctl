@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to task
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_task_templates') }}">
+    <i class="fa-solid fa-list"></i>
+    all tasks
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">task {{ template.id }}</p>
+      <h2 class="section-title">Edit Task</h2>
+    </div>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Update task metadata without running a node.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_task_template', template_id=template.id) }}"
+    class="form-grid"
+    style="margin-top: 20px;"
+    enctype="multipart/form-data"
+  >
+    <label class="label">
+      name
+      <input type="text" name="name" value="{{ template.name }}" class="input" />
+    </label>
+    <label class="label">
+      description (optional)
+      <input
+        type="text"
+        name="description"
+        value="{{ template.description or "" }}"
+        class="input"
+      />
+    </label>
+    <label class="label">
+      agent
+      <select name="agent_id" class="input">
+        <option value="" {% if template.agent_id is none %}selected{% endif %}>
+          No agent (optional)
+        </option>
+        {% for agent in agents %}
+          <option
+            value="{{ agent.id }}"
+            {% if template.agent_id == agent.id %}selected{% endif %}
+          >
+            {{ agent.name }}
+          </option>
+        {% endfor %}
+      </select>
+      {% if not agents %}
+        <span class="muted" style="font-size: 12px; margin-top: 6px;">
+          Create an agent when you want to attach one.
+        </span>
+      {% endif %}
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      prompt
+      <textarea
+        name="prompt"
+        class="textarea"
+        data-attachment-paste
+        data-attachment-input-id="template-attachments-edit"
+      >{{ template.prompt }}</textarea>
+    </label>
+    <label class="label" style="grid-column: 1 / -1;">
+      attachments (optional)
+      <input
+        type="file"
+        name="attachments"
+        id="template-attachments-edit"
+        class="input"
+        multiple
+        data-attachment-input
+      />
+      <span class="muted" style="font-size: 12px; margin-top: 6px;">
+        Paste images into the prompt or choose files. Saved to <code>data/attachments</code>.
+      </span>
+      <div class="muted" style="font-size: 12px; margin-top: 6px;" data-attachment-list="template-attachments-edit"></div>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.view_task_template', template_id=template.id) }}">
+        <i class="fa-solid fa-arrow-left"></i>
+        cancel
+      </a>
+    </div>
+  </form>
+  {% if template.attachments %}
+    <div class="stack" style="margin-top: 12px;">
+      <p class="muted" style="font-size: 12px;">Existing attachments:</p>
+      {% for attachment in template.attachments %}
+        <div class="row" style="gap: 8px; align-items: center;">
+          <p class="muted" style="font-size: 12px; margin: 0;">
+            {{ attachment.file_name }} {% if attachment.file_path %}({{ attachment.file_path }}){% endif %}
+          </p>
+          <form
+            method="post"
+            action="{{ url_for('agents.remove_task_template_attachment', template_id=template.id, attachment_id=attachment.id) }}"
+            onsubmit="return confirm('Remove this attachment?');"
+          >
+            <input type="hidden" name="next" value="{{ request.path }}" />
+            <button type="submit" class="btn btn-secondary" style="padding: 4px 10px;">
+              remove
+            </button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

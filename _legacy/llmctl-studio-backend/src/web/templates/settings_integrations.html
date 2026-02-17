@@ -1,0 +1,1205 @@
+{% extends "settings_layout.html" %}
+{% set integration_nav = [
+  {
+    "id": "git",
+    "label": "Git",
+    "icon": "fa-solid fa-code-branch",
+    "url": url_for("agents.settings_integrations_git"),
+  },
+  {
+    "id": "github",
+    "label": "GitHub",
+    "icon": "fa-brands fa-github",
+    "url": url_for("agents.settings_integrations_github"),
+  },
+  {
+    "id": "jira",
+    "label": "Jira",
+    "icon": "fa-brands fa-jira",
+    "url": url_for("agents.settings_integrations_jira"),
+  },
+  {
+    "id": "confluence",
+    "label": "Confluence",
+    "icon": "fa-brands fa-confluence",
+    "url": url_for("agents.settings_integrations_confluence"),
+  },
+  {
+    "id": "google_cloud",
+    "label": "Google Cloud",
+    "icon": "fa-brands fa-google",
+    "url": url_for("agents.settings_integrations_google_cloud"),
+  },
+  {
+    "id": "google_workspace",
+    "label": "Google Workspace",
+    "icon": "fa-brands fa-google",
+    "url": url_for("agents.settings_integrations_google_workspace"),
+  },
+  {
+    "id": "huggingface",
+    "label": "Hugging Face",
+    "icon": "fa-solid fa-face-smile",
+    "url": url_for("agents.settings_integrations_huggingface"),
+  },
+  {
+    "id": "chroma",
+    "label": "ChromaDB",
+    "icon": "fa-solid fa-layer-group",
+    "url": url_for("agents.settings_integrations_chroma"),
+  },
+] %}
+
+{% block topbar_actions %}
+{% endblock %}
+
+{% block action_header %}
+  {% set active_integration_section = integration_section if integration_section is defined else "git" %}
+  {% if active_integration_section == "huggingface" %}
+    {% set vllm_local_settings = vllm_local_settings if vllm_local_settings is defined else {} %}
+    <div class="action-header-actions">
+      <button class="btn btn-primary" type="submit" form="integration-vllm-local-settings-form">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save huggingface
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.settings_provider_vllm_local') }}">
+        <i class="fa-solid fa-arrow-right"></i>
+        open vllm local provider
+      </a>
+      <button
+        id="integration-vllm-local-qwen-button"
+        class="btn {% if vllm_local_settings.qwen.action == 'remove' %}btn-danger{% else %}btn-secondary{% endif %}"
+        type="submit"
+        form="integration-vllm-local-qwen-form"
+      >
+        <i class="fa-solid {% if vllm_local_settings.qwen.action == 'remove' %}fa-trash{% else %}fa-download{% endif %}"></i>
+        {% if vllm_local_settings.qwen.action == "remove" %}
+          remove qwen
+        {% else %}
+          download qwen
+        {% endif %}
+      </button>
+      {% if vllm_local_settings.huggingface.configured %}
+        <button
+          id="integration-vllm-local-hf-download-button"
+          class="btn btn-secondary"
+          type="submit"
+          form="integration-vllm-local-hf-download-form"
+        >
+          <i class="fa-solid fa-download"></i>
+          download huggingface model
+        </button>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block settings_content %}
+{% set integration_section = integration_section if integration_section is defined else "git" %}
+{% set gitconfig_path = gitconfig_path if gitconfig_path is defined else "~/.gitconfig" %}
+{% set gitconfig_exists = gitconfig_exists if gitconfig_exists is defined else false %}
+{% set gitconfig_content = gitconfig_content if gitconfig_content is defined else "" %}
+{% set google_cloud_settings = google_cloud_settings if google_cloud_settings is defined else {} %}
+{% set google_cloud_connected = google_cloud_connected if google_cloud_connected is defined else false %}
+{% set google_cloud_service_email = google_cloud_service_email if google_cloud_service_email is defined else none %}
+{% set google_workspace_settings = google_workspace_settings if google_workspace_settings is defined else {} %}
+{% set google_workspace_connected = google_workspace_connected if google_workspace_connected is defined else false %}
+{% set google_workspace_service_email = google_workspace_service_email if google_workspace_service_email is defined else none %}
+{% set vllm_local_settings = vllm_local_settings if vllm_local_settings is defined else {} %}
+{% set google_cloud_mcp_enabled_raw = (google_cloud_settings.get('google_cloud_mcp_enabled', 'true') or 'true')|lower %}
+{% set google_cloud_mcp_enabled = google_cloud_mcp_enabled_raw in ['1', 'true', 'yes', 'on'] %}
+{% set google_workspace_mcp_enabled_raw = (google_workspace_settings.get('google_workspace_mcp_enabled', 'false') or 'false')|lower %}
+{% set google_workspace_mcp_enabled = google_workspace_mcp_enabled_raw in ['1', 'true', 'yes', 'on'] %}
+<style>
+  .integrations-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .integrations-sidebar {
+    border-radius: 18px;
+    border: 1px solid var(--line);
+    background: rgba(17, 24, 33, 0.9);
+    padding: 14px;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+    position: sticky;
+    top: 0;
+  }
+
+  .integrations-sidebar-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+  }
+
+  .integrations-sidebar-nav {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .integration-sidebar-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: rgba(11, 15, 20, 0.6);
+    color: var(--muted);
+    padding: 10px 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-weight: 600;
+    transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+  }
+
+  .integration-sidebar-link-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .integration-sidebar-link-main i {
+    width: 14px;
+    text-align: center;
+  }
+
+  .integration-sidebar-link .fa-chevron-right {
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .integration-sidebar-link:hover {
+    border-color: rgba(255, 122, 24, 0.4);
+    color: #fff;
+  }
+
+  .integration-sidebar-link.is-active {
+    background: rgba(255, 122, 24, 0.15);
+    border-color: rgba(255, 122, 24, 0.55);
+    color: #fff;
+  }
+
+  .integration-sidebar-link.is-active .fa-chevron-right {
+    color: var(--accent);
+  }
+
+  .integrations-layout > .stack {
+    min-width: 0;
+  }
+
+  @media (max-width: 980px) {
+    .integrations-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .integrations-sidebar {
+      position: static;
+    }
+
+    .integrations-sidebar-nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+  }
+
+  @media (max-width: 640px) {
+    .integrations-sidebar-nav {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>
+<section class="integrations-layout">
+  <aside class="integrations-sidebar" aria-label="Integration sections">
+    <p class="integrations-sidebar-title">Integration Sections</p>
+    <nav class="integrations-sidebar-nav">
+      {% for item in integration_nav %}
+        <a
+          href="{{ item.url }}"
+          class="integration-sidebar-link{% if integration_section == item.id %} is-active{% endif %}"
+        >
+          <span class="integration-sidebar-link-main">
+            <i class="{{ item.icon }}"></i>
+            <span>{{ item.label }}</span>
+          </span>
+          <i class="fa-solid fa-chevron-right"></i>
+        </a>
+      {% endfor %}
+    </nav>
+  </aside>
+  <section class="stack">
+  {% if integration_section == "git" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Git</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Edit the global Git configuration for this host.
+        </p>
+      </div>
+      <span class="status {% if gitconfig_exists %}status-success{% else %}status-warning{% endif %}">
+        {% if gitconfig_exists %}present{% else %}missing{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_integrations_gitconfig') }}" class="form-grid">
+      <label class="label" style="grid-column: 1 / -1;">
+        {{ gitconfig_path }}
+        <textarea class="textarea" name="gitconfig_content" rows="18">{{ gitconfig_content }}</textarea>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save gitconfig
+        </button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if integration_section == "github" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">GitHub</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Personal access token for API access, or an SSH key for cloning.
+        </p>
+      </div>
+      <span class="status {% if github_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if github_connected %}connected{% else %}needs token{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_github_settings') }}" class="form-grid" enctype="multipart/form-data">
+      <label class="label" style="grid-column: 1 / -1;">
+        GitHub PAT
+        <div class="input-row">
+          <input
+            class="input"
+            type="text"
+            name="github_pat"
+            id="github-pat-input"
+            value="{{ github_settings.get('pat', '') }}"
+            placeholder="enter PAT"
+          />
+          <button class="btn btn-secondary" type="submit" name="action" value="refresh">
+            <i class="fa-solid fa-rotate"></i>
+            refresh
+          </button>
+        </div>
+      </label>
+      <div
+        id="github-repo-block"
+        style="grid-column: 1 / -1;{% if not github_connected %} display: none;{% endif %}"
+      >
+        <label class="label">
+          Repository
+          {% if github_repo_options %}
+            <select class="input" name="github_repo">
+              {% set selected_repo = github_settings.get('repo', '') %}
+              {% for repo in github_repo_options %}
+                <option value="{{ repo }}" {% if repo == selected_repo %}selected{% endif %}>
+                  {{ repo }}
+                </option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <span class="muted" style="font-size: 12px;">
+              Refresh to load repositories.
+            </span>
+          {% endif %}
+        </label>
+      </div>
+      <label class="label" style="grid-column: 1 / -1;">
+        SSH private key (.pem)
+        <input
+          class="input"
+          type="file"
+          name="github_ssh_key"
+        />
+        <div class="muted" style="margin-top: 6px; font-size: 12px;">
+          {% if github_settings.get('ssh_key_path') %}
+            SSH key uploaded.
+          {% else %}
+            No SSH key uploaded. HTTPS cloning will be used.
+          {% endif %}
+        </div>
+      </label>
+      <label class="label" style="grid-column: 1 / -1; margin-top: -4px;">
+        <input type="checkbox" name="github_ssh_key_clear" value="true" />
+        remove SSH key
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save github
+        </button>
+        <a class="btn btn-secondary" href="{{ url_for('agents.github_workspace') }}">
+          <i class="fa-solid fa-arrow-right"></i>
+          open github
+        </a>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if integration_section == "jira" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Jira</h2>
+        <p class="muted" style="margin-top: 6px;">
+          API token, email, site, project, and board selection.
+        </p>
+      </div>
+      <span class="status {% if jira_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if jira_connected %}connected{% else %}needs key{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_jira_settings') }}" class="form-grid" id="jira-settings-form">
+      <label class="label" style="grid-column: 1 / -1;">
+        Jira API Key
+        <div class="input-row">
+          <input
+            class="input"
+            type="password"
+            name="jira_api_key"
+            value="{{ jira_settings.get('api_key', '') }}"
+            placeholder="api_key_xxxxxxxxxx"
+          />
+          <button class="btn btn-secondary" type="submit" name="action" value="refresh">
+            <i class="fa-solid fa-rotate"></i>
+            refresh
+          </button>
+        </div>
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Atlassian email
+        <input
+          class="input"
+          type="email"
+          name="jira_email"
+          value="{{ jira_settings.get('email', '') }}"
+          placeholder="me@company.com"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Jira site URL
+        <input
+          class="input"
+          type="text"
+          name="jira_site"
+          value="{{ jira_settings.get('site', '') }}"
+          placeholder="https://your-domain.atlassian.net"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Project
+        {% if jira_project_options %}
+          <select class="input" name="jira_project_key" id="jira-project-select">
+            {% set selected_project = jira_settings.get('project_key', '') %}
+            {% for project in jira_project_options %}
+              {% if project.value is defined %}
+                <option value="{{ project.value }}" {% if project.value == selected_project %}selected{% endif %}>
+                  {{ project.label }}
+                </option>
+              {% else %}
+                <option value="{{ project }}" {% if project == selected_project %}selected{% endif %}>
+                  {{ project }}
+                </option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        {% else %}
+          <span class="muted" style="font-size: 12px;">
+            Refresh to load projects.
+          </span>
+        {% endif %}
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Board name
+        {% if jira_board_options %}
+          <select class="input" name="jira_board">
+            {% set selected_board = jira_settings.get('board', '') %}
+            {% for board in jira_board_options %}
+              {% if board.value is defined %}
+                <option value="{{ board.value }}" {% if board.value == selected_board %}selected{% endif %}>
+                  {{ board.label }}
+                </option>
+              {% else %}
+                <option value="{{ board }}" {% if board == selected_board %}selected{% endif %}>
+                  {{ board }}
+                </option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        {% else %}
+          <span class="muted" style="font-size: 12px;">
+            Select a project and refresh to load boards.
+          </span>
+        {% endif %}
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save jira
+        </button>
+        <a class="btn btn-secondary" href="{{ url_for('agents.jira_workspace') }}">
+          <i class="fa-solid fa-arrow-right"></i>
+          open jira
+        </a>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if integration_section == "confluence" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Confluence</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Configure the single Confluence space used by the in-app workspace.
+        </p>
+      </div>
+      <span class="status {% if confluence_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if confluence_connected %}connected{% else %}needs key{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_confluence_settings') }}" class="form-grid">
+      <label class="label" style="grid-column: 1 / -1;">
+        Space key
+        <input
+          class="input"
+          type="text"
+          name="confluence_space"
+          value="{{ confluence_settings.get('space', '') }}"
+          placeholder="TEAM"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        <span class="muted" style="font-size: 12px;">
+          Confluence auth and site use the configured Confluence values, and fall back to Jira values when empty.
+        </span>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save confluence
+        </button>
+        <a class="btn btn-secondary" href="{{ url_for('agents.confluence_workspace') }}">
+          <i class="fa-solid fa-arrow-right"></i>
+          open confluence
+        </a>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if integration_section == "google_cloud" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Google Cloud</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Service account JSON used by Google Cloud integrations, including the integrated Cloud MCP server.
+        </p>
+      </div>
+      <span class="status {% if google_cloud_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if google_cloud_connected %}connected{% else %}needs key{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_google_cloud_settings') }}" class="form-grid">
+      <label class="label" style="grid-column: 1 / -1;">
+        Google service account JSON
+        <textarea
+          class="input mono"
+          name="google_cloud_service_account_json"
+          rows="10"
+          placeholder='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'
+        >{{ google_cloud_settings.get('service_account_json', '') }}</textarea>
+      </label>
+      {% if google_cloud_service_email %}
+        <span class="muted" style="grid-column: 1 / -1; font-size: 12px;">
+          Google service account email: {{ google_cloud_service_email }}
+        </span>
+      {% endif %}
+      <label class="label" style="grid-column: 1 / -1;">
+        Google Cloud project ID (optional)
+        <input
+          class="input"
+          type="text"
+          name="google_cloud_project_id"
+          value="{{ google_cloud_settings.get('google_cloud_project_id', '') }}"
+          placeholder="my-gcp-project-id"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Integrated MCP
+        <span class="muted" style="font-size: 12px; display: block; margin-top: 6px;">
+          Enable the official Google Cloud MCP server (`gcloud-mcp`) for agent tool use.
+        </span>
+      </label>
+      <label class="label" style="grid-column: 1 / -1; margin-top: -6px;">
+        <input type="hidden" name="google_cloud_mcp_enabled" value="false" />
+        <input
+          type="checkbox"
+          name="google_cloud_mcp_enabled"
+          value="true"
+          {% if google_cloud_mcp_enabled %}checked{% endif %}
+        />
+        enable Google Cloud MCP
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save google cloud
+        </button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if integration_section == "google_workspace" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Google Workspace</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Service account JSON for Google Workspace integrations, including Drive source operations.
+        </p>
+      </div>
+      <span class="status {% if google_workspace_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if google_workspace_connected %}connected{% else %}needs key{% endif %}
+      </span>
+    </div>
+    <form method="post" action="{{ url_for('agents.update_google_workspace_settings') }}" class="form-grid">
+      <label class="label" style="grid-column: 1 / -1;">
+        Google Workspace service account JSON
+        <textarea
+          class="input mono"
+          name="workspace_service_account_json"
+          rows="10"
+          placeholder='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'
+        >{{ google_workspace_settings.get('service_account_json', '') }}</textarea>
+      </label>
+      {% if google_workspace_service_email %}
+        <span class="muted" style="grid-column: 1 / -1; font-size: 12px;">
+          Google Workspace service account email: {{ google_workspace_service_email }}
+        </span>
+      {% endif %}
+      <label class="label" style="grid-column: 1 / -1;">
+        Delegated user email (optional)
+        <input
+          class="input"
+          type="email"
+          name="workspace_delegated_user_email"
+          value="{{ google_workspace_settings.get('workspace_delegated_user_email', '') }}"
+          placeholder="user@your-workspace-domain.com"
+        />
+        <span class="muted" style="font-size: 12px; display: block; margin-top: 6px;">
+          Optional domain-wide delegation subject for Workspace APIs that require user context.
+        </span>
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        Integrated MCP
+        <span class="muted" style="font-size: 12px; display: block; margin-top: 6px;">
+          Workspace MCP scaffold is configured here, but runtime activation is currently guarded until a supported service-account server path is finalized.
+        </span>
+      </label>
+      <label class="label" style="grid-column: 1 / -1; margin-top: -6px;">
+        <input type="hidden" name="google_workspace_mcp_enabled" value="false" />
+        <input
+          type="checkbox"
+          name="google_workspace_mcp_enabled"
+          value="true"
+          {% if google_workspace_mcp_enabled %}checked{% endif %}
+        />
+        enable Google Workspace MCP (guarded)
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save google workspace
+        </button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if integration_section == "huggingface" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">Hugging Face (vLLM Local)</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Configure token and download local model assets for vLLM Local.
+        </p>
+      </div>
+      <span class="status {% if vllm_local_settings.huggingface.configured %}status-success{% else %}status-warning{% endif %}">
+        {% if vllm_local_settings.huggingface.configured %}configured{% else %}needs token{% endif %}
+      </span>
+    </div>
+    <form
+      id="integration-vllm-local-settings-form"
+      method="post"
+      action="{{ url_for('agents.update_huggingface_settings') }}"
+      class="form-grid"
+    >
+      <label class="label" style="grid-column: 1 / -1;">
+        HuggingFace token (optional)
+        <input
+          class="input"
+          type="password"
+          name="vllm_local_hf_token"
+          value="{{ vllm_local_settings.huggingface.token }}"
+          placeholder="hf_..."
+          autocomplete="off"
+        />
+        <p class="muted" style="margin-top: 6px; font-size: 12px;">
+          Required for private/gated model downloads.
+        </p>
+      </label>
+    </form>
+
+    <form
+      id="integration-vllm-local-qwen-form"
+      method="post"
+      action="{{ url_for('agents.toggle_vllm_local_qwen_model') }}"
+      data-qwen-action="{{ vllm_local_settings.qwen.action }}"
+      data-download-start-url="{{ url_for('agents.start_vllm_local_qwen_download') }}"
+      style="margin-top: 20px;"
+      {% if vllm_local_settings.qwen.action == "remove" %}
+        onsubmit="return confirm('Remove downloaded Qwen model files?');"
+      {% endif %}
+    >
+      <input type="hidden" name="qwen_action" value="{{ vllm_local_settings.qwen.action }}" />
+      <p class="muted" style="font-size: 12px;">
+        qwen model:
+        {% if vllm_local_settings.qwen.installed %}
+          downloaded
+        {% else %}
+          not downloaded
+        {% endif %}
+        • target: {{ vllm_local_settings.qwen.target_dir }}
+      </p>
+    </form>
+
+    {% if vllm_local_settings.huggingface.configured %}
+      <form
+        id="integration-vllm-local-hf-download-form"
+        method="post"
+        action="{{ url_for('agents.download_vllm_local_huggingface_model') }}"
+        data-download-start-url="{{ url_for('agents.start_vllm_local_huggingface_download') }}"
+        class="form-grid"
+        style="margin-top: 20px;"
+      >
+        <label class="label" style="grid-column: 1 / -1;">
+          Download any HuggingFace model
+          <input
+            class="input"
+            type="text"
+            name="vllm_local_hf_model_id"
+            placeholder="owner/model"
+            required
+          />
+          <p class="muted" style="margin-top: 6px; font-size: 12px;">
+            Uses repo id format (owner/model). Local dir is auto-named from model name.
+          </p>
+        </label>
+      </form>
+    {% endif %}
+
+    <section
+      id="integration-vllm-local-download-status"
+      class="subcard"
+      data-status-url-template="{{ url_for('agents.vllm_local_huggingface_download_status', job_id='__JOB_ID__') }}"
+      style="margin-top: 20px;"
+    >
+      <div class="row-between">
+        <p class="eyebrow">download status</p>
+        <span class="status status-idle" id="integration-vllm-local-download-status-badge">idle</span>
+      </div>
+      <p class="muted" id="integration-vllm-local-download-summary" style="margin-top: 10px; font-size: 12px;">
+        No active download.
+      </p>
+      <p class="muted" id="integration-vllm-local-download-model" style="margin-top: 6px; font-size: 12px;"></p>
+      <div style="margin-top: 12px;">
+        <div style="height: 8px; border-radius: 999px; background: rgba(148, 163, 184, 0.2); overflow: hidden;">
+          <div
+            id="integration-vllm-local-download-progress-bar"
+            style="height: 8px; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #10b981 0%, #34d399 100%); transition: width 180ms ease;"
+          ></div>
+        </div>
+        <p class="muted" id="integration-vllm-local-download-percent" style="margin-top: 8px; font-size: 12px;">0%</p>
+      </div>
+    </section>
+
+    <section class="subcard" style="margin-top: 20px;">
+      <div class="row-between">
+        <p class="eyebrow">downloaded models</p>
+        <span class="status status-success">
+          {{ (vllm_local_settings.huggingface.downloaded_models or []) | length }} downloaded
+        </span>
+      </div>
+      {% if vllm_local_settings.huggingface.downloaded_models %}
+        <div style="margin-top: 12px; overflow-x: auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Status</th>
+                <th class="table-actions-cell">Delete</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for model in vllm_local_settings.huggingface.downloaded_models %}
+                <tr>
+                  <td>
+                    <p>{{ model.label }}</p>
+                    <p class="muted" style="margin-top: 6px; font-size: 12px;">
+                      {{ model.value or model.container_path }}
+                    </p>
+                  </td>
+                  <td>
+                    <span class="status status-success">{{ model.status }}</span>
+                  </td>
+                  <td class="table-actions-cell">
+                    <div class="table-actions">
+                      <form
+                        method="post"
+                        action="{{ url_for('agents.delete_vllm_local_huggingface_model') }}"
+                        onsubmit="return confirm('Delete this downloaded model?');"
+                      >
+                        <input type="hidden" name="model_dir_name" value="{{ model.dir_name }}" />
+                        <button
+                          type="submit"
+                          class="icon-button icon-button-danger"
+                          aria-label="Delete {{ model.label }}"
+                        >
+                          <i class="fa-solid fa-trash"></i>
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted" style="margin-top: 12px; font-size: 12px;">No downloaded models yet.</p>
+      {% endif %}
+    </section>
+  </div>
+  {% endif %}
+
+  {% if integration_section == "chroma" %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="section-title">ChromaDB</h2>
+        <p class="muted" style="margin-top: 6px;">
+          Host, port, and TLS settings for integrated MCP and Chroma collections views.
+        </p>
+      </div>
+      <span class="status {% if chroma_connected %}status-success{% else %}status-warning{% endif %}">
+        {% if chroma_connected %}connected{% else %}needs host + port{% endif %}
+      </span>
+    </div>
+    {% if chroma_settings.get("normalized_hint") %}
+      <div class="alert alert-info" style="margin-top: 16px;">
+        {{ chroma_settings.get("normalized_hint") }}
+      </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('agents.update_chroma_settings') }}" class="form-grid">
+      <label class="label">
+        Host
+        <input
+          class="input"
+          type="text"
+          name="chroma_host"
+          value="{{ chroma_settings.get('host', '') }}"
+          placeholder="llmctl-chromadb"
+        />
+      </label>
+      <label class="label">
+        Port
+        <input
+          class="input"
+          type="number"
+          min="1"
+          max="65535"
+          name="chroma_port"
+          value="{{ chroma_settings.get('port', '') }}"
+          placeholder="8000"
+        />
+      </label>
+      <label class="label" style="grid-column: 1 / -1;">
+        TLS
+        {% set chroma_ssl = chroma_settings.get('ssl', 'false').strip().lower() %}
+        <select class="input" name="chroma_ssl">
+          <option value="false" {% if chroma_ssl != 'true' %}selected{% endif %}>disabled</option>
+          <option value="true" {% if chroma_ssl == 'true' %}selected{% endif %}>enabled</option>
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i>
+          save chroma
+        </button>
+        {% if chroma_connected %}
+          <a class="btn btn-secondary" href="{{ url_for('agents.chroma_collections') }}">
+            <i class="fa-solid fa-arrow-right"></i>
+            open collections
+          </a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+</section>
+</section>
+
+{% if integration_section == "huggingface" %}
+<script>
+  (() => {
+    const qwenForm = document.getElementById("integration-vllm-local-qwen-form");
+    const qwenButton = document.getElementById("integration-vllm-local-qwen-button");
+    const qwenAction = qwenForm ? (qwenForm.dataset.qwenAction || "").trim() : "";
+    const qwenStartUrl = qwenForm ? (qwenForm.dataset.downloadStartUrl || "").trim() : "";
+
+    const hfForm = document.getElementById("integration-vllm-local-hf-download-form");
+    const hfButton = document.getElementById("integration-vllm-local-hf-download-button");
+    const hfInput = hfForm ? hfForm.querySelector("input[name='vllm_local_hf_model_id']") : null;
+    const hfStartUrl = hfForm ? (hfForm.dataset.downloadStartUrl || "").trim() : "";
+
+    const statusCard = document.getElementById("integration-vllm-local-download-status");
+    const statusBadge = document.getElementById("integration-vllm-local-download-status-badge");
+    const statusSummary = document.getElementById("integration-vllm-local-download-summary");
+    const statusModel = document.getElementById("integration-vllm-local-download-model");
+    const progressBar = document.getElementById("integration-vllm-local-download-progress-bar");
+    const progressPercent = document.getElementById("integration-vllm-local-download-percent");
+    const statusUrlTemplate = statusCard ? (statusCard.dataset.statusUrlTemplate || "").trim() : "";
+    const initialJob = {{ vllm_local_settings.download_job | tojson }};
+
+    if (!statusCard || !statusBadge || !statusSummary || !statusModel || !progressBar || !progressPercent) {
+      return;
+    }
+
+    let activeJobId = null;
+    let pollTimer = null;
+    let pollingEnabled = false;
+    let realtimeController = null;
+
+    const activeStatuses = new Set(["queued", "running"]);
+    const statusClasses = {
+      queued: "status-queued",
+      running: "status-running",
+      succeeded: "status-success",
+      failed: "status-failed",
+    };
+
+    const stopPolling = () => {
+      if (pollTimer) {
+        window.clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const setActiveJobId = (jobId) => {
+      const nextId = String(jobId || "").trim();
+      activeJobId = nextId || null;
+      if (realtimeController) {
+        const rooms = [];
+        if (activeJobId) {
+          rooms.push(`download_job:${activeJobId}`);
+        }
+        realtimeController.updateRooms(rooms);
+      }
+    };
+
+    const setControlsBusy = (busy) => {
+      if (qwenButton && qwenAction === "download") {
+        qwenButton.disabled = busy;
+      }
+      if (hfButton) {
+        hfButton.disabled = busy;
+      }
+    };
+
+    const showStatusCard = (show) => {
+      statusCard.style.display = show ? "block" : "none";
+    };
+
+    const renderJob = (job) => {
+      if (!job || typeof job !== "object") {
+        showStatusCard(true);
+        statusBadge.className = "status status-idle";
+        statusBadge.textContent = "idle";
+        statusSummary.textContent = "No active download.";
+        statusModel.textContent = "";
+        progressBar.style.width = "0%";
+        progressPercent.textContent = "0%";
+        return;
+      }
+      showStatusCard(true);
+      const status = String(job.status || "queued").trim() || "queued";
+      const className = statusClasses[status] || "status-idle";
+      statusBadge.className = `status ${className}`;
+      statusBadge.textContent = status;
+
+      const summary = String(job.summary || "").trim();
+      statusSummary.textContent = summary || "Working...";
+
+      const modelId = String(job.model_id || "").trim();
+      const targetDir = String(job.target_dir || "").trim();
+      statusModel.textContent = modelId
+        ? `${modelId}${targetDir ? ` -> ${targetDir}` : ""}`
+        : targetDir;
+
+      const hasNumericPercent = Number.isFinite(Number(job.percent));
+      const percentValue = hasNumericPercent
+        ? Math.max(0, Math.min(100, Number(job.percent)))
+        : activeStatuses.has(status)
+          ? 8
+          : 0;
+      progressBar.style.width = `${percentValue}%`;
+      progressPercent.textContent = hasNumericPercent
+        ? `${Math.round(percentValue)}%`
+        : activeStatuses.has(status)
+          ? "working..."
+          : "0%";
+
+      if (!activeStatuses.has(status)) {
+        setControlsBusy(false);
+      }
+    };
+
+    const schedulePoll = () => {
+      stopPolling();
+      if (!pollingEnabled || !activeJobId) {
+        return;
+      }
+      pollTimer = window.setTimeout(pollJob, 1200);
+    };
+
+    const pollJob = async () => {
+      if (!activeJobId || !statusUrlTemplate) {
+        return;
+      }
+      try {
+        const response = await window.fetch(
+          statusUrlTemplate.replace("__JOB_ID__", encodeURIComponent(activeJobId)),
+          { headers: { Accept: "application/json" } }
+        );
+        if (!response.ok) {
+          throw new Error("Unable to load download status.");
+        }
+        const data = await response.json();
+        const job = data && typeof data === "object" ? data.download_job : null;
+        renderJob(job);
+        if (job && activeStatuses.has(String(job.status || ""))) {
+          schedulePoll();
+          return;
+        }
+        setActiveJobId(null);
+        stopPolling();
+      } catch (error) {
+        statusSummary.textContent = error && error.message ? error.message : "Unable to load download status.";
+        statusBadge.className = "status status-warning";
+        statusBadge.textContent = "warning";
+        schedulePoll();
+      }
+    };
+
+    const startDownload = async (url, formData) => {
+      if (!url) {
+        statusSummary.textContent = "Download start URL is missing.";
+        statusBadge.className = "status status-failed";
+        statusBadge.textContent = "failed";
+        showStatusCard(true);
+        return;
+      }
+      showStatusCard(true);
+      setControlsBusy(true);
+      statusBadge.className = "status status-running";
+      statusBadge.textContent = "starting";
+      statusSummary.textContent = "Starting download...";
+      progressBar.style.width = "3%";
+      progressPercent.textContent = "starting...";
+      try {
+        const response = await window.fetch(url, {
+          method: "POST",
+          body: formData,
+          headers: { Accept: "application/json" },
+        });
+        const data = await response.json();
+        if (!response.ok || !data || data.ok === false) {
+          const message =
+            data && typeof data.error === "string" && data.error.trim()
+              ? data.error.trim()
+              : "Unable to start download.";
+          throw new Error(message);
+        }
+        const job = data.download_job;
+        if (!job || !job.id) {
+          throw new Error("Download job was not created.");
+        }
+        setActiveJobId(String(job.id));
+        renderJob(job);
+        if (pollingEnabled) {
+          schedulePoll();
+        }
+      } catch (error) {
+        setActiveJobId(null);
+        setControlsBusy(false);
+        statusBadge.className = "status status-failed";
+        statusBadge.textContent = "failed";
+        statusSummary.textContent = error && error.message ? error.message : "Unable to start download.";
+        progressBar.style.width = "0%";
+        progressPercent.textContent = "0%";
+      }
+    };
+
+    const handleRealtimeEvent = (eventName, envelope) => {
+      const data = envelope && typeof envelope === "object" ? envelope : {};
+      const eventType = String(data.event_type || eventName || "").trim();
+      if (!eventType.startsWith("download.job.")) {
+        return;
+      }
+      const payload = data.payload && typeof data.payload === "object" ? data.payload : {};
+      const job = payload.download_job && typeof payload.download_job === "object"
+        ? payload.download_job
+        : null;
+      if (!job || !job.id) {
+        return;
+      }
+      if (activeJobId && String(job.id) !== activeJobId) {
+        return;
+      }
+      setActiveJobId(String(job.id));
+      renderJob(job);
+      const status = String(job.status || "").trim();
+      if (activeStatuses.has(status)) {
+        return;
+      }
+      setActiveJobId(null);
+      stopPolling();
+    };
+
+    const startRealtime = () => {
+      if (!window.llmctlRealtime || typeof window.llmctlRealtime.connect !== "function") {
+        pollingEnabled = true;
+        return;
+      }
+      realtimeController = window.llmctlRealtime.connect({
+        roomKeys: activeJobId ? [`download_job:${activeJobId}`] : [],
+        onSocketReady: () => {
+          pollingEnabled = false;
+          stopPolling();
+        },
+        onSocketFailure: () => {
+          pollingEnabled = true;
+          if (activeJobId) {
+            schedulePoll();
+          }
+        },
+        onEvent: handleRealtimeEvent,
+      });
+      if (!realtimeController) {
+        pollingEnabled = true;
+      }
+    };
+
+    if (qwenForm && qwenAction === "download") {
+      qwenForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const formData = new window.FormData(qwenForm);
+        startDownload(qwenStartUrl, formData);
+      });
+    }
+
+    if (hfForm) {
+      hfForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!hfInput || !hfInput.value.trim()) {
+          statusBadge.className = "status status-warning";
+          statusBadge.textContent = "warning";
+          statusSummary.textContent = "Enter a HuggingFace model ID (owner/model).";
+          showStatusCard(true);
+          return;
+        }
+        const formData = new window.FormData(hfForm);
+        startDownload(hfStartUrl, formData);
+      });
+    }
+
+    renderJob(initialJob);
+    if (initialJob && typeof initialJob.id === "string" && activeStatuses.has(String(initialJob.status || ""))) {
+      setActiveJobId(initialJob.id);
+    }
+    startRealtime();
+    if (pollingEnabled && activeJobId) {
+      schedulePoll();
+    }
+    window.addEventListener("beforeunload", () => {
+      stopPolling();
+      if (realtimeController) {
+        realtimeController.disconnect();
+        realtimeController = null;
+      }
+    });
+  })();
+</script>
+{% endif %}
+
+<script>
+  const githubPatInput = document.getElementById("github-pat-input");
+  const githubRepoBlock = document.getElementById("github-repo-block");
+
+  const toggleRepoBlock = () => {
+    if (!githubPatInput || !githubRepoBlock) {
+      return;
+    }
+    const hasPat = githubPatInput.value.trim().length > 0;
+    githubRepoBlock.style.display = hasPat ? "block" : "none";
+  };
+
+  if (githubPatInput) {
+    githubPatInput.addEventListener("input", toggleRepoBlock);
+    toggleRepoBlock();
+  }
+
+  const jiraForm = document.getElementById("jira-settings-form");
+  const jiraProjectSelect = document.getElementById("jira-project-select");
+
+  if (jiraForm && jiraProjectSelect) {
+    const refreshButton = jiraForm.querySelector(
+      "button[name='action'][value='refresh']"
+    );
+    jiraProjectSelect.addEventListener("change", () => {
+      if (jiraForm.requestSubmit && refreshButton) {
+        jiraForm.requestSubmit(refreshButton);
+        return;
+      }
+      if (refreshButton) {
+        refreshButton.click();
+        return;
+      }
+      const hiddenAction = document.createElement("input");
+      hiddenAction.type = "hidden";
+      hiddenAction.name = "action";
+      hiddenAction.value = "refresh";
+      jiraForm.appendChild(hiddenAction);
+      jiraForm.submit();
+    });
+  }
+</script>
+{% endblock %}

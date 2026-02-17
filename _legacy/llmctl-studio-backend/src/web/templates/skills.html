@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block action_header %}
+  <div class="action-header-actions">
+    <a class="btn btn-secondary" href="{{ url_for('agents.import_skill') }}">
+      <i class="fa-solid fa-file-import"></i>
+      import skill
+    </a>
+    <a class="btn btn-primary" href="{{ url_for('agents.new_skill') }}">
+      <i class="fa-solid fa-plus"></i>
+      create skill
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Skills</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    First-class skill packages assigned to Agents.
+  </p>
+  {% if skills %}
+    <div style="margin-top: 20px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Slug</th>
+            <th>Status</th>
+            <th>Latest version</th>
+            <th>Agent bindings</th>
+            <th class="table-actions-cell">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for skill in skills %}
+            <tr
+              class="table-row-link"
+              data-href="{{ url_for('agents.view_skill', skill_id=skill.id) }}"
+            >
+              <td>
+                <p>{{ skill.display_name }}</p>
+              </td>
+              <td>
+                <p class="muted">{{ skill.name }}</p>
+              </td>
+              <td>
+                <p>{{ skill.status }}</p>
+              </td>
+              <td>
+                <p>{{ skill.latest_version or '-' }}</p>
+              </td>
+              <td>
+                <p>{{ skill.binding_count }}</p>
+              </td>
+              <td class="table-actions-cell">
+                <div class="table-actions">
+                  {% if skill.is_git_read_only %}
+                    <span class="btn btn-secondary" aria-label="Git-based skill is read-only">
+                      <i class="fa-solid fa-lock"></i>
+                    </span>
+                  {% else %}
+                    <form
+                      method="post"
+                      action="{{ url_for('agents.delete_skill', skill_id=skill.id) }}"
+                      onsubmit="return confirm('Delete this skill?');"
+                    >
+                      <input type="hidden" name="next" value="{{ request.path }}" />
+                      <button type="submit" class="btn btn-danger" aria-label="Delete skill">
+                        <i class="fa-solid fa-trash"></i>
+                      </button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted" style="margin-top: 16px;">No skills created yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  const skillRows = document.querySelectorAll(".table-row-link");
+  skillRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}

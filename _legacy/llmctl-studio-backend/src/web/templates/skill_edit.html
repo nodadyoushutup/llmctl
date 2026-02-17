@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+
+{% block topbar_actions %}
+  <a class="btn btn-secondary" href="{{ url_for('agents.view_skill', skill_id=skill.id) }}">
+    <i class="fa-solid fa-arrow-left"></i>
+    back to skill
+  </a>
+  <a class="btn btn-secondary" href="{{ url_for('agents.list_skills') }}">
+    <i class="fa-solid fa-list"></i>
+    all skills
+  </a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <p class="eyebrow">skill {{ skill.id }}</p>
+      <h2 class="section-title">Edit Skill</h2>
+    </div>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Changes are staged in this form and applied only when you click save.
+  </p>
+  <form
+    method="post"
+    action="{{ url_for('agents.update_skill', skill_id=skill.id) }}"
+    class="form-grid"
+    enctype="multipart/form-data"
+    style="margin-top: 20px;"
+    id="skillEditForm"
+  >
+    <label class="label">
+      slug
+      <input type="text" class="input" value="{{ skill.name }}" disabled />
+    </label>
+    <label class="label">
+      display name
+      <input type="text" name="display_name" class="input" value="{{ skill.display_name }}" required />
+    </label>
+    <label class="label">
+      status
+      <select name="status" class="input">
+        {% for value, label in skill_status_options %}
+          <option value="{{ value }}" {% if skill.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="label">
+      description
+      <textarea name="description" class="textarea" rows="3" required>{{ skill.description or '' }}</textarea>
+    </label>
+
+    <div class="subcard" style="margin-top: 4px;">
+      <p class="eyebrow">publish new immutable version</p>
+      <div class="stack" style="margin-top: 10px; gap: 10px;">
+        <label class="label" style="margin-top: 0;">
+          new version
+          <input
+            type="text"
+            name="new_version"
+            class="input"
+            placeholder="{{ latest_version.version if latest_version else '1.0.0' }}"
+          />
+        </label>
+        <label class="label" style="margin-top: 0;">
+          source ref (optional)
+          <input type="text" name="source_ref" class="input" placeholder="{{ skill.source_ref or ('web:skill:' ~ skill.id) }}" />
+        </label>
+      </div>
+    </div>
+
+    <label class="label">
+      SKILL.md content
+      <textarea
+        name="new_skill_md"
+        class="textarea"
+        rows="14"
+      >{{ latest_skill_md }}</textarea>
+    </label>
+
+    <div class="subcard" style="margin-top: 6px;">
+      <p class="eyebrow">existing files (latest version)</p>
+      <input type="hidden" name="existing_files_json" id="skillEditExistingFilesJson" value="[]" />
+      <div style="margin-top: 10px; overflow-x: auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Current path</th>
+              <th>Target path</th>
+              <th>Size</th>
+              <th>Type</th>
+              <th>Delete</th>
+            </tr>
+          </thead>
+          <tbody id="skillEditExistingRows">
+            {% if latest_non_skill_files %}
+              {% for file in latest_non_skill_files %}
+                <tr data-existing-path="{{ file.path }}">
+                  <td><p>{{ file.path }}</p></td>
+                  <td>
+                    <input type="text" class="input js-existing-target-path" value="{{ file.path }}" />
+                  </td>
+                  <td><p>{{ file.size_bytes or '-' }}</p></td>
+                  <td><p class="muted">{{ "binary" if file.is_binary else "text" }}</p></td>
+                  <td>
+                    <label class="label" style="margin-top: 0;">
+                      <input type="checkbox" class="js-existing-delete" />
+                    </label>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="5"><p class="muted">No files besides SKILL.md in latest version.</p></td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="subcard" style="margin-top: 6px;">
+      <p class="eyebrow">upload files</p>
+      <p class="muted" style="margin-top: 6px; font-size: 12px;">
+        Allowed: text/code/docs + images/data/PDF/DOCX/PPTX. Max {{ max_upload_bytes // (1024 * 1024) }} MB per file.
+      </p>
+      <label class="label" style="margin-top: 10px;">
+        select files
+        <input type="file" id="skillEditUploads" name="upload_files" class="input" multiple />
+      </label>
+      <input type="hidden" name="upload_specs_json" id="skillEditUploadSpecsJson" value="[]" />
+      <div style="margin-top: 12px; overflow-x: auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Target path</th>
+              <th>On conflict</th>
+            </tr>
+          </thead>
+          <tbody id="skillEditUploadRows">
+            <tr>
+              <td colspan="3"><p class="muted">No files selected.</p></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-floppy-disk"></i>
+        save
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('agents.view_skill', skill_id=skill.id) }}">
+        <i class="fa-solid fa-arrow-left"></i>
+        cancel
+      </a>
+    </div>
+  </form>
+</section>
+
+<script>
+  const editForm = document.getElementById("skillEditForm");
+  const existingRows = document.getElementById("skillEditExistingRows");
+  const existingJsonInput = document.getElementById("skillEditExistingFilesJson");
+  const uploadInput = document.getElementById("skillEditUploads");
+  const uploadRows = document.getElementById("skillEditUploadRows");
+  const uploadSpecsInput = document.getElementById("skillEditUploadSpecsJson");
+
+  function defaultTargetPath(name) {
+    const cleaned = String(name || "").replaceAll("\\\\", "/").split("/").pop() || "file.txt";
+    return `references/${cleaned}`;
+  }
+
+  function nextKeepBothPath(path, occupied) {
+    const normalized = String(path || "").trim();
+    const slash = normalized.lastIndexOf("/");
+    const parent = slash >= 0 ? normalized.slice(0, slash) : "";
+    const name = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+    const dot = name.indexOf(".");
+    const stem = dot >= 0 ? name.slice(0, dot) : name;
+    const suffix = dot >= 0 ? name.slice(dot) : "";
+    let index = 1;
+    while (index < 10000) {
+      const candidateName = `${stem} (${index})${suffix}`;
+      const candidate = parent ? `${parent}/${candidateName}` : candidateName;
+      if (!occupied.has(candidate)) {
+        return candidate;
+      }
+      index += 1;
+    }
+    return normalized;
+  }
+
+  function buildExistingDraft() {
+    const rows = Array.from(document.querySelectorAll("#skillEditExistingRows tr[data-existing-path]"));
+    const draft = [];
+    for (const row of rows) {
+      const originalPath = String(row.getAttribute("data-existing-path") || "").trim();
+      const targetInput = row.querySelector(".js-existing-target-path");
+      const deleteInput = row.querySelector(".js-existing-delete");
+      const targetPath = String(targetInput ? targetInput.value : "").trim();
+      const deleteFlag = Boolean(deleteInput && deleteInput.checked);
+      if (!originalPath) {
+        return { error: "Existing file row has no original path.", draft: [] };
+      }
+      if (!deleteFlag && !targetPath) {
+        return { error: `Target path is required for '${originalPath}'.`, draft: [] };
+      }
+      draft.push({
+        original_path: originalPath,
+        path: targetPath,
+        delete: deleteFlag,
+      });
+    }
+    return { error: "", draft };
+  }
+
+  function renderUploadRows() {
+    const files = Array.from(uploadInput ? uploadInput.files || [] : []);
+    if (!uploadRows) {
+      return;
+    }
+    if (!files.length) {
+      uploadRows.innerHTML = '<tr><td colspan="3"><p class="muted">No files selected.</p></td></tr>';
+      return;
+    }
+    uploadRows.innerHTML = files
+      .map((file, index) => {
+        return `
+          <tr data-upload-index="${index}">
+            <td><p>${file.name}</p><p class="muted">${file.size} bytes</p></td>
+            <td>
+              <input type="text" class="input js-upload-target-path" value="${defaultTargetPath(file.name)}" />
+            </td>
+            <td>
+              <select class="input js-upload-conflict">
+                {% for option in upload_conflict_options %}
+                  <option value="{{ option }}" {% if option == 'ask' %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  function buildUploadDraft(existingOccupied) {
+    const rows = Array.from(document.querySelectorAll("#skillEditUploadRows tr[data-upload-index]"));
+    const occupied = new Set(existingOccupied);
+    const specs = [];
+    for (const row of rows) {
+      const index = Number(row.getAttribute("data-upload-index"));
+      const pathInput = row.querySelector(".js-upload-target-path");
+      const conflictInput = row.querySelector(".js-upload-conflict");
+      const path = String(pathInput ? pathInput.value : "").trim();
+      const conflict = String(conflictInput ? conflictInput.value : "ask").trim().toLowerCase();
+      if (!path) {
+        return { error: "Each uploaded file needs a target path.", specs: [] };
+      }
+      if (occupied.has(path)) {
+        if (conflict === "ask") {
+          return { error: `Select conflict behavior for '${path}'.`, specs: [] };
+        }
+        if (conflict === "replace") {
+          specs.push({ index, path, conflict });
+          continue;
+        }
+        if (conflict === "keep_both") {
+          const keepBothPath = nextKeepBothPath(path, occupied);
+          occupied.add(keepBothPath);
+          specs.push({ index, path, conflict });
+          continue;
+        }
+        if (conflict === "skip") {
+          specs.push({ index, path, conflict });
+          continue;
+        }
+      } else {
+        occupied.add(path);
+      }
+      specs.push({ index, path, conflict });
+    }
+    return { error: "", specs };
+  }
+
+  if (uploadInput) {
+    uploadInput.addEventListener("change", renderUploadRows);
+  }
+
+  if (editForm) {
+    editForm.addEventListener("submit", (event) => {
+      const existing = buildExistingDraft();
+      if (existing.error) {
+        event.preventDefault();
+        window.alert(existing.error);
+        return;
+      }
+      if (existingJsonInput) {
+        existingJsonInput.value = JSON.stringify(existing.draft);
+      }
+      const occupied = new Set(
+        existing.draft
+          .filter((item) => !item.delete)
+          .map((item) => String(item.path || "").trim())
+          .filter((value) => value)
+      );
+      const uploads = buildUploadDraft(occupied);
+      if (uploads.error) {
+        event.preventDefault();
+        window.alert(uploads.error);
+        return;
+      }
+      if (uploadSpecsInput) {
+        uploadSpecsInput.value = JSON.stringify(uploads.specs);
+      }
+    });
+  }
+</script>
+{% endblock %}

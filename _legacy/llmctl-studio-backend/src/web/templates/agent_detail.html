@@ -1,0 +1,89 @@
+{% extends "agent_detail_layout.html" %}
+
+{% block agent_detail_content %}
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Priorities</h2>
+  </div>
+  {% if priorities %}
+    <ol style="margin-top: 12px; padding-left: 20px; display: grid; gap: 8px;">
+      {% for priority in priorities %}
+        <li>
+          <p>{{ priority.content }}</p>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No priorities configured.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Skills</h2>
+  </div>
+  {% if assigned_skills %}
+    <div style="margin-top: 16px; overflow-x: auto;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Latest version</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for skill in assigned_skills %}
+            {% set versions = (skill.versions | sort(attribute='id')) %}
+            {% set latest_version = versions[-1] if versions else None %}
+            <tr class="table-row-link" data-href="{{ url_for('agents.view_skill', skill_id=skill.id) }}">
+              <td><p>{{ skill.display_name }}</p></td>
+              <td><p>{{ skill.status }}</p></td>
+              <td><p>{{ latest_version.version if latest_version else "-" }}</p></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top: 10px; font-size: 12px;">
+      Task and flowchart execution resolves this ordered Agent skill set at runtime.
+    </p>
+  {% else %}
+    <p class="muted" style="margin-top: 12px;">No skills assigned.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="section-title">Autorun Behavior</h2>
+  </div>
+  <p class="muted" style="margin-top: 12px;">
+    Autoruns use the agent role plus ordered priorities to decide and execute work.
+  </p>
+</section>
+
+<script>
+  const agentSkillRows = document.querySelectorAll(".table-row-link[data-href]");
+  agentSkillRows.forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const target = event.target;
+      if (
+        target.closest("a") ||
+        target.closest("button") ||
+        target.closest("input") ||
+        target.closest("select") ||
+        target.closest("textarea") ||
+        target.closest("label") ||
+        target.closest("summary") ||
+        target.closest("details")
+      ) {
+        return;
+      }
+      const href = row.dataset.href;
+      if (href) {
+        window.location.href = href;
+      }
+    });
+  });
+</script>
+{% endblock %}
