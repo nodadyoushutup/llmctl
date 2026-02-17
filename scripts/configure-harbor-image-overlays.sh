@@ -31,7 +31,7 @@ Then apply one of:
   - kubectl apply -k kubernetes-overlays/harbor-images
   - kubectl apply -k kubernetes-overlays/minikube-live-code-harbor
 
-For ArgoCD apps that track path "kubernetes/llmctl-studio/overlays/dev", pass --argocd-app (for example: llmctl-kubernetes)
+For ArgoCD apps that track path "kubernetes/llmctl-studio/overlays/dev", pass --argocd-app (for example: llmctl-studio)
 to set kustomize image overrides for llmctl images.
 EOF
 }

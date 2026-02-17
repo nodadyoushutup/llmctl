@@ -11,7 +11,7 @@ This folder deploys the full `llmctl` stack into a single `llmctl` namespace:
 - `llmctl-chromadb`
 - integrated MCP services (`llmctl-mcp`, `llmctl-mcp-github`, `llmctl-mcp-atlassian`, `llmctl-mcp-chroma`, `llmctl-mcp-google-cloud`)
 
-ArgoCD tracks this as one application (`llmctl-kubernetes`) for core services. pgAdmin and Harbor are tracked as separate ArgoCD applications (`llmctl-pgadmin`, `llmctl-harbor`).
+ArgoCD tracks this as one application (`llmctl-studio`) for core services. pgAdmin and Harbor are tracked as separate ArgoCD applications (`llmctl-pgadmin`, `llmctl-harbor`).
 
 ## Layout
 
@@ -228,8 +228,8 @@ This avoids Docker/CRI HTTPS-vs-HTTP pull mismatches that can occur when using H
 If ArgoCD tracks `path: kubernetes/llmctl-studio/overlays/dev` instead of the Harbor overlay path, set Harbor image overrides on the app:
 
 ```bash
-scripts/configure-harbor-image-overlays.sh --argocd-app llmctl-kubernetes
-argocd app sync llmctl-kubernetes
+scripts/configure-harbor-image-overlays.sh --argocd-app llmctl-studio
+argocd app sync llmctl-studio
 ```
 
 That command updates all llmctl-managed images (`llmctl-studio-backend`, `llmctl-studio-frontend`, `llmctl-celery-worker`, `llmctl-mcp`, `llmctl-executor`) so ArgoCD does not fall back to unqualified local image names.
