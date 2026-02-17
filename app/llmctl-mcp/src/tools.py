@@ -54,7 +54,6 @@ from core.models import (
     SkillVersion,
     Role,
     Script,
-    TaskTemplate,
     agent_task_scripts,
     is_legacy_skill_script_type,
 )
@@ -155,7 +154,6 @@ def _coerce_bool(value: Any) -> bool:
 
 
 FLOWCHART_NODE_TYPE_WITH_REF = {
-    FLOWCHART_NODE_TYPE_TASK,
     FLOWCHART_NODE_TYPE_PLAN,
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_MEMORY,
@@ -271,8 +269,6 @@ def _flowchart_ref_exists(
 ) -> bool:
     if ref_id is None:
         return False
-    if node_type == FLOWCHART_NODE_TYPE_TASK:
-        return session.get(TaskTemplate, ref_id) is not None
     if node_type == FLOWCHART_NODE_TYPE_PLAN:
         return session.get(Plan, ref_id) is not None
     if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
@@ -2976,8 +2972,8 @@ def register(mcp: FastMCP) -> None:
     ) -> dict[str, Any]:
         """Attach an existing attachment to a target model record.
 
-        Use this after create_attachment to link files to tasks and task templates.
-        Targets include task and task_template.
+        Use this after create_attachment to link files to tasks.
+        Target includes task.
         Keywords: link attachment, attach file, add attachment to record.
 
         IDs: target_id and attachment_id are numeric LLMCTL Studio IDs.

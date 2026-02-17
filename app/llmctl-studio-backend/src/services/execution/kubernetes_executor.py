@@ -209,7 +209,7 @@ class KubernetesExecutor:
         )
         dispatch_timeout = _as_int(
             settings.get("dispatch_timeout_seconds"),
-            default=60,
+            default=300,
             minimum=5,
             maximum=3600,
         )
@@ -312,10 +312,16 @@ class KubernetesExecutor:
 
         remote_status = str((outcome.executor_result or {}).get("status") or "").strip().lower()
         if remote_status and remote_status != EXECUTION_STATUS_SUCCESS:
+            remote_error_message = ""
+            remote_error = (outcome.executor_result or {}).get("error")
+            if isinstance(remote_error, dict):
+                remote_error_message = str(remote_error.get("message") or "").strip()
             message = (
                 "Kubernetes executor returned non-success status "
                 f"'{remote_status or 'unknown'}'."
             )
+            if remote_error_message:
+                message = f"{message} {remote_error_message}"
             return self._execution_failed_after_confirmed_result(
                 request=request,
                 started_at=started_at,
@@ -709,11 +715,18 @@ class KubernetesExecutor:
                 if str(item).strip()
             ],
         }
+        execution_mode = "flowchart_node_in_pod"
+        request_id = f"flowchart-node-{request.node_id}-run-{request.execution_id}"
+        if str(request.node_type or "").strip().lower() == "agent_task":
+            execution_mode = "agent_task_in_pod"
+            task_id = int(request.execution_task_id or request.execution_id)
+            request_id = f"agent-task-{task_id}"
+
         payload = {
             "contract_version": "v1",
             "result_contract_version": "v1",
             "provider": self.provider,
-            "request_id": f"flowchart-node-{request.node_id}-run-{request.execution_id}",
+            "request_id": request_id,
             "timeout_seconds": max(5, min(execution_timeout, 3600)),
             "emit_start_markers": True,
             "node_execution": {
@@ -727,7 +740,7 @@ class KubernetesExecutor:
             "metadata": {
                 "flowchart_node_id": request.node_id,
                 "execution_id": request.execution_id,
-                "execution_mode": "flowchart_node_in_pod",
+                "execution_mode": execution_mode,
             },
         }
         return json.dumps(payload, separators=(",", ":"))
@@ -823,6 +836,16 @@ class KubernetesExecutor:
                             terminal_reason=terminal_reason,
                         )
                     if terminal_status == "failed":
+                        if executor_result is not None:
+                            return _KubernetesDispatchOutcome(
+                                job_name=job_name,
+                                pod_name=pod_name,
+                                stdout=latest_stdout,
+                                stderr=latest_stderr,
+                                startup_marker_seen=startup_seen,
+                                executor_result=executor_result,
+                                terminal_reason=terminal_reason,
+                            )
                         raise _KubernetesDispatchFailure(
                             fallback_reason="create_failed",
                             message=(

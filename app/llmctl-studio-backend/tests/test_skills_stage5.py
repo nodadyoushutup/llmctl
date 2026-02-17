@@ -27,7 +27,6 @@ from core.models import (
     Skill,
     SkillFile,
     SkillVersion,
-    TaskTemplate,
     agent_skill_bindings,
     flowchart_node_skills,
 )
@@ -597,13 +596,7 @@ class SkillsStage5Tests(StudioDbTestCase):
                 provider="codex",
                 config_json="{}",
             )
-            template = TaskTemplate.create(
-                session,
-                name="stage5-template",
-                prompt="hello",
-                model_id=model.id,
-            )
-            template_id = int(template.id)
+            model_id = int(model.id)
 
         flowchart_id = self._create_flowchart("Stage 5 Node Skill Routes")
         current_graph = self.client.get(f"/flowcharts/{flowchart_id}/graph")
@@ -625,7 +618,8 @@ class SkillsStage5Tests(StudioDbTestCase):
                     {
                         "client_id": "task",
                         "node_type": FLOWCHART_NODE_TYPE_TASK,
-                        "ref_id": template_id,
+                        "model_id": model_id,
+                        "config": {"task_prompt": "hello"},
                         "x": 140,
                         "y": 0,
                     },

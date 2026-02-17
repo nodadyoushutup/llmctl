@@ -54,7 +54,6 @@ from core.models import (
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
     Script,
-    TaskTemplate,
     Flowchart,
     FlowchartEdge,
     FlowchartNode,
@@ -362,12 +361,6 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 provider="codex",
                 config_json="{}",
             )
-            template_model = LLMModel.create(
-                session,
-                name="template-model",
-                provider="codex",
-                config_json="{}",
-            )
             default_model = LLMModel.create(
                 session,
                 name="default-model",
@@ -383,44 +376,17 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 x=0.0,
                 y=0.0,
             )
-            template = TaskTemplate.create(
-                session,
-                name="resolver-template",
-                prompt="test",
-                model_id=template_model.id,
-            )
-
-            resolved = studio_tasks._resolve_node_model(
-                session,
-                node=node,
-                template=template,
-                default_model_id=default_model.id,
-            )
+            resolved = studio_tasks._resolve_node_model(session, node=node, default_model_id=default_model.id)
             self.assertEqual(node_model.id, resolved.id)
 
             node.model_id = None
-            resolved = studio_tasks._resolve_node_model(
-                session,
-                node=node,
-                template=template,
-                default_model_id=default_model.id,
-            )
-            self.assertEqual(template_model.id, resolved.id)
-
-            template.model_id = None
-            resolved = studio_tasks._resolve_node_model(
-                session,
-                node=node,
-                template=template,
-                default_model_id=default_model.id,
-            )
+            resolved = studio_tasks._resolve_node_model(session, node=node, default_model_id=default_model.id)
             self.assertEqual(default_model.id, resolved.id)
 
             with self.assertRaisesRegex(ValueError, "No model configured"):
                 studio_tasks._resolve_node_model(
                     session,
                     node=node,
-                    template=template,
                     default_model_id=None,
                 )
 
@@ -499,7 +465,6 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             output_state = json.loads(task_run.output_state_json or "{}")
             self.assertEqual("config", output_state.get("task_prompt_source"))
             self.assertEqual("ad-hoc task", output_state.get("task_name"))
-            self.assertIsNone(output_state.get("task_template_id"))
             self.assertEqual("", output_state.get("raw_error"))
             self.assertEqual("post_run", output_state.get("task_current_stage"))
             output_stage_logs = output_state.get("task_stage_logs") or {}
@@ -619,26 +584,13 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             assert task is not None
             self.assertEqual(agent_id, task.agent_id)
 
-    def test_task_node_merges_template_and_node_attachments(self) -> None:
+    def test_task_node_uses_node_attachments(self) -> None:
         with session_scope() as session:
             model = LLMModel.create(
                 session,
                 name="attachment-task-model",
                 provider="codex",
                 config_json="{}",
-            )
-            template = TaskTemplate.create(
-                session,
-                name="template-with-attachments",
-                prompt="Return route_key=done",
-                model_id=model.id,
-            )
-            template_attachment = Attachment.create(
-                session,
-                file_name="template.txt",
-                file_path="/tmp/template.txt",
-                content_type="text/plain",
-                size_bytes=8,
             )
             node_attachment = Attachment.create(
                 session,
@@ -647,7 +599,6 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 content_type="text/plain",
                 size_bytes=4,
             )
-            template.attachments.append(template_attachment)
             flowchart = Flowchart.create(session, name="attachment-flowchart")
             start_node = FlowchartNode.create(
                 session,
@@ -660,11 +611,12 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 session,
                 flowchart_id=flowchart.id,
                 node_type=FLOWCHART_NODE_TYPE_TASK,
-                ref_id=template.id,
                 model_id=model.id,
                 x=1.0,
                 y=0.0,
-                config_json=json.dumps({}, sort_keys=True),
+                config_json=json.dumps(
+                    {"task_prompt": "Return route_key=done"}, sort_keys=True
+                ),
             )
             task_node.attachments.append(node_attachment)
             FlowchartEdge.create(
@@ -681,7 +633,6 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             run_id = flowchart_run.id
             task_node_id = task_node.id
             flowchart_id = flowchart.id
-            template_attachment_id = template_attachment.id
             node_attachment_id = node_attachment.id
 
         with patch.object(
@@ -714,7 +665,7 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             (llm_payload.get("task_context") or {}).get("attachments") or []
         )
         attachment_ids = {int(entry.get("id")) for entry in attachment_entries if entry.get("id")}
-        self.assertEqual({template_attachment_id, node_attachment_id}, attachment_ids)
+        self.assertEqual({node_attachment_id}, attachment_ids)
 
         with session_scope() as session:
             run = session.get(FlowchartRun, run_id)
@@ -737,18 +688,12 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 for entry in (output_state.get("attachments") or [])
                 if entry.get("id")
             }
-            self.assertEqual(
-                {template_attachment_id, node_attachment_id},
-                output_attachment_ids,
-            )
+            self.assertEqual({node_attachment_id}, output_attachment_ids)
             task = session.get(AgentTask, node_run.agent_task_id)
             self.assertIsNotNone(task)
             assert task is not None
             task_attachment_ids = {attachment.id for attachment in list(task.attachments)}
-            self.assertEqual(
-                {template_attachment_id, node_attachment_id},
-                task_attachment_ids,
-            )
+            self.assertEqual({node_attachment_id}, task_attachment_ids)
 
     def test_flowchart_task_output_display_prefers_raw_output(self) -> None:
         output = studio_tasks._flowchart_task_output_display(
@@ -2573,7 +2518,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertFalse(bool(validation.get("valid")))
         self.assertTrue(
             any(
-                "task node requires ref_id or config.task_prompt" in str(item)
+                "task node requires config.task_prompt" in str(item)
                 for item in (validation.get("errors") or [])
             )
         )
@@ -2584,7 +2529,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertFalse(bool(validate_payload.get("valid")))
         self.assertTrue(
             any(
-                "task node requires ref_id or config.task_prompt" in str(item)
+                "task node requires config.task_prompt" in str(item)
                 for item in (validate_payload.get("errors") or [])
             )
         )
@@ -2596,7 +2541,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertFalse(bool(run_validation.get("valid")))
         self.assertTrue(
             any(
-                "task node requires ref_id or config.task_prompt" in str(item)
+                "task node requires config.task_prompt" in str(item)
                 for item in (run_validation.get("errors") or [])
             )
         )
@@ -2674,23 +2619,11 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
 
     def test_node_bound_utilities_do_not_inherit_template_bindings(self) -> None:
         with session_scope() as session:
-            template_model = LLMModel.create(
-                session,
-                name="template-model",
-                provider="codex",
-                config_json="{}",
-            )
             node_model = LLMModel.create(
                 session,
                 name="node-model",
                 provider="codex",
                 config_json="{}",
-            )
-            template_mcp = MCPServer.create(
-                session,
-                name="template-mcp",
-                server_key="template-mcp",
-                config_json='{"command":"echo"}',
             )
             node_mcp = MCPServer.create(
                 session,
@@ -2698,32 +2631,15 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 server_key="node-mcp",
                 config_json='{"command":"echo"}',
             )
-            template_script = Script.create(
-                session,
-                file_name="template.sh",
-                content="#!/bin/sh\necho template\n",
-                script_type=SCRIPT_TYPE_INIT,
-            )
             node_script = Script.create(
                 session,
                 file_name="node.sh",
                 content="#!/bin/sh\necho node\n",
                 script_type=SCRIPT_TYPE_INIT,
             )
-            template = TaskTemplate.create(
-                session,
-                name="template-task",
-                prompt="prompt",
-                model_id=template_model.id,
-            )
-            template.mcp_servers.append(template_mcp)
-            template.scripts.append(template_script)
-            template_id = template.id
             node_model_id = node_model.id
             node_mcp_id = node_mcp.id
             node_script_id = node_script.id
-            template_mcp_id = template_mcp.id
-            template_script_id = template_script.id
 
         flowchart_id = self._create_flowchart("Stage 9 Utilities")
         graph_response = self.client.post(
@@ -2739,7 +2655,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "client_id": "n-task",
                         "node_type": FLOWCHART_NODE_TYPE_TASK,
-                        "ref_id": template_id,
+                        "config": {"task_prompt": "Return route_key=done"},
                         "x": 120,
                         "y": 0,
                     },
@@ -2768,8 +2684,6 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertIsNone(before_node.get("model_id"))
         self.assertEqual([], before_node.get("mcp_server_ids"))
         self.assertEqual([], before_node.get("script_ids"))
-        self.assertNotIn(template_mcp_id, before_node.get("mcp_server_ids") or [])
-        self.assertNotIn(template_script_id, before_node.get("script_ids") or [])
 
         set_model = self.client.post(
             f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/model",
@@ -2793,8 +2707,6 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(node_model_id, after_node.get("model_id"))
         self.assertIn(node_mcp_id, after_node.get("mcp_server_ids") or [])
         self.assertIn(node_script_id, after_node.get("script_ids") or [])
-        self.assertNotIn(template_mcp_id, after_node.get("mcp_server_ids") or [])
-        self.assertNotIn(template_script_id, after_node.get("script_ids") or [])
 
     def test_node_type_behaviors_task_plan_milestone_memory_decision(self) -> None:
         with session_scope() as session:
@@ -2803,12 +2715,6 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 name="integration-model",
                 provider="codex",
                 config_json="{}",
-            )
-            template = TaskTemplate.create(
-                session,
-                name="integration-template",
-                prompt="Return structured JSON",
-                model_id=model.id,
             )
             plan = Plan.create(session, name="integration-plan")
             stage = PlanStage.create(
@@ -2828,12 +2734,12 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 name="integration-milestone",
             )
             memory = Memory.create(session, description="before")
-            template_id = template.id
             plan_id = plan.id
             stage_id = stage.id
             plan_task_id = plan_task.id
             milestone_id = milestone.id
             memory_id = memory.id
+            model_id = model.id
 
         flowchart_id = self._create_flowchart("Stage 9 Node Behaviors")
         graph_response = self.client.post(
@@ -2849,7 +2755,8 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     {
                         "client_id": "task",
                         "node_type": FLOWCHART_NODE_TYPE_TASK,
-                        "ref_id": template_id,
+                        "model_id": model_id,
+                        "config": {"task_prompt": "Return structured JSON"},
                         "x": 100,
                         "y": 0,
                     },

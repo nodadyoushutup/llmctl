@@ -10,9 +10,7 @@ from sqlalchemy import delete, func, select
 from core.models import (
     AgentTask,
     Attachment,
-    TaskTemplate,
     agent_task_attachments,
-    task_template_attachments,
 )
 from storage.attachment_storage import write_attachment_file
 
@@ -62,13 +60,6 @@ def _attachment_in_use(session, attachment_id: int) -> bool:
     ).scalar_one()
     if task_refs:
         return True
-    template_refs = session.execute(
-        select(func.count())
-        .select_from(task_template_attachments)
-        .where(task_template_attachments.c.attachment_id == attachment_id)
-    ).scalar_one()
-    if template_refs:
-        return True
     return False
 
 
@@ -76,11 +67,6 @@ def _unlink_attachment(session, attachment_id: int) -> None:
     session.execute(
         delete(agent_task_attachments).where(
             agent_task_attachments.c.attachment_id == attachment_id
-        )
-    )
-    session.execute(
-        delete(task_template_attachments).where(
-            task_template_attachments.c.attachment_id == attachment_id
         )
     )
 
@@ -108,7 +94,4 @@ def _resolve_attachment_target(session, target: str, target_id: int):
     if normalized in {"task", "agent_task", "agenttask"}:
         record = session.get(AgentTask, target_id)
         return record
-    if normalized in {"template", "task_template", "tasktemplate"}:
-        record = session.get(TaskTemplate, target_id)
-        return record
-    raise ValueError("Target must be task or task_template.")
+    raise ValueError("Target must be task.")

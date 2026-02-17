@@ -78,14 +78,6 @@ export const parityChecklist = [
   },
   {
     wave: 'Wave 3',
-    area: 'Task Templates',
-    legacyPath: '/task-templates',
-    reactPath: '/task-templates + /task-templates/:templateId + /task-templates/:templateId/edit',
-    status: 'migrated',
-    notes: 'Native React workflow-node list plus task-template detail/edit/delete flows.',
-  },
-  {
-    wave: 'Wave 3',
     area: 'Memories',
     legacyPath: '/memories',
     reactPath: '/memories + /memories/:memoryId + /memories/:memoryId/edit',

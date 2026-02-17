@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ActionIcon from './ActionIcon'
 
 const DEFAULT_NODE_TYPES = ['start', 'end', 'flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag']
-const NODE_TYPE_WITH_REF = new Set(['flowchart', 'task', 'plan', 'milestone', 'memory'])
+const NODE_TYPE_WITH_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
 const NODE_TYPE_REQUIRES_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left']
 const EDGE_MODE_OPTIONS = ['solid', 'dotted']
 const TYPE_TO_REF_CATALOG_KEY = {
   flowchart: 'flowcharts',
-  task: 'tasks',
   plan: 'plans',
   milestone: 'milestones',
   memory: 'memories',
@@ -541,9 +541,6 @@ function refLabel(item, nodeType) {
   if (!item || typeof item !== 'object') {
     return '-'
   }
-  if (nodeType === 'task') {
-    return String(item.name || item.id)
-  }
   return String(item.name || item.title || item.id)
 }
 
@@ -553,11 +550,14 @@ function normalizeEdgeMode(value) {
 }
 
 function buildNodePayload(node) {
+  const nodeType = normalizeNodeType(node.node_type)
   const payload = {
     id: node.persistedId || null,
-    node_type: normalizeNodeType(node.node_type),
+    node_type: nodeType,
     title: String(node.title || '').trim() || null,
-    ref_id: node.ref_id == null ? null : parseOptionalInt(node.ref_id),
+    ref_id: NODE_TYPE_WITH_REF.has(nodeType)
+      ? (node.ref_id == null ? null : parseOptionalInt(node.ref_id))
+      : null,
     x: Number(toNumber(node.x, 0).toFixed(2)),
     y: Number(toNumber(node.y, 0).toFixed(2)),
     config: node.config && typeof node.config === 'object' ? node.config : {},
@@ -611,7 +611,7 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
       clientId,
       node_type: nodeType,
       title: String(raw?.title || '').trim() || titleForType(nodeType),
-      ref_id: parseOptionalInt(raw?.ref_id),
+      ref_id: NODE_TYPE_WITH_REF.has(nodeType) ? parseOptionalInt(raw?.ref_id) : null,
       x: toNumber(raw?.x, 0),
       y: toNumber(raw?.y, 0),
       config: raw?.config && typeof raw.config === 'object' ? { ...raw.config } : defaultConfigForType(nodeType),
@@ -705,6 +705,8 @@ export default function FlowchartWorkspaceEditor({
   onGraphChange,
   onNodeSelectionChange,
   onNotice,
+  onSaveGraph,
+  saveGraphBusy = false,
 }) {
   const initialWorkspace = useMemo(
     () => buildInitialWorkspace(initialNodes, initialEdges),
@@ -889,13 +891,14 @@ export default function FlowchartWorkspaceEditor({
 
   const selectedNode = selectedNodeToken ? nodesByToken.get(selectedNodeToken) || null : null
   const selectedNodeType = selectedNode ? normalizeNodeType(selectedNode.node_type) : ''
+  const canSaveGraph = typeof onSaveGraph === 'function'
+  const saveButtonDisabled = saveGraphBusy || !canSaveGraph
   const selectedEdge = selectedEdgeId
     ? edges.find((edge) => edge.localId === selectedEdgeId) || null
     : null
   const selectedTaskNodeNeedsPrompt = Boolean(
     selectedNode
     && selectedNodeType === 'task'
-    && !selectedNode.ref_id
     && !hasTaskPrompt(selectedNode.config),
   )
 
@@ -986,6 +989,18 @@ export default function FlowchartWorkspaceEditor({
     setEdges((current) => current.filter((edge) => edge.sourceToken !== token && edge.targetToken !== token))
     setSelectedNodeToken('')
   }, [emitNotice, nodesByToken])
+
+  const confirmAndRemoveNode = useCallback((node) => {
+    if (!node) {
+      return
+    }
+    const fallbackLabel = titleForType(node.node_type)
+    const label = String(node.title || fallbackLabel || 'node').trim()
+    if (!window.confirm(`Delete node "${label}"?`)) {
+      return
+    }
+    removeNode(node.token)
+  }, [removeNode])
 
   const removeEdge = useCallback((localId) => {
     setEdges((current) => current.filter((edge) => edge.localId !== localId))
@@ -1586,7 +1601,9 @@ export default function FlowchartWorkspaceEditor({
                   >
                     <span className="flow-ws-node-content">
                       <span className="flow-ws-node-title">{node.title || titleForType(node.node_type)}</span>
-                      {node.ref_id ? <span className="flow-ws-node-meta">ref {node.ref_id}</span> : null}
+                      {NODE_TYPE_WITH_REF.has(normalizeNodeType(node.node_type)) && node.ref_id
+                        ? <span className="flow-ws-node-meta">ref {node.ref_id}</span>
+                        : null}
                     </span>
                     {connectorLayout.map((connector) => {
                       const handleId = connector.id
@@ -1621,7 +1638,30 @@ export default function FlowchartWorkspaceEditor({
       <aside className="flow-ws-inspector">
         {selectedNode ? (
           <div className="stack-sm">
-            <h3>Node Inspector</h3>
+            <div className="flow-ws-inspector-header">
+              <h3>Node Inspector</h3>
+              <div className="table-actions">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Save graph"
+                  title="Save graph"
+                  disabled={saveButtonDisabled}
+                  onClick={onSaveGraph}
+                >
+                  <ActionIcon name="save" />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button icon-button-danger"
+                  aria-label="Delete node"
+                  title="Delete node"
+                  onClick={() => confirmAndRemoveNode(selectedNode)}
+                >
+                  <ActionIcon name="trash" />
+                </button>
+              </div>
+            </div>
             <label className="field">
               <span>title</span>
               <input
@@ -1672,7 +1712,7 @@ export default function FlowchartWorkspaceEditor({
             ) : null}
             {selectedNodeType === 'task' ? (
               <label className="field">
-                <span>task prompt (used when no ref)</span>
+                <span>task prompt</span>
                 <textarea
                   value={String(selectedNode.config?.task_prompt || '')}
                   onChange={(event) => updateNode(selectedNode.token, (current) => ({
@@ -1686,7 +1726,7 @@ export default function FlowchartWorkspaceEditor({
               </label>
             ) : null}
             {selectedTaskNodeNeedsPrompt ? (
-              <p className="error-text">Task nodes require either a ref or a non-empty task prompt before save/validate.</p>
+              <p className="error-text">Task nodes require a non-empty task prompt before save/validate.</p>
             ) : null}
             <label className="field">
               <span>model</span>
@@ -1723,16 +1763,6 @@ export default function FlowchartWorkspaceEditor({
             {NODE_TYPE_REQUIRES_REF.has(selectedNodeType) && !selectedNode.ref_id ? (
               <p className="error-text">This node type requires a ref_id before save/validate.</p>
             ) : null}
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn btn-danger"
-                onClick={() => removeNode(selectedNode.token)}
-              >
-                <i className="fa-solid fa-trash" />
-                delete node
-              </button>
-            </div>
           </div>
         ) : null}
 

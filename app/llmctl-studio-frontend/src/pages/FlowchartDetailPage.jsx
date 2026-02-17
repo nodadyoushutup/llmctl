@@ -64,9 +64,10 @@ function validateDraftNodes(nodes) {
   const errors = []
   nodes.forEach((node, index) => {
     const nodeType = String(node?.node_type || '').trim().toLowerCase()
-    const refId = parseId(node?.ref_id)
-    if (nodeType === 'task' && refId == null && !hasTaskPrompt(node?.config)) {
-      errors.push(`nodes[${index}] task node requires ref_id or config.task_prompt.`)
+    if (nodeType === 'task' && !hasTaskPrompt(node?.config)) {
+      const title = String(node?.title || '').trim()
+      const label = title ? `"${title}"` : `#${index + 1}`
+      errors.push(`Task node ${label} needs a task prompt before saving or running.`)
     }
   })
   return errors
@@ -348,6 +349,12 @@ export default function FlowchartDetailPage() {
   const validationLabel = activeValidation?.valid
     ? 'valid'
     : `${validationIssueCount} issue${validationIssueCount === 1 ? '' : 's'}`
+  const validationFlashMessage = !activeValidation?.valid && validationErrors.length > 0
+    ? `Validation: ${validationErrors.join(' ')}`
+    : ''
+  const combinedActionError = [actionError, validationFlashMessage]
+    .filter((item) => typeof item === 'string' && item.trim())
+    .join(' ')
 
   const handleWorkspaceNotice = useCallback((message) => {
     const text = String(message || '').trim()
@@ -385,6 +392,7 @@ export default function FlowchartDetailPage() {
                 </Link>
               ) : null}
             </div>
+            {combinedActionError ? <p className="flowchart-fixed-toolbar-error">{combinedActionError}</p> : null}
 
             {areToolbarToolsExpanded ? (
               <div className="flowchart-fixed-toolbar-tools" id="flowchart-toolbar-tools">
@@ -575,19 +583,7 @@ export default function FlowchartDetailPage() {
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
           {catalogWarning ? <p className="toolbar-meta">{catalogWarning}</p> : null}
-          {actionError ? <p className="error-text">{actionError}</p> : null}
           {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
-          {activeValidation ? (
-            <div className="stack-sm">
-              {!activeValidation.valid && validationErrors.length > 0 ? (
-                <ul>
-                  {validationErrors.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
         </header>
 
         <div className="flowchart-fixed-workspace">
@@ -600,6 +596,8 @@ export default function FlowchartDetailPage() {
             runningNodeIds={runningNodeIds}
             onGraphChange={handleWorkspaceGraphChange}
             onNotice={handleWorkspaceNotice}
+            onSaveGraph={handleSaveGraph}
+            saveGraphBusy={isBusy('save-graph')}
           />
         </div>
       </article>

@@ -31,12 +31,10 @@ from core.models import (
     Skill,
     SkillFile,
     SkillVersion,
-    TaskTemplate,
     agent_skill_bindings,
     agent_task_scripts,
     flowchart_node_scripts,
     flowchart_node_skills,
-    task_template_scripts,
 )
 from rag.web.views import bp as rag_bp
 from services.skill_adapters import (
@@ -106,7 +104,7 @@ class SkillsStage6Tests(StudioDbTestCase):
             )
             return int(result.inserted_primary_key[0])
 
-    def _create_task_node(self) -> tuple[int, int, int]:
+    def _create_task_node(self) -> tuple[int, int]:
         with session_scope() as session:
             model = LLMModel.create(
                 session,
@@ -114,22 +112,15 @@ class SkillsStage6Tests(StudioDbTestCase):
                 provider="codex",
                 config_json="{}",
             )
-            template = TaskTemplate.create(
-                session,
-                name="stage6-template",
-                prompt="hello",
-                model_id=model.id,
-            )
             flowchart = Flowchart.create(session, name="stage6-flowchart")
             node = FlowchartNode.create(
                 session,
                 flowchart_id=flowchart.id,
                 node_type=FLOWCHART_NODE_TYPE_TASK,
-                ref_id=template.id,
                 model_id=model.id,
-                config_json="{}",
+                config_json=json.dumps({"task_prompt": "hello"}, sort_keys=True),
             )
-            return int(flowchart.id), int(node.id), int(template.id)
+            return int(flowchart.id), int(node.id)
 
     def test_model_layer_blocks_legacy_skill_script_create(self) -> None:
         with session_scope() as session:
@@ -160,7 +151,7 @@ class SkillsStage6Tests(StudioDbTestCase):
             ).scalars().all()
         self.assertEqual([], count)
 
-        flowchart_id, node_id, _template_id = self._create_task_node()
+        flowchart_id, node_id = self._create_task_node()
         legacy_script_id = self._insert_legacy_skill_script(
             file_name="legacy-node.sh",
             content="echo legacy\n",
@@ -175,7 +166,7 @@ class SkillsStage6Tests(StudioDbTestCase):
         self.assertIn("Legacy script_type=skill", str(payload.get("error") or ""))
 
     def test_backfill_migrates_and_maps_legacy_references(self) -> None:
-        flowchart_id, node_id, template_id = self._create_task_node()
+        flowchart_id, node_id = self._create_task_node()
         del flowchart_id
 
         legacy_script_id = self._insert_legacy_skill_script(
@@ -187,13 +178,6 @@ class SkillsStage6Tests(StudioDbTestCase):
             session.execute(
                 flowchart_node_scripts.insert().values(
                     flowchart_node_id=node_id,
-                    script_id=legacy_script_id,
-                    position=1,
-                )
-            )
-            session.execute(
-                task_template_scripts.insert().values(
-                    task_template_id=template_id,
                     script_id=legacy_script_id,
                     position=1,
                 )
@@ -236,7 +220,6 @@ class SkillsStage6Tests(StudioDbTestCase):
         self.assertTrue(payload.get("applied"))
         self.assertEqual(1, int(payload["legacy_scripts"]["migrated"]))
         self.assertEqual(1, int(payload["reference_scan"]["flowchart_node_script_refs"]))
-        self.assertEqual(1, int(payload["reference_scan"]["task_template_script_refs"]))
         self.assertEqual(1, int(payload["reference_scan"]["agent_task_script_refs"]))
 
         with session_scope() as session:
@@ -280,13 +263,6 @@ class SkillsStage6Tests(StudioDbTestCase):
                 name="stage6-template-agent",
                 prompt_json=json.dumps({"instruction": "stage6"}),
             )
-            task_template = TaskTemplate.create(
-                session,
-                name="stage6-migration-template",
-                prompt="hello",
-                model_id=model.id,
-                agent_id=template_agent.id,
-            )
             flowchart = Flowchart.create(session, name="stage6-migration-flowchart")
             config_bound_node = FlowchartNode.create(
                 session,
@@ -299,9 +275,8 @@ class SkillsStage6Tests(StudioDbTestCase):
                 session,
                 flowchart_id=flowchart.id,
                 node_type=FLOWCHART_NODE_TYPE_TASK,
-                ref_id=task_template.id,
                 model_id=model.id,
-                config_json=json.dumps({}, sort_keys=True),
+                config_json=json.dumps({"agent_id": template_agent.id}, sort_keys=True),
             )
             duplicate_node = FlowchartNode.create(
                 session,

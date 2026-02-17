@@ -133,7 +133,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
-  test('shows task validation hint when task node has no ref and no prompt', async () => {
+  test('shows task validation hint when task node has no prompt', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(
       <FlowchartWorkspaceEditor
@@ -151,6 +151,6 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
 
     fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
-    expect(screen.getByText('Task nodes require either a ref or a non-empty task prompt before save/validate.')).toBeTruthy()
+    expect(screen.getByText('Task nodes require a non-empty task prompt before save/validate.')).toBeTruthy()
   })
 })

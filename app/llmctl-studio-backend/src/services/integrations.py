@@ -445,7 +445,7 @@ def node_executor_default_settings() -> dict[str, str]:
         "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": _coerce_int_setting(
             str(Config.NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS),
-            default=60,
+            default=300,
             minimum=5,
             maximum=3600,
         ),
@@ -678,7 +678,7 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": _coerce_int_setting(
             candidate.get("dispatch_timeout_seconds"),
-            default=60,
+            default=300,
             minimum=5,
             maximum=3600,
         ),
@@ -755,7 +755,7 @@ def node_executor_effective_config_summary() -> dict[str, str]:
     settings = load_node_executor_settings(include_secrets=False)
     return {
         "provider": settings.get("provider") or NODE_EXECUTOR_PROVIDER_KUBERNETES,
-        "dispatch_timeout_seconds": settings.get("dispatch_timeout_seconds") or "60",
+        "dispatch_timeout_seconds": settings.get("dispatch_timeout_seconds") or "300",
         "execution_timeout_seconds": settings.get("execution_timeout_seconds") or "1800",
         "log_collection_timeout_seconds": settings.get("log_collection_timeout_seconds")
         or "30",
@@ -782,7 +782,7 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
     settings = load_node_executor_settings(include_secrets=True)
     return {
         "provider": settings.get("provider") or NODE_EXECUTOR_PROVIDER_KUBERNETES,
-        "dispatch_timeout_seconds": settings.get("dispatch_timeout_seconds") or "60",
+        "dispatch_timeout_seconds": settings.get("dispatch_timeout_seconds") or "300",
         "execution_timeout_seconds": settings.get("execution_timeout_seconds") or "1800",
         "log_collection_timeout_seconds": settings.get("log_collection_timeout_seconds")
         or "30",

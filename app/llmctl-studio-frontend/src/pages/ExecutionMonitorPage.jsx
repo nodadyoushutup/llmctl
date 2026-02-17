@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getNodeStatus, getRun } from '../lib/studioApi'
+import PersistedDetails from '../components/PersistedDetails'
 
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(String(value ?? ''), 10)
@@ -218,10 +219,10 @@ export default function ExecutionMonitorPage() {
             </dl>
           ) : null}
           {runState.payload ? (
-            <details>
+            <PersistedDetails storageKey="execution-monitor:run-raw-payload">
               <summary>Raw payload</summary>
               <pre>{JSON.stringify(runState.payload, null, 2)}</pre>
-            </details>
+            </PersistedDetails>
           ) : null}
         </article>
 
@@ -266,10 +267,10 @@ export default function ExecutionMonitorPage() {
             </dl>
           ) : null}
           {nodeState.payload ? (
-            <details>
+            <PersistedDetails storageKey="execution-monitor:node-raw-payload">
               <summary>Raw payload</summary>
               <pre>{JSON.stringify(nodeState.payload, null, 2)}</pre>
-            </details>
+            </PersistedDetails>
           ) : null}
         </article>
       </section>

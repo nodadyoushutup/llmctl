@@ -30,10 +30,12 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY app/llmctl-executor/requirements.txt /app/app/llmctl-executor/requirements.txt
+COPY app/llmctl-studio-backend/requirements.txt /app/app/llmctl-studio-backend/requirements.txt
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && if [ -s /app/app/llmctl-executor/requirements.txt ]; then /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-executor/requirements.txt; fi \
+    && if [ -s /app/app/llmctl-studio-backend/requirements.txt ]; then /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt; fi \
     && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm>=0.8.5"; fi
 
 COPY app/llmctl-executor /app/app/llmctl-executor

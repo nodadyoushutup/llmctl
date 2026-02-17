@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
 import { cancelNode, deleteNode, getNode, getNodeStatus, removeNodeAttachment } from '../lib/studioApi'
 
@@ -65,6 +66,30 @@ function scriptTypeLabel(value) {
     .trim() || '-'
 }
 
+function stageEntryKey(stage, index) {
+  const key = String(stage?.key || '').trim()
+  if (key) {
+    return `stage-key-${key}-${index + 1}`
+  }
+  const label = String(stage?.label || '').trim()
+  if (label) {
+    return `stage-label-${label}-${index + 1}`
+  }
+  return `stage-${index + 1}`
+}
+
+function stageEntryLabel(stage, index) {
+  const label = String(stage?.label || '').trim()
+  if (label) {
+    return label
+  }
+  const key = String(stage?.key || '').trim()
+  if (key) {
+    return key
+  }
+  return `Stage ${index + 1}`
+}
+
 export default function NodeDetailPage() {
   const navigate = useNavigate()
   const { nodeId } = useParams()
@@ -73,6 +98,7 @@ export default function NodeDetailPage() {
   const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [busyAttachmentId, setBusyAttachmentId] = useState(null)
+  const [expandedStageKey, setExpandedStageKey] = useState('')
 
   const refreshDetail = useCallback(async ({ silent = false } = {}) => {
     if (!parsedNodeId) {
@@ -139,7 +165,10 @@ export default function NodeDetailPage() {
   const task = payload && payload.task && typeof payload.task === 'object' ? payload.task : null
   const agent = payload && payload.agent && typeof payload.agent === 'object' ? payload.agent : null
   const template = payload && payload.template && typeof payload.template === 'object' ? payload.template : null
-  const stageEntries = payload && Array.isArray(payload.stage_entries) ? payload.stage_entries : []
+  const stageEntries = useMemo(
+    () => (payload && Array.isArray(payload.stage_entries) ? payload.stage_entries : []),
+    [payload],
+  )
   const scripts = payload && Array.isArray(payload.scripts) ? payload.scripts : []
   const attachments = payload && Array.isArray(payload.attachments) ? payload.attachments : []
   const mcpServers = payload && Array.isArray(payload.mcp_servers) ? payload.mcp_servers : []
@@ -149,6 +178,38 @@ export default function NodeDetailPage() {
   const isQuickTask = Boolean(payload?.is_quick_task)
   const active = canCancel(task?.status)
   const status = nodeStatusMeta(task?.status)
+
+  useEffect(() => {
+    if (!stageEntries.length) {
+      setExpandedStageKey('')
+      return
+    }
+    const keyedEntries = stageEntries.map((stage, index) => ({
+      key: stageEntryKey(stage, index),
+      stage,
+    }))
+    setExpandedStageKey((current) => {
+      if (current && keyedEntries.some((entry) => entry.key === current)) {
+        return current
+      }
+      const runningEntry = keyedEntries.find((entry) => String(entry.stage?.status || '').toLowerCase() === 'running')
+      if (runningEntry) {
+        return runningEntry.key
+      }
+      const currentStage = String(task?.current_stage || '').trim().toLowerCase()
+      if (currentStage) {
+        const matchedEntry = keyedEntries.find((entry) => {
+          const entryKey = String(entry.stage?.key || '').trim().toLowerCase()
+          const entryLabel = String(entry.stage?.label || '').trim().toLowerCase()
+          return entryKey === currentStage || entryLabel === currentStage
+        })
+        if (matchedEntry) {
+          return matchedEntry.key
+        }
+      }
+      return keyedEntries[0]?.key || ''
+    })
+  }, [stageEntries, task?.current_stage])
 
   useEffect(() => {
     if (!active) {
@@ -210,182 +271,249 @@ export default function NodeDetailPage() {
   }
 
   return (
-    <section className="stack" aria-label="Node detail">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{task ? `Node ${task.id}` : 'Node'}</h2>
-            <p>{task?.kind || 'Node'} details and realtime execution state.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
-          </div>
-        </div>
-        {state.loading ? <p>Loading node...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {task ? (
-          <div className="stack-sm">
-            <div className="table-actions">
-              <span className={status.className}>{status.label}</span>
-              {active ? (
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Cancel node"
-                  title="Cancel node"
-                  disabled={busy}
-                  onClick={handleCancel}
-                >
-                  <ActionIcon name="stop" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="icon-button icon-button-danger"
-                aria-label="Delete node"
-                title="Delete node"
-                disabled={busy}
-                onClick={handleDelete}
-              >
-                <ActionIcon name="trash" />
-              </button>
-            </div>
-            <dl className="kv-grid">
-              <div>
-                <dt>Kind</dt>
-                <dd>{task.kind || '-'}</dd>
+    <section className="node-detail-fixed-page" aria-label="Node detail">
+      <div className="node-detail-fixed-layout">
+        <article className="card node-detail-panel node-detail-panel-main">
+          <div className="node-detail-scroll">
+            <header className="node-detail-header">
+              <div className="title-row">
+                <div>
+                  <h2>{task ? `Node ${task.id}` : 'Node'}</h2>
+                  <p>{task?.kind || 'Node'} details and realtime execution state.</p>
+                </div>
+                <div className="table-actions">
+                  <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
+                </div>
               </div>
-              <div>
-                <dt>Agent</dt>
-                <dd>
-                  {agent ? <Link to={`/agents/${agent.id}`}>{agent.name}</Link> : (task.agent_id || '-')}
-                </dd>
-              </div>
-              <div>
-                <dt>Task template</dt>
-                <dd>{template?.name || '-'}</dd>
-              </div>
-              <div>
-                <dt>Model</dt>
-                <dd>{task.model_id || '-'}</dd>
-              </div>
-              <div>
-                <dt>Autorun node</dt>
-                <dd>{task.run_task_id || '-'}</dd>
-              </div>
-              <div>
-                <dt>Celery task</dt>
-                <dd>{task.celery_task_id || '-'}</dd>
-              </div>
-              <div>
-                <dt>Current stage</dt>
-                <dd>{task.current_stage || '-'}</dd>
-              </div>
-              <div>
-                <dt>Created</dt>
-                <dd>{task.created_at || '-'}</dd>
-              </div>
-              <div>
-                <dt>Started</dt>
-                <dd>{task.started_at || '-'}</dd>
-              </div>
-              <div>
-                <dt>Finished</dt>
-                <dd>{task.finished_at || '-'}</dd>
-              </div>
-            </dl>
-            {task.error ? <p className="error-text">{task.error}</p> : null}
-            {active ? <p className="toolbar-meta">Realtime updates active. Polling fallback starts only if socket connectivity fails.</p> : null}
-          </div>
-        ) : null}
-      </article>
+              {state.loading ? <p>Loading node...</p> : null}
+              {state.error ? <p className="error-text">{state.error}</p> : null}
+              {actionError ? <p className="error-text">{actionError}</p> : null}
+            </header>
 
-      <article className="card">
-        <h2>Context</h2>
-        <div className="stack-sm">
-          <p>
-            Integrations:{' '}
-            {selectedIntegrationLabels.length > 0
-              ? selectedIntegrationLabels.join(', ')
-              : '-'}
-          </p>
-          <p>
-            MCP servers:{' '}
-            {mcpServers.length > 0
-              ? mcpServers.map((server) => server.name).join(', ')
-              : '-'}
-          </p>
-          <p>Scripts:</p>
-          {scripts.length > 0 ? (
-            <ul>
-              {scripts.map((script) => (
-                <li key={script.id}>
-                  {script.file_name} ({scriptTypeLabel(script.script_type)})
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="toolbar-meta">No scripts attached.</p>
-          )}
-          <p>Attachments:</p>
-          {attachments.length > 0 ? (
-            <ul>
-              {attachments.map((attachment) => (
-                <li key={attachment.id}>
-                  <span>{attachment.file_name}</span>
-                  {isQuickTask ? (
+            <PersistedDetails
+              className="subcard node-detail-section node-detail-collapsible"
+              storageKey={`node:${parsedNodeId || 'unknown'}:left:prompt`}
+              defaultOpen
+            >
+              <summary className="node-detail-summary">
+                <span className="node-detail-summary-title">Prompt</span>
+                <i className="fa-solid fa-chevron-down" aria-hidden="true" />
+              </summary>
+              <div className="node-detail-section-body">
+                {payload?.prompt_text ? <pre>{payload.prompt_text}</pre> : <p>No prompt recorded.</p>}
+              </div>
+            </PersistedDetails>
+
+            <PersistedDetails
+              className="subcard node-detail-section node-detail-collapsible"
+              storageKey={`node:${parsedNodeId || 'unknown'}:left:output`}
+              defaultOpen
+            >
+              <summary className="node-detail-summary">
+                <span className="node-detail-summary-title">Output</span>
+                <i className="fa-solid fa-chevron-down" aria-hidden="true" />
+              </summary>
+              <div className="node-detail-section-body">
+                {task?.output ? <pre>{task.output}</pre> : <p>No output yet.</p>}
+              </div>
+            </PersistedDetails>
+
+            {task ? (
+              <PersistedDetails
+                className="subcard node-detail-section node-detail-collapsible"
+                storageKey={`node:${parsedNodeId || 'unknown'}:left:details`}
+                defaultOpen
+              >
+                <summary className="node-detail-summary">
+                  <span className="node-detail-summary-title">Details</span>
+                  <span className="node-detail-summary-meta">
+                    <span className={status.className}>{status.label}</span>
+                    <i className="fa-solid fa-chevron-down" aria-hidden="true" />
+                  </span>
+                </summary>
+                <div className="node-detail-section-body">
+                  <div className="table-actions">
+                    {active ? (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label="Cancel node"
+                        title="Cancel node"
+                        disabled={busy}
+                        onClick={handleCancel}
+                      >
+                        <ActionIcon name="stop" />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="icon-button icon-button-danger"
-                      aria-label={`Remove ${attachment.file_name}`}
-                      title="Remove attachment"
-                      disabled={busyAttachmentId === attachment.id}
-                      onClick={() => handleAttachmentRemove(attachment.id)}
-                      style={{ marginLeft: '8px' }}
+                      aria-label="Delete node"
+                      title="Delete node"
+                      disabled={busy}
+                      onClick={handleDelete}
                     >
                       <ActionIcon name="trash" />
                     </button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="toolbar-meta">No attachments.</p>
-          )}
-        </div>
-      </article>
+                  </div>
+                  <dl className="kv-grid">
+                    <div>
+                      <dt>Kind</dt>
+                      <dd>{task.kind || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Agent</dt>
+                      <dd>
+                        {agent ? <Link to={`/agents/${agent.id}`}>{agent.name}</Link> : (task.agent_id || '-')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Task template</dt>
+                      <dd>{template?.name || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Model</dt>
+                      <dd>{task.model_id || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Autorun node</dt>
+                      <dd>{task.run_task_id || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Celery task</dt>
+                      <dd>{task.celery_task_id || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Current stage</dt>
+                      <dd>{task.current_stage || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Created</dt>
+                      <dd>{task.created_at || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Started</dt>
+                      <dd>{task.started_at || '-'}</dd>
+                    </div>
+                    <div>
+                      <dt>Finished</dt>
+                      <dd>{task.finished_at || '-'}</dd>
+                    </div>
+                  </dl>
+                  {task.error ? <p className="error-text">{task.error}</p> : null}
+                  {active ? <p className="toolbar-meta">Realtime updates active. Polling fallback starts only if socket connectivity fails.</p> : null}
+                </div>
+              </PersistedDetails>
+            ) : null}
 
-      <article className="card">
-        <h2>Prompt</h2>
-        {payload?.prompt_text ? <pre>{payload.prompt_text}</pre> : <p>No prompt recorded.</p>}
-      </article>
-
-      <article className="card">
-        <h2>Output</h2>
-        {task?.output ? <pre>{task.output}</pre> : <p>No output yet.</p>}
-      </article>
-
-      <article className="card">
-        <h2>Stages</h2>
-        {stageEntries.length === 0 ? <p>No stage data yet.</p> : null}
-        {stageEntries.length > 0 ? (
-          <div className="stack-sm">
-            {stageEntries.map((stage) => {
-              const stageStatus = stageStatusMeta(stage.status)
-              return (
-                <details key={stage.key} className="card">
-                  <summary className="title-row">
-                    <strong>{stage.label}</strong>
-                    <span className={stageStatus.className}>{stageStatus.label}</span>
-                  </summary>
-                  {stage.logs ? <pre>{stage.logs}</pre> : <p>No logs yet.</p>}
-                </details>
-              )
-            })}
+            <PersistedDetails
+              className="subcard node-detail-section node-detail-collapsible"
+              storageKey={`node:${parsedNodeId || 'unknown'}:left:context`}
+              defaultOpen={false}
+            >
+              <summary className="node-detail-summary">
+                <span className="node-detail-summary-title">Context</span>
+                <i className="fa-solid fa-chevron-down" aria-hidden="true" />
+              </summary>
+              <div className="node-detail-section-body stack-sm">
+                <p>
+                  Integrations:{' '}
+                  {selectedIntegrationLabels.length > 0
+                    ? selectedIntegrationLabels.join(', ')
+                    : '-'}
+                </p>
+                <p>
+                  MCP servers:{' '}
+                  {mcpServers.length > 0
+                    ? mcpServers.map((server) => server.name).join(', ')
+                    : '-'}
+                </p>
+                <p>Scripts:</p>
+                {scripts.length > 0 ? (
+                  <ul>
+                    {scripts.map((script) => (
+                      <li key={script.id}>
+                        {script.file_name} ({scriptTypeLabel(script.script_type)})
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="toolbar-meta">No scripts attached.</p>
+                )}
+                <p>Attachments:</p>
+                {attachments.length > 0 ? (
+                  <ul>
+                    {attachments.map((attachment) => (
+                      <li key={attachment.id} className="node-detail-attachment-row">
+                        <span>{attachment.file_name}</span>
+                        {isQuickTask ? (
+                          <button
+                            type="button"
+                            className="icon-button icon-button-danger"
+                            aria-label={`Remove ${attachment.file_name}`}
+                            title="Remove attachment"
+                            disabled={busyAttachmentId === attachment.id}
+                            onClick={() => handleAttachmentRemove(attachment.id)}
+                          >
+                            <ActionIcon name="trash" />
+                          </button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="toolbar-meta">No attachments.</p>
+                )}
+              </div>
+            </PersistedDetails>
           </div>
-        ) : null}
-      </article>
+        </article>
+
+        <article className="card node-detail-panel node-detail-panel-stages">
+          <div className="node-stage-shell">
+            <div className="title-row">
+              <h2>Stages</h2>
+              {stageEntries.length > 0 ? <p className="toolbar-meta">{stageEntries.length} total</p> : null}
+            </div>
+            {stageEntries.length === 0 ? <p className="toolbar-meta">No stage data yet.</p> : null}
+            {stageEntries.length > 0 ? (
+              <div className="node-stage-list">
+                {stageEntries.map((stage, index) => {
+                  const stageKey = stageEntryKey(stage, index)
+                  const stageStatus = stageStatusMeta(stage.status)
+                  const isExpanded = expandedStageKey === stageKey
+                  const contentId = `node-stage-content-${index + 1}`
+                  return (
+                    <section
+                      key={stageKey}
+                      className={`node-stage-card${isExpanded ? ' is-expanded' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        className="node-stage-toggle"
+                        aria-expanded={isExpanded}
+                        aria-controls={contentId}
+                        onClick={() => setExpandedStageKey((current) => (current === stageKey ? '' : stageKey))}
+                      >
+                        <span className="node-stage-toggle-main">{stageEntryLabel(stage, index)}</span>
+                        <span className="node-stage-toggle-meta">
+                          <span className={stageStatus.className}>{stageStatus.label}</span>
+                          <i className={`fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true" />
+                        </span>
+                      </button>
+                      {isExpanded ? (
+                        <div className="node-stage-content" id={contentId}>
+                          {stage.logs ? <pre>{stage.logs}</pre> : <p className="toolbar-meta">No logs yet.</p>}
+                        </div>
+                      ) : null}
+                    </section>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
+        </article>
+      </div>
     </section>
   )
 }

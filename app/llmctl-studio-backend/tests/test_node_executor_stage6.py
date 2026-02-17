@@ -396,6 +396,32 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         self.assertEqual("pod-remote-2", result.run_metadata.get("k8s_pod_name"))
         self.assertEqual("Complete", result.run_metadata.get("k8s_terminal_reason"))
 
+    def test_kubernetes_executor_surfaces_remote_failure_message(self) -> None:
+        executor = KubernetesExecutor({})
+        executor._dispatch_via_kubernetes = (  # type: ignore[method-assign]
+            lambda **_kwargs: _KubernetesDispatchOutcome(
+                job_name="job-remote-3",
+                pod_name="pod-remote-3",
+                stdout="",
+                stderr="",
+                startup_marker_seen=True,
+                executor_result={
+                    "status": "failed",
+                    "error": {
+                        "message": "Node execution failed: No module named 'sqlalchemy'",
+                    },
+                },
+                terminal_reason="BackoffLimitExceeded",
+            )
+        )
+
+        result = executor.execute(_request(), lambda _request: ({"local": True}, {}))
+        self.assertEqual("failed", result.status)
+        self.assertEqual("execution_error", (result.error or {}).get("code"))
+        message = str((result.error or {}).get("message") or "")
+        self.assertIn("non-success status 'failed'", message)
+        self.assertIn("No module named 'sqlalchemy'", message)
+
 
 if __name__ == "__main__":
     unittest.main()

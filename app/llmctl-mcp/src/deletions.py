@@ -13,7 +13,6 @@ from core.models import (
     Run,
     RUN_ACTIVE_STATUSES,
     Script,
-    TaskTemplate,
 )
 from services.celery_app import celery_app
 
@@ -81,39 +80,19 @@ def _delete_role_record(session, role: Role) -> dict[str, Any]:
     }
 
 
-def _delete_task_template_record(session, template: TaskTemplate) -> dict[str, Any]:
-    tasks_with_template = (
-        session.execute(
-            select(AgentTask).where(AgentTask.task_template_id == template.id)
-        )
-        .scalars()
-        .all()
-    )
-    for task in tasks_with_template:
-        task.task_template_id = None
-    session.delete(template)
-    return {
-        "ok": True,
-        "deleted": template.id,
-    }
-
-
 def _delete_script_record(session, script: Script) -> tuple[dict[str, Any], str | None]:
     script_path = script.file_path
     detached_tasks = len(script.tasks)
-    detached_templates = len(script.task_templates)
     detached_nodes = len(script.flowchart_nodes)
     if script.tasks:
         script.tasks = []
-    if script.task_templates:
-        script.task_templates = []
     if script.flowchart_nodes:
         script.flowchart_nodes = []
     session.delete(script)
     return {
         "ok": True,
         "deleted": script.id,
-        "detached_bindings": detached_tasks + detached_templates + detached_nodes,
+        "detached_bindings": detached_tasks + detached_nodes,
     }, script_path
 
 

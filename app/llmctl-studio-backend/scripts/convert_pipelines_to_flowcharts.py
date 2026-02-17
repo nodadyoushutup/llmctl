@@ -86,7 +86,6 @@ def _build_step_config(step: sqlite3.Row) -> str:
         "title",
         "label",
         "description",
-        "task_template_id",
         "template_id",
         "task_id",
         "model_id",
@@ -176,7 +175,7 @@ def _convert(
                 or _value(step, "label")
                 or f"Step {index}"
             )
-            ref_id = _value(step, "task_template_id", "template_id", "task_id")
+            ref_id = _value(step, "ref_id")
             model_id = _value(step, "model_id")
             node_id = _insert_row(
                 conn,

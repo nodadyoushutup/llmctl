@@ -153,7 +153,6 @@ from core.models import (
     flowchart_node_skills,
     flowchart_node_scripts,
     is_legacy_skill_script_type,
-    task_template_attachments,
     SCRIPT_TYPE_CHOICES,
     SCRIPT_TYPE_LABELS,
     SCRIPT_TYPE_INIT,
@@ -161,7 +160,6 @@ from core.models import (
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
     SYSTEM_MANAGED_MCP_SERVER_KEYS,
-    TaskTemplate,
 )
 from core.mcp_config import format_mcp_config, validate_server_key
 from core.integrated_mcp import sync_integrated_mcp_servers
@@ -468,7 +466,6 @@ SKILL_STATUS_OPTIONS = tuple(
 
 FLOWCHART_NODE_TYPE_WITH_REF = {
     FLOWCHART_NODE_TYPE_FLOWCHART,
-    FLOWCHART_NODE_TYPE_TASK,
     FLOWCHART_NODE_TYPE_PLAN,
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_MEMORY,
@@ -679,13 +676,6 @@ def _attachment_in_use(session, attachment_id: int) -> bool:
     ).scalar_one()
     if task_refs:
         return True
-    template_refs = session.execute(
-        select(func.count())
-        .select_from(task_template_attachments)
-        .where(task_template_attachments.c.attachment_id == attachment_id)
-    ).scalar_one()
-    if template_refs:
-        return True
     flowchart_node_refs = session.execute(
         select(func.count())
         .select_from(flowchart_node_attachments)
@@ -700,11 +690,6 @@ def _unlink_attachment(session, attachment_id: int) -> None:
     session.execute(
         delete(agent_task_attachments).where(
             agent_task_attachments.c.attachment_id == attachment_id
-        )
-    )
-    session.execute(
-        delete(task_template_attachments).where(
-            task_template_attachments.c.attachment_id == attachment_id
         )
     )
     session.execute(
@@ -5426,14 +5411,6 @@ def _build_pagination_items(
     return items
 
 
-def _load_task_templates() -> list[TaskTemplate]:
-    with session_scope() as session:
-        return (
-            session.execute(select(TaskTemplate).order_by(TaskTemplate.created_at.desc()))
-            .scalars()
-            .all()
-        )
-
 PAGINATION_PAGE_SIZES = (10, 25, 50, 100)
 PAGINATION_DEFAULT_SIZE = 10
 PAGINATION_WINDOW = 2
@@ -5532,7 +5509,6 @@ def _load_mcp_servers() -> list[MCPServer]:
             session.execute(
                 select(MCPServer)
                 .options(
-                    selectinload(MCPServer.task_templates),
                     selectinload(MCPServer.flowchart_nodes),
                     selectinload(MCPServer.tasks),
                 )
@@ -5702,7 +5678,6 @@ def _load_attachments() -> list[Attachment]:
                 select(Attachment)
                 .options(
                     selectinload(Attachment.tasks),
-                    selectinload(Attachment.templates),
                     selectinload(Attachment.flowchart_nodes),
                 )
                 .order_by(Attachment.created_at.desc())
@@ -6394,40 +6369,6 @@ def _serialize_memory(memory: Memory) -> dict[str, object]:
     }
 
 
-def _serialize_task_template(template: TaskTemplate) -> dict[str, object]:
-    return {
-        "id": template.id,
-        "name": template.name,
-        "description": template.description or "",
-        "prompt": template.prompt,
-        "agent_id": template.agent_id,
-        "model_id": template.model_id,
-        "created_at": _human_time(template.created_at),
-        "updated_at": _human_time(template.updated_at),
-        "attachments": [
-            {
-                "id": attachment.id,
-                "file_name": attachment.file_name,
-                "file_path": attachment.file_path,
-                "content_type": attachment.content_type,
-                "size_bytes": attachment.size_bytes,
-            }
-            for attachment in (template.attachments or [])
-        ],
-    }
-
-
-def _serialize_task_template_node(item: dict[str, object]) -> dict[str, object]:
-    return {
-        "node_id": int(item.get("node_id") or 0),
-        "task_name": str(item.get("task_name") or ""),
-        "prompt_preview": str(item.get("prompt_preview") or ""),
-        "node_type": str(item.get("node_type") or ""),
-        "flowchart_id": int(item.get("flowchart_id") or 0),
-        "flowchart_name": str(item.get("flowchart_name") or ""),
-    }
-
-
 def _serialize_model(
     model: LLMModel,
     *,
@@ -6471,8 +6412,7 @@ def _serialize_mcp_server(
         "description": mcp_server.description or "",
         "server_type": mcp_server.server_type or MCP_SERVER_TYPE_CUSTOM,
         "is_integrated": bool(mcp_server.is_integrated),
-        "binding_count": _safe_relationship_count(lambda: mcp_server.task_templates)
-        + _safe_relationship_count(lambda: mcp_server.flowchart_nodes)
+        "binding_count": _safe_relationship_count(lambda: mcp_server.flowchart_nodes)
         + _safe_relationship_count(lambda: mcp_server.tasks),
         "created_at": _human_time(mcp_server.created_at),
         "updated_at": _human_time(mcp_server.updated_at),
@@ -6496,7 +6436,6 @@ def _serialize_script(
         "script_type_label": _script_type_label(script.script_type),
         "file_path": script.file_path,
         "binding_count": _safe_relationship_count(lambda: script.tasks)
-        + _safe_relationship_count(lambda: script.task_templates)
         + _safe_relationship_count(lambda: script.flowchart_nodes),
         "created_at": _human_time(script.created_at),
         "updated_at": _human_time(script.updated_at),
@@ -6541,7 +6480,6 @@ def _serialize_attachment(attachment: Attachment) -> dict[str, object]:
         "is_image": is_image,
         "preview_url": preview_url,
         "binding_count": _safe_relationship_count(lambda: attachment.tasks)
-        + _safe_relationship_count(lambda: attachment.templates)
         + _safe_relationship_count(lambda: attachment.flowchart_nodes),
         "created_at": _human_time(attachment.created_at),
         "updated_at": _human_time(attachment.updated_at),
@@ -6748,11 +6686,9 @@ def _backfill_flowchart_node_activity_tasks(
     )
     created_count = 0
     for node_run, node in rows:
-        template_id = node.ref_id if node.node_type == FLOWCHART_NODE_TYPE_TASK else None
         output = (node_run.output_state_json or "").strip() or None
         task = AgentTask.create(
             session,
-            task_template_id=template_id,
             flowchart_id=flowchart_id,
             flowchart_run_id=run_id,
             flowchart_node_id=node_run.flowchart_node_id,
@@ -6826,18 +6762,6 @@ def _flowchart_catalog(session) -> dict[str, object]:
     scripts = [
         script for script in scripts if not is_legacy_skill_script_type(script.script_type)
     ]
-    task_templates = (
-        session.execute(
-            select(TaskTemplate)
-            .options(
-                selectinload(TaskTemplate.mcp_servers),
-                selectinload(TaskTemplate.scripts),
-            )
-            .order_by(TaskTemplate.created_at.desc())
-        )
-        .scalars()
-        .all()
-    )
     plans = session.execute(select(Plan).order_by(Plan.created_at.desc())).scalars().all()
     flowcharts = (
         session.execute(select(Flowchart).order_by(Flowchart.created_at.desc()))
@@ -6915,17 +6839,6 @@ def _flowchart_catalog(session) -> dict[str, object]:
             for option in TASK_INTEGRATION_OPTIONS
             if option.get("key")
         ],
-        "tasks": [
-            {
-                "id": task.id,
-                "name": task.name,
-                "prompt": task.prompt,
-                "model_id": task.model_id,
-                "mcp_server_ids": [server.id for server in task.mcp_servers],
-                "script_ids": [script.id for script in task.scripts],
-            }
-            for task in task_templates
-        ],
         "flowcharts": [
             {"id": flowchart.id, "name": flowchart.name} for flowchart in flowcharts
         ],
@@ -6963,8 +6876,6 @@ def _flowchart_ref_exists(
         return False
     if node_type == FLOWCHART_NODE_TYPE_FLOWCHART:
         return session.get(Flowchart, ref_id) is not None
-    if node_type == FLOWCHART_NODE_TYPE_TASK:
-        return session.get(TaskTemplate, ref_id) is not None
     if node_type == FLOWCHART_NODE_TYPE_PLAN:
         return session.get(Plan, ref_id) is not None
     if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
@@ -7060,14 +6971,10 @@ def _validate_flowchart_graph_snapshot(
             errors.append(f"Node {node_id} ({node_type}) requires ref_id.")
         if node_type not in FLOWCHART_NODE_TYPE_WITH_REF and ref_id is not None:
             errors.append(f"Node {node_id} ({node_type}) does not allow ref_id.")
-        if (
-            node_type == FLOWCHART_NODE_TYPE_TASK
-            and ref_id is None
-            and not _task_node_has_prompt(config_payload)
+        if node_type == FLOWCHART_NODE_TYPE_TASK and not _task_node_has_prompt(
+            config_payload
         ):
-            errors.append(
-                f"Node {node_id} ({node_type}) requires ref_id or config.task_prompt."
-            )
+            errors.append(f"Node {node_id} ({node_type}) requires config.task_prompt.")
         if node_type == FLOWCHART_NODE_TYPE_RAG:
             try:
                 _sanitize_rag_node_config(config_payload)
@@ -9259,27 +9166,10 @@ def list_nodes():
                     FlowchartNode.node_type,
                     FlowchartNode.title,
                     FlowchartNode.config_json,
-                    FlowchartNode.ref_id,
                 ).where(
                     FlowchartNode.id.in_(flowchart_node_ids)
                 )
             ).all()
-            template_ids = {
-                int(row[4])
-                for row in rows
-                if row[4] is not None
-                and str(row[1] or "").strip().lower() == FLOWCHART_NODE_TYPE_TASK
-            }
-            template_name_by_id: dict[int, str] = {}
-            if template_ids:
-                template_name_by_id = {
-                    int(row[0]): str(row[1])
-                    for row in session.execute(
-                        select(TaskTemplate.id, TaskTemplate.name).where(
-                            TaskTemplate.id.in_(template_ids)
-                        )
-                    ).all()
-                }
         for row in rows:
             node_id = int(row[0])
             node_type = str(row[1] or "").strip().lower()
@@ -9289,8 +9179,6 @@ def list_nodes():
             task_name = str(inline_name).strip() if isinstance(inline_name, str) else ""
             if not task_name:
                 task_name = title
-            if not task_name and row[4] is not None and node_type == FLOWCHART_NODE_TYPE_TASK:
-                task_name = template_name_by_id.get(int(row[4]), "")
             if not task_name:
                 type_label = (node_type or "node").replace("_", " ")
                 task_name = f"{type_label} node"
@@ -9419,11 +9307,6 @@ def view_node(task_id: int):
                 .scalars()
                 .first()
             )
-        template = (
-            session.get(TaskTemplate, task.task_template_id)
-            if task.task_template_id
-            else None
-        )
         stage_entries = _build_stage_entries(task)
         prompt_text, prompt_json = _parse_task_prompt(task.prompt)
         task_output = _task_output_for_display(task.output)
@@ -9448,7 +9331,6 @@ def view_node(task_id: int):
                 "status": task.status,
                 "kind": task.kind,
                 "agent_id": task.agent_id,
-                "task_template_id": task.task_template_id,
                 "model_id": task.model_id,
                 "run_task_id": task.run_task_id,
                 "celery_task_id": task.celery_task_id,
@@ -9466,14 +9348,6 @@ def view_node(task_id: int):
                     "name": agent.name,
                 }
                 if agent is not None
-                else None
-            ),
-            "template": (
-                {
-                    "id": template.id,
-                    "name": template.name,
-                }
-                if template is not None
                 else None
             ),
             "prompt_text": prompt_text,
@@ -9518,7 +9392,6 @@ def view_node(task_id: int):
         is_quick_rag_task=is_quick_rag_task_kind(task.kind),
         quick_rag_task_context=_quick_rag_task_context(task),
         agent=agent,
-        template=template,
         stage_entries=stage_entries,
         prompt_text=prompt_text,
         prompt_json=prompt_json,
@@ -10518,206 +10391,6 @@ def delete_milestone(milestone_id: int):
         return {"ok": True}
     flash("Milestone deleted.", "success")
     return redirect(next_url)
-
-
-@bp.get("/task-templates")
-def list_task_templates():
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    page = _parse_page(request.args.get("page"))
-    per_page = WORKFLOW_LIST_PER_PAGE
-    with session_scope() as session:
-        total_count = session.execute(
-            select(func.count(FlowchartNode.id)).where(
-                FlowchartNode.node_type.in_(
-                    [FLOWCHART_NODE_TYPE_TASK, FLOWCHART_NODE_TYPE_RAG]
-                )
-            )
-        ).scalar_one()
-        pagination = _build_pagination(request.path, page, per_page, total_count)
-        offset = (pagination["page"] - 1) * per_page
-        task_rows = (
-            session.execute(
-                select(FlowchartNode, Flowchart)
-                .join(Flowchart, Flowchart.id == FlowchartNode.flowchart_id)
-                .where(
-                    FlowchartNode.node_type.in_(
-                        [FLOWCHART_NODE_TYPE_TASK, FLOWCHART_NODE_TYPE_RAG]
-                    )
-                )
-                .order_by(FlowchartNode.updated_at.desc(), FlowchartNode.id.desc())
-                .limit(per_page)
-                .offset(offset)
-            )
-            .all()
-        )
-        template_name_by_id: dict[int, str] = {}
-        template_ids = {
-            int(node.ref_id)
-            for node, _flowchart in task_rows
-            if node.ref_id is not None and int(node.ref_id) > 0
-        }
-        if template_ids:
-            template_name_by_id = {
-                int(row[0]): str(row[1])
-                for row in session.execute(
-                    select(TaskTemplate.id, TaskTemplate.name).where(
-                        TaskTemplate.id.in_(template_ids)
-                    )
-                ).all()
-            }
-
-    task_nodes: list[dict[str, object]] = []
-    for node, flowchart in task_rows:
-        config = _parse_json_dict(node.config_json)
-        task_name = str(node.title or "").strip()
-        prompt_text = ""
-        if node.node_type == FLOWCHART_NODE_TYPE_RAG:
-            if not task_name:
-                task_name = f"RAG node {node.id}"
-            rag_mode = str(config.get("mode") or "query").strip().lower() or "query"
-            if rag_mode == RAG_NODE_MODE_QUERY:
-                prompt_text = str(config.get("question_prompt") or "").strip()
-            if not prompt_text:
-                selected_collections = rag_normalize_collection_selection(
-                    config.get("collections")
-                )
-                if selected_collections:
-                    prompt_text = (
-                        f"mode={rag_mode} | collections="
-                        + ", ".join(selected_collections)
-                    )
-                else:
-                    prompt_text = f"mode={rag_mode}"
-        else:
-            inline_name = config.get("task_name")
-            inline_prompt = config.get("task_prompt")
-            if not task_name:
-                task_name = str(inline_name).strip() if isinstance(inline_name, str) else ""
-            if not task_name and node.ref_id is not None:
-                task_name = template_name_by_id.get(int(node.ref_id), "")
-            if not task_name:
-                task_name = f"Task node {node.id}"
-
-            prompt_text = str(inline_prompt).strip() if isinstance(inline_prompt, str) else ""
-            if not prompt_text and node.ref_id is not None:
-                legacy_name = template_name_by_id.get(int(node.ref_id), "")
-                if legacy_name:
-                    prompt_text = f"Legacy template reference: {legacy_name}"
-                else:
-                    prompt_text = "Legacy template reference."
-        prompt_preview = " ".join(prompt_text.split())
-        if len(prompt_preview) > 180:
-            prompt_preview = f"{prompt_preview[:177]}..."
-        task_nodes.append(
-            {
-                "node_id": node.id,
-                "task_name": task_name,
-                "prompt_preview": prompt_preview or "-",
-                "node_type": str(node.node_type or "").strip().lower(),
-                "flowchart_id": flowchart.id,
-                "flowchart_name": flowchart.name,
-            }
-        )
-
-    if _workflow_wants_json():
-        return {
-            "task_nodes": [_serialize_task_template_node(item) for item in task_nodes],
-            "pagination": _serialize_workflow_pagination(pagination),
-        }
-
-    return render_template(
-        "task_templates.html",
-        task_nodes=task_nodes,
-        pagination=pagination,
-        summary=summary,
-        human_time=_human_time,
-        fixed_list_page=True,
-        page_title="Workflow Nodes",
-        active_page="templates",
-    )
-
-
-@bp.get("/task-templates/new")
-def new_task_template():
-    if _workflow_wants_json():
-        return {
-            "message": "Create tasks by adding Task nodes in a flowchart.",
-            "flowcharts_url": url_for("agents.list_flowcharts"),
-        }
-    flash("Create tasks by adding Task nodes in a flowchart.", "error")
-    return redirect(url_for("agents.list_flowcharts"))
-
-
-@bp.get("/task-templates/<int:template_id>")
-def view_task_template(template_id: int):
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    agents_by_id = {agent.id: agent.name for agent in agents}
-    with session_scope() as session:
-        template = (
-            session.execute(
-                select(TaskTemplate)
-                .options(selectinload(TaskTemplate.attachments))
-                .where(TaskTemplate.id == template_id)
-            )
-            .scalars()
-            .first()
-        )
-        if template is None:
-            abort(404)
-        task_count = session.execute(
-            select(func.count(AgentTask.id)).where(
-                AgentTask.task_template_id == template_id
-            )
-        ).scalar_one()
-    if _workflow_wants_json():
-        return {
-            "template": _serialize_task_template(template),
-            "task_count": int(task_count or 0),
-            "agents_by_id": {str(key): value for key, value in agents_by_id.items()},
-        }
-    return render_template(
-        "task_template_detail.html",
-        template=template,
-        agents_by_id=agents_by_id,
-        task_count=task_count,
-        summary=summary,
-        human_time=_human_time,
-        page_title=f"Task - {template.name}",
-        active_page="templates",
-    )
-
-
-@bp.get("/task-templates/<int:template_id>/edit")
-def edit_task_template(template_id: int):
-    agents = _load_agents()
-    _, summary = _agent_rollup(agents)
-    with session_scope() as session:
-        template = (
-            session.execute(
-                select(TaskTemplate)
-                .options(selectinload(TaskTemplate.attachments))
-                .where(TaskTemplate.id == template_id)
-            )
-            .scalars()
-            .first()
-        )
-        if template is None:
-            abort(404)
-    if _workflow_wants_json():
-        return {
-            "template": _serialize_task_template(template),
-            "agents": [_serialize_agent_list_item(agent) for agent in agents],
-        }
-    return render_template(
-        "task_template_edit.html",
-        template=template,
-        agents=agents,
-        summary=summary,
-        page_title=f"Edit Task - {template.name}",
-        active_page="templates",
-    )
 
 
 @bp.get("/flowcharts")
@@ -12717,7 +12390,6 @@ def view_model(model_id: int):
     llm_settings = _load_integration_settings("llm")
     default_model_id = resolve_default_model_id(llm_settings)
     model_payload: dict[str, object] | None = None
-    template_payload: list[dict[str, object]] = []
     node_payload: list[dict[str, object]] = []
     task_payload: list[dict[str, object]] = []
     flowcharts_by_id: dict[int, str] = {}
@@ -12725,15 +12397,6 @@ def view_model(model_id: int):
         model = session.get(LLMModel, model_id)
         if model is None:
             abort(404)
-        attached_templates = (
-            session.execute(
-                select(TaskTemplate)
-                .where(TaskTemplate.model_id == model_id)
-                .order_by(TaskTemplate.created_at.desc())
-            )
-            .scalars()
-            .all()
-        )
         attached_nodes = (
             session.execute(
                 select(FlowchartNode)
@@ -12766,15 +12429,6 @@ def view_model(model_id: int):
             default_model_id=default_model_id,
             include_config=True,
         )
-        template_payload = [
-            {
-                "id": template.id,
-                "name": template.name,
-                "description": template.description or "",
-                "created_at": _human_time(template.created_at),
-            }
-            for template in attached_templates
-        ]
         node_payload = [
             {
                 "id": node.id,
@@ -12804,7 +12458,6 @@ def view_model(model_id: int):
     if _workflow_wants_json():
         return {
             "model": model_payload,
-            "attached_templates": template_payload,
             "attached_nodes": node_payload,
             "attached_tasks": task_payload,
             "flowcharts_by_id": flowcharts_by_id,
@@ -12819,7 +12472,6 @@ def view_model(model_id: int):
         provider_label=provider_label,
         model_name=_model_display_name(model),
         config_json=formatted_config,
-        attached_templates=attached_templates,
         attached_nodes=attached_nodes,
         attached_tasks=attached_tasks,
         flowcharts_by_id=flowcharts_by_id,
@@ -13058,11 +12710,6 @@ def delete_model(model_id: int):
         model = session.get(LLMModel, model_id)
         if model is None:
             abort(404)
-        attached_templates = (
-            session.execute(select(TaskTemplate).where(TaskTemplate.model_id == model_id))
-            .scalars()
-            .all()
-        )
         attached_nodes = (
             session.execute(select(FlowchartNode).where(FlowchartNode.model_id == model_id))
             .scalars()
@@ -13073,15 +12720,13 @@ def delete_model(model_id: int):
             .scalars()
             .all()
         )
-        for template in attached_templates:
-            template.model_id = None
         for node in attached_nodes:
             node.model_id = None
         for task in attached_tasks:
             task.model_id = None
         session.delete(model)
 
-    detached_count = len(attached_templates) + len(attached_nodes) + len(attached_tasks)
+    detached_count = len(attached_nodes) + len(attached_tasks)
     default_cleared = False
     llm_settings = _load_integration_settings("llm")
     if resolve_default_model_id(llm_settings) == model_id:
@@ -13354,18 +12999,15 @@ def delete_mcp(mcp_id: int):
                 return {"error": "Integrated MCP servers cannot be deleted."}, 409
             flash("Integrated MCP servers cannot be deleted.", "error")
             return redirect(next_url)
-        attached_templates = list(mcp.task_templates)
         attached_nodes = list(mcp.flowchart_nodes)
         attached_tasks = list(mcp.tasks)
-        if attached_templates:
-            mcp.task_templates = []
         if attached_nodes:
             mcp.flowchart_nodes = []
         if attached_tasks:
             mcp.tasks = []
         session.delete(mcp)
 
-    detached_count = len(attached_templates) + len(attached_nodes) + len(attached_tasks)
+    detached_count = len(attached_nodes) + len(attached_tasks)
     if is_api_request:
         return {"ok": True, "detached_count": detached_count}
     flash("MCP server deleted.", "success")
@@ -13379,7 +13021,6 @@ def view_mcp(mcp_id: int):
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
     mcp_payload: dict[str, object] | None = None
-    template_payload: list[dict[str, object]] = []
     node_payload: list[dict[str, object]] = []
     task_payload: list[dict[str, object]] = []
     flowcharts_by_id: dict[int, str] = {}
@@ -13388,7 +13029,6 @@ def view_mcp(mcp_id: int):
             session.execute(
                 select(MCPServer)
                 .options(
-                    selectinload(MCPServer.task_templates),
                     selectinload(MCPServer.flowchart_nodes),
                     selectinload(MCPServer.tasks),
                 )
@@ -13399,7 +13039,6 @@ def view_mcp(mcp_id: int):
         )
         if mcp_server is None:
             abort(404)
-        attached_templates = list(mcp_server.task_templates)
         attached_nodes = list(mcp_server.flowchart_nodes)
         attached_tasks = list(mcp_server.tasks)
         flowchart_ids = {
@@ -13411,15 +13050,6 @@ def view_mcp(mcp_id: int):
             ).all()
             flowcharts_by_id = {row[0]: row[1] for row in rows}
         mcp_payload = _serialize_mcp_server(mcp_server, include_config=True)
-        template_payload = [
-            {
-                "id": template.id,
-                "name": template.name,
-                "description": template.description or "",
-                "created_at": _human_time(template.created_at),
-            }
-            for template in attached_templates
-        ]
         node_payload = [
             {
                 "id": node.id,
@@ -13449,7 +13079,6 @@ def view_mcp(mcp_id: int):
     if _workflow_wants_json():
         return {
             "mcp_server": mcp_payload,
-            "attached_templates": template_payload,
             "attached_nodes": node_payload,
             "attached_tasks": task_payload,
             "flowcharts_by_id": flowcharts_by_id,
@@ -13459,7 +13088,6 @@ def view_mcp(mcp_id: int):
         "mcp_detail.html",
         mcp_server=mcp_server,
         mcp_config_json=_format_json_object_for_display(mcp_server.config_json),
-        attached_templates=attached_templates,
         attached_nodes=attached_nodes,
         attached_tasks=attached_tasks,
         flowcharts_by_id=flowcharts_by_id,
@@ -14459,10 +14087,8 @@ def list_attachments():
 def view_attachment(attachment_id: int):
     attachment_payload: dict[str, object] | None = None
     task_payload: list[dict[str, object]] = []
-    template_payload: list[dict[str, object]] = []
     node_payload: list[dict[str, object]] = []
     agents_by_id: dict[int, str] = {}
-    templates_by_id: dict[int, str] = {}
     flowcharts_by_id: dict[int, str] = {}
     with session_scope() as session:
         attachment = (
@@ -14470,7 +14096,6 @@ def view_attachment(attachment_id: int):
                 select(Attachment)
                 .options(
                     selectinload(Attachment.tasks),
-                    selectinload(Attachment.templates),
                     selectinload(Attachment.flowchart_nodes),
                 )
                 .where(Attachment.id == attachment_id)
@@ -14481,15 +14106,12 @@ def view_attachment(attachment_id: int):
         if attachment is None:
             abort(404)
         tasks = list(attachment.tasks)
-        templates = list(attachment.templates)
         flowchart_nodes = list(attachment.flowchart_nodes)
 
         tasks.sort(key=lambda item: item.created_at or datetime.min, reverse=True)
-        templates.sort(key=lambda item: item.created_at or datetime.min, reverse=True)
         flowchart_nodes.sort(key=lambda item: item.updated_at or datetime.min, reverse=True)
 
         agent_ids = {task.agent_id for task in tasks if task.agent_id is not None}
-        template_ids = {task.task_template_id for task in tasks if task.task_template_id}
         flowchart_ids = {
             int(node.flowchart_id)
             for node in flowchart_nodes
@@ -14501,14 +14123,6 @@ def view_attachment(attachment_id: int):
                 select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
             ).all()
             agents_by_id = {row[0]: row[1] for row in rows}
-
-        if template_ids:
-            rows = session.execute(
-                select(TaskTemplate.id, TaskTemplate.name).where(
-                    TaskTemplate.id.in_(template_ids)
-                )
-            ).all()
-            templates_by_id = {row[0]: row[1] for row in rows}
 
         if flowchart_ids:
             rows = session.execute(
@@ -14523,24 +14137,12 @@ def view_attachment(attachment_id: int):
                 "id": task.id,
                 "agent_id": task.agent_id,
                 "agent_name": agents_by_id.get(task.agent_id or 0, ""),
-                "task_template_id": task.task_template_id,
-                "task_template_name": templates_by_id.get(task.task_template_id or 0, ""),
                 "status": task.status,
                 "prompt": task.prompt,
                 "created_at": _human_time(task.created_at),
                 "updated_at": _human_time(task.updated_at),
             }
             for task in tasks
-        ]
-        template_payload = [
-            {
-                "id": template.id,
-                "name": template.name,
-                "description": template.description or "",
-                "created_at": _human_time(template.created_at),
-                "updated_at": _human_time(template.updated_at),
-            }
-            for template in templates
         ]
         node_payload = [
             {
@@ -14568,10 +14170,8 @@ def view_attachment(attachment_id: int):
             "attachment_preview_url": attachment_preview_url,
             "is_image_attachment": is_image_attachment,
             "tasks": task_payload,
-            "templates": template_payload,
             "flowchart_nodes": node_payload,
             "agents_by_id": agents_by_id,
-            "templates_by_id": templates_by_id,
             "flowcharts_by_id": flowcharts_by_id,
         }
 
@@ -14581,10 +14181,8 @@ def view_attachment(attachment_id: int):
         attachment_preview_url=attachment_preview_url,
         is_image_attachment=is_image_attachment,
         tasks=tasks,
-        templates=templates,
         flowchart_nodes=flowchart_nodes,
         agents_by_id=agents_by_id,
-        templates_by_id=templates_by_id,
         flowcharts_by_id=flowcharts_by_id,
         human_time=_human_time,
         format_bytes=_format_bytes,
@@ -14890,7 +14488,6 @@ def create_script():
 def view_script(script_id: int):
     script_payload: dict[str, object] | None = None
     task_payload: list[dict[str, object]] = []
-    template_payload: list[dict[str, object]] = []
     node_payload: list[dict[str, object]] = []
     flowcharts_by_id: dict[int, str] = {}
     with session_scope() as session:
@@ -14899,7 +14496,6 @@ def view_script(script_id: int):
                 select(Script)
                 .options(
                     selectinload(Script.tasks),
-                    selectinload(Script.task_templates),
                     selectinload(Script.flowchart_nodes),
                 )
                 .where(Script.id == script_id)
@@ -14910,7 +14506,6 @@ def view_script(script_id: int):
         if script is None:
             abort(404)
         attached_tasks = list(script.tasks)
-        attached_templates = list(script.task_templates)
         attached_nodes = list(script.flowchart_nodes)
         flowchart_ids = {
             node.flowchart_id for node in attached_nodes if node.flowchart_id is not None
@@ -14934,16 +14529,6 @@ def view_script(script_id: int):
             }
             for task in attached_tasks
         ]
-        template_payload = [
-            {
-                "id": template.id,
-                "name": template.name,
-                "description": template.description or "",
-                "created_at": _human_time(template.created_at),
-                "updated_at": _human_time(template.updated_at),
-            }
-            for template in attached_templates
-        ]
         node_payload = [
             {
                 "id": node.id,
@@ -14961,7 +14546,6 @@ def view_script(script_id: int):
         return {
             "script": script_payload,
             "attached_tasks": task_payload,
-            "attached_templates": template_payload,
             "attached_nodes": node_payload,
             "flowcharts_by_id": flowcharts_by_id,
         }
@@ -14970,7 +14554,6 @@ def view_script(script_id: int):
         script=script,
         script_content=script_content,
         attached_tasks=attached_tasks,
-        attached_templates=attached_templates,
         attached_nodes=attached_nodes,
         flowcharts_by_id=flowcharts_by_id,
         human_time=_human_time,
@@ -15102,17 +14685,14 @@ def delete_script(script_id: int):
             abort(404)
         script_path = script.file_path
         attached_tasks = list(script.tasks)
-        attached_templates = list(script.task_templates)
         attached_nodes = list(script.flowchart_nodes)
         if attached_tasks:
             script.tasks = []
-        if attached_templates:
-            script.task_templates = []
         if attached_nodes:
             script.flowchart_nodes = []
         session.delete(script)
 
-    detached_count = len(attached_tasks) + len(attached_templates) + len(attached_nodes)
+    detached_count = len(attached_tasks) + len(attached_nodes)
     if is_api_request:
         remove_script_file(script_path)
         return {"ok": True, "detached_count": detached_count}
@@ -15907,153 +15487,6 @@ def delete_chroma_collection():
         return {"ok": True, "collection_name": collection_name}
     flash("Collection deleted.", "success")
     return redirect(url_for("agents.chroma_collections"))
-
-
-@bp.post("/task-templates")
-def create_task_template():
-    if _workflow_api_request():
-        return {
-            "error": "Create tasks by adding Task nodes in a flowchart.",
-            "reason_code": "FLOWCHART_MANAGED_TEMPLATE_CREATE",
-        }, 409
-    flash("Create tasks by adding Task nodes in a flowchart.", "error")
-    return redirect(url_for("agents.list_flowcharts"))
-
-
-@bp.post("/task-templates/<int:template_id>")
-def update_task_template(template_id: int):
-    is_api_request = _workflow_api_request()
-    payload = request.get_json(silent=True) if request.is_json else {}
-    if payload is None or not isinstance(payload, dict):
-        payload = {}
-    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
-    prompt_raw = payload.get("prompt") if is_api_request else request.form.get("prompt", "")
-    description_raw = (
-        payload.get("description")
-        if is_api_request
-        else request.form.get("description", "")
-    )
-    agent_id_raw_obj = payload.get("agent_id") if is_api_request else request.form.get("agent_id", "")
-    name = str(name_raw or "").strip()
-    prompt = str(prompt_raw or "").strip()
-    description = str(description_raw or "").strip()
-    agent_id_raw = str(agent_id_raw_obj or "").strip()
-    uploads = [] if is_api_request else request.files.getlist("attachments")
-    agent_id: int | None = None
-    if agent_id_raw:
-        try:
-            agent_id = _coerce_optional_int(
-                agent_id_raw,
-                field_name="agent_id",
-                minimum=1,
-            )
-        except ValueError:
-            if is_api_request:
-                return {"error": "Select a valid agent."}, 400
-            flash("Select a valid agent.", "error")
-            return redirect(url_for("agents.edit_task_template", template_id=template_id))
-    if not name or not prompt:
-        if is_api_request:
-            return {"error": "Template name and prompt are required."}, 400
-        flash("Template name and prompt are required.", "error")
-        return redirect(url_for("agents.edit_task_template", template_id=template_id))
-    template_payload: dict[str, object] | None = None
-    try:
-        with session_scope() as session:
-            template = session.get(TaskTemplate, template_id)
-            if template is None:
-                abort(404)
-            if agent_id is not None:
-                agent = session.get(Agent, agent_id)
-                if agent is None:
-                    if is_api_request:
-                        return {"error": "Agent not found."}, 404
-                    flash("Agent not found.", "error")
-                    return redirect(
-                        url_for("agents.edit_task_template", template_id=template_id)
-                    )
-            template.name = name
-            template.prompt = prompt
-            template.description = description or None
-            template.agent_id = agent_id
-            attachments = _save_uploaded_attachments(session, uploads)
-            _attach_attachments(template, attachments)
-            template_payload = _serialize_task_template(template)
-    except (OSError, ValueError) as exc:
-        logger.exception("Failed to save template attachments")
-        if is_api_request:
-            return {"error": str(exc) or "Failed to save attachments."}, 400
-        flash(str(exc) or "Failed to save attachments.", "error")
-        return redirect(url_for("agents.edit_task_template", template_id=template_id))
-    if is_api_request:
-        return {"ok": True, "template": template_payload}
-    flash("Template updated.", "success")
-    return redirect(url_for("agents.view_task_template", template_id=template_id))
-
-
-@bp.post("/task-templates/<int:template_id>/attachments/<int:attachment_id>/remove")
-def remove_task_template_attachment(template_id: int, attachment_id: int):
-    is_api_request = _workflow_api_request()
-    redirect_target = _safe_redirect_target(
-        request.form.get("next"),
-        url_for("agents.edit_task_template", template_id=template_id),
-    )
-    removed_path: str | None = None
-    with session_scope() as session:
-        template = (
-            session.execute(
-                select(TaskTemplate)
-                .options(selectinload(TaskTemplate.attachments))
-                .where(TaskTemplate.id == template_id)
-            )
-            .scalars()
-            .first()
-        )
-        if template is None:
-            abort(404)
-        attachment = next(
-            (item for item in template.attachments if item.id == attachment_id), None
-        )
-        if attachment is None:
-            if is_api_request:
-                return {"error": "Attachment not found on this template."}, 404
-            flash("Attachment not found on this template.", "error")
-            return redirect(redirect_target)
-        template.attachments.remove(attachment)
-        session.flush()
-        removed_path = _delete_attachment_if_unused(session, attachment)
-    if removed_path:
-        remove_attachment_file(removed_path)
-    if is_api_request:
-        return {"ok": True}
-    flash("Attachment removed.", "success")
-    return redirect(redirect_target)
-
-
-@bp.post("/task-templates/<int:template_id>/delete")
-def delete_task_template(template_id: int):
-    is_api_request = _workflow_api_request()
-    next_url = _safe_redirect_target(
-        request.form.get("next"), url_for("agents.list_task_templates")
-    )
-    with session_scope() as session:
-        template = session.get(TaskTemplate, template_id)
-        if template is None:
-            abort(404)
-        tasks_with_template = (
-            session.execute(
-                select(AgentTask).where(AgentTask.task_template_id == template_id)
-            )
-            .scalars()
-            .all()
-        )
-        for task in tasks_with_template:
-            task.task_template_id = None
-        session.delete(template)
-    if is_api_request:
-        return {"ok": True}
-    flash("Template deleted.", "success")
-    return redirect(next_url)
 
 
 @bp.get("/settings")

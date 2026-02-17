@@ -258,33 +258,11 @@ agent_task_attachments = Table(
     Column("attachment_id", ForeignKey("attachments.id"), primary_key=True),
 )
 
-task_template_attachments = Table(
-    "task_template_attachments",
-    Base.metadata,
-    Column("task_template_id", ForeignKey("task_templates.id"), primary_key=True),
-    Column("attachment_id", ForeignKey("attachments.id"), primary_key=True),
-)
-
-task_template_mcp_servers = Table(
-    "task_template_mcp_servers",
-    Base.metadata,
-    Column("task_template_id", ForeignKey("task_templates.id"), primary_key=True),
-    Column("mcp_server_id", ForeignKey("mcp_servers.id"), primary_key=True),
-)
-
 agent_task_mcp_servers = Table(
     "agent_task_mcp_servers",
     Base.metadata,
     Column("agent_task_id", ForeignKey("agent_tasks.id"), primary_key=True),
     Column("mcp_server_id", ForeignKey("mcp_servers.id"), primary_key=True),
-)
-
-task_template_scripts = Table(
-    "task_template_scripts",
-    Base.metadata,
-    Column("task_template_id", ForeignKey("task_templates.id"), primary_key=True),
-    Column("script_id", ForeignKey("scripts.id"), primary_key=True),
-    Column("position", Integer, nullable=True),
 )
 
 flowchart_node_mcp_servers = Table(
@@ -454,11 +432,6 @@ class MCPServer(BaseModel):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    task_templates: Mapped[list["TaskTemplate"]] = relationship(
-        "TaskTemplate",
-        secondary=task_template_mcp_servers,
-        back_populates="mcp_servers",
-    )
     flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
         "FlowchartNode",
         secondary=flowchart_node_mcp_servers,
@@ -500,11 +473,6 @@ class Script(BaseModel):
     tasks: Mapped[list["AgentTask"]] = relationship(
         "AgentTask", secondary=agent_task_scripts, back_populates="scripts"
     )
-    task_templates: Mapped[list["TaskTemplate"]] = relationship(
-        "TaskTemplate",
-        secondary=task_template_scripts,
-        back_populates="scripts",
-    )
     flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
         "FlowchartNode",
         secondary=flowchart_node_scripts,
@@ -535,11 +503,6 @@ class Attachment(BaseModel):
 
     tasks: Mapped[list["AgentTask"]] = relationship(
         "AgentTask", secondary=agent_task_attachments, back_populates="attachments"
-    )
-    templates: Mapped[list["TaskTemplate"]] = relationship(
-        "TaskTemplate",
-        secondary=task_template_attachments,
-        back_populates="attachments",
     )
     flowchart_nodes: Mapped[list["FlowchartNode"]] = relationship(
         "FlowchartNode",
@@ -721,9 +684,6 @@ class LLMModel(BaseModel):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    task_templates: Mapped[list["TaskTemplate"]] = relationship(
-        "TaskTemplate", back_populates="model"
-    )
     tasks: Mapped[list["AgentTask"]] = relationship(
         "AgentTask", back_populates="model"
     )
@@ -878,9 +838,6 @@ class AgentTask(BaseModel):
     )
     run_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    task_template_id: Mapped[int | None] = mapped_column(
-        ForeignKey("task_templates.id"), nullable=True, index=True
-    )
     model_id: Mapped[int | None] = mapped_column(
         ForeignKey("llm_models.id"), nullable=True, index=True
     )
@@ -1010,49 +967,6 @@ class AgentTask(BaseModel):
         secondary=agent_task_attachments,
         back_populates="tasks",
     )
-
-
-class TaskTemplate(BaseModel):
-    __tablename__ = "task_templates"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    agent_id: Mapped[int | None] = mapped_column(
-        ForeignKey("agents.id"), nullable=True, index=True
-    )
-    model_id: Mapped[int | None] = mapped_column(
-        ForeignKey("llm_models.id"), nullable=True, index=True
-    )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
-    )
-    attachments: Mapped[list["Attachment"]] = relationship(
-        "Attachment",
-        secondary=task_template_attachments,
-        back_populates="templates",
-    )
-    model: Mapped["LLMModel | None"] = relationship(
-        "LLMModel", back_populates="task_templates", lazy="joined"
-    )
-    mcp_servers: Mapped[list["MCPServer"]] = relationship(
-        "MCPServer",
-        secondary=task_template_mcp_servers,
-        back_populates="task_templates",
-    )
-    scripts: Mapped[list["Script"]] = relationship(
-        "Script",
-        secondary=task_template_scripts,
-        back_populates="task_templates",
-        order_by=task_template_scripts.c.position.asc(),
-    )
-
-
 class Flowchart(BaseModel):
     __tablename__ = "flowcharts"
 
@@ -1590,6 +1504,4 @@ class ChatActivityEvent(BaseModel):
 
 
 # Canonical workflow naming going forward.
-# Keep legacy class aliases for compatibility while remaining codepaths migrate.
-Task = TaskTemplate
 NodeRun = AgentTask

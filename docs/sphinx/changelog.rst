@@ -16,6 +16,7 @@ Changelog
 - Completed Kubernetes-only node execution cutover: node-like compute now executes in Kubernetes executor pods using full ``node_execution`` payloads and structured ``output_state``/``routing_state`` results (no probe-only path).
 - Added runtime evidence contract docs for ``provider_dispatch_id``, ``k8s_job_name``, ``k8s_pod_name``, and ``k8s_terminal_reason``.
 - Documented final architecture split: chat remains service-runtime, node-like workloads run in executor pods.
+- Added ``with_test_postgres.sh`` local test harness to bootstrap disposable PostgreSQL and prevent backend test runs from blocking on missing local DB wiring.
 
 2026-02-16
 ----------

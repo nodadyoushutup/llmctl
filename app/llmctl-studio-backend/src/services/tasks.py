@@ -94,7 +94,6 @@ from core.models import (
     SCRIPT_TYPE_POST_INIT,
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
-    TaskTemplate,
     flowchart_node_skills,
 )
 from services.instruction_adapters import resolve_instruction_adapter
@@ -164,6 +163,7 @@ QUICK_RAG_TASK_KINDS = {
     RAG_QUICK_INDEX_TASK_KIND,
     RAG_QUICK_DELTA_TASK_KIND,
 }
+EXECUTOR_NODE_TYPE_AGENT_TASK = "agent_task"
 
 
 def _utcnow() -> datetime:
@@ -280,6 +280,14 @@ def _quick_rag_worker_compute_disabled(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     raise RuntimeError(
         "Quick RAG compute must execute in executor runtime; worker execution is disabled."
+    )
+
+
+def _agent_task_worker_compute_disabled(
+    _request: ExecutionRequest,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    raise RuntimeError(
+        "Agent task compute must execute in executor runtime; worker execution is disabled."
     )
 
 
@@ -3074,12 +3082,8 @@ def _inject_envelope_core_sections(
 
 def _build_task_mcp_configs(
     task: AgentTask,
-    task_template: TaskTemplate | None,
 ) -> dict[str, dict[str, Any]]:
-    task_servers = list(task.mcp_servers)
-    template_servers = list(task_template.mcp_servers) if task_template else []
-    selected_servers = task_servers if task_servers else template_servers
-    return _build_mcp_config_map(selected_servers)
+    return _build_mcp_config_map(list(task.mcp_servers))
 
 
 def _first_available_model_id(session) -> int | None:
@@ -3672,7 +3676,153 @@ def run_quick_rag_task(self, task_id: int) -> None:
 
 @celery_app.task(bind=True)
 def run_agent_task(self, task_id: int) -> None:
+    if _execute_quick_task_via_execution_router(task_id, celery_task_id=self.request.id):
+        return
     _execute_agent_task(task_id, celery_task_id=self.request.id)
+
+
+def _execute_quick_task_via_execution_router(
+    task_id: int,
+    *,
+    celery_task_id: str | None = None,
+) -> bool:
+    init_engine(Config.SQLALCHEMY_DATABASE_URI)
+    init_db()
+
+    llm_settings = load_integration_settings("llm")
+    enabled_providers = resolve_enabled_llm_providers(llm_settings)
+    default_model_id = resolve_default_model_id(llm_settings)
+
+    routed_execution_request: ExecutionRequest | None = None
+    execution_router: ExecutionRouter | None = None
+    runtime_payload: dict[str, Any] | None = None
+    runtime_evidence: dict[str, Any] = {}
+
+    with session_scope() as session:
+        task = session.get(AgentTask, task_id)
+        if task is None:
+            logger.warning("Task %s not found", task_id)
+            return True
+        if not is_quick_task_kind(task.kind):
+            return False
+        if task.status not in {"queued", "running"}:
+            return True
+
+        task.celery_task_id = celery_task_id or task.celery_task_id
+        task.status = "running"
+        task.started_at = task.started_at or _utcnow()
+        _emit_task_event(
+            "node.task.updated",
+            task=task,
+            payload={"transition": "started"},
+        )
+
+        execution_router = ExecutionRouter(
+            runtime_settings=load_node_executor_runtime_settings()
+        )
+        execution_request = ExecutionRequest(
+            node_id=int(task.id),
+            node_type=EXECUTOR_NODE_TYPE_AGENT_TASK,
+            node_ref_id=None,
+            node_config={
+                "agent_task_id": int(task.id),
+                "task_kind": str(task.kind or ""),
+            },
+            input_context={
+                "kind": "agent_task",
+                "task_id": int(task.id),
+                "task_kind": str(task.kind or ""),
+            },
+            execution_id=int(task.id),
+            execution_task_id=int(task.id),
+            execution_index=1,
+            enabled_providers=set(enabled_providers),
+            default_model_id=default_model_id,
+            mcp_server_keys=[],
+        )
+        routed_execution_request = execution_router.route_request(execution_request)
+        runtime_payload = routed_execution_request.run_metadata_payload()
+        _apply_flowchart_node_task_run_metadata(task, runtime_payload)
+        _emit_task_event(
+            "node.task.updated",
+            task=task,
+            payload={"transition": "routed"},
+            runtime_override=runtime_payload,
+        )
+
+    if execution_router is None or routed_execution_request is None:
+        return True
+
+    task_error: str | None = None
+    terminal_status = "failed"
+    provider_metadata: dict[str, Any] | None = None
+    error_payload: dict[str, Any] | None = None
+    try:
+        execution_result = execution_router.execute_routed(
+            routed_execution_request,
+            _agent_task_worker_compute_disabled,
+        )
+        runtime_payload = (
+            execution_result.run_metadata
+            if isinstance(execution_result.run_metadata, dict)
+            else runtime_payload
+        )
+        provider_metadata = (
+            execution_result.provider_metadata
+            if isinstance(execution_result.provider_metadata, dict)
+            else None
+        )
+        error_payload = execution_result.error if isinstance(execution_result.error, dict) else None
+        terminal_status = str(execution_result.status or "").strip().lower() or "failed"
+        if execution_result.status != "success":
+            task_error = (
+                str(error_payload.get("message") or "").strip()
+                if isinstance(error_payload, dict)
+                else ""
+            )
+            if not task_error:
+                task_error = (
+                    "Quick task execution failed with status "
+                    f"'{execution_result.status}'."
+                )
+    except Exception as exc:
+        task_error = str(exc) or "Quick task dispatch failed."
+        terminal_status = "failed"
+        provider_metadata = None
+        error_payload = {"message": task_error}
+
+    runtime_evidence = _runtime_evidence_payload(
+        run_metadata=runtime_payload,
+        provider_metadata=provider_metadata,
+        error=error_payload,
+        terminal_status=terminal_status,
+    )
+
+    with session_scope() as session:
+        task = session.get(AgentTask, task_id)
+        if task is None:
+            return True
+        if isinstance(runtime_payload, dict):
+            _apply_flowchart_node_task_run_metadata(task, runtime_payload)
+        if not task_error:
+            return True
+        task_was_active = task.status in {"queued", "running"}
+        if task_was_active:
+            now = _utcnow()
+            task.status = "failed"
+            task.finished_at = now
+            task.error = task_error
+            _emit_task_event(
+                "node.task.completed",
+                task=task,
+                payload={
+                    "terminal_status": "failed",
+                    "failure_message": task_error,
+                    "runtime_evidence": runtime_evidence,
+                },
+                runtime_override=runtime_payload,
+            )
+    return True
 
 
 def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None:
@@ -3693,7 +3843,6 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
     task_kind: str | None = None
     github_repo = ""
     selected_integration_keys: set[str] | None = None
-    template_scripts: list[Script] = []
     task_scripts: list[Script] = []
     task_attachments: list[Attachment] = []
     compiled_instruction_package = None
@@ -3763,45 +3912,10 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                     task.id,
                     task.agent_id,
                 )
-        task_template: TaskTemplate | None = None
-        if task.task_template_id is not None:
-            task_template = (
-                session.execute(
-                    select(TaskTemplate)
-                    .options(
-                        selectinload(TaskTemplate.mcp_servers),
-                        selectinload(TaskTemplate.scripts),
-                    )
-                    .where(TaskTemplate.id == task.task_template_id)
-                )
-                .scalars()
-                .first()
-            )
-            if task_template is None:
-                now = _utcnow()
-                task.status = "failed"
-                task.error = "Task template not found."
-                task.started_at = now
-                task.finished_at = now
-                if agent is not None:
-                    agent.last_run_at = now
-                    agent.last_error = task.error
-                    agent.task_id = None
-                    agent.last_stopped_at = now
-                if run is not None:
-                    run.last_run_at = now
-                    run.last_error = task.error
-                    run.status = "error"
-                    run.task_id = None
-                    run.last_stopped_at = now
-                return
-
         model: LLMModel | None = None
         selected_model_id: int | None = None
         if task.model_id is not None:
             selected_model_id = task.model_id
-        elif task_template is not None and task_template.model_id is not None:
-            selected_model_id = task_template.model_id
         elif default_model_id is not None:
             selected_model_id = default_model_id
         elif is_quick_task_kind(task.kind):
@@ -3905,12 +4019,11 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 run.last_stopped_at = now
             return
         agent_id = agent.id if agent is not None else None
-        template_scripts = list(task_template.scripts) if task_template else []
         task_scripts = list(task.scripts)
         task_attachments = list(task.attachments)
         ordered_scripts: list[Script] = []
         seen_script_ids: set[int] = set()
-        for script in template_scripts + task_scripts:
+        for script in task_scripts:
             if script.id in seen_script_ids:
                 continue
             seen_script_ids.add(script.id)
@@ -4045,7 +4158,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         task.instruction_materialized_paths_json = None
         task.prompt = payload
         try:
-            mcp_configs = _build_task_mcp_configs(task, task_template)
+            mcp_configs = _build_task_mcp_configs(task)
         except ValueError as exc:
             now = _utcnow()
             task.status = "failed"
@@ -5178,14 +5291,9 @@ def _create_flowchart_node_task(
     error: str | None = None,
     run_metadata: dict[str, Any] | None = None,
 ) -> AgentTask:
-    parsed_ref_id = _parse_optional_int(node_ref_id, default=0, minimum=0)
-    task_template_id: int | None = None
-    if node_type == FLOWCHART_NODE_TYPE_TASK and parsed_ref_id > 0:
-        task_template_id = parsed_ref_id
     task = AgentTask.create(
         session,
         agent_id=agent_id,
-        task_template_id=task_template_id,
         flowchart_id=flowchart_id,
         flowchart_run_id=run_id,
         flowchart_node_id=node_id,
@@ -5481,12 +5589,9 @@ def _resolve_node_model(
     session,
     *,
     node: FlowchartNode,
-    template: TaskTemplate | None = None,
     default_model_id: int | None = None,
 ) -> LLMModel:
     model_id: int | None = node.model_id
-    if model_id is None and template is not None:
-        model_id = template.model_id
     if model_id is None:
         model_id = default_model_id
     if model_id is None:
@@ -5577,26 +5682,9 @@ def _execute_flowchart_task_node(
         )
         if node is None:
             raise ValueError(f"Flowchart node {node_id} was not found.")
-        task_template: TaskTemplate | None = None
-        if node_ref_id is not None:
-            task_template = (
-                session.execute(
-                    select(TaskTemplate)
-                    .options(
-                        selectinload(TaskTemplate.attachments),
-                        selectinload(TaskTemplate.scripts),
-                    )
-                    .where(TaskTemplate.id == node_ref_id)
-                )
-                .scalars()
-                .first()
-            )
-            if task_template is None:
-                raise ValueError(f"Task template {node_ref_id} was not found.")
         model = _resolve_node_model(
             session,
             node=node,
-            template=task_template,
             default_model_id=default_model_id,
         )
         configured_agent_id = _parse_optional_int(
@@ -5607,9 +5695,6 @@ def _execute_flowchart_task_node(
         if configured_agent_id > 0:
             selected_agent_id = configured_agent_id
             selected_agent_source = "config"
-        elif task_template is not None and task_template.agent_id is not None:
-            selected_agent_id = int(task_template.agent_id)
-            selected_agent_source = "template"
         if selected_agent_id is not None:
             selected_agent = session.get(Agent, selected_agent_id)
             if selected_agent is None:
@@ -5647,13 +5732,9 @@ def _execute_flowchart_task_node(
                 selected_agent_id,
             )
         mcp_servers = list(node.mcp_servers)
-        template_scripts = list(task_template.scripts) if task_template is not None else []
         node_scripts = list(node.scripts)
-        template_attachments = (
-            list(task_template.attachments) if task_template is not None else []
-        )
         node_attachments = list(node.attachments)
-        attachments = _merge_attachments(template_attachments, node_attachments)
+        attachments = list(node_attachments)
         if selected_agent_id is not None:
             try:
                 resolved_skills = resolve_agent_skills(session, selected_agent_id)
@@ -5678,7 +5759,7 @@ def _execute_flowchart_task_node(
 
     ordered_scripts: list[Script] = []
     seen_script_ids: set[int] = set()
-    for script in template_scripts + node_scripts:
+    for script in node_scripts:
         if script.id in seen_script_ids:
             continue
         seen_script_ids.add(script.id)
@@ -5799,21 +5880,13 @@ def _execute_flowchart_task_node(
     if inline_task_prompt.strip():
         base_prompt = inline_task_prompt
         prompt_source = "config"
-    elif task_template is not None:
-        base_prompt = task_template.prompt or ""
-        prompt_source = "template"
     else:
-        raise ValueError(
-            "Task node requires either config.task_prompt or ref_id to a task template."
-        )
+        raise ValueError("Task node requires config.task_prompt.")
     if not base_prompt.strip():
-        raise ValueError(
-            "Task node prompt is empty. Provide config.task_prompt or select a template with a prompt."
-        )
+        raise ValueError("Task node prompt is empty. Provide config.task_prompt.")
 
     resolved_task_name = (
         inline_task_name
-        or (task_template.name if task_template is not None else None)
         or f"Flowchart task node {node_id}"
     )
     selected_integration_keys: set[str] | None = None
@@ -5831,8 +5904,6 @@ def _execute_flowchart_task_node(
                 + "."
             )
         selected_integration_keys = set(valid_integration_keys)
-    task_template_id = task_template.id if task_template is not None else None
-    task_template_name = task_template.name if task_template is not None else None
     resolved_instruction_manifest_hash: str | None = None
     if selected_agent_id is not None:
         compiled_instruction_package = compile_instruction_package(
@@ -5864,8 +5935,6 @@ def _execute_flowchart_task_node(
             "node_id": node_id,
             "input_context": input_context,
         }
-        if task_template_id is not None:
-            flowchart_context["task_template_id"] = task_template_id
         flowchart_context["task_name"] = resolved_task_name
         flowchart_context["task_prompt_source"] = prompt_source
         if selected_agent_id is not None:
@@ -6255,8 +6324,6 @@ def _execute_flowchart_task_node(
         "node_type": FLOWCHART_NODE_TYPE_TASK,
         "task_name": resolved_task_name,
         "task_prompt_source": prompt_source,
-        "task_template_id": task_template_id,
-        "task_template_name": task_template_name,
         "agent_id": selected_agent_id,
         "agent_name": selected_agent_name,
         "agent_source": selected_agent_source,
@@ -6434,7 +6501,6 @@ def _execute_flowchart_plan_node(
                 model = _resolve_node_model(
                     session,
                     node=node,
-                    template=None,
                     default_model_id=default_model_id,
                 )
                 llm_patch = _execute_optional_llm_transform(
@@ -6565,7 +6631,6 @@ def _execute_flowchart_milestone_node(
                 model = _resolve_node_model(
                     session,
                     node=node,
-                    template=None,
                     default_model_id=default_model_id,
                 )
                 llm_patch = _execute_optional_llm_transform(
@@ -6870,7 +6935,6 @@ def _execute_flowchart_rag_node(
         model = _resolve_node_model(
             session,
             node=node,
-            template=None,
             default_model_id=default_model_id,
         )
 
@@ -7001,6 +7065,50 @@ def _execute_flowchart_rag_node(
     return output_state, {}
 
 
+def _execute_executor_agent_task_node(
+    *,
+    node_config: dict[str, Any],
+    execution_task_id: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    explicit_task_id = _parse_optional_int(
+        node_config.get("agent_task_id"),
+        default=0,
+        minimum=0,
+    )
+    target_task_id = explicit_task_id if explicit_task_id > 0 else int(execution_task_id or 0)
+    if target_task_id <= 0:
+        raise ValueError("Executor agent task payload is missing task_id.")
+
+    _execute_agent_task(target_task_id, celery_task_id=None)
+
+    with session_scope() as session:
+        task = session.get(AgentTask, target_task_id)
+        if task is None:
+            raise ValueError(f"Agent task {target_task_id} was not found.")
+        task_status = str(task.status or "").strip().lower()
+        task_kind = str(task.kind or "").strip()
+        task_output = str(task.output or "")
+        task_error = str(task.error or "").strip()
+        task_stage = str(task.current_stage or "").strip()
+
+    if task_status != "succeeded":
+        raise RuntimeError(
+            task_error or f"Agent task {target_task_id} failed with status '{task_status}'."
+        )
+
+    return (
+        {
+            "node_type": EXECUTOR_NODE_TYPE_AGENT_TASK,
+            "task_id": int(target_task_id),
+            "task_kind": task_kind,
+            "task_status": task_status,
+            "task_output": task_output,
+            "task_stage": task_stage,
+        },
+        {},
+    )
+
+
 def _execute_flowchart_node(
     *,
     node_id: int,
@@ -7046,6 +7154,11 @@ def _execute_flowchart_node(
             execution_task_id=execution_task_id,
             enabled_providers=enabled_providers,
             default_model_id=default_model_id,
+        )
+    if node_type == EXECUTOR_NODE_TYPE_AGENT_TASK:
+        return _execute_executor_agent_task_node(
+            node_config=node_config,
+            execution_task_id=execution_task_id,
         )
     if node_type == FLOWCHART_NODE_TYPE_RAG:
         return _execute_flowchart_rag_node(

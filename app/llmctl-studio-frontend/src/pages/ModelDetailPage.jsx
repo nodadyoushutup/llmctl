@@ -49,7 +49,6 @@ export default function ModelDetailPage() {
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const model = payload?.model && typeof payload.model === 'object' ? payload.model : null
-  const templates = Array.isArray(payload?.attached_templates) ? payload.attached_templates : []
   const nodes = Array.isArray(payload?.attached_nodes) ? payload.attached_nodes : []
   const tasks = Array.isArray(payload?.attached_tasks) ? payload.attached_tasks : []
   const invalidId = parsedModelId == null
@@ -90,19 +89,6 @@ export default function ModelDetailPage() {
             <pre>{model.config_json || '{}'}</pre>
           </div>
         ) : null}
-      </article>
-
-      <article className="card">
-        <h2>Template bindings</h2>
-        {templates.length === 0 ? <p>No template bindings.</p> : (
-          <ul>
-            {templates.map((template) => (
-              <li key={template.id}>
-                <Link to={`/task-templates/${template.id}`}>{template.name || `Template ${template.id}`}</Link>
-              </li>
-            ))}
-          </ul>
-        )}
       </article>
 
       <article className="card">

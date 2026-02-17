@@ -125,18 +125,14 @@ def _collect_reference_candidates(
 
     from core.models import (
         AgentTask,
-        FlowchartNode,
-        FLOWCHART_NODE_TYPE_TASK,
         Script,
         agent_task_scripts,
         flowchart_node_scripts,
-        task_template_scripts,
     )
 
     source_order = {
         "flowchart_node_scripts": 1,
-        "task_template_scripts": 2,
-        "agent_task_scripts": 3,
+        "agent_task_scripts": 2,
     }
     default_position = 2**31 - 1
     candidates: dict[int, list[tuple[int, int, int, int, str]]] = {}
@@ -193,57 +189,6 @@ def _collect_reference_candidates(
             source="flowchart_node_scripts",
             source_ref=f"flowchart_node:{node_id}",
         )
-
-    template_rows = session.execute(
-        select(
-            task_template_scripts.c.task_template_id,
-            task_template_scripts.c.script_id,
-            task_template_scripts.c.position,
-        )
-        .join(Script, Script.id == task_template_scripts.c.script_id)
-        .where(Script.script_type == LEGACY_SKILL_SCRIPT_TYPE)
-    ).all()
-    template_ids = sorted({int(row[0]) for row in template_rows})
-    nodes_by_template_id: dict[int, list[int]] = {}
-    if template_ids:
-        resolved_nodes = session.execute(
-            select(FlowchartNode.id, FlowchartNode.ref_id).where(
-                FlowchartNode.node_type == FLOWCHART_NODE_TYPE_TASK,
-                FlowchartNode.ref_id.in_(template_ids),
-            )
-        ).all()
-        for node_id, ref_id in resolved_nodes:
-            template_id = int(ref_id)
-            nodes_by_template_id.setdefault(template_id, []).append(int(node_id))
-
-    for template_id, script_id, position in template_rows:
-        if isinstance(reference_scan, dict):
-            reference_scan["task_template_script_refs"] = int(
-                reference_scan.get("task_template_script_refs", 0)
-            ) + 1
-        node_ids = nodes_by_template_id.get(int(template_id), [])
-        if not node_ids:
-            if isinstance(reference_scan, dict):
-                reference_scan["template_refs_without_nodes"] = int(
-                    reference_scan.get("template_refs_without_nodes", 0)
-                ) + 1
-            _append_mismatch(
-                summary,
-                "task_template_without_flowchart_nodes",
-                (
-                    f"Task template {template_id} references legacy skill script {script_id} "
-                    "but no task flowchart nodes currently target that template."
-                ),
-            )
-            continue
-        for node_id in node_ids:
-            _add_candidate(
-                node_id=node_id,
-                script_id=int(script_id),
-                position=int(position) if position is not None else None,
-                source="task_template_scripts",
-                source_ref=f"task_template:{template_id}->flowchart_node:{node_id}",
-            )
 
     task_rows = session.execute(
         select(
@@ -380,9 +325,7 @@ def main() -> int:
         },
         "reference_scan": {
             "flowchart_node_script_refs": 0,
-            "task_template_script_refs": 0,
             "agent_task_script_refs": 0,
-            "template_refs_without_nodes": 0,
             "agent_task_refs_without_node": 0,
             "unmapped_script_refs": 0,
         },

@@ -26,7 +26,6 @@ from core.models import (
     MCPServer,
     SCRIPT_TYPE_INIT,
     Script,
-    TaskTemplate,
     flowchart_node_skills,
     flowchart_node_scripts,
 )
@@ -77,12 +76,6 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
                 provider="codex",
                 config_json="{}",
             )
-            task_template = TaskTemplate.create(
-                session,
-                name="mcp-template",
-                prompt="hello",
-                model_id=model.id,
-            )
             mcp_server = MCPServer.create(
                 session,
                 name="mcp-server",
@@ -102,7 +95,6 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
                 script_type=SCRIPT_TYPE_INIT,
             )
             model_id = model.id
-            template_id = task_template.id
             mcp_server_id = mcp_server.id
             script_a_id = script_a.id
             script_b_id = script_b.id
@@ -142,7 +134,7 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
                 {
                     "client_id": "task",
                     "node_type": FLOWCHART_NODE_TYPE_TASK,
-                    "ref_id": template_id,
+                    "config": {"task_prompt": "hello"},
                     "x": 100,
                     "y": 0,
                 },

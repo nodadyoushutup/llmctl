@@ -156,7 +156,7 @@ export default function McpsPage() {
         <div className="title-row">
           <div>
             <h2>MCP Servers</h2>
-            <p>User-managed and system-managed servers for task templates and flowchart nodes.</p>
+            <p>User-managed and system-managed servers for flowchart nodes.</p>
           </div>
           <Link to="/mcps/new" className="btn-link">New MCP Server</Link>
         </div>

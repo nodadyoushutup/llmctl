@@ -65,7 +65,6 @@ export default function AttachmentDetailPage() {
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const attachment = payload?.attachment && typeof payload.attachment === 'object' ? payload.attachment : null
   const tasks = Array.isArray(payload?.tasks) ? payload.tasks : []
-  const templates = Array.isArray(payload?.templates) ? payload.templates : []
   const flowchartNodes = Array.isArray(payload?.flowchart_nodes) ? payload.flowchart_nodes : []
   const invalidId = parsedAttachmentId == null
   const loading = invalidId ? false : state.loading
@@ -121,19 +120,6 @@ export default function AttachmentDetailPage() {
           <ul>
             {tasks.map((task) => (
               <li key={task.id}>Task {task.id} ({task.status || 'unknown'})</li>
-            ))}
-          </ul>
-        )}
-      </article>
-
-      <article className="card">
-        <h2>Template bindings</h2>
-        {templates.length === 0 ? <p>No template bindings.</p> : (
-          <ul>
-            {templates.map((template) => (
-              <li key={template.id}>
-                <Link to={`/task-templates/${template.id}`}>{template.name || `Template ${template.id}`}</Link>
-              </li>
             ))}
           </ul>
         )}

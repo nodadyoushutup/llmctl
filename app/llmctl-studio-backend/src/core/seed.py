@@ -19,7 +19,6 @@ from core.models import (
     Skill,
     SkillVersion,
     SYSTEM_MANAGED_MCP_SERVER_KEYS,
-    TaskTemplate,
 )
 from services.skills import build_skill_package_from_directory, import_skill_package_to_db
 from storage.script_storage import ensure_script_file
@@ -1217,154 +1216,6 @@ SCRIPT_SEEDS = [
     },
 ]
 
-TASK_TEMPLATE_SEEDS = [
-    {
-        "name": "Create Jira Story",
-        "agent": "Project Manager",
-        "description": "Create a Jira story on the board",
-        "prompt": (
-            "Using the Technical Lead assessment, create one Jira story with:\n"
-            "- title\n"
-            "- 2-3 sentence summary\n"
-            "- priority (P0-P3)\n"
-            "- expected outcome\n"
-            "Keep it brief; no implementation details yet."
-        ),
-    },
-    {
-        "name": "Technical Lead Assessment",
-        "agent": "Technical Lead",
-        "description": "Look at the existing workspace to identify work to be done",
-        "prompt": (
-            "Review the current workspace/repo and make a concrete decision on "
-            "the next work item.\n"
-            f"{INDEX_FILES_NOTE}\n"
-            "Return a short assessment with:\n"
-            "- decision: one specific change to implement\n"
-            "- scope boundaries (in/out)\n"
-            "- rationale (why now)\n"
-            "- success criteria (3-5 bullets)\n"
-            "- risks/unknowns\n"
-            "Keep it to 5-8 bullets. Do not present multiple options."
-        ),
-        "append_if_missing": INDEX_FILES_NOTE,
-    },
-    {
-        "name": "Plan & Risk Check",
-        "agent": "Technical Lead",
-        "description": "Create a concise plan and risk assessment",
-        "prompt": (
-            "Using the Technical Lead assessment, create a short plan with:\n"
-            "- 3-6 implementation steps\n"
-            "- key risks/unknowns\n"
-            "- dependencies or approvals needed\n"
-            "- rollback/backout plan\n"
-            "If blocked, ask 1-3 clarifying questions."
-        ),
-    },
-    {
-        "name": "Requirement Gathering Questions",
-        "agent": "Business Analyst",
-        "description": "Leave a comment with requirement gathering questions for the technical lead to answer.",
-        "prompt": (
-            "Add a Jira comment with 5-8 questions to clarify scope and success:\n"
-            "- user goal/value\n"
-            "- in-scope vs out-of-scope\n"
-            "- acceptance criteria\n"
-            "- dependencies/constraints\n"
-            "- data/UX considerations\n"
-            "Keep questions crisp and answerable."
-        ),
-    },
-    {
-        "name": "Answer Technical Questions",
-        "agent": "Technical Lead",
-        "description": "Answer pending technical questions",
-        "prompt": (
-            "Answer each open question in the Jira comments.\n"
-            "Be specific; include assumptions, constraints, and non-goals.\n"
-            "If scope should be reduced, state it clearly."
-        ),
-    },
-    {
-        "name": "Update Jira Story",
-        "agent": "Business Analyst",
-        "description": "Update the Jira story with more technical details",
-        "prompt": (
-            "Update the Jira story using the answered questions:\n"
-            "- problem statement\n"
-            "- scope (in/out)\n"
-            "- acceptance criteria (bullets)\n"
-            "- dependencies\n"
-            "- estimate (S/M/L)\n"
-            "Keep it concise and actionable."
-        ),
-    },
-    {
-        "name": "Code Development",
-        "agent": "Coder",
-        "description": "Perform the code changes required.",
-        "prompt": (
-            "Set the Jira story to In Progress.\n"
-            f"{INDEX_FILES_NOTE}\n"
-            "Create a branch from main named `<story-key>-<short-slug>` "
-            "(use title slug if no key).\n"
-            "Implement the required changes in the workspace.\n"
-            "Run relevant tests if available.\n"
-            "Commit with a concise message, push, and open a PR against main."
-        ),
-        "append_if_missing": INDEX_FILES_NOTE,
-    },
-    {
-        "name": "Code Review",
-        "agent": "Technical Lead",
-        "description": "Perform a code review",
-        "prompt": (
-            "Review the PR diff and always leave a review comment on the PR, even "
-            "if it is just to confirm it looks good.\n"
-            "If there are issues, include file/line refs and severity.\n"
-            "If fixes are straightforward, checkout the branch, apply fixes, "
-            "commit, and push.\n"
-            "Then comment on the Jira story with QA instructions: exact commands, "
-            "setup steps, and what to verify.\n"
-            "Assume the repo is already cloned in the workspace."
-        ),
-    },
-    {
-        "name": "Wrap Up",
-        "agent": "Project Manager",
-        "description": "Perform clean up work",
-        "prompt": (
-            "Confirm the PR is merged.\n"
-            "Set the Jira story to Done and add a brief closure note "
-            "(what shipped, PR link)."
-        ),
-    },
-    {
-        "name": "Testing",
-        "agent": "Quality Assurance",
-        "description": "Testing the code changes",
-        "prompt": (
-            "Follow the QA instructions from the Jira story.\n"
-            "Use existing venv/db if present; create only if missing.\n"
-            "Run the specified tests and comment back with commands and results.\n"
-            "If tests fail, report the failures without making code changes."
-        ),
-    },
-    {
-        "name": "Merge Code",
-        "agent": "Technical Lead",
-        "description": "Review the results of testing and merge code",
-        "prompt": (
-            "Review QA results on the Jira story.\n"
-            "If tests passed, merge the PR.\n"
-            "If tests failed, fix issues, run tests, push a new commit, then "
-            "merge.\n"
-            "Update the Jira story with final status."
-        ),
-    },
-]
-
 SKILL_PACKAGE_SEEDS = [
     {
         "path": REPO_ROOT / "app" / "llmctl-studio-backend" / "seed-skills" / "chromium-screenshot",
@@ -1383,7 +1234,6 @@ def seed_defaults() -> None:
         _seed_agents(session)
         _seed_scripts(session)
         _seed_skills(session)
-        _seed_task_templates(session)
 
 
 def _seed_roles(session) -> None:
@@ -1599,63 +1449,6 @@ def _seed_integrated_mcp_servers(session) -> None:
     from core.integrated_mcp import sync_integrated_mcp_servers_in_session
 
     sync_integrated_mcp_servers_in_session(session)
-
-
-def _append_prompt_once(prompt: str, addition: str) -> str:
-    addition = addition.strip()
-    if not addition:
-        return prompt
-    if addition in prompt:
-        return prompt
-    if not prompt.strip():
-        return addition
-    if prompt.endswith("\n"):
-        return f"{prompt}{addition}"
-    return f"{prompt}\n{addition}"
-
-
-def _seed_task_templates(session) -> None:
-    existing = {
-        template.name: template
-        for template in session.execute(select(TaskTemplate)).scalars().all()
-    }
-    agents_by_name = {
-        agent.name: agent
-        for agent in session.execute(select(Agent)).scalars().all()
-    }
-    for payload in TASK_TEMPLATE_SEEDS:
-        name = payload.get("name")
-        if not isinstance(name, str) or not name.strip():
-            continue
-        prompt = payload.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            continue
-        description = payload.get("description")
-        append_if_missing = payload.get("append_if_missing")
-        agent_id = None
-        agent_name = payload.get("agent")
-        if isinstance(agent_name, str) and agent_name.strip():
-            agent = agents_by_name.get(agent_name)
-            if agent is not None:
-                agent_id = agent.id
-        template = existing.get(name)
-        if template is None:
-            TaskTemplate.create(
-                session,
-                agent_id=agent_id,
-                name=name,
-                description=description if isinstance(description, str) else None,
-                prompt=prompt,
-            )
-            continue
-        if template.agent_id is None and agent_id is not None:
-            template.agent_id = agent_id
-        if not template.description and isinstance(description, str):
-            template.description = description
-        if not template.prompt or not template.prompt.strip():
-            template.prompt = prompt
-        elif isinstance(append_if_missing, str):
-            template.prompt = _append_prompt_once(template.prompt, append_if_missing)
 
 
 def _seed_skills(session) -> None:

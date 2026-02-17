@@ -32,7 +32,6 @@ import {
   deletePlanStage,
   deletePlanTask,
   deleteRun,
-  deleteTaskTemplate,
   detachAgentSkill,
   detachFlowchartNodeMcp,
   detachFlowchartNodeScript,
@@ -119,10 +118,6 @@ import {
   getSkillImportMeta,
   getSkillMeta,
   getSkills,
-  getTaskTemplate,
-  getTaskTemplateEdit,
-  getTaskTemplateMeta,
-  getTaskTemplates,
   importSkillBundle,
   moveAgentPriority,
   moveAgentSkill,
@@ -130,7 +125,6 @@ import {
   reorderFlowchartNodeScripts,
   reorderFlowchartNodeSkills,
   removeNodeAttachment,
-  removeTaskTemplateAttachment,
   runFlowchart,
   setFlowchartNodeModel,
   startAgent,
@@ -174,7 +168,6 @@ import {
   updatePlan,
   updatePlanStage,
   updatePlanTask,
-  updateTaskTemplate,
   updateAgent,
   updateAgentPriority,
   deleteMcp,
@@ -563,27 +556,6 @@ describe('studioApi', () => {
       body: { description: 'Updated memory' },
     })
     expect(requestJson).toHaveBeenNthCalledWith(12, '/memories/4/delete', { method: 'POST' })
-  })
-
-  test('stage 4 task template endpoints map to expected api paths', () => {
-    getTaskTemplates()
-    getTaskTemplateMeta()
-    getTaskTemplate(6)
-    getTaskTemplateEdit(6)
-    updateTaskTemplate(6, { name: 'Template', description: 'Desc', prompt: 'Prompt', agentId: 3 })
-    removeTaskTemplateAttachment(6, 8)
-    deleteTaskTemplate(6)
-
-    expect(requestJson).toHaveBeenNthCalledWith(1, '/task-templates?page=1&per_page=20')
-    expect(requestJson).toHaveBeenNthCalledWith(2, '/task-templates/new')
-    expect(requestJson).toHaveBeenNthCalledWith(3, '/task-templates/6')
-    expect(requestJson).toHaveBeenNthCalledWith(4, '/task-templates/6/edit')
-    expect(requestJson).toHaveBeenNthCalledWith(5, '/task-templates/6', {
-      method: 'POST',
-      body: { name: 'Template', description: 'Desc', prompt: 'Prompt', agent_id: 3 },
-    })
-    expect(requestJson).toHaveBeenNthCalledWith(6, '/task-templates/6/attachments/8/remove', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(7, '/task-templates/6/delete', { method: 'POST' })
   })
 
   test('stage 5 flowchart endpoints map to expected api paths', () => {

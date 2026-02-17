@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
 import {
   createPlanStage,
@@ -384,9 +385,10 @@ export default function PlanDetailPage() {
               const stageEditPanelId = `stage-edit-${stage.id}`
 
               return (
-                <details
+                <PersistedDetails
                   key={stage.id}
                   className={`subcard plan-stage${stage.completed_at ? ' is-complete' : ''}`}
+                  storageKey={`plan:${parsedPlanId || 'unknown'}:stage:${stage.id}`}
                   defaultOpen={index === 0}
                 >
                   <summary className="plan-stage-summary">
@@ -455,7 +457,11 @@ export default function PlanDetailPage() {
                         const taskEditDraft = getTaskEditDraft(task)
 
                         return (
-                          <details key={task.id} className={`plan-task${task.completed_at ? ' is-complete' : ''}`}>
+                          <PersistedDetails
+                            key={task.id}
+                            className={`plan-task${task.completed_at ? ' is-complete' : ''}`}
+                            storageKey={`plan:${parsedPlanId || 'unknown'}:task:${task.id}`}
+                          >
                             <summary className="plan-task-summary">
                               <span className="plan-node-title">{task.name}</span>
                               <div className="row" style={{ gap: '10px' }}>
@@ -533,7 +539,7 @@ export default function PlanDetailPage() {
                                 </div>
                               </form>
                             </div>
-                          </details>
+                          </PersistedDetails>
                         )
                       })
                     ) : (
@@ -612,7 +618,7 @@ export default function PlanDetailPage() {
                       </div>
                     </form>
                   </div>
-                </details>
+                </PersistedDetails>
               )
             })}
           </div>

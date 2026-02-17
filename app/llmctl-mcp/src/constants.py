@@ -25,7 +25,6 @@ from core.models import (
     SCRIPT_TYPE_POST_INIT,
     SCRIPT_TYPE_POST_RUN,
     SCRIPT_TYPE_PRE_INIT,
-    TaskTemplate,
 )
 
 # NOTE: Keep naming consistent with llmctl-studio models.
@@ -53,9 +52,6 @@ MODEL_REGISTRY = {
     "agenttask": AgentTask,
     "agent_task": AgentTask,
     "agent_tasks": AgentTask,
-    "tasktemplate": TaskTemplate,
-    "task_template": TaskTemplate,
-    "task_templates": TaskTemplate,
     "flowchart": Flowchart,
     "flowcharts": Flowchart,
     "flowchartnode": FlowchartNode,

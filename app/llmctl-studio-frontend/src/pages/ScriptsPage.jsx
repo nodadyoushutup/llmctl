@@ -89,7 +89,7 @@ export default function ScriptsPage() {
         <div className="title-row">
           <div>
             <h2>Scripts</h2>
-            <p>Upload helper scripts and bind them to task templates or flowchart nodes.</p>
+            <p>Upload helper scripts and bind them to flowchart nodes.</p>
           </div>
           <Link to="/scripts/new" className="btn-link">New Script</Link>
         </div>

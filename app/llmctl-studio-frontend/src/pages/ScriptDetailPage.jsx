@@ -50,7 +50,6 @@ export default function ScriptDetailPage() {
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const script = payload?.script && typeof payload.script === 'object' ? payload.script : null
   const attachedTasks = Array.isArray(payload?.attached_tasks) ? payload.attached_tasks : []
-  const attachedTemplates = Array.isArray(payload?.attached_templates) ? payload.attached_templates : []
   const attachedNodes = Array.isArray(payload?.attached_nodes) ? payload.attached_nodes : []
   const invalidId = parsedScriptId == null
   const loading = invalidId ? false : state.loading
@@ -98,19 +97,6 @@ export default function ScriptDetailPage() {
           <ul>
             {attachedTasks.map((task) => (
               <li key={task.id}>Task {task.id} ({task.status || 'unknown'})</li>
-            ))}
-          </ul>
-        )}
-      </article>
-
-      <article className="card">
-        <h2>Template bindings</h2>
-        {attachedTemplates.length === 0 ? <p>No template bindings.</p> : (
-          <ul>
-            {attachedTemplates.map((template) => (
-              <li key={template.id}>
-                <Link to={`/task-templates/${template.id}`}>{template.name || `Template ${template.id}`}</Link>
-              </li>
             ))}
           </ul>
         )}

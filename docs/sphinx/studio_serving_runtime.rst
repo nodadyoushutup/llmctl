@@ -46,6 +46,33 @@ Standalone CLI check:
 
    python3 app/llmctl-studio-backend/scripts/check_database_health.py
 
+Local Backend Test Bootstrap
+----------------------------
+
+To avoid local test runs failing when PostgreSQL wiring is missing, use the
+test wrapper script. It starts a disposable local PostgreSQL container,
+exports ``LLMCTL_STUDIO_DATABASE_URI``, and runs your test command.
+
+Run a targeted backend test:
+
+.. code-block:: bash
+
+   bash app/llmctl-studio-backend/scripts/with_test_postgres.sh -- \
+     .venv/bin/python3 -m unittest app/llmctl-studio-backend/tests/test_node_executor_stage4.py
+
+Run full backend test discovery:
+
+.. code-block:: bash
+
+   bash app/llmctl-studio-backend/scripts/with_test_postgres.sh
+
+Useful options:
+
+- ``--keep-container``: keep the test PostgreSQL container running after tests.
+- ``--skip-dep-check``: skip Python dependency import preflight.
+- ``--python <path>``: use a specific Python binary.
+- default local DB port is ``15432``; if busy, the script auto-selects a free port.
+
 Integrated MCP Startup Gate (Kubernetes)
 ----------------------------------------
 

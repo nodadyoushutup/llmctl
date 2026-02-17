@@ -699,58 +699,6 @@ export function deleteMemory(memoryId) {
   return requestJson(`/memories/${parsedMemoryId}/delete`, { method: 'POST' })
 }
 
-export function getTaskTemplates({ page = 1, perPage = 20 } = {}) {
-  return requestJson(
-    appendQuery('/task-templates', {
-      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
-      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
-    }),
-  )
-}
-
-export function getTaskTemplateMeta() {
-  return requestJson('/task-templates/new')
-}
-
-export function getTaskTemplate(templateId) {
-  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
-  return requestJson(`/task-templates/${parsedTemplateId}`)
-}
-
-export function getTaskTemplateEdit(templateId) {
-  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
-  return requestJson(`/task-templates/${parsedTemplateId}/edit`)
-}
-
-export function updateTaskTemplate(
-  templateId,
-  { name = '', description = '', prompt = '', agentId = null } = {},
-) {
-  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
-  return requestJson(`/task-templates/${parsedTemplateId}`, {
-    method: 'POST',
-    body: {
-      name,
-      description,
-      prompt,
-      agent_id: agentId,
-    },
-  })
-}
-
-export function removeTaskTemplateAttachment(templateId, attachmentId) {
-  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
-  const parsedAttachmentId = parsePositiveId(attachmentId, 'attachmentId')
-  return requestJson(`/task-templates/${parsedTemplateId}/attachments/${parsedAttachmentId}/remove`, {
-    method: 'POST',
-  })
-}
-
-export function deleteTaskTemplate(templateId) {
-  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
-  return requestJson(`/task-templates/${parsedTemplateId}/delete`, { method: 'POST' })
-}
-
 export function getFlowcharts() {
   return requestJson('/flowcharts')
 }

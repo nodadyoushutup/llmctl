@@ -219,12 +219,6 @@ def _ensure_schema() -> None:
         _migrate_script_storage(connection)
         _migrate_script_positions(connection)
 
-        task_template_columns = {
-            "agent_id": "INTEGER",
-            "model_id": "INTEGER",
-        }
-        _ensure_columns(connection, "task_templates", task_template_columns)
-
         mcp_server_columns = {
             "server_type": "TEXT NOT NULL DEFAULT 'custom'",
         }
@@ -296,7 +290,6 @@ def _ensure_schema() -> None:
         }
         _ensure_columns(connection, "flowchart_run_nodes", flowchart_run_node_columns)
 
-        _ensure_columns(connection, "task_template_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "flowchart_node_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "flowchart_node_skills", {"position": "INTEGER"})
         _ensure_flowchart_node_attachment_schema(connection)
@@ -321,7 +314,6 @@ def _ensure_schema() -> None:
         existing_agent_task_columns = _table_columns(connection, "agent_tasks")
         task_columns = {
             "run_id": "INTEGER",
-            "task_template_id": "INTEGER",
             "model_id": "INTEGER",
             "flowchart_id": "INTEGER",
             "flowchart_run_id": "INTEGER",
@@ -359,6 +351,7 @@ def _ensure_schema() -> None:
         _migrate_agent_task_agent_nullable(connection)
         _migrate_agent_task_kind_values(connection)
         _drop_pipeline_schema(connection)
+        _drop_task_template_schema(connection)
         _ensure_flowchart_indexes(connection)
         _ensure_rag_schema(connection)
         _ensure_rag_indexes(connection)
@@ -1547,7 +1540,6 @@ def _drop_pipeline_schema(connection) -> None:
         index_statements=[
             "CREATE INDEX IF NOT EXISTS ix_agent_tasks_agent_id ON agent_tasks (agent_id)",
             "CREATE INDEX IF NOT EXISTS ix_agent_tasks_run_id ON agent_tasks (run_id)",
-            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_task_template_id ON agent_tasks (task_template_id)",
             "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)",
             "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)",
             "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)",
@@ -1557,6 +1549,31 @@ def _drop_pipeline_schema(connection) -> None:
     connection.execute(text("DROP TABLE IF EXISTS pipeline_steps"))
     connection.execute(text("DROP TABLE IF EXISTS pipeline_runs"))
     connection.execute(text("DROP TABLE IF EXISTS pipelines"))
+
+
+def _drop_task_template_schema(connection) -> None:
+    if connection.dialect.name == "postgresql":
+        connection.execute(
+            text("ALTER TABLE agent_tasks DROP COLUMN IF EXISTS task_template_id")
+        )
+        connection.execute(text("DROP INDEX IF EXISTS ix_agent_tasks_task_template_id"))
+    _drop_columns_sqlite(
+        connection,
+        "agent_tasks",
+        {"task_template_id"},
+        index_statements=[
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_agent_id ON agent_tasks (agent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_run_id ON agent_tasks (run_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)",
+        ],
+    )
+    connection.execute(text("DROP VIEW IF EXISTS tasks"))
+    connection.execute(text("DROP TABLE IF EXISTS task_template_attachments"))
+    connection.execute(text("DROP TABLE IF EXISTS task_template_mcp_servers"))
+    connection.execute(text("DROP TABLE IF EXISTS task_template_scripts"))
+    connection.execute(text("DROP TABLE IF EXISTS task_templates"))
 
 
 def _migrate_agent_task_agent_nullable(connection) -> None:
@@ -1961,7 +1978,6 @@ def _migrate_flowchart_node_skills_to_agent_bindings(connection) -> None:
     required_tables = {
         "flowchart_node_skills",
         "flowchart_nodes",
-        "task_templates",
         "agents",
         "skills",
         "agent_skill_bindings",
@@ -1980,18 +1996,6 @@ def _migrate_flowchart_node_skills_to_agent_bindings(connection) -> None:
         for row in connection.execute(text("SELECT id FROM skills")).fetchall()
         if row[0] is not None
     }
-    template_agent_by_id = {
-        int(row[0]): int(row[1])
-        for row in connection.execute(
-            text(
-                "SELECT id, agent_id "
-                "FROM task_templates "
-                "WHERE agent_id IS NOT NULL"
-            )
-        ).fetchall()
-        if row[0] is not None and row[1] is not None
-    }
-
     existing_pairs: set[tuple[int, int]] = set()
     max_position_by_agent: dict[int, int] = {}
     existing_rows = connection.execute(
@@ -2064,17 +2068,10 @@ def _migrate_flowchart_node_skills_to_agent_bindings(connection) -> None:
         config_agent_id = _extract_agent_id_from_node_config(node_config_json)
         if config_agent_id is not None and config_agent_id in valid_agent_ids:
             resolved_agent_id = config_agent_id
-        elif node_ref_id is not None:
-            template_agent_id = template_agent_by_id.get(node_ref_id)
-            if template_agent_id is not None and template_agent_id in valid_agent_ids:
-                resolved_agent_id = template_agent_id
-
         if resolved_agent_id is None:
             reason = "missing_agent_mapping"
             if config_agent_id is not None and config_agent_id not in valid_agent_ids:
                 reason = "node_config_agent_not_found"
-            elif node_ref_id is not None and node_ref_id in template_agent_by_id:
-                reason = "task_template_agent_not_found"
             connection.execute(
                 text(
                     "INSERT OR IGNORE INTO legacy_unmapped_node_skills ("
@@ -2683,10 +2680,9 @@ def _ensure_canonical_workflow_views(connection) -> None:
     if connection.dialect.name != "sqlite":
         return
     tables = _table_names(connection)
-    if "task_templates" in tables:
-        connection.execute(text("DROP VIEW IF EXISTS tasks"))
-        connection.execute(text("CREATE VIEW tasks AS SELECT * FROM task_templates"))
     if "agent_tasks" in tables:
+        connection.execute(text("DROP VIEW IF EXISTS tasks"))
+        connection.execute(text("CREATE VIEW tasks AS SELECT * FROM agent_tasks"))
         connection.execute(text("DROP VIEW IF EXISTS node_runs"))
         connection.execute(text("CREATE VIEW node_runs AS SELECT * FROM agent_tasks"))
 

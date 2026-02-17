@@ -23,7 +23,6 @@ const navSections = [
     id: 'workflow',
     label: 'Workflow',
     items: [
-      { id: 'task-templates', to: '/task-templates', label: 'Tasks', icon: 'fa-solid fa-layer-group' },
       { id: 'plans', to: '/plans', label: 'Plans', icon: 'fa-solid fa-map' },
       { id: 'milestones', to: '/milestones', label: 'Milestones', icon: 'fa-solid fa-flag-checkered' },
       { id: 'memories', to: '/memories', label: 'Memories', icon: 'fa-solid fa-brain' },
@@ -116,6 +115,8 @@ export default function AppLayout({ children }) {
   const location = useLocation()
   const active = useMemo(() => findActive(location.pathname), [location.pathname])
   const isFlowchartDetailRoute = useMemo(() => /^\/flowcharts\/\d+\/?$/.test(location.pathname), [location.pathname])
+  const isNodeDetailRoute = useMemo(() => /^\/nodes\/\d+\/?$/.test(location.pathname), [location.pathname])
+  const isFixedContentRoute = isFlowchartDetailRoute || isNodeDetailRoute
   const [expandedBySection, setExpandedBySection] = useState(() => initialExpanded(location.pathname))
 
   const title = active?.item?.label || 'LLMCTL'
@@ -175,7 +176,7 @@ export default function AppLayout({ children }) {
           </nav>
         </aside>
 
-        <div className={`main${isFlowchartDetailRoute ? ' main-is-fixed' : ''}`}>
+        <div className={`main${isFixedContentRoute ? ' main-is-fixed' : ''}`}>
           <header className="topbar content-header" id="content-header">
             <div className="topbar-row">
               <div>
@@ -183,7 +184,7 @@ export default function AppLayout({ children }) {
               </div>
             </div>
           </header>
-          <main className={`content${isFlowchartDetailRoute ? ' content-is-fixed' : ''}`}>{children}</main>
+          <main className={`content${isFixedContentRoute ? ' content-is-fixed' : ''}`}>{children}</main>
         </div>
       </div>
     </div>

@@ -30,10 +30,6 @@ import MemoriesPage from './pages/MemoriesPage'
 import MemoryDetailPage from './pages/MemoryDetailPage'
 import MemoryEditPage from './pages/MemoryEditPage'
 import MemoryNewPage from './pages/MemoryNewPage'
-import TaskTemplatesPage from './pages/TaskTemplatesPage'
-import TaskTemplateDetailPage from './pages/TaskTemplateDetailPage'
-import TaskTemplateEditPage from './pages/TaskTemplateEditPage'
-import TaskTemplateNewPage from './pages/TaskTemplateNewPage'
 import FlowchartsPage from './pages/FlowchartsPage'
 import FlowchartNewPage from './pages/FlowchartNewPage'
 import FlowchartDetailPage from './pages/FlowchartDetailPage'
@@ -116,10 +112,6 @@ export default function App() {
         <Route path="/memories/new" element={<AppLayout><MemoryNewPage /></AppLayout>} />
         <Route path="/memories/:memoryId" element={<AppLayout><MemoryDetailPage /></AppLayout>} />
         <Route path="/memories/:memoryId/edit" element={<AppLayout><MemoryEditPage /></AppLayout>} />
-        <Route path="/task-templates" element={<AppLayout><TaskTemplatesPage /></AppLayout>} />
-        <Route path="/task-templates/new" element={<AppLayout><TaskTemplateNewPage /></AppLayout>} />
-        <Route path="/task-templates/:templateId" element={<AppLayout><TaskTemplateDetailPage /></AppLayout>} />
-        <Route path="/task-templates/:templateId/edit" element={<AppLayout><TaskTemplateEditPage /></AppLayout>} />
         <Route path="/flowcharts" element={<AppLayout><FlowchartsPage /></AppLayout>} />
         <Route path="/flowcharts/new" element={<AppLayout><FlowchartNewPage /></AppLayout>} />
         <Route path="/flowcharts/:flowchartId" element={<AppLayout><FlowchartDetailPage /></AppLayout>} />
