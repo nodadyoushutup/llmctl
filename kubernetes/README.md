@@ -195,6 +195,15 @@ minikube -p llmctl ip
 # open http://<minikube-ip>:30082/
 ```
 
+For Kubernetes image pulls from Harbor, render overlays with the in-cluster Harbor Service endpoint (ClusterIP:80):
+
+```bash
+scripts/configure-harbor-image-overlays.sh
+kubectl apply -k kubernetes-overlays/harbor-images
+```
+
+This avoids Docker/CRI HTTPS-vs-HTTP pull mismatches that can occur when using Harbor NodePort endpoints directly in image names.
+
 ## Runtime knobs to edit
 
 Edit `kubernetes/studio-configmap.yaml` for these keys:

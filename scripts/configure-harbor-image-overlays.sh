@@ -13,12 +13,12 @@ Usage: scripts/configure-harbor-image-overlays.sh [options]
 Render Harbor image overlay for Kubernetes.
 
 Defaults:
-  - Registry endpoint auto-discovered from Harbor NodePort service
+  - Registry endpoint auto-discovered from Harbor ClusterIP service (fallback: NodePort)
   - Project: llmctl
   - Tag: latest
 
 Options:
-  --registry <host:port>   Harbor registry endpoint (example: 192.168.49.2:30082)
+  --registry <host:port>   Harbor registry endpoint (example: 10.107.62.134:80)
   --project <name>         Harbor project name (default: llmctl)
   --tag <tag>              Image tag (default: latest)
   -h, --help               Show this help
@@ -37,11 +37,20 @@ have_cmd() {
 }
 
 discover_registry() {
+  local service_ip=""
+  local service_port=""
   local node_port=""
   local node_ip=""
   local profile="${MINIKUBE_PROFILE:-llmctl}"
 
   if have_cmd kubectl; then
+    service_ip="$(kubectl -n llmctl-harbor get svc harbor -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+    service_port="$(kubectl -n llmctl-harbor get svc harbor -o jsonpath='{.spec.ports[?(@.name=="http")].port}' 2>/dev/null || true)"
+    if [ -n "${service_ip}" ] && [ "${service_ip}" != "None" ] && [ -n "${service_port}" ]; then
+      printf '%s:%s\n' "${service_ip}" "${service_port}"
+      return 0
+    fi
+
     node_port="$(kubectl -n llmctl-harbor get svc harbor -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null || true)"
     if [ -n "${node_port}" ]; then
       if have_cmd minikube; then

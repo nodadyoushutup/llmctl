@@ -13,7 +13,7 @@ Usage: scripts/build-harbor.sh [options]
 Build and push llmctl images to Harbor.
 
 Defaults:
-  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-executor
+  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-executor, llmctl-celery-worker
   - Pushes tag: latest
   - Project: llmctl
   - Harbor login user: admin
@@ -32,6 +32,7 @@ Options:
   --frontend               Build/push llmctl-studio-frontend only
   --mcp                    Build/push llmctl-mcp only
   --executor               Build/push llmctl-executor only
+  --celery-worker          Build/push llmctl-celery-worker only
   --all                    Build/push all images
 
   -h, --help               Show this help message
@@ -104,6 +105,7 @@ SELECTED_STUDIO=false
 SELECTED_FRONTEND=false
 SELECTED_MCP=false
 SELECTED_EXECUTOR=false
+SELECTED_CELERY_WORKER=false
 SELECTION_MADE=false
 
 while [ $# -gt 0 ]; do
@@ -177,11 +179,17 @@ while [ $# -gt 0 ]; do
       SELECTION_MADE=true
       shift
       ;;
+    --celery-worker)
+      SELECTED_CELERY_WORKER=true
+      SELECTION_MADE=true
+      shift
+      ;;
     --all)
       SELECTED_STUDIO=true
       SELECTED_FRONTEND=true
       SELECTED_MCP=true
       SELECTED_EXECUTOR=true
+      SELECTED_CELERY_WORKER=true
       SELECTION_MADE=true
       shift
       ;;
@@ -202,6 +210,7 @@ if [ "${SELECTION_MADE}" = false ]; then
   SELECTED_FRONTEND=true
   SELECTED_MCP=true
   SELECTED_EXECUTOR=true
+  SELECTED_CELERY_WORKER=true
 fi
 
 if [ -z "${HARBOR_REGISTRY}" ]; then
@@ -413,6 +422,10 @@ fi
 
 if [ "${SELECTED_EXECUTOR}" = true ]; then
   build_and_push "llmctl-executor" "${REPO_ROOT}/app/llmctl-executor/build-executor.sh"
+fi
+
+if [ "${SELECTED_CELERY_WORKER}" = true ]; then
+  build_and_push "llmctl-celery-worker" "${REPO_ROOT}/app/llmctl-celery-worker/docker/build-celery-worker.sh"
 fi
 
 echo
