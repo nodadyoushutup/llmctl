@@ -110,6 +110,7 @@ export default function ChatPage() {
   const [chatError, setChatError] = useState('')
   const [draftMessage, setDraftMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [showPendingAssistantBubble, setShowPendingAssistantBubble] = useState(false)
   const [creatingThread, setCreatingThread] = useState(false)
   const [archivingThreadId, setArchivingThreadId] = useState(null)
   const [clearingThread, setClearingThread] = useState(false)
@@ -203,6 +204,24 @@ export default function ChatPage() {
     ? payload.selected_thread
     : null
   const selectedThreadId = selectedThread && selectedThread.id != null ? Number(selectedThread.id) : null
+  const selectedThreadMessages = useMemo(
+    () => (Array.isArray(selectedThread?.messages) ? selectedThread.messages : []),
+    [selectedThread?.messages],
+  )
+  const visibleMessages = useMemo(() => {
+    if (!showPendingAssistantBubble) {
+      return selectedThreadMessages
+    }
+    return [
+      ...selectedThreadMessages,
+      {
+        id: 'pending-assistant',
+        role: 'assistant',
+        content: 'Thinking...',
+        pending: true,
+      },
+    ]
+  }, [selectedThreadMessages, showPendingAssistantBubble])
 
   const sessionModelLabel = useMemo(() => {
     const modelId = parseThreadId(sessionConfig.modelId)
@@ -261,7 +280,7 @@ export default function ChatPage() {
       return
     }
     log.scrollTop = log.scrollHeight
-  }, [selectedThread?.messages?.length])
+  }, [visibleMessages.length])
 
   function updateSelectedThread(nextThread) {
     if (!nextThread || typeof nextThread !== 'object') {
@@ -412,9 +431,11 @@ export default function ChatPage() {
     }
 
     setSending(true)
+    setShowPendingAssistantBubble(true)
     setChatError('')
     try {
       const response = await sendChatTurn(selectedThreadId, message)
+      setShowPendingAssistantBubble(false)
       if (!response || typeof response !== 'object' || !response.ok) {
         setChatError('Chat request failed.')
         return
@@ -426,8 +447,10 @@ export default function ChatPage() {
         setRefreshVersion((value) => value + 1)
       }
     } catch (error) {
+      setShowPendingAssistantBubble(false)
       setChatError(messageFromError(error, 'Chat request failed.'))
     } finally {
+      setShowPendingAssistantBubble(false)
       setSending(false)
       if (messageInputRef.current) {
         messageInputRef.current.focus()
@@ -714,20 +737,25 @@ export default function ChatPage() {
             ) : null}
 
             <div className="chat-message-log" id="chat-message-log" ref={messageLogRef}>
-              {Array.isArray(selectedThread.messages) && selectedThread.messages.length > 0
-                ? selectedThread.messages.map((item) => {
+              {visibleMessages.length > 0
+                ? visibleMessages.map((item) => {
                   const role = String(item?.role || 'assistant').toLowerCase()
                   const roleLabel = role === 'user' ? 'you' : role === 'assistant' ? 'LLMCTL' : role
+                  const isPending = Boolean(item?.pending)
                   return (
                     <div
                       key={`chat-message-${item.id || `${role}-${item.created_at}`}`}
-                      className={`chat-message ${role === 'user' ? 'chat-message-user' : 'chat-message-assistant'}`}
+                      className={`chat-message ${role === 'user' ? 'chat-message-user' : 'chat-message-assistant'}${isPending ? ' chat-message-pending' : ''}`}
                     >
                       <p className="chat-message-header">{roleLabel}</p>
-                      <div
-                        className="chat-message-content markdown-content"
-                        dangerouslySetInnerHTML={{ __html: renderChatMarkdown(item.content || '') }}
-                      />
+                      {isPending ? (
+                        <p className="chat-message-content chat-message-thinking">{item.content || 'Thinking...'}</p>
+                      ) : (
+                        <div
+                          className="chat-message-content markdown-content"
+                          dangerouslySetInnerHTML={{ __html: renderChatMarkdown(item.content || '') }}
+                        />
+                      )}
                     </div>
                   )
                 })

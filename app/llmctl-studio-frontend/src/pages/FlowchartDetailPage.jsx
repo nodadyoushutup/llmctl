@@ -12,8 +12,9 @@ import {
   detachFlowchartNodeMcp,
   detachFlowchartNodeScript,
   detachFlowchartNodeSkill,
-  getFlowchart,
+  getFlowchartGraph,
   getFlowchartEdit,
+  getFlowchartHistory,
   getFlowchartNodeUtilities,
   getFlowchartRuntime,
   reorderFlowchartNodeScripts,
@@ -91,6 +92,7 @@ export default function FlowchartDetailPage() {
   const [editorRevision, setEditorRevision] = useState(0)
   const [validationState, setValidationState] = useState(null)
   const [runtimeWarning, setRuntimeWarning] = useState('')
+  const [catalogWarning, setCatalogWarning] = useState('')
 
   const [selectedNodeId, setSelectedNodeId] = useState('')
   const [utilityState, setUtilityState] = useState({ loading: false, payload: null, error: '' })
@@ -110,20 +112,36 @@ export default function FlowchartDetailPage() {
       setState((current) => ({ ...current, loading: true, error: '' }))
     }
     try {
-      const [detailResult, editResult, runtimeResult] = await Promise.allSettled([
-        getFlowchart(parsedFlowchartId),
+      const [graphResult, historyResult, editResult, runtimeResult] = await Promise.allSettled([
+        getFlowchartGraph(parsedFlowchartId),
+        getFlowchartHistory(parsedFlowchartId),
         getFlowchartEdit(parsedFlowchartId),
         getFlowchartRuntime(parsedFlowchartId),
       ])
-      if (detailResult.status !== 'fulfilled') {
-        throw detailResult.reason
+
+      if (graphResult.status !== 'fulfilled') {
+        throw graphResult.reason
       }
-      if (editResult.status !== 'fulfilled') {
-        throw editResult.reason
+      if (historyResult.status !== 'fulfilled') {
+        throw historyResult.reason
       }
 
-      const detail = detailResult.value
-      const edit = editResult.value
+      const graphPayload = graphResult.value
+      const historyPayload = historyResult.value
+      const detail = {
+        flowchart: historyPayload?.flowchart || null,
+        graph: {
+          nodes: Array.isArray(graphPayload?.nodes) ? graphPayload.nodes : [],
+          edges: Array.isArray(graphPayload?.edges) ? graphPayload.edges : [],
+        },
+        runs: Array.isArray(historyPayload?.runs) ? historyPayload.runs : [],
+        validation: graphPayload?.validation && typeof graphPayload.validation === 'object'
+          ? graphPayload.validation
+          : { valid: true, errors: [] },
+      }
+      const edit = editResult.status === 'fulfilled'
+        ? editResult.value
+        : { catalog: null, node_types: DEFAULT_FLOWCHART_NODE_TYPES }
       const runtime = runtimeResult.status === 'fulfilled'
         ? runtimeResult.value
         : { active_run_id: null, active_run_status: null, running_node_ids: [] }
@@ -137,6 +155,11 @@ export default function FlowchartDetailPage() {
         setRuntimeWarning(errorMessage(runtimeResult.reason, 'Runtime status is temporarily unavailable.'))
       } else {
         setRuntimeWarning('')
+      }
+      if (editResult.status !== 'fulfilled') {
+        setCatalogWarning(errorMessage(editResult.reason, 'Catalog and node utility metadata are temporarily unavailable.'))
+      } else {
+        setCatalogWarning('')
       }
       const graph = detail?.graph && typeof detail.graph === 'object' ? detail.graph : { nodes: [], edges: [] }
       const nextNodes = Array.isArray(graph.nodes) ? graph.nodes : []
@@ -152,6 +175,7 @@ export default function FlowchartDetailPage() {
         error: errorMessage(error, 'Failed to load flowchart.'),
       }))
       setRuntimeWarning('')
+      setCatalogWarning('')
     }
   }, [parsedFlowchartId])
 
@@ -208,6 +232,7 @@ export default function FlowchartDetailPage() {
   const activeRunId = runtime?.active_run_id || null
   const activeRun = isRunActive(runtimeStatus)
   const runningNodeIds = Array.isArray(runtime?.running_node_ids) ? runtime.running_node_ids : []
+  const utilitiesAvailable = Boolean(catalog)
 
   useEffect(() => {
     if (!selectedNodeId && persistedNodes.length > 0) {
@@ -223,12 +248,12 @@ export default function FlowchartDetailPage() {
   }, [persistedNodes, selectedNodeId])
 
   useEffect(() => {
-    if (!selectedPersistedNodeId) {
+    if (!utilitiesAvailable || !selectedPersistedNodeId) {
       setUtilityState({ loading: false, payload: null, error: '' })
       return
     }
     refreshUtilities(selectedPersistedNodeId)
-  }, [selectedPersistedNodeId, refreshUtilities])
+  }, [selectedPersistedNodeId, refreshUtilities, utilitiesAvailable])
 
   useEffect(() => {
     if (!activeRun || !parsedFlowchartId) {
@@ -595,6 +620,7 @@ export default function FlowchartDetailPage() {
         {state.loading ? <p>Loading flowchart...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
+        {catalogWarning ? <p className="toolbar-meta">{catalogWarning}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
         {flowchart ? (
@@ -758,13 +784,17 @@ export default function FlowchartDetailPage() {
 
       <article className="card">
         <h2>Node Utilities</h2>
-        <p className="toolbar-meta">Select a node above to manage model/MCP/script/skill operations.</p>
+        <p className="toolbar-meta">Select a persisted node to manage model/MCP/script/skill operations.</p>
+        {!utilitiesAvailable ? (
+          <p className="error-text">Node utilities are temporarily unavailable while catalog endpoints are degraded.</p>
+        ) : null}
         <div className="toolbar-group">
           <label htmlFor="flowchart-node-select">Node</label>
           <select
             id="flowchart-node-select"
             value={selectedNodeId}
             onChange={(event) => setSelectedNodeId(event.target.value)}
+            disabled={!utilitiesAvailable}
           >
             <option value="">Select node</option>
             {persistedNodes.map((node) => (
