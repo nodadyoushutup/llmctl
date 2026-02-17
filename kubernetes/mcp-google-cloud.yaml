@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-mcp-google-cloud
+  namespace: llmctl
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: llmctl-mcp-google-cloud
+  template:
+    metadata:
+      labels:
+        app: llmctl-mcp-google-cloud
+    spec:
+      containers:
+        - name: google-cloud-mcp
+          image: google/cloud-sdk:slim
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              if ! command -v node >/dev/null 2>&1 || [ "$(node -p "process.versions.node.split('.')[0]")" -lt 20 ]; then
+                apt-get update
+                apt-get install -y --no-install-recommends ca-certificates curl gnupg
+                mkdir -p /etc/apt/keyrings
+                curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+                  | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+                echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+                  > /etc/apt/sources.list.d/nodesource.list
+                apt-get update
+                apt-get install -y --no-install-recommends nodejs
+                rm -rf /var/lib/apt/lists/*
+              fi
+              npm install -g mcp-proxy@6.4.0 @google-cloud/gcloud-mcp@0.5.3 >/tmp/npm-install.log 2>&1
+              exec mcp-proxy \
+                --server stream \
+                --host "${MCP_PROXY_HOST}" \
+                --port "${MCP_PROXY_PORT}" \
+                --streamEndpoint "${MCP_PROXY_STREAM_ENDPOINT}" \
+                --stateless \
+                -- gcloud-mcp
+          envFrom:
+            - configMapRef:
+                name: llmctl-mcp-config
+            - secretRef:
+                name: llmctl-mcp-secrets
+                optional: true
+          env:
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /var/secrets/google/service-account.json
+            - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+              value: /var/secrets/google/service-account.json
+          volumeMounts:
+            - name: google-cloud-service-account
+              mountPath: /var/secrets/google
+              readOnly: true
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 8
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 25
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: google-cloud-service-account
+          secret:
+            secretName: llmctl-mcp-secrets
+            optional: true
+            items:
+              - key: GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON
+                path: service-account.json
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmctl-mcp-google-cloud
+  namespace: llmctl
+spec:
+  selector:
+    app: llmctl-mcp-google-cloud
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

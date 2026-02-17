@@ -74,9 +74,6 @@ from services.integrations import (
     GOOGLE_WORKSPACE_PROVIDER,
     LLM_PROVIDER_LABELS,
     LLM_PROVIDERS,
-    NODE_EXECUTOR_DOCKER_API_STALL_SECONDS_CHOICES,
-    NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES,
-    NODE_EXECUTOR_FALLBACK_PROVIDER_CHOICES,
     NODE_EXECUTOR_PROVIDER_CHOICES,
     NODE_SKILL_BINDING_MODE_CHOICES,
     NODE_SKILL_BINDING_MODE_REJECT,
@@ -14115,43 +14112,13 @@ RUNTIME_SETTINGS_SECTIONS: dict[str, dict[str, str]] = {
 
 def _node_executor_settings_options() -> dict[str, list[dict[str, str]]]:
     provider_options = [
-        {"value": "workspace", "label": "Workspace"},
-        {"value": "docker", "label": "Docker"},
         {"value": "kubernetes", "label": "Kubernetes"},
-    ]
-    fallback_provider_options = [
-        {"value": "workspace", "label": "Workspace"}
-    ]
-    docker_pull_policy_options = [
-        {"value": "always", "label": "Always"},
-        {"value": "if_not_present", "label": "If Not Present"},
-        {"value": "never", "label": "Never"},
-    ]
-    docker_api_stall_seconds_options = [
-        {"value": "5", "label": "5 seconds"},
-        {"value": "10", "label": "10 seconds"},
-        {"value": "15", "label": "15 seconds"},
     ]
     return {
         "provider_options": [
             option
             for option in provider_options
             if option["value"] in set(NODE_EXECUTOR_PROVIDER_CHOICES)
-        ],
-        "fallback_provider_options": [
-            option
-            for option in fallback_provider_options
-            if option["value"] in set(NODE_EXECUTOR_FALLBACK_PROVIDER_CHOICES)
-        ],
-        "docker_pull_policy_options": [
-            option
-            for option in docker_pull_policy_options
-            if option["value"] in set(NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES)
-        ],
-        "docker_api_stall_seconds_options": [
-            option
-            for option in docker_api_stall_seconds_options
-            if option["value"] in set(NODE_EXECUTOR_DOCKER_API_STALL_SECONDS_CHOICES)
         ],
     }
 
@@ -14390,15 +14357,14 @@ def update_node_skill_binding_mode_route():
 @bp.post("/settings/runtime/node-executor")
 def update_node_executor_runtime_settings_route():
     # Auth is not available yet. Once RBAC ships, limit this endpoint to admins.
+    requested_provider = (request.form.get("provider") or "").strip().lower()
+    if requested_provider and requested_provider != "kubernetes":
+        flash("Node executor provider must be kubernetes.", "error")
+        return redirect(url_for("agents.settings_runtime"))
     kubeconfig_value = request.form.get("k8s_kubeconfig", "")
     kubeconfig_clear = _as_bool(request.form.get("k8s_kubeconfig_clear"))
     payload = {
-        "provider": request.form.get("provider", ""),
-        "fallback_provider": request.form.get("fallback_provider", ""),
-        "fallback_enabled": "true" if _as_bool(request.form.get("fallback_enabled")) else "false",
-        "fallback_on_dispatch_error": (
-            "true" if _as_bool(request.form.get("fallback_on_dispatch_error")) else "false"
-        ),
+        "provider": "kubernetes",
         "dispatch_timeout_seconds": request.form.get("dispatch_timeout_seconds", ""),
         "execution_timeout_seconds": request.form.get("execution_timeout_seconds", ""),
         "log_collection_timeout_seconds": request.form.get(
@@ -14412,19 +14378,13 @@ def update_node_executor_runtime_settings_route():
         "cancel_force_kill_enabled": (
             "true" if _as_bool(request.form.get("cancel_force_kill_enabled")) else "false"
         ),
-        "workspace_root": request.form.get("workspace_root", ""),
         "workspace_identity_key": request.form.get("workspace_identity_key", ""),
-        "docker_host": request.form.get("docker_host", ""),
-        "docker_image": request.form.get("docker_image", ""),
-        "docker_network": request.form.get("docker_network", ""),
-        "docker_pull_policy": request.form.get("docker_pull_policy", ""),
-        "docker_env_json": request.form.get("docker_env_json", ""),
-        "docker_api_stall_seconds": request.form.get("docker_api_stall_seconds", ""),
         "k8s_namespace": request.form.get("k8s_namespace", ""),
         "k8s_image": request.form.get("k8s_image", ""),
         "k8s_in_cluster": "true" if _as_bool(request.form.get("k8s_in_cluster")) else "false",
         "k8s_service_account": request.form.get("k8s_service_account", ""),
         "k8s_gpu_limit": request.form.get("k8s_gpu_limit", ""),
+        "k8s_job_ttl_seconds": request.form.get("k8s_job_ttl_seconds", ""),
         "k8s_image_pull_secrets_json": request.form.get(
             "k8s_image_pull_secrets_json",
             "",

@@ -57,23 +57,15 @@ NODE_SKILL_BINDING_MODE_CHOICES = (
     NODE_SKILL_BINDING_MODE_REJECT,
 )
 NODE_EXECUTOR_PROVIDER = "node_executor"
-NODE_EXECUTOR_PROVIDER_WORKSPACE = "workspace"
-NODE_EXECUTOR_PROVIDER_DOCKER = "docker"
 NODE_EXECUTOR_PROVIDER_KUBERNETES = "kubernetes"
 NODE_EXECUTOR_PROVIDER_CHOICES = (
-    NODE_EXECUTOR_PROVIDER_WORKSPACE,
-    NODE_EXECUTOR_PROVIDER_DOCKER,
     NODE_EXECUTOR_PROVIDER_KUBERNETES,
 )
-NODE_EXECUTOR_FALLBACK_PROVIDER_CHOICES = (NODE_EXECUTOR_PROVIDER_WORKSPACE,)
-NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES = ("always", "if_not_present", "never")
-NODE_EXECUTOR_DOCKER_API_STALL_SECONDS_CHOICES = ("5", "10", "15")
 NODE_EXECUTOR_DISPATCH_STATUS_CHOICES = (
     "dispatch_pending",
     "dispatch_submitted",
     "dispatch_confirmed",
     "dispatch_failed",
-    "fallback_started",
 )
 NODE_EXECUTOR_FALLBACK_REASON_CHOICES = (
     "provider_unavailable",
@@ -98,32 +90,25 @@ NODE_EXECUTOR_IMAGE_DIGEST_PATTERN = re.compile(r"^sha256:[a-f0-9]{64}$")
 NODE_EXECUTOR_IMAGE_TAG_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 NODE_EXECUTOR_WORKSPACE_IDENTITY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 NODE_EXECUTOR_PROVIDER_DISPATCH_ID_PATTERN = re.compile(
-    r"^(workspace|docker|kubernetes):[A-Za-z0-9][A-Za-z0-9_.:-]{0,511}$"
+    r"^(kubernetes):[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$"
 )
+NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MIN = 60
+NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MAX = 86400
 NODE_EXECUTOR_SETTING_KEYS = (
     "provider",
-    "fallback_provider",
-    "fallback_enabled",
-    "fallback_on_dispatch_error",
     "dispatch_timeout_seconds",
     "execution_timeout_seconds",
     "log_collection_timeout_seconds",
     "cancel_grace_timeout_seconds",
     "cancel_force_kill_enabled",
-    "workspace_root",
     "workspace_identity_key",
-    "docker_host",
-    "docker_image",
-    "docker_network",
-    "docker_pull_policy",
-    "docker_env_json",
-    "docker_api_stall_seconds",
     "k8s_namespace",
     "k8s_image",
     "k8s_in_cluster",
     "k8s_service_account",
     "k8s_kubeconfig",
     "k8s_gpu_limit",
+    "k8s_job_ttl_seconds",
     "k8s_image_pull_secrets_json",
 )
 NODE_EXECUTOR_K8S_KUBECONFIG_ENCRYPTED_PREFIX = "enc:v1:"
@@ -297,14 +282,12 @@ def normalize_node_executor_provider(value: str | None) -> str:
     cleaned = (value or "").strip().lower()
     if cleaned in NODE_EXECUTOR_PROVIDER_CHOICES:
         return cleaned
-    return NODE_EXECUTOR_PROVIDER_WORKSPACE
+    return NODE_EXECUTOR_PROVIDER_KUBERNETES
 
 
 def normalize_node_executor_fallback_provider(value: str | None) -> str:
-    cleaned = (value or "").strip().lower()
-    if cleaned in NODE_EXECUTOR_FALLBACK_PROVIDER_CHOICES:
-        return cleaned
-    return NODE_EXECUTOR_PROVIDER_WORKSPACE
+    del value
+    return NODE_EXECUTOR_PROVIDER_KUBERNETES
 
 
 def normalize_workspace_identity_key(value: str | None) -> str:
@@ -379,7 +362,7 @@ def normalize_provider_dispatch_id(
         return ""
     if not NODE_EXECUTOR_PROVIDER_DISPATCH_ID_PATTERN.fullmatch(cleaned):
         raise ValueError(
-            "provider_dispatch_id must use <provider>:<native_id> with provider in workspace|docker|kubernetes."
+            "provider_dispatch_id must use kubernetes:<native_id>."
         )
     if selected_provider:
         expected = normalize_node_executor_provider(selected_provider)
@@ -418,31 +401,13 @@ def normalize_node_executor_run_metadata(
     selected_provider = normalize_node_executor_provider(
         str(payload.get("selected_provider") or "")
     )
-    final_provider = normalize_node_executor_provider(
-        str(payload.get("final_provider") or "")
-    )
+    final_provider = NODE_EXECUTOR_PROVIDER_KUBERNETES
     dispatch_status = normalize_node_executor_dispatch_status(
         str(payload.get("dispatch_status") or "")
-    )
-    fallback_attempted = _as_bool_flag(
-        str(payload.get("fallback_attempted") or ""),
-        default=False,
     )
     dispatch_uncertain = _as_bool_flag(
         str(payload.get("dispatch_uncertain") or ""),
         default=False,
-    )
-    cli_fallback_used = _as_bool_flag(
-        str(payload.get("cli_fallback_used") or ""),
-        default=False,
-    )
-    cli_preflight_passed_raw = str(payload.get("cli_preflight_passed") or "").strip().lower()
-    cli_preflight_passed = ""
-    if cli_preflight_passed_raw in {"true", "false"}:
-        cli_preflight_passed = cli_preflight_passed_raw
-
-    fallback_reason = normalize_node_executor_fallback_reason(
-        str(payload.get("fallback_reason") or "")
     )
     api_failure_category = normalize_node_executor_api_failure_category(
         str(payload.get("api_failure_category") or "")
@@ -459,27 +424,6 @@ def normalize_node_executor_run_metadata(
         raise ValueError(
             "provider_dispatch_id is required when dispatch_status is dispatch_submitted or dispatch_confirmed."
         )
-    if cli_preflight_passed and not cli_fallback_used:
-        raise ValueError(
-            "cli_preflight_passed can only be set when cli_fallback_used=true."
-        )
-    if dispatch_status == "fallback_started":
-        fallback_attempted = True
-        if not fallback_reason:
-            raise ValueError(
-                "fallback_reason is required when dispatch_status=fallback_started."
-            )
-    if not fallback_attempted:
-        fallback_reason = ""
-    if dispatch_uncertain:
-        fallback_attempted = False
-        fallback_reason = ""
-    if fallback_attempted:
-        final_provider = NODE_EXECUTOR_PROVIDER_WORKSPACE
-    if fallback_attempted and dispatch_status == "dispatch_failed" and not dispatch_uncertain and not fallback_reason:
-        raise ValueError(
-            "fallback_reason is required when fallback_attempted=true and dispatch_status=dispatch_failed."
-        )
 
     return {
         "selected_provider": selected_provider,
@@ -487,31 +431,18 @@ def normalize_node_executor_run_metadata(
         "provider_dispatch_id": provider_dispatch_id,
         "workspace_identity": workspace_identity,
         "dispatch_status": dispatch_status,
-        "fallback_attempted": _bool_string(fallback_attempted),
-        "fallback_reason": fallback_reason,
+        "fallback_attempted": _bool_string(False),
+        "fallback_reason": "",
         "dispatch_uncertain": _bool_string(dispatch_uncertain),
         "api_failure_category": api_failure_category,
-        "cli_fallback_used": _bool_string(cli_fallback_used),
-        "cli_preflight_passed": cli_preflight_passed,
+        "cli_fallback_used": _bool_string(False),
+        "cli_preflight_passed": "",
     }
 
 
 def node_executor_default_settings() -> dict[str, str]:
-    workspace_root = (
-        (Config.NODE_EXECUTOR_WORKSPACE_ROOT or "").strip() or Config.WORKSPACES_DIR
-    )
-    docker_host = (
-        (Config.NODE_EXECUTOR_DOCKER_HOST or "").strip() or "unix:///var/run/docker.sock"
-    )
     return {
-        "provider": normalize_node_executor_provider(Config.NODE_EXECUTOR_PROVIDER),
-        "fallback_provider": normalize_node_executor_fallback_provider(
-            Config.NODE_EXECUTOR_FALLBACK_PROVIDER
-        ),
-        "fallback_enabled": _bool_string(Config.NODE_EXECUTOR_FALLBACK_ENABLED),
-        "fallback_on_dispatch_error": _bool_string(
-            Config.NODE_EXECUTOR_FALLBACK_ON_DISPATCH_ERROR
-        ),
+        "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": _coerce_int_setting(
             str(Config.NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS),
             default=60,
@@ -539,25 +470,9 @@ def node_executor_default_settings() -> dict[str, str]:
         "cancel_force_kill_enabled": _bool_string(
             Config.NODE_EXECUTOR_CANCEL_FORCE_KILL_ENABLED
         ),
-        "workspace_root": workspace_root,
         "workspace_identity_key": normalize_workspace_identity_key(
             Config.NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY
         ),
-        "docker_host": docker_host,
-        "docker_image": (
-            (Config.NODE_EXECUTOR_DOCKER_IMAGE or "").strip()
-            or "llmctl-executor:latest"
-        ),
-        "docker_network": (Config.NODE_EXECUTOR_DOCKER_NETWORK or "").strip(),
-        "docker_pull_policy": (
-            (Config.NODE_EXECUTOR_DOCKER_PULL_POLICY or "").strip().lower()
-            if (Config.NODE_EXECUTOR_DOCKER_PULL_POLICY or "").strip().lower()
-            in NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES
-            else "if_not_present"
-        ),
-        "docker_env_json": (Config.NODE_EXECUTOR_DOCKER_ENV_JSON or "").strip(),
-        # DB-only source of truth: no env override for stall threshold.
-        "docker_api_stall_seconds": "10",
         "k8s_namespace": (Config.NODE_EXECUTOR_K8S_NAMESPACE or "").strip() or "default",
         "k8s_image": (
             (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip()
@@ -573,6 +488,12 @@ def node_executor_default_settings() -> dict[str, str]:
             default=0,
             minimum=0,
             maximum=8,
+        ),
+        "k8s_job_ttl_seconds": _coerce_int_setting(
+            str(Config.NODE_EXECUTOR_K8S_JOB_TTL_SECONDS),
+            default=1800,
+            minimum=NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MIN,
+            maximum=NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MAX,
         ),
         "k8s_image_pull_secrets_json": (
             (Config.NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON or "").strip()
@@ -608,6 +529,36 @@ def ensure_node_executor_setting_defaults(
             )
 
 
+def migrate_node_executor_to_kubernetes_only_settings() -> dict[str, int]:
+    deprecated_keys = (
+        "fallback_provider",
+        "fallback_enabled",
+        "fallback_on_dispatch_error",
+        "workspace_root",
+        "docker_host",
+        "docker_image",
+        "docker_network",
+        "docker_pull_policy",
+        "docker_env_json",
+        "docker_api_stall_seconds",
+    )
+    settings = load_node_executor_settings(include_secrets=True)
+    save_node_executor_settings(settings)
+    stored = load_integration_settings(NODE_EXECUTOR_PROVIDER)
+    cleanup_payload: dict[str, str] = {}
+    removed = 0
+    for key in deprecated_keys:
+        if key in stored:
+            cleanup_payload[key] = ""
+            removed += 1
+    if cleanup_payload:
+        save_integration_settings(NODE_EXECUTOR_PROVIDER, cleanup_payload)
+    return {
+        "provider_forced": 1,
+        "deprecated_keys_removed": removed,
+    }
+
+
 def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, str]:
     defaults = node_executor_default_settings()
     try:
@@ -633,16 +584,7 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
         stored.get("k8s_kubeconfig")
     )
     settings = {**defaults, **stored}
-    settings["provider"] = normalize_node_executor_provider(settings.get("provider"))
-    settings["fallback_provider"] = normalize_node_executor_fallback_provider(
-        settings.get("fallback_provider")
-    )
-    settings["fallback_enabled"] = _bool_string(
-        _as_bool_flag(settings.get("fallback_enabled"), default=True)
-    )
-    settings["fallback_on_dispatch_error"] = _bool_string(
-        _as_bool_flag(settings.get("fallback_on_dispatch_error"), default=True)
-    )
+    settings["provider"] = NODE_EXECUTOR_PROVIDER_KUBERNETES
     settings["dispatch_timeout_seconds"] = _coerce_int_setting(
         settings.get("dispatch_timeout_seconds"),
         default=int(defaults["dispatch_timeout_seconds"]),
@@ -670,35 +612,12 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
     settings["cancel_force_kill_enabled"] = _bool_string(
         _as_bool_flag(settings.get("cancel_force_kill_enabled"), default=True)
     )
-    settings["workspace_root"] = (
-        (settings.get("workspace_root") or "").strip() or defaults["workspace_root"]
-    )
     try:
         settings["workspace_identity_key"] = normalize_workspace_identity_key(
             settings.get("workspace_identity_key")
         )
     except ValueError:
         settings["workspace_identity_key"] = defaults["workspace_identity_key"]
-    settings["docker_host"] = (
-        (settings.get("docker_host") or "").strip() or defaults["docker_host"]
-    )
-    try:
-        settings["docker_image"] = validate_node_executor_image_reference(
-            settings.get("docker_image"),
-            field_name="Docker image",
-        ) or defaults["docker_image"]
-    except ValueError:
-        settings["docker_image"] = defaults["docker_image"]
-    settings["docker_network"] = (settings.get("docker_network") or "").strip()
-    docker_pull_policy = (settings.get("docker_pull_policy") or "").strip().lower()
-    if docker_pull_policy not in NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES:
-        docker_pull_policy = defaults["docker_pull_policy"]
-    settings["docker_pull_policy"] = docker_pull_policy
-    settings["docker_env_json"] = (settings.get("docker_env_json") or "").strip()
-    stall_seconds = (settings.get("docker_api_stall_seconds") or "").strip()
-    if stall_seconds not in NODE_EXECUTOR_DOCKER_API_STALL_SECONDS_CHOICES:
-        stall_seconds = defaults["docker_api_stall_seconds"]
-    settings["docker_api_stall_seconds"] = stall_seconds
     settings["k8s_namespace"] = (
         (settings.get("k8s_namespace") or "").strip() or defaults["k8s_namespace"]
     )
@@ -721,6 +640,12 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
         minimum=0,
         maximum=8,
     )
+    settings["k8s_job_ttl_seconds"] = _coerce_int_setting(
+        settings.get("k8s_job_ttl_seconds"),
+        default=int(defaults["k8s_job_ttl_seconds"]),
+        minimum=NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MIN,
+        maximum=NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MAX,
+    )
     kubeconfig_value = (settings.get("k8s_kubeconfig") or "").strip()
     kubeconfig_fingerprint = ""
     if kubeconfig_value:
@@ -739,6 +664,9 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
 
 
 def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
+    provider_raw = (payload.get("provider") or "").strip().lower()
+    if provider_raw and provider_raw != NODE_EXECUTOR_PROVIDER_KUBERNETES:
+        raise ValueError("Node executor provider must be kubernetes.")
     current = load_node_executor_settings(include_secrets=True)
     candidate = dict(current)
     for key in NODE_EXECUTOR_SETTING_KEYS:
@@ -747,16 +675,7 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         candidate[key] = (payload.get(key) or "").strip()
 
     validated: dict[str, str] = {
-        "provider": normalize_node_executor_provider(candidate.get("provider")),
-        "fallback_provider": normalize_node_executor_fallback_provider(
-            candidate.get("fallback_provider")
-        ),
-        "fallback_enabled": _bool_string(
-            _as_bool_flag(candidate.get("fallback_enabled"), default=True)
-        ),
-        "fallback_on_dispatch_error": _bool_string(
-            _as_bool_flag(candidate.get("fallback_on_dispatch_error"), default=True)
-        ),
+        "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": _coerce_int_setting(
             candidate.get("dispatch_timeout_seconds"),
             default=60,
@@ -784,27 +703,8 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         "cancel_force_kill_enabled": _bool_string(
             _as_bool_flag(candidate.get("cancel_force_kill_enabled"), default=True)
         ),
-        "workspace_root": (
-            (candidate.get("workspace_root") or "").strip()
-            or Config.WORKSPACES_DIR
-        ),
         "workspace_identity_key": normalize_workspace_identity_key(
             candidate.get("workspace_identity_key")
-        ),
-        "docker_host": (
-            (candidate.get("docker_host") or "").strip() or "unix:///var/run/docker.sock"
-        ),
-        "docker_image": validate_node_executor_image_reference(
-            candidate.get("docker_image"),
-            field_name="Docker image",
-        ) or "llmctl-executor:latest",
-        "docker_network": (candidate.get("docker_network") or "").strip(),
-        "docker_pull_policy": (
-            (candidate.get("docker_pull_policy") or "").strip().lower() or "if_not_present"
-        ),
-        "docker_env_json": (candidate.get("docker_env_json") or "").strip(),
-        "docker_api_stall_seconds": (
-            (candidate.get("docker_api_stall_seconds") or "").strip()
         ),
         "k8s_namespace": (
             (candidate.get("k8s_namespace") or "").strip() or "default"
@@ -826,28 +726,16 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
             minimum=0,
             maximum=8,
         ),
+        "k8s_job_ttl_seconds": _coerce_int_setting(
+            candidate.get("k8s_job_ttl_seconds"),
+            default=1800,
+            minimum=NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MIN,
+            maximum=NODE_EXECUTOR_K8S_JOB_TTL_SECONDS_MAX,
+        ),
         "k8s_image_pull_secrets_json": (
             candidate.get("k8s_image_pull_secrets_json") or ""
         ).strip(),
     }
-
-    if validated["docker_pull_policy"] not in NODE_EXECUTOR_DOCKER_PULL_POLICY_CHOICES:
-        raise ValueError(
-            "Docker pull policy must be one of: always, if_not_present, never."
-        )
-    if (
-        validated["docker_api_stall_seconds"]
-        not in NODE_EXECUTOR_DOCKER_API_STALL_SECONDS_CHOICES
-    ):
-        raise ValueError("Docker API stall threshold must be one of: 5, 10, 15.")
-    docker_env_json = (validated.get("docker_env_json") or "").strip()
-    if docker_env_json:
-        try:
-            docker_env_payload = json.loads(docker_env_json)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Docker env JSON is invalid: {exc.msg}.") from exc
-        if not isinstance(docker_env_payload, dict):
-            raise ValueError("Docker env JSON must be an object map.")
     image_pull_secrets_json = (validated.get("k8s_image_pull_secrets_json") or "").strip()
     if image_pull_secrets_json:
         try:
@@ -866,10 +754,7 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
 def node_executor_effective_config_summary() -> dict[str, str]:
     settings = load_node_executor_settings(include_secrets=False)
     return {
-        "provider": settings.get("provider") or NODE_EXECUTOR_PROVIDER_WORKSPACE,
-        "fallback_provider": settings.get("fallback_provider") or NODE_EXECUTOR_PROVIDER_WORKSPACE,
-        "fallback_enabled": settings.get("fallback_enabled") or "true",
-        "fallback_on_dispatch_error": settings.get("fallback_on_dispatch_error") or "true",
+        "provider": settings.get("provider") or NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": settings.get("dispatch_timeout_seconds") or "60",
         "execution_timeout_seconds": settings.get("execution_timeout_seconds") or "1800",
         "log_collection_timeout_seconds": settings.get("log_collection_timeout_seconds")
@@ -877,18 +762,13 @@ def node_executor_effective_config_summary() -> dict[str, str]:
         "cancel_grace_timeout_seconds": settings.get("cancel_grace_timeout_seconds")
         or "15",
         "cancel_force_kill_enabled": settings.get("cancel_force_kill_enabled") or "true",
-        "workspace_root": settings.get("workspace_root") or Config.WORKSPACES_DIR,
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
-        "docker_host": settings.get("docker_host") or "unix:///var/run/docker.sock",
-        "docker_image": settings.get("docker_image") or "llmctl-executor:latest",
-        "docker_network": settings.get("docker_network") or "",
-        "docker_pull_policy": settings.get("docker_pull_policy") or "if_not_present",
-        "docker_api_stall_seconds": settings.get("docker_api_stall_seconds") or "10",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
         "k8s_image": settings.get("k8s_image") or "llmctl-executor:latest",
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
         "k8s_gpu_limit": settings.get("k8s_gpu_limit") or "0",
+        "k8s_job_ttl_seconds": settings.get("k8s_job_ttl_seconds") or "1800",
         "k8s_kubeconfig_is_set": settings.get("k8s_kubeconfig_is_set") or "false",
         "k8s_kubeconfig_fingerprint": settings.get("k8s_kubeconfig_fingerprint")
         or "",
@@ -901,10 +781,7 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
     # Runtime-only accessor: includes sensitive kubeconfig for internal executor paths.
     settings = load_node_executor_settings(include_secrets=True)
     return {
-        "provider": settings.get("provider") or NODE_EXECUTOR_PROVIDER_WORKSPACE,
-        "fallback_provider": settings.get("fallback_provider") or NODE_EXECUTOR_PROVIDER_WORKSPACE,
-        "fallback_enabled": settings.get("fallback_enabled") or "true",
-        "fallback_on_dispatch_error": settings.get("fallback_on_dispatch_error") or "true",
+        "provider": settings.get("provider") or NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": settings.get("dispatch_timeout_seconds") or "60",
         "execution_timeout_seconds": settings.get("execution_timeout_seconds") or "1800",
         "log_collection_timeout_seconds": settings.get("log_collection_timeout_seconds")
@@ -912,20 +789,14 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
         "cancel_grace_timeout_seconds": settings.get("cancel_grace_timeout_seconds")
         or "15",
         "cancel_force_kill_enabled": settings.get("cancel_force_kill_enabled") or "true",
-        "workspace_root": settings.get("workspace_root") or Config.WORKSPACES_DIR,
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
-        "docker_host": settings.get("docker_host") or "unix:///var/run/docker.sock",
-        "docker_image": settings.get("docker_image") or "llmctl-executor:latest",
-        "docker_network": settings.get("docker_network") or "",
-        "docker_pull_policy": settings.get("docker_pull_policy") or "if_not_present",
-        "docker_env_json": settings.get("docker_env_json") or "",
-        "docker_api_stall_seconds": settings.get("docker_api_stall_seconds") or "10",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
         "k8s_image": settings.get("k8s_image") or "llmctl-executor:latest",
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
         "k8s_kubeconfig": settings.get("k8s_kubeconfig") or "",
         "k8s_gpu_limit": settings.get("k8s_gpu_limit") or "0",
+        "k8s_job_ttl_seconds": settings.get("k8s_job_ttl_seconds") or "1800",
         "k8s_image_pull_secrets_json": settings.get("k8s_image_pull_secrets_json") or "",
     }
 

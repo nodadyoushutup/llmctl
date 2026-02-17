@@ -395,8 +395,8 @@ class SocketFallbackStage9Tests(unittest.TestCase):
 
 
 class RuntimeParityStage9Tests(unittest.TestCase):
-    def test_runtime_metadata_schema_is_consistent_for_workspace_and_executor_paths(self) -> None:
-        workspace_payload = normalize_runtime_metadata(
+    def test_runtime_metadata_schema_is_consistent_for_kubernetes_execution(self) -> None:
+        direct_payload = normalize_runtime_metadata(
             ExecutionRequest(
                 node_id=1,
                 node_type="agent",
@@ -406,14 +406,14 @@ class RuntimeParityStage9Tests(unittest.TestCase):
                 execution_id=11,
                 execution_task_id=None,
                 execution_index=0,
-                enabled_providers={"workspace"},
+                enabled_providers={"kubernetes"},
                 default_model_id=None,
                 mcp_server_keys=[],
-                selected_provider="workspace",
-                final_provider="workspace",
+                selected_provider="kubernetes",
+                final_provider="kubernetes",
             ).run_metadata_payload()
         )
-        executor_payload = normalize_runtime_metadata(
+        failed_dispatch_payload = normalize_runtime_metadata(
             ExecutionRequest(
                 node_id=1,
                 node_type="agent",
@@ -423,17 +423,17 @@ class RuntimeParityStage9Tests(unittest.TestCase):
                 execution_id=12,
                 execution_task_id=None,
                 execution_index=0,
-                enabled_providers={"workspace", "docker"},
+                enabled_providers={"kubernetes"},
                 default_model_id=None,
                 mcp_server_keys=[],
-                selected_provider="docker",
-                final_provider="workspace",
-                fallback_attempted=True,
-                fallback_reason="provider_unavailable",
+                selected_provider="kubernetes",
+                final_provider="kubernetes",
+                fallback_attempted=False,
+                fallback_reason=None,
                 dispatch_uncertain=False,
-                api_failure_category="socket_missing",
+                api_failure_category="api_unreachable",
                 cli_fallback_used=False,
-                cli_preflight_passed=True,
+                cli_preflight_passed=None,
             ).run_metadata_payload()
         )
 
@@ -450,16 +450,16 @@ class RuntimeParityStage9Tests(unittest.TestCase):
             "cli_fallback_used",
             "cli_preflight_passed",
         }
-        self.assertIsNotNone(workspace_payload)
-        self.assertIsNotNone(executor_payload)
-        assert workspace_payload is not None
-        assert executor_payload is not None
-        self.assertEqual(expected_keys, set(workspace_payload.keys()))
-        self.assertEqual(expected_keys, set(executor_payload.keys()))
-        self.assertEqual("workspace", workspace_payload["selected_provider"])
-        self.assertEqual("workspace", workspace_payload["final_provider"])
-        self.assertEqual("docker", executor_payload["selected_provider"])
-        self.assertEqual("workspace", executor_payload["final_provider"])
+        self.assertIsNotNone(direct_payload)
+        self.assertIsNotNone(failed_dispatch_payload)
+        assert direct_payload is not None
+        assert failed_dispatch_payload is not None
+        self.assertEqual(expected_keys, set(direct_payload.keys()))
+        self.assertEqual(expected_keys, set(failed_dispatch_payload.keys()))
+        self.assertEqual("kubernetes", direct_payload["selected_provider"])
+        self.assertEqual("kubernetes", direct_payload["final_provider"])
+        self.assertEqual("kubernetes", failed_dispatch_payload["selected_provider"])
+        self.assertEqual("kubernetes", failed_dispatch_payload["final_provider"])
 
 
 if __name__ == "__main__":

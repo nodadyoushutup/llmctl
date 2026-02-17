@@ -53,48 +53,8 @@ class NodeExecutorStage6Tests(unittest.TestCase):
     def setUp(self) -> None:
         clear_dispatch_registry()
 
-    def test_kubernetes_executor_fallbacks_to_workspace_on_dispatch_failure(self) -> None:
-        settings = {
-            "fallback_enabled": "true",
-            "fallback_on_dispatch_error": "true",
-            "fallback_provider": "workspace",
-        }
-        executor = KubernetesExecutor(settings)
-
-        def _dispatch_failure(**_kwargs):
-            raise _KubernetesDispatchFailure(
-                fallback_reason="provider_unavailable",
-                message="kubernetes unavailable",
-            )
-
-        executor._dispatch_via_kubernetes = _dispatch_failure  # type: ignore[method-assign]
-
-        callback_called = {"value": False}
-
-        def _callback(_request: ExecutionRequest):
-            callback_called["value"] = True
-            return {"node_type": "start", "message": "ok"}, {}
-
-        result = executor.execute(_request(), _callback)
-        self.assertTrue(callback_called["value"])
-        self.assertEqual("success", result.status)
-        self.assertEqual("kubernetes", result.run_metadata.get("selected_provider"))
-        self.assertEqual("workspace", result.run_metadata.get("final_provider"))
-        self.assertTrue(bool(result.run_metadata.get("fallback_attempted")))
-        self.assertEqual("provider_unavailable", result.run_metadata.get("fallback_reason"))
-        self.assertEqual("dispatch_confirmed", result.run_metadata.get("dispatch_status"))
-        self.assertEqual(
-            "workspace:workspace-111",
-            result.run_metadata.get("provider_dispatch_id"),
-        )
-
-    def test_kubernetes_executor_respects_no_fallback(self) -> None:
-        settings = {
-            "fallback_enabled": "false",
-            "fallback_on_dispatch_error": "true",
-            "fallback_provider": "workspace",
-        }
-        executor = KubernetesExecutor(settings)
+    def test_kubernetes_executor_dispatch_failure_returns_failed(self) -> None:
+        executor = KubernetesExecutor({})
 
         def _dispatch_failure(**_kwargs):
             raise _KubernetesDispatchFailure(
@@ -168,9 +128,14 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         self.assertEqual("success", result.status)
         self.assertEqual("kubernetes", result.run_metadata.get("final_provider"))
 
+    def test_router_coerces_unknown_provider_to_kubernetes(self) -> None:
+        router = ExecutionRouter(runtime_settings={"provider": "workspace"})
+        routed = router.route_request(_request())
+        self.assertEqual("kubernetes", routed.selected_provider)
+        self.assertEqual("kubernetes", routed.final_provider)
+
     def test_kubernetes_executor_requires_kubeconfig_when_not_in_cluster(self) -> None:
         settings = {
-            "fallback_enabled": "false",
             "k8s_in_cluster": "false",
             "k8s_kubeconfig": "",
         }
@@ -234,7 +199,10 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         ]
         executor._delete_job = lambda _args, *, job_name: deleted.append(job_name)  # type: ignore[method-assign]
 
-        executor._prune_completed_jobs(["--namespace", "default"])
+        executor._prune_completed_jobs(
+            ["--namespace", "default"],
+            job_ttl_seconds=7200,
+        )
         self.assertEqual(["job-old"], deleted)
 
     def test_build_job_manifest_includes_gpu_limit_when_configured(self) -> None:
@@ -249,6 +217,7 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             image_pull_secrets=[],
             k8s_gpu_limit=2,
             execution_timeout=120,
+            job_ttl_seconds=1200,
         )
         limits = (
             manifest["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
@@ -267,11 +236,13 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             image_pull_secrets=[],
             k8s_gpu_limit=0,
             execution_timeout=120,
+            job_ttl_seconds=1800,
         )
         limits = (
             manifest["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
         )
         self.assertNotIn("nvidia.com/gpu", limits)
+        self.assertEqual(1800, manifest["spec"]["ttlSecondsAfterFinished"])
 
 
 if __name__ == "__main__":

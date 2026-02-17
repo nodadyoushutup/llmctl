@@ -189,25 +189,15 @@
         <h2 class="section-title">Node Executor Runtime</h2>
       </div>
       <p class="muted" style="margin-top: 12px;">
-        Configure runtime provider routing, fallback behavior, timeouts, and provider-specific settings.
+        Configure Kubernetes-only node execution, timeouts, and pod lifecycle settings.
       </p>
       <form method="post" action="{{ url_for('agents.update_node_executor_runtime_settings_route') }}" class="form-grid" style="margin-top: 16px;">
-        <div class="grid grid-3" style="grid-column: 1 / -1; gap: 10px;">
+        <div class="grid grid-2" style="grid-column: 1 / -1; gap: 10px;">
           <label class="label">
             Provider
-            <select class="input" name="provider">
+            <select class="input" name="provider" disabled>
               {% for option in node_executor_options.provider_options %}
                 <option value="{{ option.value }}" {% if option.value == node_executor_settings.provider %}selected{% endif %}>
-                  {{ option.label }}
-                </option>
-              {% endfor %}
-            </select>
-          </label>
-          <label class="label">
-            Fallback Provider
-            <select class="input" name="fallback_provider">
-              {% for option in node_executor_options.fallback_provider_options %}
-                <option value="{{ option.value }}" {% if option.value == node_executor_settings.fallback_provider %}selected{% endif %}>
                   {{ option.label }}
                 </option>
               {% endfor %}
@@ -218,17 +208,7 @@
             <input class="input" type="text" name="workspace_identity_key" value="{{ node_executor_settings.workspace_identity_key }}" />
           </label>
         </div>
-
-        <div class="grid grid-2" style="grid-column: 1 / -1; gap: 10px;">
-          <label class="label">
-            Workspace Root
-            <input class="input" type="text" name="workspace_root" value="{{ node_executor_settings.workspace_root }}" />
-          </label>
-          <label class="label">
-            Docker Host
-            <input class="input" type="text" name="docker_host" value="{{ node_executor_settings.docker_host }}" />
-          </label>
-        </div>
+        <input type="hidden" name="provider" value="kubernetes" />
 
         <div class="grid grid-3" style="grid-column: 1 / -1; gap: 10px;">
           <label class="label">
@@ -251,43 +231,12 @@
             <input class="input" type="number" min="1" max="300" name="cancel_grace_timeout_seconds" value="{{ node_executor_settings.cancel_grace_timeout_seconds }}" />
           </label>
           <label class="label">
-            Docker Pull Policy
-            <select class="input" name="docker_pull_policy">
-              {% for option in node_executor_options.docker_pull_policy_options %}
-                <option value="{{ option.value }}" {% if option.value == node_executor_settings.docker_pull_policy %}selected{% endif %}>
-                  {{ option.label }}
-                </option>
-              {% endfor %}
-            </select>
-          </label>
-          <label class="label">
-            Docker API Stall Threshold
-            <select class="input" name="docker_api_stall_seconds">
-              {% for option in node_executor_options.docker_api_stall_seconds_options %}
-                <option value="{{ option.value }}" {% if option.value == node_executor_settings.docker_api_stall_seconds %}selected{% endif %}>
-                  {{ option.label }}
-                </option>
-              {% endfor %}
-            </select>
+            Job TTL After Completion (seconds)
+            <input class="input" type="number" min="60" max="86400" name="k8s_job_ttl_seconds" value="{{ node_executor_settings.k8s_job_ttl_seconds }}" />
           </label>
         </div>
 
         <div class="grid grid-2" style="grid-column: 1 / -1; gap: 10px;">
-          <label class="label">
-            Docker Image
-            <input class="input" type="text" name="docker_image" value="{{ node_executor_settings.docker_image }}" />
-          </label>
-          <label class="label">
-            Docker Network
-            <input class="input" type="text" name="docker_network" value="{{ node_executor_settings.docker_network }}" />
-          </label>
-        </div>
-
-        <div class="grid grid-2" style="grid-column: 1 / -1; gap: 10px;">
-          <label class="label">
-            Docker Env JSON
-            <textarea class="input" name="docker_env_json" rows="3">{{ node_executor_settings.docker_env_json }}</textarea>
-          </label>
           <label class="label">
             Kubernetes Kubeconfig (write-only)
             <textarea class="input" name="k8s_kubeconfig" rows="3" placeholder="Paste kubeconfig to replace current secret.">{{ node_executor_settings.k8s_kubeconfig }}</textarea>
@@ -346,14 +295,6 @@
         </label>
 
         <div class="row" style="grid-column: 1 / -1; gap: 16px; margin-top: 8px;">
-          <label style="display: inline-flex; gap: 8px; align-items: center;">
-            <input type="checkbox" name="fallback_enabled" value="true" {% if node_executor_settings.fallback_enabled == "true" %}checked{% endif %} />
-            fallback enabled
-          </label>
-          <label style="display: inline-flex; gap: 8px; align-items: center;">
-            <input type="checkbox" name="fallback_on_dispatch_error" value="true" {% if node_executor_settings.fallback_on_dispatch_error == "true" %}checked{% endif %} />
-            fallback on dispatch error
-          </label>
           <label style="display: inline-flex; gap: 8px; align-items: center;">
             <input type="checkbox" name="cancel_force_kill_enabled" value="true" {% if node_executor_settings.cancel_force_kill_enabled == "true" %}checked{% endif %} />
             force kill after grace timeout

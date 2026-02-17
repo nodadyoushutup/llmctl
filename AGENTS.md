@@ -48,10 +48,9 @@
 - Run `~/.codex/skills/argocd-commit-push-autosync/scripts/commit_push_enable_autosync.sh --app <argocd-app-name>`.
 - Default ArgoCD behavior for this workflow is autosync enablement with `--auto-prune --self-heal` (no immediate one-off sync).
 
-# Docker Reload Behavior
+# Kubernetes Reload Behavior
 
-- If a task changes only UI files (templates, CSS, JS, or other frontend assets), restart the impacted web container so changes are visible immediately.
-- For Studio UI changes, run `docker compose -f docker/docker-compose.yml restart llmctl-studio`.
-- If a task changes only Python files, run the impacted Flask service in debug mode so it auto-reloads on save.
-- For Python-only Studio changes, run `FLASK_DEBUG=true docker compose -f docker/docker-compose.yml up -d --force-recreate --no-deps llmctl-studio`.
-- For Python-only RAG changes, run `FLASK_DEBUG=true docker compose -f docker/docker-compose.yml up -d --force-recreate --no-deps llmctl-rag`.
+- If a task changes only UI files (templates, CSS, JS, or other frontend assets), restart the impacted Kubernetes deployment so changes are visible immediately.
+- For Studio UI changes, run `kubectl -n llmctl rollout restart deploy/llmctl-studio` and `kubectl -n llmctl rollout status deploy/llmctl-studio`.
+- For Python-only Studio live-code changes, use the `llmctl-studio-live-redeploy` skill workflow to restart the Kubernetes deployment.
+- For Python-only RAG changes, restart the corresponding Kubernetes deployment instead of Docker Compose.

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llmctl-mcp-config
+  namespace: llmctl
+data:
+  MCP_PROXY_HOST: "0.0.0.0"
+  MCP_PROXY_PORT: "8000"
+  MCP_PROXY_STREAM_ENDPOINT: "/mcp"
+  LLMCTL_MCP_HOST: "0.0.0.0"
+  LLMCTL_MCP_PORT: "9020"
+  LLMCTL_MCP_PATH: "/mcp"
+  LLMCTL_MCP_TRANSPORT: "streamable-http"

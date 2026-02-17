@@ -43,19 +43,48 @@ Goal: move integrated MCP servers out of the `llmctl-studio` image into Kubernet
 - [x] Stage 9: Docs Updates.
 
 ## Stage 2 - Integrated MCP Inventory + Endpoint Contract
-- [ ] Inventory all integrated MCP server keys currently managed by Studio from `app/llmctl-studio-backend/src/core/integrated_mcp.py`.
-- [ ] Define canonical Kubernetes service names, ports, and URL paths per integrated server (including `llmctl-mcp` Harbor image reference).
-- [ ] Define final in-cluster endpoint format for DB records (for example `http://<service>.<namespace>.svc.cluster.local:<port>` with transport metadata).
-- [ ] Document any integrated key that is currently feature-gated and decide include-now vs deferred behavior.
-- [ ] Acceptance criteria: one agreed mapping table exists from integrated server key -> image -> Service DNS endpoint -> DB config payload shape.
+- [x] Inventory all integrated MCP server keys currently managed by Studio from `app/llmctl-studio-backend/src/core/integrated_mcp.py`.
+- [x] Define canonical Kubernetes service names, ports, and URL paths per integrated server (including `llmctl-mcp` Harbor image reference).
+- [x] Define final in-cluster endpoint format for DB records (for example `http://<service>.<namespace>.svc.cluster.local:<port>` with transport metadata).
+- [x] Document any integrated key that is currently feature-gated and decide include-now vs deferred behavior.
+- [x] Acceptance criteria: one agreed mapping table exists from integrated server key -> image -> Service DNS endpoint -> DB config payload shape.
+
+## Stage 2 - Output: Integrated MCP Contract
+- [x] Integrated key inventory from `core/integrated_mcp.py`: `llmctl-mcp`, `github`, `atlassian`, `chroma`, `google-cloud`, `google-workspace`.
+- [x] Existing legacy-key normalization retained: `jira` -> `atlassian`.
+- [x] Harbor verification completed: project `llmctl` contains repository path `llmctl/llmctl-mcp` (tag publishing handled in rollout/build step).
+- [x] Transport capability finding:
+- [x] Native HTTP-capable upstream server confirmed: `mcp/atlassian:latest` (`--transport streamable-http`, `--host`, `--port`, `--path`).
+- [x] Current upstream images/packages are stdio-first only for `github`, `chroma`, and `google-cloud`; Stage 3 will add HTTP endpoint exposure for these before DB cutover.
+
+### Stage 2 Mapping Table (Agreed Contract)
+| Integrated key | Deployment image/runtime contract | K8s Service name | Port/path | Canonical DB `url` value | Status decision |
+| --- | --- | --- | --- | --- | --- |
+| `llmctl-mcp` | Harbor image: `<harbor-registry>/llmctl/llmctl-mcp:<tag>` | `llmctl-mcp` | `9020` + `/mcp` | `http://llmctl-mcp.<namespace>.svc.cluster.local:9020/mcp` | Include in cutover |
+| `github` | Upstream server image: `mcp/github:latest` with Stage 3 HTTP exposure wrapper | `llmctl-mcp-github` | `8000` + `/mcp` | `http://llmctl-mcp-github.<namespace>.svc.cluster.local:8000/mcp` | Include in cutover (requires Stage 3 wrapper) |
+| `atlassian` | Upstream server image: `mcp/atlassian:latest` (native streamable-http mode) | `llmctl-mcp-atlassian` | `8000` + `/mcp` | `http://llmctl-mcp-atlassian.<namespace>.svc.cluster.local:8000/mcp` | Include in cutover |
+| `chroma` | Upstream server image: `mcp/chroma:latest` with Stage 3 HTTP exposure wrapper | `llmctl-mcp-chroma` | `8000` + `/mcp` | `http://llmctl-mcp-chroma.<namespace>.svc.cluster.local:8000/mcp` | Include in cutover (requires Stage 3 wrapper) |
+| `google-cloud` | Upstream package runtime (`@google-cloud/gcloud-mcp`) with Stage 3 HTTP exposure wrapper | `llmctl-mcp-google-cloud` | `8000` + `/mcp` | `http://llmctl-mcp-google-cloud.<namespace>.svc.cluster.local:8000/mcp` | Include in cutover (requires Stage 3 wrapper) |
+| `google-workspace` | No active runtime path yet in current codebase | `llmctl-mcp-google-workspace` (reserved) | `8000` + `/mcp` (reserved) | Reserved | Deferred (feature-gated in code) |
+
+- [x] Final DB payload shape for integrated rows in migration/seed stages:
+- [x] `{"url":"http://<service>.<namespace>.svc.cluster.local:<port>/mcp","transport":"streamable-http"}`.
+- [x] Optional HTTP headers field remains available for future auth hardening: `headers`.
 
 ## Stage 3 - Kubernetes Manifests for Integrated MCP Deployments/Services
-- [ ] Add one Deployment + Service manifest per integrated MCP server under `kubernetes/` using plain YAML.
-- [ ] Add/extend ConfigMap and Secret wiring for upstream MCP containers that require provider credentials.
-- [ ] Add Harbor image pull configuration for `llmctl-mcp` deployment where required.
-- [ ] Update `kubernetes/kustomization.yaml` to include all new MCP manifests.
-- [ ] Ensure resource names are consistent with Studio namespace-local DNS usage.
-- [ ] Acceptance criteria: `kubectl apply -k kubernetes` includes all MCP services and each integrated MCP pod becomes Ready.
+- [x] Add one Deployment + Service manifest per integrated MCP server under `kubernetes/` using plain YAML.
+- [x] Implement HTTP endpoint exposure for stdio-only upstream MCP servers (`github`, `chroma`, `google-cloud`) so Stage 2 URL contracts resolve in-cluster.
+- [x] Add/extend ConfigMap and Secret wiring for upstream MCP containers that require provider credentials.
+- [x] Add Harbor image pull configuration for `llmctl-mcp` deployment where required.
+- [x] Update `kubernetes/kustomization.yaml` to include all new MCP manifests.
+- [x] Ensure resource names are consistent with Studio namespace-local DNS usage.
+- [x] Acceptance criteria: `kubectl apply -k kubernetes` includes all MCP services and each integrated MCP pod becomes Ready.
+
+Stage 3 implementation note:
+- [x] `google-workspace` remains intentionally deferred (feature-gated in current backend logic); Stage 3 creates Deployments/Services for active integrated servers only.
+- [x] Server-side dry-run check completed: `kubectl apply -k kubernetes --dry-run=server`.
+- [x] Live cluster rollout check completed for active integrated MCP Deployments:
+- [x] `kubectl -n llmctl get deploy llmctl-mcp llmctl-mcp-github llmctl-mcp-atlassian llmctl-mcp-chroma llmctl-mcp-google-cloud`.
 
 ## Stage 4 - Studio Integrated MCP DB Migration + Sync Refactor
 - [ ] Refactor integrated MCP payload generation in `app/llmctl-studio-backend/src/core/integrated_mcp.py` from local `command`/`stdio` assumptions to Kubernetes service `url` endpoints.
@@ -74,7 +103,7 @@ Goal: move integrated MCP servers out of the `llmctl-studio` image into Kubernet
 - [ ] Remove integrated MCP server runtime installs from `app/llmctl-studio-backend/docker/Dockerfile` that are no longer needed inside Studio.
 - [ ] Remove Studio image coupling to local `app/llmctl-mcp` runtime dependencies where no longer required.
 - [ ] Update `app/llmctl-studio-backend/src/services/tasks.py` to stop hardcoded local `llmctl-mcp` command injection and use DB-managed integrated MCP config behavior.
-- [ ] Update `docker/docker-compose.yml` only where needed to keep local development behavior coherent with the new DB-managed integrated MCP model.
+- [ ] Update Kubernetes overlays/runtime configuration only where needed to keep local development behavior coherent with the new DB-managed integrated MCP model.
 - [ ] Acceptance criteria: Studio image size decreases and Studio no longer depends on embedded MCP server executables for integrated MCP operation.
 
 ## Stage 7 - Single-Cutover Wiring and Deployment Sequencing

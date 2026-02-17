@@ -32,6 +32,7 @@ from chat.contracts import (
     CHAT_REASON_MODEL_FAILED,
     RAG_REASON_RETRIEVAL_FAILED,
     RAG_REASON_UNAVAILABLE,
+    RAGHealth,
     RAG_HEALTH_CONFIGURED_HEALTHY,
     RAG_HEALTH_UNCONFIGURED,
     RAGContractError,
@@ -861,8 +862,66 @@ def execute_turn(
             },
         )
 
-        rag_health = client.health()
+        rag_health_error: RAGContractError | None = None
+        try:
+            rag_health = client.health()
+        except RAGContractError as exc:
+            rag_health_error = exc
+            rag_health = RAGHealth(
+                state=RAG_HEALTH_UNCONFIGURED,
+                provider="unknown",
+                error=str(exc),
+            )
+        except Exception as exc:
+            rag_health_error = RAGContractError(
+                reason_code=RAG_REASON_RETRIEVAL_FAILED,
+                message="RAG health check failed unexpectedly.",
+                metadata={"exception_type": type(exc).__name__},
+            )
+            rag_health = RAGHealth(
+                state=RAG_HEALTH_UNCONFIGURED,
+                provider="unknown",
+                error=str(exc),
+            )
+
         turn.rag_health_state = rag_health.state
+        if selected_rag_collections and rag_health_error is not None:
+            turn.reason_code = rag_health_error.reason_code or RAG_REASON_RETRIEVAL_FAILED
+            turn.error_message = str(rag_health_error)
+            turn.runtime_metadata_json = _safe_json_dump(
+                {
+                    "rag_health_state": rag_health.state,
+                    "selected_collections": selected_rag_collections,
+                    "provider": rag_health.provider,
+                    "metadata": rag_health_error.metadata,
+                }
+            )
+            _record_activity(
+                session,
+                thread_id=thread.id,
+                turn_id=turn.id,
+                event_class=CHAT_EVENT_CLASS_FAILURE,
+                event_type=CHAT_EVENT_TYPE_FAILED,
+                reason_code=turn.reason_code,
+                message=turn.error_message,
+                metadata={
+                    "rag_health_state": rag_health.state,
+                    "selected_collections": selected_rag_collections,
+                    "provider": rag_health.provider,
+                    "metadata": rag_health_error.metadata,
+                },
+            )
+            thread.last_activity_at = _now()
+            return TurnResult(
+                ok=False,
+                thread_id=thread.id,
+                turn_id=turn.id,
+                request_id=request_id,
+                reason_code=turn.reason_code,
+                error=turn.error_message,
+                rag_health_state=rag_health.state,
+                selected_collections=selected_rag_collections,
+            )
         if (
             selected_rag_collections
             and rag_health.state != RAG_HEALTH_CONFIGURED_HEALTHY
@@ -934,6 +993,40 @@ def execute_turn(
                     reason_code=turn.reason_code,
                     message=turn.error_message,
                     metadata=exc.metadata,
+                )
+                thread.last_activity_at = _now()
+                return TurnResult(
+                    ok=False,
+                    thread_id=thread.id,
+                    turn_id=turn.id,
+                    request_id=request_id,
+                    reason_code=turn.reason_code,
+                    error=turn.error_message,
+                    rag_health_state=rag_health.state,
+                    selected_collections=selected_rag_collections,
+                )
+            except Exception as exc:
+                turn.reason_code = RAG_REASON_RETRIEVAL_FAILED
+                turn.error_message = "RAG retrieval failed unexpectedly."
+                turn.runtime_metadata_json = _safe_json_dump(
+                    {
+                        "selected_collections": selected_rag_collections,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                    }
+                )
+                _record_activity(
+                    session,
+                    thread_id=thread.id,
+                    turn_id=turn.id,
+                    event_class=CHAT_EVENT_CLASS_FAILURE,
+                    event_type=CHAT_EVENT_TYPE_FAILED,
+                    reason_code=turn.reason_code,
+                    message=turn.error_message,
+                    metadata={
+                        "selected_collections": selected_rag_collections,
+                        "exception_type": type(exc).__name__,
+                    },
                 )
                 thread.last_activity_at = _now()
                 return TurnResult(

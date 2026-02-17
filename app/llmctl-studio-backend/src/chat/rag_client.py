@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -85,6 +86,18 @@ class HttpRAGContractClient:
                 metadata={"status": exc.code, "path": path},
             ) from exc
         except URLError as exc:
+            raise RAGContractError(
+                reason_code=RAG_REASON_RETRIEVAL_FAILED,
+                message=str(exc),
+                metadata={"path": path},
+            ) from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise RAGContractError(
+                reason_code=RAG_REASON_RETRIEVAL_FAILED,
+                message=f"RAG contract request timed out for {path}.",
+                metadata={"path": path, "timeout_seconds": self.timeout_seconds},
+            ) from exc
+        except OSError as exc:
             raise RAGContractError(
                 reason_code=RAG_REASON_RETRIEVAL_FAILED,
                 message=str(exc),
@@ -204,4 +217,16 @@ def get_rag_contract_client() -> RAGContractClient:
     base_url = (os.getenv("CHAT_RAG_CONTRACT_BASE_URL") or "").strip()
     if not base_url:
         return StubRAGContractClient()
-    return HttpRAGContractClient(base_url=base_url)
+    timeout_raw = (os.getenv("CHAT_RAG_CONTRACT_TIMEOUT_SECONDS") or "").strip()
+    timeout_seconds = 10.0
+    if timeout_raw:
+        try:
+            parsed_timeout = float(timeout_raw)
+            if parsed_timeout > 0:
+                timeout_seconds = parsed_timeout
+        except ValueError:
+            timeout_seconds = 10.0
+    return HttpRAGContractClient(
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+    )

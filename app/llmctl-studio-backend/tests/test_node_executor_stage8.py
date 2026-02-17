@@ -89,17 +89,17 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
                 run_id=run.id,
                 run_task_id="run-task-1",
                 status="succeeded",
-                selected_provider="docker",
-                final_provider="workspace",
-                provider_dispatch_id="workspace:workspace-42",
+                selected_provider="kubernetes",
+                final_provider="kubernetes",
+                provider_dispatch_id="kubernetes:default/job-42",
                 workspace_identity="workspace-main",
                 dispatch_status="dispatch_confirmed",
-                fallback_attempted=True,
-                fallback_reason="provider_unavailable",
+                fallback_attempted=False,
+                fallback_reason=None,
                 dispatch_uncertain=False,
-                api_failure_category="socket_missing",
-                cli_fallback_used=True,
-                cli_preflight_passed=True,
+                api_failure_category=None,
+                cli_fallback_used=False,
+                cli_preflight_passed=None,
             )
             run_id = int(run.id)
 
@@ -109,15 +109,15 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         run_tasks = payload.get("run_tasks") or []
         self.assertEqual(1, len(run_tasks))
         run_task = run_tasks[0]
-        self.assertEqual("docker", run_task.get("selected_provider"))
-        self.assertEqual("workspace", run_task.get("final_provider"))
+        self.assertEqual("kubernetes", run_task.get("selected_provider"))
+        self.assertEqual("kubernetes", run_task.get("final_provider"))
         self.assertEqual("dispatch_confirmed", run_task.get("dispatch_status"))
-        self.assertTrue(bool(run_task.get("fallback_attempted")))
-        self.assertEqual("provider_unavailable", run_task.get("fallback_reason"))
-        self.assertEqual("socket_missing", run_task.get("api_failure_category"))
-        self.assertTrue(bool(run_task.get("cli_fallback_used")))
+        self.assertFalse(bool(run_task.get("fallback_attempted")))
+        self.assertEqual("", run_task.get("fallback_reason"))
+        self.assertIsNone(run_task.get("api_failure_category"))
+        self.assertFalse(bool(run_task.get("cli_fallback_used")))
         self.assertEqual(
-            "workspace:workspace-42",
+            "kubernetes:default/job-42",
             run_task.get("provider_dispatch_id"),
         )
 

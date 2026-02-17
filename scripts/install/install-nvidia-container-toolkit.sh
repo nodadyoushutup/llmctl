@@ -103,6 +103,4 @@ log "Running GPU smoke test container (${CUDA_TEST_IMAGE})..."
 docker run --rm --gpus all "${CUDA_TEST_IMAGE}" nvidia-smi
 
 log "GPU passthrough is functional."
-log "You can now run:"
-log "  cd docker"
-log "  docker compose -f docker-compose.yml up -d --build llmctl-studio"
+log "You can now build/push images and deploy via Kubernetes manifests/overlays."

@@ -5018,11 +5018,11 @@ def _apply_flowchart_node_task_run_metadata(
         return
 
     provider = str(run_metadata.get("selected_provider") or "").strip().lower()
-    if provider in {"workspace", "docker", "kubernetes"}:
+    if provider in {"kubernetes"}:
         task.selected_provider = provider
 
     final_provider = str(run_metadata.get("final_provider") or "").strip().lower()
-    if final_provider in {"workspace", "docker", "kubernetes"}:
+    if final_provider in {"kubernetes"}:
         task.final_provider = final_provider
 
     provider_dispatch_id_raw = run_metadata.get("provider_dispatch_id")
@@ -5042,7 +5042,6 @@ def _apply_flowchart_node_task_run_metadata(
         "dispatch_submitted",
         "dispatch_confirmed",
         "dispatch_failed",
-        "fallback_started",
     }:
         task.dispatch_status = dispatch_status
 

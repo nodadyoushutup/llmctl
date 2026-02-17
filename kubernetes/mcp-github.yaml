@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-mcp-github
+  namespace: llmctl
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: llmctl-mcp-github
+  template:
+    metadata:
+      labels:
+        app: llmctl-mcp-github
+    spec:
+      containers:
+        - name: github-mcp
+          image: mcp/github:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              npm install -g mcp-proxy@6.4.0 >/tmp/npm-install.log 2>&1
+              exec mcp-proxy \
+                --server stream \
+                --host "${MCP_PROXY_HOST}" \
+                --port "${MCP_PROXY_PORT}" \
+                --streamEndpoint "${MCP_PROXY_STREAM_ENDPOINT}" \
+                --stateless \
+                -- node /app/dist/index.js
+          env:
+            - name: GITHUB_PERSONAL_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: llmctl-mcp-secrets
+                  key: GITHUB_PERSONAL_ACCESS_TOKEN
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: llmctl-mcp-config
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmctl-mcp-github
+  namespace: llmctl
+spec:
+  selector:
+    app: llmctl-mcp-github
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

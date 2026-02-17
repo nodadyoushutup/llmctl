@@ -9,16 +9,12 @@ from typing import Any
 from services.execution.contracts import (
     EXECUTION_CONTRACT_VERSION,
     EXECUTION_DISPATCH_PENDING,
-    EXECUTION_PROVIDER_DOCKER,
     EXECUTION_PROVIDER_KUBERNETES,
-    EXECUTION_PROVIDER_WORKSPACE,
     EXECUTION_STATUS_FAILED,
     ExecutionRequest,
     ExecutionResult,
 )
-from services.execution.docker_executor import DockerExecutor
 from services.execution.kubernetes_executor import KubernetesExecutor
-from services.execution.workspace_executor import WorkspaceExecutor
 from services.integrations import (
     load_node_executor_runtime_settings,
     normalize_node_executor_provider,
@@ -37,13 +33,9 @@ class ExecutionRouter:
         self,
         *,
         runtime_settings: dict[str, str] | None = None,
-        workspace_executor: WorkspaceExecutor | None = None,
-        docker_executor: DockerExecutor | None = None,
         kubernetes_executor: KubernetesExecutor | None = None,
     ) -> None:
         self._runtime_settings = runtime_settings or load_node_executor_runtime_settings()
-        self._workspace_executor = workspace_executor or WorkspaceExecutor()
-        self._docker_executor = docker_executor or DockerExecutor(self._runtime_settings)
         self._kubernetes_executor = (
             kubernetes_executor or KubernetesExecutor(self._runtime_settings)
         )
@@ -53,7 +45,7 @@ class ExecutionRouter:
             self._runtime_settings.get("provider")
         )
         if not configured_provider:
-            configured_provider = EXECUTION_PROVIDER_WORKSPACE
+            configured_provider = EXECUTION_PROVIDER_KUBERNETES
         workspace_identity = normalize_workspace_identity_key(
             self._runtime_settings.get("workspace_identity_key")
         )
@@ -101,11 +93,7 @@ class ExecutionRouter:
             request.dispatch_status,
         )
         result: ExecutionResult | None = None
-        if request.selected_provider == EXECUTION_PROVIDER_WORKSPACE:
-            result = self._workspace_executor.execute(request, execute_callback)
-        elif request.selected_provider == EXECUTION_PROVIDER_DOCKER:
-            result = self._docker_executor.execute(request, execute_callback)
-        elif request.selected_provider == EXECUTION_PROVIDER_KUBERNETES:
+        if request.selected_provider == EXECUTION_PROVIDER_KUBERNETES:
             result = self._kubernetes_executor.execute(request, execute_callback)
         else:
             now = _utcnow()

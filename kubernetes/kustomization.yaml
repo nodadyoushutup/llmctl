@@ -6,6 +6,12 @@ resources:
   - postgres.yaml
   - pgadmin.yaml
   - chromadb.yaml
+  - mcp-configmap.yaml
+  - mcp-llmctl.yaml
+  - mcp-github.yaml
+  - mcp-atlassian.yaml
+  - mcp-chroma.yaml
+  - mcp-google-cloud.yaml
   - studio-configmap.yaml
   - studio-pvc.yaml
   - studio-rbac.yaml

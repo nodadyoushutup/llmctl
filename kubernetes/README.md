@@ -149,10 +149,11 @@ Edit `kubernetes/studio-configmap.yaml` for these keys:
 
 - `LLMCTL_POSTGRES_HOST`, `LLMCTL_POSTGRES_PORT`, `LLMCTL_POSTGRES_DB`, `LLMCTL_POSTGRES_USER`
 - `CHROMA_HOST`, `CHROMA_PORT`, `CHROMA_SSL`
-- `LLMCTL_NODE_EXECUTOR_PROVIDER` (`kubernetes` or `workspace`)
+- `LLMCTL_NODE_EXECUTOR_PROVIDER` (`kubernetes` only)
 - `LLMCTL_NODE_EXECUTOR_K8S_IMAGE` (executor image)
 - `LLMCTL_NODE_EXECUTOR_K8S_SERVICE_ACCOUNT` (job pod service account)
 - `LLMCTL_NODE_EXECUTOR_K8S_GPU_LIMIT` (set `>0` to request NVIDIA GPU per executor Job)
+- `LLMCTL_NODE_EXECUTOR_K8S_JOB_TTL_SECONDS` (terminal pod/job retention before auto-cleanup)
 - `LLMCTL_NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON` (JSON list, for private registries)
 
 Edit `kubernetes/studio-secret.example.yaml` for:

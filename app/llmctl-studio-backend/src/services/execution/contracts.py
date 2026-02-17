@@ -8,12 +8,8 @@ EXECUTION_CONTRACT_VERSION = "v1"
 EXECUTION_STATUS_SUCCESS = "success"
 EXECUTION_STATUS_FAILED = "failed"
 
-EXECUTION_PROVIDER_WORKSPACE = "workspace"
-EXECUTION_PROVIDER_DOCKER = "docker"
 EXECUTION_PROVIDER_KUBERNETES = "kubernetes"
 EXECUTION_PROVIDER_CHOICES = (
-    EXECUTION_PROVIDER_WORKSPACE,
-    EXECUTION_PROVIDER_DOCKER,
     EXECUTION_PROVIDER_KUBERNETES,
 )
 
@@ -21,13 +17,11 @@ EXECUTION_DISPATCH_PENDING = "dispatch_pending"
 EXECUTION_DISPATCH_SUBMITTED = "dispatch_submitted"
 EXECUTION_DISPATCH_CONFIRMED = "dispatch_confirmed"
 EXECUTION_DISPATCH_FAILED = "dispatch_failed"
-EXECUTION_DISPATCH_FALLBACK_STARTED = "fallback_started"
 EXECUTION_DISPATCH_STATUS_CHOICES = (
     EXECUTION_DISPATCH_PENDING,
     EXECUTION_DISPATCH_SUBMITTED,
     EXECUTION_DISPATCH_CONFIRMED,
     EXECUTION_DISPATCH_FAILED,
-    EXECUTION_DISPATCH_FALLBACK_STARTED,
 )
 
 
@@ -44,8 +38,8 @@ class ExecutionRequest:
     enabled_providers: set[str]
     default_model_id: int | None
     mcp_server_keys: list[str]
-    selected_provider: str = EXECUTION_PROVIDER_WORKSPACE
-    final_provider: str = EXECUTION_PROVIDER_WORKSPACE
+    selected_provider: str = EXECUTION_PROVIDER_KUBERNETES
+    final_provider: str = EXECUTION_PROVIDER_KUBERNETES
     provider_dispatch_id: str | None = None
     workspace_identity: str = "default"
     dispatch_status: str = EXECUTION_DISPATCH_PENDING

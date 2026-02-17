@@ -240,24 +240,7 @@ class Config:
 
     GITHUB_MCP_URL = os.getenv("GITHUB_MCP_URL", "")
 
-    NODE_EXECUTOR_PROVIDER = os.getenv("LLMCTL_NODE_EXECUTOR_PROVIDER", "workspace")
-    NODE_EXECUTOR_FALLBACK_PROVIDER = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_FALLBACK_PROVIDER",
-        "workspace",
-    )
-    NODE_EXECUTOR_FALLBACK_ENABLED = (
-        os.getenv("LLMCTL_NODE_EXECUTOR_FALLBACK_ENABLED", "true").strip().lower()
-        in {"1", "true", "yes", "on"}
-    )
-    NODE_EXECUTOR_FALLBACK_ON_DISPATCH_ERROR = (
-        os.getenv(
-            "LLMCTL_NODE_EXECUTOR_FALLBACK_ON_DISPATCH_ERROR",
-            "true",
-        )
-        .strip()
-        .lower()
-        in {"1", "true", "yes", "on"}
-    )
+    NODE_EXECUTOR_PROVIDER = os.getenv("LLMCTL_NODE_EXECUTOR_PROVIDER", "kubernetes")
     NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS = os.getenv(
         "LLMCTL_NODE_EXECUTOR_DISPATCH_TIMEOUT_SECONDS",
         "60",
@@ -280,30 +263,9 @@ class Config:
         .lower()
         in {"1", "true", "yes", "on"}
     )
-    NODE_EXECUTOR_WORKSPACE_ROOT = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_WORKSPACE_ROOT",
-        WORKSPACES_DIR,
-    )
     NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY = os.getenv(
         "LLMCTL_NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY",
         "default",
-    )
-    NODE_EXECUTOR_DOCKER_HOST = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_DOCKER_HOST",
-        os.getenv("DOCKER_HOST", "unix:///var/run/docker.sock"),
-    )
-    NODE_EXECUTOR_DOCKER_IMAGE = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_DOCKER_IMAGE",
-        "llmctl-executor:latest",
-    )
-    NODE_EXECUTOR_DOCKER_NETWORK = os.getenv("LLMCTL_NODE_EXECUTOR_DOCKER_NETWORK", "")
-    NODE_EXECUTOR_DOCKER_PULL_POLICY = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_DOCKER_PULL_POLICY",
-        "if_not_present",
-    )
-    NODE_EXECUTOR_DOCKER_ENV_JSON = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_DOCKER_ENV_JSON",
-        "",
     )
     NODE_EXECUTOR_K8S_NAMESPACE = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_NAMESPACE",
@@ -326,6 +288,10 @@ class Config:
     NODE_EXECUTOR_K8S_GPU_LIMIT = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_GPU_LIMIT",
         "0",
+    )
+    NODE_EXECUTOR_K8S_JOB_TTL_SECONDS = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_JOB_TTL_SECONDS",
+        "1800",
     )
     NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON",

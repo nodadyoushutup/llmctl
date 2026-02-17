@@ -14,13 +14,12 @@ from storage.script_storage import write_script_file
 
 _engine = None
 SessionLocal = None
-NODE_EXECUTOR_PROVIDER_ALLOWED_VALUES = ("workspace", "docker", "kubernetes")
+NODE_EXECUTOR_PROVIDER_ALLOWED_VALUES = ("kubernetes",)
 NODE_EXECUTOR_DISPATCH_STATUS_ALLOWED_VALUES = (
     "dispatch_pending",
     "dispatch_submitted",
     "dispatch_confirmed",
     "dispatch_failed",
-    "fallback_started",
 )
 NODE_EXECUTOR_FALLBACK_REASON_ALLOWED_VALUES = (
     "provider_unavailable",
@@ -51,15 +50,15 @@ DB_HEALTHCHECK_REQUIRED_TABLES: tuple[str, ...] = (
 NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
     (
         "ck_node_runs_selected_provider_allowed",
-        "selected_provider IN ('workspace','docker','kubernetes')",
+        "selected_provider IN ('kubernetes')",
     ),
     (
         "ck_node_runs_final_provider_allowed",
-        "final_provider IN ('workspace','docker','kubernetes')",
+        "final_provider IN ('kubernetes')",
     ),
     (
         "ck_node_runs_dispatch_status_allowed",
-        "dispatch_status IN ('dispatch_pending','dispatch_submitted','dispatch_confirmed','dispatch_failed','fallback_started')",
+        "dispatch_status IN ('dispatch_pending','dispatch_submitted','dispatch_confirmed','dispatch_failed')",
     ),
     (
         "ck_node_runs_provider_dispatch_required",
@@ -68,8 +67,6 @@ NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
     (
         "ck_node_runs_provider_dispatch_namespace",
         "provider_dispatch_id IS NULL "
-        "OR provider_dispatch_id LIKE 'workspace:%' "
-        "OR provider_dispatch_id LIKE 'docker:%' "
         "OR provider_dispatch_id LIKE 'kubernetes:%'",
     ),
     (
@@ -78,7 +75,7 @@ NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
     ),
     (
         "ck_node_runs_fallback_reason_required",
-        "dispatch_status != 'fallback_started' OR fallback_reason IS NOT NULL",
+        "dispatch_status != 'dispatch_failed' OR fallback_reason IS NULL OR TRIM(fallback_reason) != ''",
     ),
     (
         "ck_node_runs_fallback_reason_consistency",
@@ -90,7 +87,7 @@ NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
     ),
     (
         "ck_node_runs_fallback_terminal_provider",
-        "fallback_attempted = 0 OR final_provider = 'workspace'",
+        "fallback_attempted = 0",
     ),
     (
         "ck_node_runs_fallback_reason_allowed",
@@ -342,8 +339,8 @@ def _ensure_schema() -> None:
             "resolved_instruction_manifest_hash": "VARCHAR(128)",
             "instruction_adapter_mode": "VARCHAR(32)",
             "instruction_materialized_paths_json": "TEXT",
-            "selected_provider": "TEXT NOT NULL DEFAULT 'workspace'",
-            "final_provider": "TEXT NOT NULL DEFAULT 'workspace'",
+            "selected_provider": "TEXT NOT NULL DEFAULT 'kubernetes'",
+            "final_provider": "TEXT NOT NULL DEFAULT 'kubernetes'",
             "provider_dispatch_id": "TEXT",
             "workspace_identity": "TEXT NOT NULL DEFAULT 'default'",
             "dispatch_status": "TEXT NOT NULL DEFAULT 'dispatch_pending'",
@@ -553,14 +550,14 @@ def _migrate_agent_task_node_executor_fields(
 
     connection.execute(
         text(
-            "UPDATE agent_tasks SET selected_provider = 'workspace' "
+            "UPDATE agent_tasks SET selected_provider = 'kubernetes' "
             "WHERE selected_provider IS NULL OR selected_provider NOT IN "
             f"({provider_values})"
         )
     )
     connection.execute(
         text(
-            "UPDATE agent_tasks SET final_provider = 'workspace' "
+            "UPDATE agent_tasks SET final_provider = 'kubernetes' "
             "WHERE final_provider IS NULL OR final_provider NOT IN "
             f"({provider_values})"
         )
@@ -570,13 +567,11 @@ def _migrate_agent_task_node_executor_fields(
             "UPDATE agent_tasks "
             "SET provider_dispatch_id = "
             "(CASE "
-            "WHEN selected_provider IN ('workspace','docker','kubernetes') "
+            "WHEN selected_provider IN ('kubernetes') "
             "THEN selected_provider "
-            "ELSE 'workspace' "
+            "ELSE 'kubernetes' "
             "END) || :legacy_prefix || id "
             "WHERE provider_dispatch_id IS NOT NULL "
-            "AND provider_dispatch_id NOT LIKE 'workspace:%' "
-            "AND provider_dispatch_id NOT LIKE 'docker:%' "
             "AND provider_dispatch_id NOT LIKE 'kubernetes:%'"
         ),
         {"legacy_prefix": ":legacy-"},
@@ -648,26 +643,14 @@ def _migrate_agent_task_node_executor_fields(
     )
     connection.execute(
         text(
-            "UPDATE agent_tasks SET final_provider = 'workspace' "
+            f"UPDATE agent_tasks SET fallback_attempted = {false_literal}, fallback_reason = NULL "
             f"WHERE fallback_attempted = {true_literal}"
         )
     )
     connection.execute(
         text(
-            "UPDATE agent_tasks "
-            f"SET fallback_reason = 'unknown', fallback_attempted = {true_literal}, final_provider = 'workspace' "
-            "WHERE dispatch_status = 'fallback_started' "
-            "AND (fallback_reason IS NULL OR TRIM(fallback_reason) = '')"
-        )
-    )
-    connection.execute(
-        text(
-            "UPDATE agent_tasks "
-            "SET fallback_reason = 'unknown' "
-            f"WHERE fallback_attempted = {true_literal} "
-            "AND dispatch_status = 'dispatch_failed' "
-            f"AND dispatch_uncertain = {false_literal} "
-            "AND (fallback_reason IS NULL OR TRIM(fallback_reason) = '')"
+            "UPDATE agent_tasks SET final_provider = 'kubernetes' "
+            "WHERE final_provider IS NULL OR TRIM(final_provider) = ''"
         )
     )
     connection.execute(
@@ -682,9 +665,9 @@ def _migrate_agent_task_node_executor_fields(
             "UPDATE agent_tasks "
             "SET provider_dispatch_id = "
             "(CASE "
-            "WHEN selected_provider IN ('workspace','docker','kubernetes') "
+            "WHEN selected_provider IN ('kubernetes') "
             "THEN selected_provider "
-            "ELSE 'workspace' "
+            "ELSE 'kubernetes' "
             "END) || :legacy_prefix || id "
             "WHERE dispatch_status IN ('dispatch_submitted','dispatch_confirmed') "
             "AND provider_dispatch_id IS NULL"
@@ -697,10 +680,10 @@ def _migrate_agent_task_node_executor_fields(
         connection.execute(
             text(
                 "UPDATE agent_tasks "
-                "SET provider_dispatch_id = :legacy_workspace_prefix || id "
+                "SET provider_dispatch_id = :legacy_kubernetes_prefix || id "
                 "WHERE provider_dispatch_id IS NULL"
             ),
-            {"legacy_workspace_prefix": "workspace:legacy-workspace-"},
+            {"legacy_kubernetes_prefix": "kubernetes:legacy-kubernetes-"},
         )
     if "dispatch_status" not in existing_columns_before_add:
         connection.execute(
@@ -712,14 +695,14 @@ def _migrate_agent_task_node_executor_fields(
     if "selected_provider" not in existing_columns_before_add:
         connection.execute(
             text(
-                "UPDATE agent_tasks SET selected_provider = 'workspace' "
+                "UPDATE agent_tasks SET selected_provider = 'kubernetes' "
                 "WHERE selected_provider IS NULL OR selected_provider = ''"
             )
         )
     if "final_provider" not in existing_columns_before_add:
         connection.execute(
             text(
-                "UPDATE agent_tasks SET final_provider = 'workspace' "
+                "UPDATE agent_tasks SET final_provider = 'kubernetes' "
                 "WHERE final_provider IS NULL OR final_provider = ''"
             )
         )

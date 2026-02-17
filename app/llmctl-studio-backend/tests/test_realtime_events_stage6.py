@@ -34,7 +34,7 @@ class RealtimeEventsStage6Tests(unittest.TestCase):
             entity_id=42,
             room_keys=["task:42", "run:7", "task:42"],
             payload={"status": "running"},
-            runtime={"selected_provider": "workspace", "fallback_attempted": "false"},
+            runtime={"selected_provider": "kubernetes", "fallback_attempted": "false"},
         )
         second = build_event_envelope(
             event_type="node.task.updated",
@@ -42,7 +42,7 @@ class RealtimeEventsStage6Tests(unittest.TestCase):
             entity_id=42,
             room_keys=["task:42"],
             payload={"status": "succeeded"},
-            runtime={"selected_provider": "workspace", "fallback_attempted": False},
+            runtime={"selected_provider": "kubernetes", "fallback_attempted": False},
         )
 
         self.assertEqual("v1", first["contract_version"])
@@ -85,27 +85,27 @@ class RealtimeEventsStage6Tests(unittest.TestCase):
     def test_runtime_metadata_normalization(self) -> None:
         normalized = normalize_runtime_metadata(
             {
-                "selected_provider": "docker",
-                "final_provider": "workspace",
-                "provider_dispatch_id": "docker:abc123",
+                "selected_provider": "kubernetes",
+                "final_provider": "kubernetes",
+                "provider_dispatch_id": "kubernetes:default/job-1",
                 "workspace_identity": "workspace-main",
                 "dispatch_status": "dispatch_confirmed",
-                "fallback_attempted": "true",
-                "fallback_reason": "provider_unavailable",
+                "fallback_attempted": "false",
+                "fallback_reason": "",
                 "dispatch_uncertain": "false",
-                "api_failure_category": "socket_missing",
+                "api_failure_category": "",
                 "cli_fallback_used": "false",
                 "cli_preflight_passed": None,
             }
         )
         self.assertIsNotNone(normalized)
         assert normalized is not None
-        self.assertTrue(bool(normalized["fallback_attempted"]))
+        self.assertFalse(bool(normalized["fallback_attempted"]))
         self.assertFalse(bool(normalized["dispatch_uncertain"]))
         self.assertFalse(bool(normalized["cli_fallback_used"]))
-        self.assertEqual("docker", normalized["selected_provider"])
-        self.assertEqual("workspace", normalized["final_provider"])
-        self.assertEqual("docker:abc123", normalized["provider_dispatch_id"])
+        self.assertEqual("kubernetes", normalized["selected_provider"])
+        self.assertEqual("kubernetes", normalized["final_provider"])
+        self.assertEqual("kubernetes:default/job-1", normalized["provider_dispatch_id"])
         self.assertEqual(["task:1", "run:2", "flowchart:3"], task_scope_rooms(
             task_id=1,
             run_id=2,
@@ -194,10 +194,10 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
             )
             return int(flowchart.id), int(run.id)
 
-    def _capture_node_completed_runtime(self, provider: str) -> list[dict[str, object]]:
+    def _capture_node_completed_runtime(self) -> list[dict[str, object]]:
         self.save_node_executor_settings(
             {
-                "provider": provider,
+                "provider": "kubernetes",
                 "workspace_identity_key": "workspace-main",
             }
         )
@@ -217,11 +217,9 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
             self.studio_tasks.run_flowchart.run(flowchart_id, run_id)
         return captured
 
-    def test_runtime_schema_matches_across_workspace_and_docker_selection(self) -> None:
-        workspace_events = self._capture_node_completed_runtime("workspace")
-        docker_events = self._capture_node_completed_runtime("docker")
-        self.assertGreaterEqual(len(workspace_events), 1)
-        self.assertGreaterEqual(len(docker_events), 1)
+    def test_runtime_schema_matches_for_kubernetes_selection(self) -> None:
+        kubernetes_events = self._capture_node_completed_runtime()
+        self.assertGreaterEqual(len(kubernetes_events), 1)
 
         expected_keys = {
             "selected_provider",
@@ -236,24 +234,16 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
             "cli_fallback_used",
             "cli_preflight_passed",
         }
-        for payload in workspace_events + docker_events:
+        for payload in kubernetes_events:
             self.assertEqual(expected_keys, set(payload.keys()))
 
         self.assertEqual(
-            {"workspace"},
-            {str(item["selected_provider"]) for item in workspace_events},
+            {"kubernetes"},
+            {str(item["selected_provider"]) for item in kubernetes_events},
         )
         self.assertEqual(
-            {"workspace"},
-            {str(item["final_provider"]) for item in workspace_events},
-        )
-        self.assertEqual(
-            {"docker"},
-            {str(item["selected_provider"]) for item in docker_events},
-        )
-        self.assertEqual(
-            {"workspace"},
-            {str(item["final_provider"]) for item in docker_events},
+            {"kubernetes"},
+            {str(item["final_provider"]) for item in kubernetes_events},
         )
 
 

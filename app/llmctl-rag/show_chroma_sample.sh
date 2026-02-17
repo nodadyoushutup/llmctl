@@ -123,7 +123,7 @@ then
 chromadb is not available in your current Python environment.
 
 If you're using the llmctl-rag container, run this script inside it:
-  docker compose -f docker/docker-compose.yml exec -T llmctl-rag \
+  kubectl -n llmctl exec deploy/llmctl-rag -- \
     bash -lc "CHROMA_COLLECTION=${CHROMA_COLLECTION} /app/app/llmctl-rag/show_chroma_sample.sh"
 
 Or install deps locally:

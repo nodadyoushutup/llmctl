@@ -58,54 +58,39 @@ class NodeExecutorStage2Tests(unittest.TestCase):
 
     def test_node_executor_settings_bootstrap_defaults(self) -> None:
         settings = load_node_executor_settings()
-        self.assertEqual("workspace", settings.get("provider"))
-        self.assertEqual("workspace", settings.get("fallback_provider"))
-        self.assertEqual("true", settings.get("fallback_enabled"))
-        self.assertEqual("10", settings.get("docker_api_stall_seconds"))
+        self.assertEqual("kubernetes", settings.get("provider"))
         self.assertEqual("0", settings.get("k8s_gpu_limit"))
+        self.assertEqual("1800", settings.get("k8s_job_ttl_seconds"))
         self.assertEqual("default", settings.get("workspace_identity_key"))
 
     def test_node_executor_settings_save_and_validate(self) -> None:
         with self.assertRaises(ValueError):
-            save_node_executor_settings({"docker_api_stall_seconds": "12"})
-        with self.assertRaises(ValueError):
             save_node_executor_settings({"workspace_identity_key": "/tmp/workspace"})
         with self.assertRaises(ValueError):
-            save_node_executor_settings({"docker_env_json": "[]"})
-        with self.assertRaises(ValueError):
             save_node_executor_settings({"k8s_image_pull_secrets_json": "{}"})
+        with self.assertRaises(ValueError):
+            save_node_executor_settings({"provider": "docker"})
 
         updated = save_node_executor_settings(
             {
-                "provider": "docker",
-                "fallback_provider": "workspace",
-                "fallback_enabled": "true",
-                "fallback_on_dispatch_error": "true",
-                "docker_api_stall_seconds": "15",
+                "provider": "kubernetes",
                 "workspace_identity_key": "workspace-prod",
-                "docker_image": "llmctl-executor:latest",
                 "k8s_image": "llmctl-executor@sha256:" + ("a" * 64),
                 "k8s_gpu_limit": "2",
+                "k8s_job_ttl_seconds": "2400",
             }
         )
-        self.assertEqual("docker", updated.get("provider"))
-        self.assertEqual("15", updated.get("docker_api_stall_seconds"))
+        self.assertEqual("kubernetes", updated.get("provider"))
         self.assertEqual("workspace-prod", updated.get("workspace_identity_key"))
         self.assertEqual("2", updated.get("k8s_gpu_limit"))
+        self.assertEqual("2400", updated.get("k8s_job_ttl_seconds"))
 
     def test_node_executor_settings_db_overrides_env_defaults(self) -> None:
-        save_node_executor_settings(
-            {
-                "provider": "docker",
-                "docker_host": "unix:///var/run/docker.sock",
-            }
-        )
-        with patch.object(Config, "NODE_EXECUTOR_PROVIDER", "kubernetes"), patch.object(
-            Config, "NODE_EXECUTOR_DOCKER_HOST", "unix:///tmp/env-docker.sock"
-        ):
+        save_node_executor_settings({"k8s_namespace": "llmctl"})
+        with patch.object(Config, "NODE_EXECUTOR_PROVIDER", "workspace"):
             settings = load_node_executor_settings()
-        self.assertEqual("docker", settings.get("provider"))
-        self.assertEqual("unix:///var/run/docker.sock", settings.get("docker_host"))
+        self.assertEqual("kubernetes", settings.get("provider"))
+        self.assertEqual("llmctl", settings.get("k8s_namespace"))
 
     def test_run_metadata_normalization_rules(self) -> None:
         with self.assertRaises(ValueError):
@@ -117,22 +102,23 @@ class NodeExecutorStage2Tests(unittest.TestCase):
             )
         normalized = normalize_node_executor_run_metadata(
             {
-                "selected_provider": "docker",
-                "final_provider": "docker",
-                "provider_dispatch_id": "docker:abc123",
+                "selected_provider": "kubernetes",
+                "final_provider": "kubernetes",
+                "provider_dispatch_id": "kubernetes:default/job-123",
                 "workspace_identity": "default",
-                "dispatch_status": "fallback_started",
-                "fallback_attempted": "true",
-                "fallback_reason": "dispatch_timeout",
+                "dispatch_status": "dispatch_confirmed",
+                "fallback_attempted": "false",
+                "fallback_reason": "",
                 "dispatch_uncertain": "false",
                 "api_failure_category": "api_unreachable",
-                "cli_fallback_used": "true",
-                "cli_preflight_passed": "true",
+                "cli_fallback_used": "false",
+                "cli_preflight_passed": "",
             }
         )
-        self.assertEqual("workspace", normalized.get("final_provider"))
-        self.assertEqual("fallback_started", normalized.get("dispatch_status"))
-        self.assertEqual("dispatch_timeout", normalized.get("fallback_reason"))
+        self.assertEqual("kubernetes", normalized.get("final_provider"))
+        self.assertEqual("dispatch_confirmed", normalized.get("dispatch_status"))
+        self.assertEqual("", normalized.get("fallback_reason"))
+        self.assertEqual("false", normalized.get("fallback_attempted"))
 
     def test_effective_config_summary_redacts_kubeconfig(self) -> None:
         save_node_executor_settings({"k8s_kubeconfig": "apiVersion: v1"})
@@ -161,28 +147,19 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         response = self.client.post(
             "/settings/runtime/node-executor",
             data={
-                "provider": "docker",
-                "fallback_provider": "workspace",
-                "fallback_enabled": "true",
-                "fallback_on_dispatch_error": "true",
+                "provider": "kubernetes",
                 "dispatch_timeout_seconds": "120",
                 "execution_timeout_seconds": "2400",
                 "log_collection_timeout_seconds": "45",
                 "cancel_grace_timeout_seconds": "20",
                 "cancel_force_kill_enabled": "true",
-                "workspace_root": "/tmp/workspaces",
                 "workspace_identity_key": "default",
-                "docker_host": "unix:///var/run/docker.sock",
-                "docker_image": "llmctl-executor:latest",
-                "docker_network": "bridge",
-                "docker_pull_policy": "if_not_present",
-                "docker_env_json": "{\"A\":\"B\"}",
-                "docker_api_stall_seconds": "5",
                 "k8s_namespace": "default",
                 "k8s_image": "llmctl-executor:latest",
                 "k8s_in_cluster": "true",
                 "k8s_service_account": "executor",
                 "k8s_gpu_limit": "1",
+                "k8s_job_ttl_seconds": "900",
                 "k8s_kubeconfig": "",
                 "k8s_image_pull_secrets_json": "[]",
             },
@@ -192,11 +169,11 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertIn("/settings/runtime", response.headers["Location"])
 
         settings = load_node_executor_settings()
-        self.assertEqual("docker", settings.get("provider"))
+        self.assertEqual("kubernetes", settings.get("provider"))
         self.assertEqual("120", settings.get("dispatch_timeout_seconds"))
-        self.assertEqual("5", settings.get("docker_api_stall_seconds"))
         self.assertEqual("true", settings.get("k8s_in_cluster"))
         self.assertEqual("1", settings.get("k8s_gpu_limit"))
+        self.assertEqual("900", settings.get("k8s_job_ttl_seconds"))
 
     def test_agent_task_node_executor_metadata_defaults(self) -> None:
         with session_scope() as session:
@@ -207,8 +184,8 @@ class NodeExecutorStage2Tests(unittest.TestCase):
             stored = session.execute(
                 select(AgentTask).where(AgentTask.id == task_id)
             ).scalar_one()
-            self.assertEqual("workspace", stored.selected_provider)
-            self.assertEqual("workspace", stored.final_provider)
+            self.assertEqual("kubernetes", stored.selected_provider)
+            self.assertEqual("kubernetes", stored.final_provider)
             self.assertEqual("dispatch_pending", stored.dispatch_status)
             self.assertFalse(stored.fallback_attempted)
             self.assertFalse(stored.dispatch_uncertain)

@@ -118,8 +118,8 @@ def create_app() -> Flask:
     app = Flask(__name__, template_folder=str(template_dir))
     app.config.from_object(Config)
     _configure_proxy_middleware(app)
-    _configure_socketio_api_prefix_alias(app)
     init_socketio(app)
+    _configure_socketio_api_prefix_alias(app)
 
     init_engine(app.config["SQLALCHEMY_DATABASE_URI"])
     init_db()

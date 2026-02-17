@@ -8,16 +8,14 @@ import stat
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from services.execution.contracts import (
     EXECUTION_CONTRACT_VERSION,
-    EXECUTION_DISPATCH_FALLBACK_STARTED,
     EXECUTION_DISPATCH_CONFIRMED,
     EXECUTION_DISPATCH_FAILED,
-    EXECUTION_PROVIDER_WORKSPACE,
     EXECUTION_STATUS_FAILED,
     EXECUTION_STATUS_SUCCESS,
     ExecutionRequest,
@@ -31,7 +29,7 @@ _EXECUTOR_LABEL_KEY = "llmctl.executor"
 _EXECUTOR_LABEL_VALUE = "true"
 _RESULT_PREFIX = "LLMCTL_EXECUTOR_RESULT_JSON="
 _START_MARKER_LITERAL = "LLMCTL_EXECUTOR_STARTED"
-_DEFAULT_JOB_TTL_SECONDS = 24 * 3600
+_DEFAULT_JOB_TTL_SECONDS = 1800
 
 
 def _utcnow() -> datetime:
@@ -173,6 +171,12 @@ class KubernetesExecutor:
             minimum=0,
             maximum=8,
         )
+        job_ttl_seconds = _as_int(
+            settings.get("k8s_job_ttl_seconds"),
+            default=_DEFAULT_JOB_TTL_SECONDS,
+            minimum=60,
+            maximum=24 * 3600,
+        )
         dispatch_timeout = _as_int(
             settings.get("dispatch_timeout_seconds"),
             default=60,
@@ -201,19 +205,6 @@ class KubernetesExecutor:
             settings.get("cancel_force_kill_enabled"),
             default=True,
         )
-        fallback_enabled = _as_bool(settings.get("fallback_enabled"), default=True)
-        fallback_on_dispatch_error = _as_bool(
-            settings.get("fallback_on_dispatch_error"),
-            default=True,
-        )
-        fallback_provider = str(settings.get("fallback_provider") or "workspace").strip().lower()
-        fallback_allowed = (
-            fallback_enabled
-            and fallback_on_dispatch_error
-            and fallback_provider == "workspace"
-            and not request.fallback_attempted
-            and not request.dispatch_uncertain
-        )
 
         try:
             outcome = self._dispatch_via_kubernetes(
@@ -230,20 +221,12 @@ class KubernetesExecutor:
                 log_collection_timeout=log_collection_timeout,
                 cancel_grace_timeout=cancel_grace_timeout,
                 cancel_force_kill=cancel_force_kill,
+                job_ttl_seconds=job_ttl_seconds,
             )
         except _KubernetesDispatchFailure as exc:
             provider_dispatch_id = (
                 f"kubernetes:{namespace}/{exc.job_name}" if exc.job_name else None
             )
-            if fallback_allowed and not exc.dispatch_uncertain:
-                return self._execute_workspace_fallback(
-                    request=request,
-                    execute_callback=execute_callback,
-                    started_at=started_at,
-                    fallback_reason=exc.fallback_reason,
-                    provider_dispatch_id=provider_dispatch_id,
-                    dispatch_failure_message=exc.message,
-                )
             return self._dispatch_failed_result(
                 request=request,
                 started_at=started_at,
@@ -371,6 +354,7 @@ class KubernetesExecutor:
         log_collection_timeout: int,
         cancel_grace_timeout: int,
         cancel_force_kill: bool,
+        job_ttl_seconds: int,
     ) -> _KubernetesDispatchOutcome:
         kubeconfig_path: str | None = None
         try:
@@ -380,7 +364,10 @@ class KubernetesExecutor:
                 kubeconfig=kubeconfig,
             )
             self._kubectl_preflight(kubectl_args, dispatch_timeout=dispatch_timeout)
-            self._prune_completed_jobs(kubectl_args)
+            self._prune_completed_jobs(
+                kubectl_args,
+                job_ttl_seconds=job_ttl_seconds,
+            )
             payload_json = self._build_executor_payload_json(
                 request=request,
                 execution_timeout=execution_timeout,
@@ -396,6 +383,7 @@ class KubernetesExecutor:
                 image_pull_secrets=image_pull_secrets,
                 k8s_gpu_limit=k8s_gpu_limit,
                 execution_timeout=execution_timeout,
+                job_ttl_seconds=job_ttl_seconds,
             )
             self._kubectl_apply_manifest(
                 kubectl_args,
@@ -525,6 +513,7 @@ class KubernetesExecutor:
         image_pull_secrets: list[dict[str, str]],
         k8s_gpu_limit: int,
         execution_timeout: int,
+        job_ttl_seconds: int,
     ) -> dict[str, Any]:
         labels = self._job_labels(request)
         resources: dict[str, dict[str, str]] = {
@@ -564,7 +553,7 @@ class KubernetesExecutor:
             },
             "spec": {
                 "backoffLimit": 0,
-                "ttlSecondsAfterFinished": _DEFAULT_JOB_TTL_SECONDS,
+                "ttlSecondsAfterFinished": max(60, min(job_ttl_seconds, 24 * 3600)),
                 "template": {
                     "metadata": {"labels": labels},
                     "spec": template_spec,
@@ -892,12 +881,17 @@ class KubernetesExecutor:
             check=False,
         )
 
-    def _prune_completed_jobs(self, kubectl_args: list[str]) -> None:
+    def _prune_completed_jobs(
+        self,
+        kubectl_args: list[str],
+        *,
+        job_ttl_seconds: int,
+    ) -> None:
         try:
             jobs = self._list_executor_jobs(kubectl_args)
         except _KubernetesDispatchFailure:
             return
-        cutoff = _utcnow() - timedelta(seconds=_DEFAULT_JOB_TTL_SECONDS)
+        cutoff = _utcnow() - timedelta(seconds=max(60, int(job_ttl_seconds)))
         for job in jobs:
             metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
             status = job.get("status") if isinstance(job.get("status"), dict) else {}
@@ -942,125 +936,6 @@ class KubernetesExecutor:
                 except json.JSONDecodeError:
                     executor_result = None
         return startup_seen, executor_result
-
-    def _execute_workspace_fallback(
-        self,
-        *,
-        request: ExecutionRequest,
-        execute_callback,
-        started_at: datetime,
-        fallback_reason: str,
-        provider_dispatch_id: str | None,
-        dispatch_failure_message: str,
-    ) -> ExecutionResult:
-        fallback_request = replace(
-            request,
-            selected_provider=self.provider,
-            final_provider=EXECUTION_PROVIDER_WORKSPACE,
-            provider_dispatch_id=f"workspace:workspace-{request.execution_id}",
-            dispatch_status=EXECUTION_DISPATCH_FALLBACK_STARTED,
-            fallback_attempted=True,
-            fallback_reason=fallback_reason,
-            dispatch_uncertain=False,
-            api_failure_category=None,
-            cli_fallback_used=False,
-            cli_preflight_passed=None,
-        )
-        fallback_dispatch_id = str(fallback_request.provider_dispatch_id or "").strip()
-        if fallback_dispatch_id and not register_dispatch_key(
-            request.execution_id,
-            fallback_dispatch_id,
-        ):
-            return self._dispatch_failed_result(
-                request=request,
-                started_at=started_at,
-                message=(
-                    "Duplicate fallback dispatch detected for this node run; "
-                    "refusing to execute callback twice."
-                ),
-                provider_dispatch_id=fallback_dispatch_id,
-                dispatch_submitted=True,
-                dispatch_uncertain=True,
-                fallback_attempted=True,
-                fallback_reason=fallback_reason,
-                stdout="",
-                stderr="",
-            )
-        try:
-            output_state, routing_state = execute_callback(fallback_request)
-        except Exception as exc:
-            finished_at = _utcnow()
-            return ExecutionResult(
-                contract_version=EXECUTION_CONTRACT_VERSION,
-                status=EXECUTION_STATUS_FAILED,
-                exit_code=1,
-                started_at=started_at,
-                finished_at=finished_at,
-                stdout="",
-                stderr="",
-                error={
-                    "code": "execution_error",
-                    "message": f"Workspace fallback execution failed: {exc}",
-                    "retryable": False,
-                },
-                provider_metadata={
-                    "executor_provider": self.provider,
-                    "selected_provider": self.provider,
-                    "final_provider": EXECUTION_PROVIDER_WORKSPACE,
-                    "dispatch_failure": dispatch_failure_message,
-                    "fallback_reason": fallback_reason,
-                },
-                output_state={},
-                routing_state={},
-                run_metadata={
-                    "selected_provider": self.provider,
-                    "final_provider": EXECUTION_PROVIDER_WORKSPACE,
-                    "provider_dispatch_id": fallback_request.provider_dispatch_id,
-                    "workspace_identity": request.workspace_identity,
-                    "dispatch_status": EXECUTION_DISPATCH_FAILED,
-                    "fallback_attempted": True,
-                    "fallback_reason": fallback_reason,
-                    "dispatch_uncertain": False,
-                    "api_failure_category": None,
-                    "cli_fallback_used": False,
-                    "cli_preflight_passed": None,
-                },
-            )
-
-        finished_at = _utcnow()
-        return ExecutionResult(
-            contract_version=EXECUTION_CONTRACT_VERSION,
-            status=EXECUTION_STATUS_SUCCESS,
-            exit_code=0,
-            started_at=started_at,
-            finished_at=finished_at,
-            stdout="",
-            stderr="",
-            error=None,
-            provider_metadata={
-                "executor_provider": self.provider,
-                "selected_provider": self.provider,
-                "final_provider": EXECUTION_PROVIDER_WORKSPACE,
-                "dispatch_failure": dispatch_failure_message,
-                "fallback_reason": fallback_reason,
-                "prior_provider_dispatch_id": provider_dispatch_id,
-            },
-            output_state=output_state,
-            routing_state=routing_state,
-            run_metadata={
-                "selected_provider": self.provider,
-                "final_provider": EXECUTION_PROVIDER_WORKSPACE,
-                "provider_dispatch_id": fallback_request.provider_dispatch_id,
-                "workspace_identity": request.workspace_identity,
-                "dispatch_status": EXECUTION_DISPATCH_CONFIRMED,
-                "fallback_attempted": True,
-                "fallback_reason": fallback_reason,
-                "dispatch_uncertain": False,
-                "api_failure_category": None,
-                "cli_fallback_used": False,
-                "cli_preflight_passed": None,
-            },
-        )
 
     def _dispatch_failed_result(
         self,

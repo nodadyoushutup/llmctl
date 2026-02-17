@@ -12,10 +12,10 @@ python3 -m venv .venv
 pip install -r app/llmctl-rag/requirements.txt
 ```
 
-2) Ensure Chroma is running (from repo root)
+2) Ensure Chroma is running in Kubernetes (from repo root)
 
 ```
-docker compose -f docker/docker-compose.yml up -d llmctl-chromadb
+kubectl apply -f kubernetes/chromadb.yaml
 ```
 
 3) Index the repo (from repo root)

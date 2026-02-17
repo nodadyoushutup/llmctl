@@ -58,10 +58,11 @@ Goal: eliminate TOML usage for MCP server configuration and persistence, using J
 - [x] Acceptance criteria: automated coverage reflects JSON-only MCP behavior and guards against TOML regressions.
 
 ## Stage 6 - Automated Testing
-- [ ] Run targeted backend test suites for MCP/web/runtime/seed/integration paths.
+- [x] Run targeted backend test suites for MCP/web/runtime/seed/integration paths.
 - [x] Run any necessary lint/type checks relevant to touched code.
 - [x] Fix regressions discovered by automated checks.
 - [ ] Acceptance criteria: all executed automated checks pass.
+- [ ] Follow-up: `test_google_cloud_integrated_mcp_stage10.py` still fails in current baseline because it initializes SQLite while runtime enforces PostgreSQL-only.
 
 ## Stage 7 - Docs Updates
 - [x] Update backend/docs references from TOML MCP config to JSON MCP config.

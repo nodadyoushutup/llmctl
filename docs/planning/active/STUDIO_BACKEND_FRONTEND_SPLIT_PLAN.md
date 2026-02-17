@@ -48,32 +48,38 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 ## Stage 2 - Backend Rename and Path Migration
 - [x] Move Flask app from `app/llmctl-studio` to `app/llmctl-studio-backend`.
 - [x] Update all path references across runtime/build tooling:
-- [x] Update `docker/docker-compose.yml` bind mounts and build Dockerfile path.
+- [x] Update runtime bind-mount/build wiring paths for the renamed backend target.
 - [x] Update `kubernetes-overlays/minikube-live-code/studio-live-code-patch.yaml` mount paths.
 - [x] Update script paths and any direct references in repo configs and docs.
 - [x] Validate backend still boots after rename with no behavior change.
 - [x] Acceptance criteria: backend starts successfully from renamed path, and no stale `app/llmctl-studio` runtime dependency remains.
 
 ## Stage 3 - Backend API Boundary Hardening (`/api`) with Legacy GUI Retained
-- [ ] Introduce or enforce `/api` prefix for backend programmatic endpoints used by React.
-- [ ] Keep existing server-rendered GUI routes active during parity migration (temporary coexistence mode).
-- [ ] Ensure backend session/auth/CSRF behavior remains correct for both legacy GUI and React API calls.
-- [ ] Update Socket.IO/API path configuration to remain backend-reachable through ingress path strategy.
-- [ ] Acceptance criteria: API traffic is cleanly namespaced under `/api`, and legacy GUI continues functioning until Stage 9 cleanup.
+- [x] Introduce or enforce `/api` prefix for backend programmatic endpoints used by React.
+- [x] Keep existing server-rendered GUI routes active during parity migration (temporary coexistence mode).
+- [x] Ensure backend session/auth/CSRF behavior remains correct for both legacy GUI and React API calls.
+- [x] Update Socket.IO/API path configuration to remain backend-reachable through ingress path strategy.
+- [x] Acceptance criteria: API traffic is cleanly namespaced under `/api`, and legacy GUI continues functioning until Stage 9 cleanup.
 
 ## Stage 4 - Frontend App Bootstrap (`app/llmctl-studio-frontend`)
-- [ ] Create Vite + React app using `.jsx` source files in `app/llmctl-studio-frontend`.
-- [ ] Add frontend env model for backend base URL/path (`/api`) and realtime endpoint settings.
-- [ ] Implement base app shell, router, and shared layout/navigation skeleton.
-- [ ] Add shared HTTP client utilities with consistent error/auth handling.
-- [ ] Acceptance criteria: frontend app builds/runs and can call backend `/api` health/read endpoints.
+- [x] Create Vite + React app using `.jsx` source files in `app/llmctl-studio-frontend`.
+- [x] Add frontend env model for backend base URL/path (`/api`) and realtime endpoint settings.
+- [x] Implement base app shell, router, and shared layout/navigation skeleton.
+- [x] Add shared HTTP client utilities with consistent error/auth handling.
+- [x] Acceptance criteria: frontend app builds/runs and can call backend `/api` health/read endpoints.
 
 ## Stage 5 - Frontend Full-Parity Migration Waves
-- [ ] Build a page-by-page parity checklist derived from current Flask template routes.
+- [x] Build a page-by-page parity checklist derived from current Flask template routes.
 - [ ] Migrate all existing GUI sections to React in waves (dashboard/list/detail/forms/settings/chat/flowcharts/rag/etc.).
 - [ ] Preserve behavior parity for mutations, validation, long-running task feedback, and realtime updates.
-- [ ] Keep backend template UI as fallback until all parity checks are complete.
+- [x] Keep backend template UI as fallback until all parity checks are complete.
 - [ ] Acceptance criteria: every legacy GUI page/flow has an equivalent React implementation and passes parity checklist.
+
+## Stage 5 - Wave 1 Progress
+- [x] Add parity tracker view and checklist data source in React (`/parity-checklist`).
+- [x] Migrate chat activity read flow to React (`/chat/activity` via `/api/chat/activity`).
+- [x] Migrate chat thread detail read flow to React (`/chat/threads/:threadId` via `/api/chat/threads/:threadId`).
+- [ ] Continue Wave 2+ section migrations until full checklist parity is complete.
 
 ## Stage 6 - Split Containerization for Backend/Frontend
 - [ ] Backend container:
@@ -81,9 +87,9 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [ ] Update backend Dockerfile location/path references after rename.
 - [ ] Frontend container:
 - [ ] Add Dockerfile for Vite/React build and static serving strategy.
-- [ ] Add `llmctl-studio-frontend` service to `docker/docker-compose.yml`.
+- [ ] Add Kubernetes deployment/service wiring for `llmctl-studio-frontend`.
 - [ ] Wire frontend-to-backend networking in Compose using `/api` routing assumptions.
-- [ ] Acceptance criteria: `docker compose` can run backend and frontend as separate containers with working API calls.
+- [ ] Acceptance criteria: Kubernetes can run backend and frontend as separate workloads with working API calls.
 
 ## Stage 7 - Kubernetes Resource Split (Backend + Frontend)
 - [ ] Add backend-specific manifests (deployment/service/config/secret wiring) under new naming.

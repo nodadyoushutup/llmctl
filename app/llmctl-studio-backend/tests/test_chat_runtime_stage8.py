@@ -22,8 +22,10 @@ if str(STUDIO_APP_ROOT) not in sys.path:
 import core.db as core_db
 from chat.contracts import (
     CHAT_REASON_MCP_FAILED,
+    RAGContractError,
     RAG_HEALTH_CONFIGURED_HEALTHY,
     RAG_HEALTH_CONFIGURED_UNHEALTHY,
+    RAG_REASON_RETRIEVAL_FAILED,
     RAG_REASON_UNAVAILABLE,
 )
 from chat.rag_client import StubRAGContractClient
@@ -285,6 +287,37 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
             self.assertIsNotNone(turn)
             self.assertEqual(CHAT_TURN_STATUS_FAILED, turn.status if turn else None)
 
+    def test_rag_health_timeout_returns_failure_result(self) -> None:
+        model = self._create_model(name="RAG Health Timeout Model")
+        thread = create_thread(
+            title="RAG Health Timeout",
+            model_id=model.id,
+            rag_collections=["docs"],
+        )
+        thread_id = int(thread["id"])
+
+        class _HealthTimeoutRagClient:
+            def health(self):
+                raise RAGContractError(
+                    reason_code=RAG_REASON_RETRIEVAL_FAILED,
+                    message="health timeout",
+                )
+
+            def retrieve(self, payload):
+                raise AssertionError("retrieve should not be called when health fails")
+
+        with patch("chat.runtime._run_llm") as mocked_llm:
+            result = execute_turn(
+                thread_id=thread_id,
+                message="Need retrieval",
+                rag_client=_HealthTimeoutRagClient(),
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(RAG_REASON_RETRIEVAL_FAILED, result.reason_code)
+        self.assertEqual("health timeout", result.error)
+        mocked_llm.assert_not_called()
+
     def test_rag_selected_without_retrieval_context_fails_closed(self) -> None:
         model = self._create_model(name="RAG Empty Context Model")
         thread = create_thread(
@@ -311,6 +344,34 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
             "No retrieval context was found for selected collections.",
             str(result.error),
         )
+        mocked_llm.assert_not_called()
+
+    def test_rag_retrieval_unexpected_error_returns_failure_result(self) -> None:
+        model = self._create_model(name="RAG Unexpected Error Model")
+        thread = create_thread(
+            title="RAG Unexpected Error",
+            model_id=model.id,
+            rag_collections=["docs"],
+        )
+        thread_id = int(thread["id"])
+
+        class _BrokenRagClient:
+            def health(self):
+                return type("Health", (), {"state": RAG_HEALTH_CONFIGURED_HEALTHY, "provider": "chroma"})()
+
+            def retrieve(self, payload):
+                raise TimeoutError("timed out")
+
+        with patch("chat.runtime._run_llm") as mocked_llm:
+            result = execute_turn(
+                thread_id=thread_id,
+                message="Need retrieval",
+                rag_client=_BrokenRagClient(),
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(RAG_REASON_RETRIEVAL_FAILED, result.reason_code)
+        self.assertEqual("RAG retrieval failed unexpectedly.", result.error)
         mocked_llm.assert_not_called()
 
     def test_citation_metadata_persisted_but_not_prompt_context(self) -> None:

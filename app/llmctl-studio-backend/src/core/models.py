@@ -50,25 +50,19 @@ def ensure_legacy_skill_script_writable(value: str | None) -> None:
         raise ValueError(LEGACY_SKILL_SCRIPT_WRITE_ERROR)
 
 RUN_ACTIVE_STATUSES = ("starting", "running", "stopping")
-NODE_EXECUTOR_PROVIDER_WORKSPACE = "workspace"
-NODE_EXECUTOR_PROVIDER_DOCKER = "docker"
 NODE_EXECUTOR_PROVIDER_KUBERNETES = "kubernetes"
 NODE_EXECUTOR_PROVIDER_CHOICES = (
-    NODE_EXECUTOR_PROVIDER_WORKSPACE,
-    NODE_EXECUTOR_PROVIDER_DOCKER,
     NODE_EXECUTOR_PROVIDER_KUBERNETES,
 )
 NODE_EXECUTOR_DISPATCH_PENDING = "dispatch_pending"
 NODE_EXECUTOR_DISPATCH_SUBMITTED = "dispatch_submitted"
 NODE_EXECUTOR_DISPATCH_CONFIRMED = "dispatch_confirmed"
 NODE_EXECUTOR_DISPATCH_FAILED = "dispatch_failed"
-NODE_EXECUTOR_DISPATCH_FALLBACK_STARTED = "fallback_started"
 NODE_EXECUTOR_DISPATCH_STATUS_CHOICES = (
     NODE_EXECUTOR_DISPATCH_PENDING,
     NODE_EXECUTOR_DISPATCH_SUBMITTED,
     NODE_EXECUTOR_DISPATCH_CONFIRMED,
     NODE_EXECUTOR_DISPATCH_FAILED,
-    NODE_EXECUTOR_DISPATCH_FALLBACK_STARTED,
 )
 NODE_EXECUTOR_FALLBACK_REASON_CHOICES = (
     "provider_unavailable",
@@ -926,14 +920,14 @@ class AgentTask(BaseModel):
     selected_provider: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        default=NODE_EXECUTOR_PROVIDER_WORKSPACE,
-        server_default=text("'workspace'"),
+        default=NODE_EXECUTOR_PROVIDER_KUBERNETES,
+        server_default=text("'kubernetes'"),
     )
     final_provider: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        default=NODE_EXECUTOR_PROVIDER_WORKSPACE,
-        server_default=text("'workspace'"),
+        default=NODE_EXECUTOR_PROVIDER_KUBERNETES,
+        server_default=text("'kubernetes'"),
     )
     provider_dispatch_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True

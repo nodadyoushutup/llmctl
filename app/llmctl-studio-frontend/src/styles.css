@@ -1,0 +1,282 @@
+:root {
+  font-family: 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif;
+  line-height: 1.45;
+  font-weight: 400;
+  color: #f4f7ff;
+  background: radial-gradient(circle at 20% 10%, #264868, #0c1623 42%, #081019 80%);
+  text-rendering: geometricPrecision;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.app-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.top-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  padding: 1.25rem;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(45, 106, 162, 0.88), rgba(11, 33, 53, 0.92));
+  border: 1px solid rgba(188, 223, 255, 0.28);
+}
+
+.top-bar h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2.2vw, 2rem);
+}
+
+.eyebrow {
+  margin: 0 0 0.3rem;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: #c9ddf9;
+}
+
+.top-nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.top-nav-link {
+  text-decoration: none;
+  color: #e3efff;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.top-nav-link:hover {
+  border-color: rgba(230, 241, 255, 0.45);
+}
+
+.top-nav-link-active {
+  background: rgba(4, 20, 36, 0.5);
+  border-color: rgba(230, 241, 255, 0.65);
+}
+
+.main-panel {
+  display: grid;
+}
+
+.stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  border-radius: 1rem;
+  background: rgba(8, 23, 37, 0.82);
+  border: 1px solid rgba(172, 205, 234, 0.28);
+  padding: 1rem;
+  box-shadow: 0 14px 30px rgba(2, 11, 19, 0.35);
+}
+
+.card h2 {
+  margin-top: 0;
+}
+
+.card ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.7rem;
+  margin-top: 0.9rem;
+}
+
+.stat-item {
+  border-radius: 0.65rem;
+  padding: 0.65rem;
+  background: rgba(19, 41, 58, 0.72);
+  border: 1px solid rgba(172, 205, 234, 0.28);
+  display: grid;
+  gap: 0.2rem;
+}
+
+.stat-item span {
+  font-size: 0.78rem;
+  color: #c8daef;
+}
+
+.stat-item strong {
+  font-size: 1.3rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.parity-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.parity-table th,
+.parity-table td {
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid rgba(172, 205, 234, 0.2);
+  vertical-align: top;
+}
+
+.parity-table thead th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #bfd8f3;
+}
+
+.status-chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-migrated {
+  background: rgba(52, 173, 126, 0.18);
+  color: #89f2c6;
+  border: 1px solid rgba(108, 232, 176, 0.48);
+}
+
+.status-in_progress {
+  background: rgba(219, 171, 66, 0.18);
+  color: #ffdf9b;
+  border: 1px solid rgba(255, 216, 126, 0.48);
+}
+
+.status-planned {
+  background: rgba(114, 147, 191, 0.18);
+  color: #c8dbfa;
+  border: 1px solid rgba(179, 202, 237, 0.36);
+}
+
+.legacy-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.92rem;
+}
+
+.activity-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.activity-item {
+  padding: 0.7rem;
+  border-radius: 0.7rem;
+  background: rgba(11, 29, 44, 0.78);
+  border: 1px solid rgba(172, 205, 234, 0.2);
+}
+
+.activity-item header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.activity-item header span {
+  font-size: 0.85rem;
+  color: #bed6f0;
+}
+
+.runtime-panel {
+  border-radius: 1rem;
+  background: rgba(2, 16, 27, 0.75);
+  border: 1px solid rgba(172, 205, 234, 0.22);
+  padding: 1rem;
+}
+
+.runtime-panel h2 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.runtime-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.runtime-panel li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.6rem;
+  background: rgba(22, 44, 62, 0.58);
+}
+
+code,
+pre {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+pre {
+  margin: 0.7rem 0 0;
+  overflow-x: auto;
+  padding: 0.8rem;
+  border-radius: 0.6rem;
+  background: rgba(3, 11, 18, 0.92);
+  border: 1px solid rgba(164, 207, 241, 0.18);
+}
+
+a {
+  color: #9fd2ff;
+}
+
+.error-text {
+  color: #ffb7b7;
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  #root {
+    padding: 0.8rem;
+  }
+
+  .top-bar {
+    align-items: start;
+  }
+
+  .top-nav {
+    width: 100%;
+  }
+}
