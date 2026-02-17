@@ -3,7 +3,8 @@ set -euo pipefail
 
 PROFILE="${MINIKUBE_PROFILE:-llmctl}"
 MOUNT_TARGET="${MINIKUBE_LIVE_CODE_TARGET:-/workspace/llmctl}"
-PROJECT_ROOT_INPUT="${1:-$(pwd)}"
+DEFAULT_PROJECT_ROOT="/home/nodadyoushutup/llmctl"
+PROJECT_ROOT_INPUT="${1:-${DEFAULT_PROJECT_ROOT}}"
 
 fail() {
   echo "[minikube-live-code-mount.sh] ERROR: $*" >&2

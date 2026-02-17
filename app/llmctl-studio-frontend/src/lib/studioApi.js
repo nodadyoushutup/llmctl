@@ -270,3 +270,280 @@ export function createQuickTask({
     },
   })
 }
+
+export function getPlans({ page = 1, perPage = 20 } = {}) {
+  return requestJson(
+    appendQuery('/plans', {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
+    }),
+  )
+}
+
+export function getPlan(planId) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  return requestJson(`/plans/${parsedPlanId}`)
+}
+
+export function getPlanMeta() {
+  return requestJson('/plans/new')
+}
+
+export function getPlanEdit(planId) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  return requestJson(`/plans/${parsedPlanId}/edit`)
+}
+
+export function updatePlan(planId, { name = '', description = '', completedAt = '' } = {}) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  return requestJson(`/plans/${parsedPlanId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      completed_at: completedAt,
+    },
+  })
+}
+
+export function deletePlan(planId) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  return requestJson(`/plans/${parsedPlanId}/delete`, { method: 'POST' })
+}
+
+export function createPlanStage(planId, { name = '', description = '', completedAt = '' } = {}) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  return requestJson(`/plans/${parsedPlanId}/stages`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      completed_at: completedAt,
+    },
+  })
+}
+
+export function updatePlanStage(
+  planId,
+  stageId,
+  { name = '', description = '', completedAt = '' } = {},
+) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const parsedStageId = parsePositiveId(stageId, 'stageId')
+  return requestJson(`/plans/${parsedPlanId}/stages/${parsedStageId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      completed_at: completedAt,
+    },
+  })
+}
+
+export function deletePlanStage(planId, stageId) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const parsedStageId = parsePositiveId(stageId, 'stageId')
+  return requestJson(`/plans/${parsedPlanId}/stages/${parsedStageId}/delete`, {
+    method: 'POST',
+  })
+}
+
+export function createPlanTask(
+  planId,
+  stageId,
+  { name = '', description = '', completedAt = '' } = {},
+) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const parsedStageId = parsePositiveId(stageId, 'stageId')
+  return requestJson(`/plans/${parsedPlanId}/stages/${parsedStageId}/tasks`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      completed_at: completedAt,
+    },
+  })
+}
+
+export function updatePlanTask(
+  planId,
+  stageId,
+  taskId,
+  { name = '', description = '', completedAt = '' } = {},
+) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const parsedStageId = parsePositiveId(stageId, 'stageId')
+  const parsedTaskId = parsePositiveId(taskId, 'taskId')
+  return requestJson(`/plans/${parsedPlanId}/stages/${parsedStageId}/tasks/${parsedTaskId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      completed_at: completedAt,
+    },
+  })
+}
+
+export function deletePlanTask(planId, stageId, taskId) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const parsedStageId = parsePositiveId(stageId, 'stageId')
+  const parsedTaskId = parsePositiveId(taskId, 'taskId')
+  return requestJson(`/plans/${parsedPlanId}/stages/${parsedStageId}/tasks/${parsedTaskId}/delete`, {
+    method: 'POST',
+  })
+}
+
+export function getMilestones({ page = 1, perPage = 20 } = {}) {
+  return requestJson(
+    appendQuery('/milestones', {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
+    }),
+  )
+}
+
+export function getMilestoneMeta() {
+  return requestJson('/milestones/new')
+}
+
+export function getMilestone(milestoneId) {
+  const parsedMilestoneId = parsePositiveId(milestoneId, 'milestoneId')
+  return requestJson(`/milestones/${parsedMilestoneId}`)
+}
+
+export function getMilestoneEdit(milestoneId) {
+  const parsedMilestoneId = parsePositiveId(milestoneId, 'milestoneId')
+  return requestJson(`/milestones/${parsedMilestoneId}/edit`)
+}
+
+export function updateMilestone(
+  milestoneId,
+  {
+    name = '',
+    description = '',
+    status = '',
+    priority = '',
+    owner = '',
+    startDate = '',
+    dueDate = '',
+    progressPercent = 0,
+    health = '',
+    successCriteria = '',
+    dependencies = '',
+    links = '',
+    latestUpdate = '',
+  } = {},
+) {
+  const parsedMilestoneId = parsePositiveId(milestoneId, 'milestoneId')
+  return requestJson(`/milestones/${parsedMilestoneId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      status,
+      priority,
+      owner,
+      start_date: startDate,
+      due_date: dueDate,
+      progress_percent: progressPercent,
+      health,
+      success_criteria: successCriteria,
+      dependencies,
+      links,
+      latest_update: latestUpdate,
+    },
+  })
+}
+
+export function deleteMilestone(milestoneId) {
+  const parsedMilestoneId = parsePositiveId(milestoneId, 'milestoneId')
+  return requestJson(`/milestones/${parsedMilestoneId}/delete`, { method: 'POST' })
+}
+
+export function getMemories({ page = 1, perPage = 20 } = {}) {
+  return requestJson(
+    appendQuery('/memories', {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
+    }),
+  )
+}
+
+export function getMemoryMeta() {
+  return requestJson('/memories/new')
+}
+
+export function getMemory(memoryId) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  return requestJson(`/memories/${parsedMemoryId}`)
+}
+
+export function getMemoryEdit(memoryId) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  return requestJson(`/memories/${parsedMemoryId}/edit`)
+}
+
+export function updateMemory(memoryId, { description = '' } = {}) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  return requestJson(`/memories/${parsedMemoryId}`, {
+    method: 'POST',
+    body: { description },
+  })
+}
+
+export function deleteMemory(memoryId) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  return requestJson(`/memories/${parsedMemoryId}/delete`, { method: 'POST' })
+}
+
+export function getTaskTemplates({ page = 1, perPage = 20 } = {}) {
+  return requestJson(
+    appendQuery('/task-templates', {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
+    }),
+  )
+}
+
+export function getTaskTemplateMeta() {
+  return requestJson('/task-templates/new')
+}
+
+export function getTaskTemplate(templateId) {
+  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
+  return requestJson(`/task-templates/${parsedTemplateId}`)
+}
+
+export function getTaskTemplateEdit(templateId) {
+  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
+  return requestJson(`/task-templates/${parsedTemplateId}/edit`)
+}
+
+export function updateTaskTemplate(
+  templateId,
+  { name = '', description = '', prompt = '', agentId = null } = {},
+) {
+  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
+  return requestJson(`/task-templates/${parsedTemplateId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      prompt,
+      agent_id: agentId,
+    },
+  })
+}
+
+export function removeTaskTemplateAttachment(templateId, attachmentId) {
+  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
+  const parsedAttachmentId = parsePositiveId(attachmentId, 'attachmentId')
+  return requestJson(`/task-templates/${parsedTemplateId}/attachments/${parsedAttachmentId}/remove`, {
+    method: 'POST',
+  })
+}
+
+export function deleteTaskTemplate(templateId) {
+  const parsedTemplateId = parsePositiveId(templateId, 'templateId')
+  return requestJson(`/task-templates/${parsedTemplateId}/delete`, { method: 'POST' })
+}

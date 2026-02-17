@@ -18,7 +18,7 @@ ArgoCD tracks this as one application (`llmctl-studio`) for core services. pgAdm
 - `kubernetes/llmctl-studio/base/`: core llmctl manifests (namespace, redis, postgres, chromadb, integrated MCP services, Studio backend/frontend, celery worker/beat, ingress, and example secrets).
 - `kubernetes/llmctl-studio/overlays/dev/`: single deployable overlay for llmctl-studio resources (Harbor image overrides + live-code mounts + executor live-code config).
 - `kubernetes/llmctl-studio/argocd-application.yaml`: ArgoCD Application for the core stack at `kubernetes/llmctl-studio/overlays/dev`.
-- `kubernetes/pgadmin/`: pgAdmin namespace/manifests, secret example, and pgAdmin ArgoCD application.
+- `kubernetes/pgadmin/`: pgAdmin secret example and ArgoCD application (Helm chart source).
 - `kubernetes/argocd-harbor-application.yaml`: ArgoCD Application that installs Harbor from the upstream Helm chart into `llmctl-harbor`.
 
 ## Quick start
@@ -185,7 +185,7 @@ Create the pgAdmin ArgoCD application resource:
 kubectl apply -f kubernetes/pgadmin/argocd-application.yaml
 ```
 
-This tracks repo path `kubernetes/pgadmin` on `main`, which deploys pgAdmin into namespace `llmctl-pgadmin` while connecting to PostgreSQL in namespace `llmctl`.
+This installs `runix/pgadmin4` chart `1.59.0` from `https://helm.runix.net` into namespace `llmctl-pgadmin`, with NodePort HTTP exposed on `30156` and PostgreSQL bootstrap wired for `llmctl-postgres.llmctl.svc.cluster.local`.
 
 If you are migrating from older bundled pgAdmin resources in namespace `llmctl`, remove them before syncing `llmctl-pgadmin` to avoid NodePort `30156` conflicts:
 
@@ -278,7 +278,6 @@ If Harbor pull auth is needed, edit `kubernetes/llmctl-studio/base/harbor-pull-s
 
 Edit `kubernetes/pgadmin/pgadmin-secret.example.yaml` for:
 
-- `PGADMIN_DEFAULT_EMAIL` (required)
 - `PGADMIN_DEFAULT_PASSWORD` (required)
 - `LLMCTL_POSTGRES_PASSWORD` (required, must match `llmctl` PostgreSQL password)
 

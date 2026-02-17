@@ -6,9 +6,113 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/nodadyoushutup/llmctl.git
-    targetRevision: main
-    path: kubernetes/pgadmin
+    repoURL: https://helm.runix.net
+    chart: pgadmin4
+    targetRevision: 1.59.0
+    helm:
+      releaseName: llmctl-pgadmin
+      values: |
+        fullnameOverride: llmctl-pgadmin
+
+        existingSecret: llmctl-pgadmin-secrets
+        secretKeys:
+          pgadminPasswordKey: PGADMIN_DEFAULT_PASSWORD
+
+        env:
+          email: admin@example.com
+          pgpassfile: /pgpass/pgpassfile
+          enhanced_cookie_protection: "False"
+          variables:
+            - name: PGADMIN_LISTEN_PORT
+              value: "5050"
+
+        service:
+          type: NodePort
+          port: 5050
+          targetPort: http
+          portName: http
+          nodePort: 30156
+        containerPorts:
+          http: 5050
+
+        revisionHistoryLimit: 0
+        networkPolicy:
+          enabled: false
+        test:
+          enabled: false
+
+        persistentVolume:
+          enabled: true
+          size: 1Gi
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        startupProbe:
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 6
+        livenessProbe:
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          timeoutSeconds: 3
+
+        serverDefinitions:
+          enabled: true
+          resourceType: ConfigMap
+          servers:
+            llmctl-postgres:
+              Name: llmctl-postgres
+              Group: llmctl
+              Host: llmctl-postgres.llmctl.svc.cluster.local
+              Port: "5432"
+              MaintenanceDB: llmctl_studio
+              Username: llmctl
+              PassFile: /pgpass/pgpassfile
+              SSLMode: prefer
+
+        extraVolumes:
+          - name: pgpass
+            emptyDir: {}
+        extraVolumeMounts:
+          - name: pgpass
+            mountPath: /pgpass
+        extraInitContainers: |
+          - name: pgpass-bootstrap
+            image: alpine:3.20
+            imagePullPolicy: IfNotPresent
+            command:
+              - /bin/sh
+              - -c
+            args:
+              - |
+                set -eu
+                printf '%s:%s:%s:%s:%s\n' \
+                  "llmctl-postgres.llmctl.svc.cluster.local" \
+                  "5432" \
+                  "llmctl_studio" \
+                  "llmctl" \
+                  "${LLMCTL_POSTGRES_PASSWORD}" > /pgpass/pgpassfile
+                chmod 600 /pgpass/pgpassfile
+            env:
+              - name: LLMCTL_POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: llmctl-pgadmin-secrets
+                    key: LLMCTL_POSTGRES_PASSWORD
+            volumeMounts:
+              - name: pgpass
+                mountPath: /pgpass
   destination:
     server: https://kubernetes.default.svc
     namespace: llmctl-pgadmin

@@ -1,13 +1,11 @@
-# Kubernetes pgAdmin manifests
+# Kubernetes pgAdmin ArgoCD app
 
-This folder deploys `llmctl-pgadmin` into its own namespace (`llmctl-pgadmin`) and keeps it connected to the core PostgreSQL service in `llmctl`.
+This folder defines `llmctl-pgadmin` as an ArgoCD Application sourced from the upstream `runix/pgadmin4` Helm chart. It deploys into `llmctl-pgadmin` and connects to the core PostgreSQL service in `llmctl`.
 
 ## Files
 
-- `namespace.yaml`: `llmctl-pgadmin` namespace.
-- `pgadmin-configmap.yaml`: PostgreSQL connection settings used by pgAdmin bootstrap.
-- `pgadmin.yaml`: pgAdmin PVC, Deployment, and NodePort Service (`30156`).
-- `pgadmin-secret.example.yaml`: required secret template for pgAdmin login and PostgreSQL password.
+- `argocd-application.yaml`: ArgoCD Application that installs Helm chart `pgadmin4` version `1.59.0` from `https://helm.runix.net`.
+- `pgadmin-secret.example.yaml`: required secret template for pgAdmin password and PostgreSQL password.
 
 ## Quick start
 
@@ -15,16 +13,16 @@ This folder deploys `llmctl-pgadmin` into its own namespace (`llmctl-pgadmin`) a
 cp kubernetes/pgadmin/pgadmin-secret.example.yaml /tmp/llmctl-pgadmin-secret.yaml
 # edit /tmp/llmctl-pgadmin-secret.yaml
 kubectl apply -f /tmp/llmctl-pgadmin-secret.yaml
-kubectl apply -k kubernetes/pgadmin
+kubectl apply -f kubernetes/pgadmin/argocd-application.yaml
 ```
 
-If migrating from the legacy bundled pgAdmin in namespace `llmctl`, remove the old resources first to avoid NodePort conflict on `30156`:
+If migrating from the legacy bundled pgAdmin in namespace `llmctl`, remove old resources first to avoid NodePort conflict on `30156`:
 
 ```bash
 kubectl -n llmctl delete svc/llmctl-pgadmin deploy/llmctl-pgadmin pvc/llmctl-pgadmin-data --ignore-not-found
 ```
 
-Guard before ArgoCD sync or `kubectl apply -k`:
+Guard before ArgoCD sync:
 
 ```bash
 kubectl -n llmctl-pgadmin get secret llmctl-pgadmin-secrets
@@ -32,7 +30,8 @@ kubectl -n llmctl-pgadmin get secret llmctl-pgadmin-secrets
 
 Important:
 
-- Set `LLMCTL_POSTGRES_PASSWORD` in `kubernetes/pgadmin/pgadmin-secret.example.yaml` to the same value used by `llmctl` PostgreSQL (`llmctl-studio-secrets` in namespace `llmctl`), otherwise pgAdmin cannot connect.
+- Set `LLMCTL_POSTGRES_PASSWORD` in `kubernetes/pgadmin/pgadmin-secret.example.yaml` to match the `llmctl` PostgreSQL password (`llmctl-studio-secrets` in namespace `llmctl`), otherwise pgAdmin cannot connect.
+- Default pgAdmin login email is `admin@example.com` (configured in `kubernetes/pgadmin/argocd-application.yaml` Helm values).
 
 Port-forward pgAdmin:
 

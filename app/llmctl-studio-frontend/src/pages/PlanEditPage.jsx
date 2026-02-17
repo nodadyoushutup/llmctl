@@ -1,0 +1,148 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { HttpError } from '../lib/httpClient'
+import { getPlanEdit, updatePlan } from '../lib/studioApi'
+
+function parseId(value) {
+  const parsed = Number.parseInt(String(value || ''), 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function errorMessage(error, fallback) {
+  if (error instanceof HttpError) {
+    if (error.isAuthError) {
+      return `${error.message} Sign in to Studio if authentication is enabled.`
+    }
+    return error.message
+  }
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
+
+function toInputDateTime(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized || normalized === '-') {
+    return ''
+  }
+  if (normalized.includes(' ')) {
+    return normalized.replace(' ', 'T')
+  }
+  return normalized
+}
+
+export default function PlanEditPage() {
+  const navigate = useNavigate()
+  const { planId } = useParams()
+  const parsedPlanId = useMemo(() => parseId(planId), [planId])
+  const [state, setState] = useState({ loading: true, payload: null, error: '' })
+  const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    completedAt: '',
+  })
+
+  useEffect(() => {
+    if (!parsedPlanId) {
+      setState({ loading: false, payload: null, error: 'Invalid plan id.' })
+      return
+    }
+    let cancelled = false
+    getPlanEdit(parsedPlanId)
+      .then((payload) => {
+        if (!cancelled) {
+          const plan = payload && payload.plan && typeof payload.plan === 'object' ? payload.plan : null
+          setState({ loading: false, payload, error: '' })
+          if (plan) {
+            setForm({
+              name: String(plan.name || ''),
+              description: String(plan.description || ''),
+              completedAt: toInputDateTime(plan.completed_at),
+            })
+          }
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load plan edit data.') })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [parsedPlanId])
+
+  const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
+  const plan = payload && payload.plan && typeof payload.plan === 'object' ? payload.plan : null
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (!parsedPlanId) {
+      return
+    }
+    setFormError('')
+    setSaving(true)
+    try {
+      await updatePlan(parsedPlanId, form)
+      navigate(`/plans/${parsedPlanId}`)
+    } catch (error) {
+      setFormError(errorMessage(error, 'Failed to update plan.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="stack" aria-label="Edit plan">
+      <article className="card">
+        <div className="title-row">
+          <h2>{plan ? `Edit ${plan.name}` : 'Edit Plan'}</h2>
+          <div className="table-actions">
+            {plan ? <Link to={`/plans/${plan.id}`} className="btn-link btn-secondary">Back to Plan</Link> : null}
+            <Link to="/plans" className="btn-link btn-secondary">All Plans</Link>
+          </div>
+        </div>
+        {state.loading ? <p>Loading plan...</p> : null}
+        {state.error ? <p className="error-text">{state.error}</p> : null}
+        {formError ? <p className="error-text">{formError}</p> : null}
+        {!state.loading && !state.error ? (
+          <form className="form-grid" onSubmit={handleSubmit}>
+            <label className="field">
+              <span>Name</span>
+              <input
+                type="text"
+                required
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Completed at (optional)</span>
+              <input
+                type="text"
+                placeholder="YYYY-MM-DDTHH:MM"
+                value={form.completedAt}
+                onChange={(event) => setForm((current) => ({ ...current, completedAt: event.target.value }))}
+              />
+            </label>
+            <label className="field field-span">
+              <span>Description (optional)</span>
+              <textarea
+                value={form.description}
+                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              />
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="btn-link" disabled={saving}>
+                {saving ? 'Saving...' : 'Save Plan'}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </article>
+    </section>
+  )
+}
