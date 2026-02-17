@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -5704,7 +5705,18 @@ def _flowchart_as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _request_path_uses_api_prefix() -> bool:
+    api_prefix = str(current_app.config.get("API_PREFIX", "/api")).strip() or "/api"
+    if api_prefix == "/":
+        return False
+    normalized_prefix = f"/{api_prefix.strip('/')}"
+    path = request.path or ""
+    return path == normalized_prefix or path.startswith(f"{normalized_prefix}/")
+
+
 def _flowchart_wants_json() -> bool:
+    if _request_path_uses_api_prefix():
+        return True
     if (request.args.get("format") or "").strip().lower() == "json":
         return True
     accepted = request.accept_mimetypes
@@ -5715,6 +5727,8 @@ def _flowchart_wants_json() -> bool:
 
 
 def _run_wants_json() -> bool:
+    if _request_path_uses_api_prefix():
+        return True
     if (request.args.get("format") or "").strip().lower() == "json":
         return True
     accepted = request.accept_mimetypes
@@ -7946,6 +7960,11 @@ def create_quick_task():
 
     flash(f"Quick node {task_id} queued.", "success")
     return redirect(url_for("agents.view_node", task_id=task_id))
+
+
+@bp.get("/api/health")
+def api_health():
+    return {"ok": True, "service": "llmctl-studio-backend"}
 
 
 @bp.get("/api/chat/threads/<int:thread_id>")

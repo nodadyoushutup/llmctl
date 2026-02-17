@@ -49,6 +49,13 @@ def _env_str(name: str, default: str) -> str:
     return text or default
 
 
+def _env_path_prefix(name: str, default: str) -> str:
+    value = _env_str(name, default).strip()
+    if value == "/":
+        return "/"
+    return f"/{value.strip('/')}"
+
+
 def _build_studio_database_uri() -> str:
     direct_uri = os.getenv("LLMCTL_STUDIO_DATABASE_URI", "").strip()
     if direct_uri:
@@ -103,6 +110,7 @@ class Config:
         )
 
     SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev")
+    API_PREFIX = _env_path_prefix("LLMCTL_STUDIO_API_PREFIX", "/api")
     PREFERRED_URL_SCHEME = os.getenv("LLMCTL_STUDIO_PREFERRED_URL_SCHEME", "http")
 
     # Reverse proxy trust controls. Keep disabled unless explicitly enabled.

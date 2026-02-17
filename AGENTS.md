@@ -41,6 +41,13 @@
 - Use the host-installed Codex skill `chromium-screenshot` (from `~/.codex/skills`) for frontend screenshot capture policy, naming conventions, and cleanup workflow.
 - For frontend-impacting changes, capture and review at least one screenshot and mention the artifact path in the final update.
 
+# ArgoCD GitOps Workflow
+
+- Use the host-installed Codex skill `argocd-commit-push-autosync` (from `~/.codex/skills`) when a task is ready to restart/redeploy/sync in an ArgoCD-monitored repo.
+- Enforce order: commit and push current workspace repository changes first, then enable ArgoCD autosync.
+- Run `~/.codex/skills/argocd-commit-push-autosync/scripts/commit_push_enable_autosync.sh --app <argocd-app-name>`.
+- Default ArgoCD behavior for this workflow is autosync enablement with `--auto-prune --self-heal` (no immediate one-off sync).
+
 # Docker Reload Behavior
 
 - If a task changes only UI files (templates, CSS, JS, or other frontend assets), restart the impacted web container so changes are visible immediately.
