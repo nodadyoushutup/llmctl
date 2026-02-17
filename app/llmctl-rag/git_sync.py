@@ -6,6 +6,8 @@ from pathlib import Path
 
 from db import KNOWN_HOSTS_PATH
 
+_SAFE_DIRECTORY_ARG = "safe.directory=*"
+
 
 def run_git(
     args: list[str],
@@ -14,7 +16,7 @@ def run_git(
 ) -> str:
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", "-c", _SAFE_DIRECTORY_ARG, *args],
             cwd=str(cwd) if cwd else None,
             check=False,
             capture_output=True,

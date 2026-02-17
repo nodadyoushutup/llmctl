@@ -178,6 +178,43 @@ class RagStage9RuntimeTests(StudioDbTestCase):
         self.assertEqual(["docs"], output_state.get("collections"))
         self.assertEqual(4, (output_state.get("retrieval_stats") or {}).get("total_files"))
 
+    def test_quick_rag_run_uses_node_config_model_provider(self) -> None:
+        with patch.object(
+            studio_tasks,
+            "run_index_for_collections",
+            return_value={
+                "mode": "fresh_index",
+                "collections": ["docs"],
+                "source_count": 1,
+                "total_files": 2,
+                "total_chunks": 5,
+                "sources": [{"source_id": 1, "source_name": "Docs"}],
+            },
+        ) as mocked_index:
+            output_state, _routing_state = studio_tasks._execute_flowchart_rag_node(
+                node_id=999_999,
+                node_config={
+                    "mode": "fresh_index",
+                    "collections": ["docs"],
+                    "model_provider": "gemini",
+                },
+                input_context={
+                    "kind": "rag_quick_run",
+                    "rag_quick_run": {"source_id": 1},
+                },
+                execution_id=501,
+                default_model_id=None,
+            )
+
+        mocked_index.assert_called_once_with(
+            mode="fresh_index",
+            collections=["docs"],
+            model_provider="gemini",
+        )
+        self.assertEqual("gemini", output_state.get("model_provider"))
+        self.assertIsNone(output_state.get("model_id"))
+        self.assertEqual("", output_state.get("model_name"))
+
     def test_flowchart_run_executes_rag_node_in_each_mode(self) -> None:
         for mode in ("fresh_index", "delta_index", "query"):
             with self.subTest(mode=mode):

@@ -7,6 +7,7 @@ const navSections = [
     label: 'Agent',
     items: [
       { id: 'agents', to: '/agents', label: 'Agents', icon: 'fa-solid fa-robot' },
+      { id: 'roles', to: '/roles', label: 'Roles', icon: 'fa-solid fa-scroll' },
       { id: 'skills', to: '/skills', label: 'Skills', icon: 'fa-solid fa-wand-magic-sparkles' },
     ],
   },

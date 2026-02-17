@@ -10,6 +10,10 @@ import AgentsPage from './pages/AgentsPage'
 import AgentDetailPage from './pages/AgentDetailPage'
 import AgentEditPage from './pages/AgentEditPage'
 import AgentNewPage from './pages/AgentNewPage'
+import RolesPage from './pages/RolesPage'
+import RoleDetailPage from './pages/RoleDetailPage'
+import RoleEditPage from './pages/RoleEditPage'
+import RoleNewPage from './pages/RoleNewPage'
 import RunsPage from './pages/RunsPage'
 import RunDetailPage from './pages/RunDetailPage'
 import RunEditPage from './pages/RunEditPage'
@@ -92,6 +96,10 @@ export default function App() {
         <Route path="/agents/new" element={<AppLayout><AgentNewPage /></AppLayout>} />
         <Route path="/agents/:agentId" element={<AppLayout><AgentDetailPage /></AppLayout>} />
         <Route path="/agents/:agentId/edit" element={<AppLayout><AgentEditPage /></AppLayout>} />
+        <Route path="/roles" element={<AppLayout><RolesPage /></AppLayout>} />
+        <Route path="/roles/new" element={<AppLayout><RoleNewPage /></AppLayout>} />
+        <Route path="/roles/:roleId" element={<AppLayout><RoleDetailPage /></AppLayout>} />
+        <Route path="/roles/:roleId/edit" element={<AppLayout><RoleEditPage /></AppLayout>} />
         <Route path="/runs" element={<AppLayout><RunsPage /></AppLayout>} />
         <Route path="/runs/new" element={<AppLayout><RunNewPage /></AppLayout>} />
         <Route path="/runs/:runId" element={<AppLayout><RunDetailPage /></AppLayout>} />

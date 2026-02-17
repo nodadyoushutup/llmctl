@@ -105,6 +105,10 @@ import {
   getPlanMeta,
   getPlans,
   getQuickTaskMeta,
+  getRole,
+  getRoleEdit,
+  getRoleMeta,
+  getRoles,
   getRun,
   getRunEdit,
   getRunMeta,
@@ -294,6 +298,30 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(8, '/agents/4/stop', { method: 'POST' })
   })
 
+  test('role endpoints map to expected api paths', () => {
+    getRoles()
+    getRoleMeta()
+    getRole(6)
+    getRoleEdit(6)
+    createRole({ name: 'Reviewer', description: 'Reviews code', detailsJson: '{"scope":"repo"}' })
+    updateRole(6, { name: 'Reviewer+', description: 'Updated', detailsJson: '{"scope":"org"}' })
+    deleteRole(6)
+
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/roles')
+    expect(requestJson).toHaveBeenNthCalledWith(2, '/roles/new')
+    expect(requestJson).toHaveBeenNthCalledWith(3, '/roles/6')
+    expect(requestJson).toHaveBeenNthCalledWith(4, '/roles/6/edit')
+    expect(requestJson).toHaveBeenNthCalledWith(5, '/roles', {
+      method: 'POST',
+      body: { name: 'Reviewer', description: 'Reviews code', details_json: '{"scope":"repo"}' },
+    })
+    expect(requestJson).toHaveBeenNthCalledWith(6, '/roles/6', {
+      method: 'POST',
+      body: { name: 'Reviewer+', description: 'Updated', details_json: '{"scope":"org"}' },
+    })
+    expect(requestJson).toHaveBeenNthCalledWith(7, '/roles/6/delete', { method: 'POST' })
+  })
+
   test('agent priority and skill mutation endpoints map to expected api paths', () => {
     createAgentPriority(3, 'Do high-value work first')
     updateAgentPriority(3, 7, 'Updated')
@@ -336,6 +364,8 @@ describe('studioApi', () => {
     expect(() => deleteAgent(0)).toThrow('agentId must be a positive integer.')
     expect(() => attachAgentSkill(2, 'x')).toThrow('skillId must be a positive integer.')
     expect(() => updateAgentPriority(2, 'bad', 'x')).toThrow('priorityId must be a positive integer.')
+    expect(() => getRole('bad')).toThrow('roleId must be a positive integer.')
+    expect(() => deleteRole(0)).toThrow('roleId must be a positive integer.')
   })
 
   test('stage 3 runs endpoints map to expected api paths', () => {
@@ -1298,7 +1328,3 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(20, '/rag/sources/10/delete', { method: 'POST' })
   })
 })
-  getRole,
-  getRoleEdit,
-  getRoleMeta,
-  getRoles,

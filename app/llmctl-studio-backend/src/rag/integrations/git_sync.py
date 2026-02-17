@@ -8,6 +8,7 @@ from core.config import Config
 
 
 KNOWN_HOSTS_PATH = Path(Config.DATA_DIR) / "known_hosts"
+_SAFE_DIRECTORY_ARG = "safe.directory=*"
 
 
 def run_git(
@@ -17,7 +18,7 @@ def run_git(
 ) -> str:
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", "-c", _SAFE_DIRECTORY_ARG, *args],
             cwd=str(cwd) if cwd else None,
             check=False,
             capture_output=True,

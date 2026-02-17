@@ -6928,17 +6928,23 @@ def _execute_flowchart_rag_node(
     if not collections:
         raise ValueError("RAG node requires at least one selected collection.")
 
-    with session_scope() as session:
-        node = session.get(FlowchartNode, node_id)
-        if node is None:
-            raise ValueError(f"Flowchart node {node_id} was not found.")
-        model = _resolve_node_model(
-            session,
-            node=node,
-            default_model_id=default_model_id,
-        )
-
-    model_provider = str(model.provider or "").strip().lower()
+    model = None
+    is_quick_rag_run = str(input_context.get("kind") or "").strip().lower() == "rag_quick_run"
+    if is_quick_rag_run:
+        model_provider = _normalize_quick_rag_model_provider(node_config.get("model_provider"))
+    else:
+        with session_scope() as session:
+            node = session.get(FlowchartNode, node_id)
+            if node is None:
+                raise ValueError(f"Flowchart node {node_id} was not found.")
+            model = _resolve_node_model(
+                session,
+                node=node,
+                default_model_id=default_model_id,
+            )
+        model_provider = str(model.provider or "").strip().lower()
+    model_id = getattr(model, "id", None)
+    model_name = str(getattr(model, "name", "") or "")
     if mode in {RAG_FLOWCHART_MODE_FRESH_INDEX, RAG_FLOWCHART_MODE_DELTA_INDEX}:
         if model_provider not in {"codex", "gemini"}:
             raise ValueError(
@@ -6965,8 +6971,8 @@ def _execute_flowchart_rag_node(
             "mode": mode,
             "collections": collections,
             "index_summary": index_summary,
-            "model_id": model.id,
-            "model_name": model.name,
+            "model_id": model_id,
+            "model_name": model_name,
             "model_provider": model_provider,
         }
         return output_state, {}
@@ -7058,8 +7064,8 @@ def _execute_flowchart_rag_node(
     output_state = {
         "node_type": FLOWCHART_NODE_TYPE_RAG,
         **query_result,
-        "model_id": model.id,
-        "model_name": model.name,
+        "model_id": model_id,
+        "model_name": model_name,
         "model_provider": model_provider,
     }
     return output_state, {}
