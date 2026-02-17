@@ -37,6 +37,8 @@ _EXECUTOR_ARGOCD_APP_NAME_ENV = "LLMCTL_NODE_EXECUTOR_K8S_ARGOCD_APP_NAME"
 _EXECUTOR_ARGOCD_APP_NAME_DEFAULT = "llmctl-studio"
 _ARGOCD_INSTANCE_LABEL_KEY = "app.kubernetes.io/instance"
 _ARGOCD_TRACKING_ID_ANNOTATION_KEY = "argocd.argoproj.io/tracking-id"
+_ARGOCD_COMPARE_OPTIONS_ANNOTATION_KEY = "argocd.argoproj.io/compare-options"
+_ARGOCD_IGNORE_EXTRANEOUS_COMPARE_OPTION = "IgnoreExtraneous"
 _POD_ENV_ALLOWLIST = {
     "LLMCTL_STUDIO_DATABASE_URI",
     "LLMCTL_POSTGRES_HOST",
@@ -640,6 +642,9 @@ class KubernetesExecutor:
             labels[_ARGOCD_INSTANCE_LABEL_KEY] = argocd_app_name
             metadata_annotations[_ARGOCD_TRACKING_ID_ANNOTATION_KEY] = (
                 f"{argocd_app_name}:batch/Job:{namespace}/{job_name}"
+            )
+            metadata_annotations[_ARGOCD_COMPARE_OPTIONS_ANNOTATION_KEY] = (
+                _ARGOCD_IGNORE_EXTRANEOUS_COMPARE_OPTION
             )
         resources: dict[str, dict[str, str]] = {
             "requests": {"cpu": "100m", "memory": "128Mi"},

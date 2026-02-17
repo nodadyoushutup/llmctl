@@ -334,6 +334,10 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             "llmctl-studio:batch/Job:llmctl/job-argocd",
             annotations.get("argocd.argoproj.io/tracking-id"),
         )
+        self.assertEqual(
+            "IgnoreExtraneous",
+            annotations.get("argocd.argoproj.io/compare-options"),
+        )
 
     def test_build_executor_payload_contains_full_node_request(self) -> None:
         executor = KubernetesExecutor({})
