@@ -20,16 +20,16 @@ Status key:
 - [x] Quick+Nodes full route coverage (`/quick`, `/nodes`, `/nodes/new`, `/nodes/:id`) [Native React].
 
 ## Wave 3 - Planning and Knowledge Objects
-- [x] Plans list/detail/edit + stage/task mutations [Legacy Bridge].
-- [x] Milestones list/detail/edit [Legacy Bridge].
-- [x] Task templates CRUD [Legacy Bridge].
-- [x] Memories CRUD [Legacy Bridge].
+- [x] Plans list/detail/edit + stage/task mutations [Native React].
+- [x] Milestones list/detail/edit [Native React].
+- [x] Task templates list/detail/edit/delete + flowchart-managed create policy [Native React].
+- [x] Memories list/detail/edit/delete + flowchart-managed create policy [Native React].
 
 ## Wave 4 - Flowchart System
-- [x] Flowchart list/new/detail/edit [Legacy Bridge].
-- [x] Flowchart history and run detail [Legacy Bridge].
-- [x] Flowchart graph/runtime/validation/execution controls [Legacy Bridge].
-- [x] Flowchart node utility/model/mcp/script/skill mutations [Legacy Bridge].
+- [x] Flowchart list/new/detail/edit [Native React].
+- [x] Flowchart history and run detail [Native React].
+- [x] Flowchart graph/runtime/validation/execution controls [Native React].
+- [x] Flowchart node utility/model/mcp/script/skill mutations [Native React].
 
 ## Wave 5 - Studio Assets and Catalogs
 - [x] Skills CRUD/import/export [Legacy Bridge].

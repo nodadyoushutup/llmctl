@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
 import { getMemories } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -121,6 +122,7 @@ export default function MemoriesPage() {
                 <tr>
                   <th>Description</th>
                   <th>Created</th>
+                  <th className="table-actions-cell">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -137,6 +139,18 @@ export default function MemoriesPage() {
                         <Link to={href}>{memory.description}</Link>
                       </td>
                       <td>{memory.created_at || '-'}</td>
+                      <td className="table-actions-cell">
+                        <div className="table-actions">
+                          <Link
+                            to={`/memories/${memory.id}/edit`}
+                            className="icon-button"
+                            aria-label="Edit memory"
+                            title="Edit memory"
+                          >
+                            <ActionIcon name="edit" />
+                          </Link>
+                        </div>
+                      </td>
                     </tr>
                   )
                 })}

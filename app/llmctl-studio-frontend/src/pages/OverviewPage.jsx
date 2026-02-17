@@ -9,6 +9,7 @@ export default function OverviewPage() {
           <li>Stage 4 bootstrap remains the foundation for migration waves.</li>
           <li>Parity tracker now maps legacy Flask routes to React migration targets.</li>
           <li>Wave 1/2/3 domains now have native React coverage for core ops, planning, and memory/task surfaces.</li>
+          <li>Wave 4 flowchart system is now on native React route coverage.</li>
         </ul>
       </article>
       <article className="card">
@@ -45,6 +46,9 @@ export default function OverviewPage() {
         </p>
         <p>
           <Link to="/task-templates">Open native task templates domain</Link>
+        </p>
+        <p>
+          <Link to="/flowcharts">Open native flowcharts domain</Link>
         </p>
       </article>
     </section>

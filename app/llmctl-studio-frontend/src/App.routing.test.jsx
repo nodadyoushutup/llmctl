@@ -59,6 +59,11 @@ describe('App routing', () => {
     expect(await screen.findByText('Native React replacement for `/memories` list and detail navigation.')).toBeInTheDocument()
   })
 
+  test('flowcharts route is native react', async () => {
+    renderAt('/flowcharts')
+    expect(await screen.findByText('Native React replacement for `/flowcharts` list and row actions.')).toBeInTheDocument()
+  })
+
   test('unknown route still bridges through backend api path', async () => {
     renderAt('/does-not-exist')
     const iframe = await screen.findByTitle('Legacy Studio page')

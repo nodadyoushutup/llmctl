@@ -33,6 +33,12 @@ import TaskTemplatesPage from './pages/TaskTemplatesPage'
 import TaskTemplateDetailPage from './pages/TaskTemplateDetailPage'
 import TaskTemplateEditPage from './pages/TaskTemplateEditPage'
 import TaskTemplateNewPage from './pages/TaskTemplateNewPage'
+import FlowchartsPage from './pages/FlowchartsPage'
+import FlowchartNewPage from './pages/FlowchartNewPage'
+import FlowchartDetailPage from './pages/FlowchartDetailPage'
+import FlowchartEditPage from './pages/FlowchartEditPage'
+import FlowchartHistoryPage from './pages/FlowchartHistoryPage'
+import FlowchartRunDetailPage from './pages/FlowchartRunDetailPage'
 import LegacyMirrorPage from './pages/LegacyMirrorPage'
 import ParityChecklistPage from './pages/ParityChecklistPage'
 
@@ -74,6 +80,13 @@ export default function App() {
       <Route path="/task-templates/new" element={<AppLayout><TaskTemplateNewPage /></AppLayout>} />
       <Route path="/task-templates/:templateId" element={<AppLayout><TaskTemplateDetailPage /></AppLayout>} />
       <Route path="/task-templates/:templateId/edit" element={<AppLayout><TaskTemplateEditPage /></AppLayout>} />
+      <Route path="/flowcharts" element={<AppLayout><FlowchartsPage /></AppLayout>} />
+      <Route path="/flowcharts/new" element={<AppLayout><FlowchartNewPage /></AppLayout>} />
+      <Route path="/flowcharts/:flowchartId" element={<AppLayout><FlowchartDetailPage /></AppLayout>} />
+      <Route path="/flowcharts/:flowchartId/edit" element={<AppLayout><FlowchartEditPage /></AppLayout>} />
+      <Route path="/flowcharts/:flowchartId/history" element={<AppLayout><FlowchartHistoryPage /></AppLayout>} />
+      <Route path="/flowcharts/:flowchartId/history/:runId" element={<AppLayout><FlowchartRunDetailPage /></AppLayout>} />
+      <Route path="/flowcharts/runs/:runId" element={<AppLayout><FlowchartRunDetailPage /></AppLayout>} />
       <Route path="/overview" element={<LegacyMirrorPage />} />
       <Route path="*" element={<LegacyMirrorPage />} />
     </Routes>

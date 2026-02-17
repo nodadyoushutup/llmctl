@@ -11,6 +11,7 @@ const navItems = [
   { to: '/milestones', label: 'Milestones' },
   { to: '/memories', label: 'Memories' },
   { to: '/task-templates', label: 'Templates' },
+  { to: '/flowcharts', label: 'Flowcharts' },
   { to: '/overview', label: 'Legacy UI' },
   { to: '/parity-checklist', label: 'Parity Tracker' },
   { to: '/chat/activity', label: 'Chat Activity' },

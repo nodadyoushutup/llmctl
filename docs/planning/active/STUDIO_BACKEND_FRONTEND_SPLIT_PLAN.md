@@ -188,8 +188,8 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 ## Stage 1 - Execution Order (React-Only)
 - [x] Stage 2: Agents migration (full list/detail/create/edit/delete + role/priority/skill bindings).
 - [x] Stage 3: Runs, quick tasks, and node execution surfaces.
-- [ ] Stage 4: Task templates, plans, milestones, and memories.
-- [ ] Stage 5: Flowcharts (editor, runtime, history, run detail, node operations).
+- [x] Stage 4: Task templates, plans, milestones, and memories.
+- [x] Stage 5: Flowcharts (editor, runtime, history, run detail, node operations).
 - [ ] Stage 6: Settings, provider/runtime/chat config, and integrations.
 - [ ] Stage 7: Skills, scripts, attachments, models, MCP servers.
 - [ ] Stage 8: RAG pages and external tools surfaces (GitHub/Jira/Confluence/Chroma).
@@ -228,16 +228,33 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 - [x] Updated parity tracker entries to mark Runs and Quick Tasks + Nodes as migrated.
 
 ## Stage 4 - Templates, Plans, Milestones, Memories
-- [ ] Migrate task templates list/detail/new/edit/delete.
-- [ ] Migrate plans and milestones CRUD/detail flows.
-- [ ] Migrate memories list/detail/new/edit/delete.
-- [ ] Mark domain parity complete in tracker.
+- [x] Migrate task templates list/detail/new/edit/delete.
+- [x] Migrate plans and milestones CRUD/detail flows.
+- [x] Migrate memories list/detail/new/edit/delete.
+- [x] Mark domain parity complete in tracker.
+
+## Stage 4 - Completion Notes
+- [x] Added backend API-mode JSON coverage for plans, plan stages/tasks, milestones, memories, and task-template routes/mutations.
+- [x] Added native React routes/pages for:
+- [x] Plans: `/plans`, `/plans/new`, `/plans/:planId`, `/plans/:planId/edit`.
+- [x] Milestones: `/milestones`, `/milestones/new`, `/milestones/:milestoneId`, `/milestones/:milestoneId/edit`.
+- [x] Memories: `/memories`, `/memories/new`, `/memories/:memoryId`, `/memories/:memoryId/edit`.
+- [x] Task templates: `/task-templates`, `/task-templates/new`, `/task-templates/:templateId`, `/task-templates/:templateId/edit`.
+- [x] Updated parity tracker entries to mark Wave 3 domains as migrated.
+- [x] Added icon-only React list actions for milestones and memories while keeping `table-row-link` navigation behavior.
 
 ## Stage 5 - Flowcharts
-- [ ] Migrate flowchart list/detail/new/edit.
-- [ ] Migrate node graph editing operations and connector behavior.
-- [ ] Migrate flowchart run/history/detail surfaces and actions.
-- [ ] Mark Flowcharts parity complete in tracker.
+- [x] Migrate flowchart list/detail/new/edit.
+- [x] Migrate node graph editing operations and connector behavior.
+- [x] Migrate flowchart run/history/detail surfaces and actions.
+- [x] Mark Flowcharts parity complete in tracker.
+
+## Stage 5 - Completion Notes
+- [x] Added native React routes/pages for `/flowcharts`, `/flowcharts/new`, `/flowcharts/:flowchartId`, `/flowcharts/:flowchartId/edit`.
+- [x] Added native React history and run-detail routes/pages for `/flowcharts/:flowchartId/history`, `/flowcharts/:flowchartId/history/:runId`, and `/flowcharts/runs/:runId`.
+- [x] Added frontend API client coverage for flowchart list/detail/new/edit/delete, graph read/write/validate, runtime/run/cancel, history/run detail, and node utility mutations.
+- [x] Wired flowchart route coverage directly in React router/app nav (no flowchart bridge route dependency).
+- [x] Updated parity tracker entries/docs to mark Wave 4 flowchart system as `Native React`.
 
 ## Stage 6 - Settings and Integrations
 - [ ] Migrate settings core/provider/runtime/chat pages to React.
@@ -293,13 +310,13 @@ Objective: complete full React parity, then remove legacy Jinja/UI paths with no
 
 ## React Domain Tracker
 - [x] Agents
-- [ ] Runs
-- [ ] Quick Tasks / Nodes
-- [ ] Task Templates
-- [ ] Plans
-- [ ] Milestones
-- [ ] Memories
-- [ ] Flowcharts
+- [x] Runs
+- [x] Quick Tasks / Nodes
+- [x] Task Templates
+- [x] Plans
+- [x] Milestones
+- [x] Memories
+- [x] Flowcharts
 - [ ] Settings Core/Provider
 - [ ] Settings Runtime/Chat
 - [ ] Integrations

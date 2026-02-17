@@ -547,3 +547,215 @@ export function deleteTaskTemplate(templateId) {
   const parsedTemplateId = parsePositiveId(templateId, 'templateId')
   return requestJson(`/task-templates/${parsedTemplateId}/delete`, { method: 'POST' })
 }
+
+export function getFlowcharts() {
+  return requestJson('/flowcharts')
+}
+
+export function getFlowchartMeta() {
+  return requestJson('/flowcharts/new')
+}
+
+export function createFlowchart({
+  name = '',
+  description = '',
+  maxNodeExecutions = null,
+  maxRuntimeMinutes = null,
+  maxParallelNodes = 1,
+} = {}) {
+  return requestJson('/flowcharts', {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      max_node_executions: maxNodeExecutions,
+      max_runtime_minutes: maxRuntimeMinutes,
+      max_parallel_nodes: maxParallelNodes,
+    },
+  })
+}
+
+export function getFlowchart(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}`)
+}
+
+export function getFlowchartEdit(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/edit`)
+}
+
+export function updateFlowchart(
+  flowchartId,
+  {
+    name = '',
+    description = '',
+    maxNodeExecutions = null,
+    maxRuntimeMinutes = null,
+    maxParallelNodes = 1,
+  } = {},
+) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      max_node_executions: maxNodeExecutions,
+      max_runtime_minutes: maxRuntimeMinutes,
+      max_parallel_nodes: maxParallelNodes,
+    },
+  })
+}
+
+export function deleteFlowchart(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/delete`, { method: 'POST' })
+}
+
+export function getFlowchartGraph(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/graph`)
+}
+
+export function updateFlowchartGraph(flowchartId, { nodes = [], edges = [] } = {}) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/graph`, {
+    method: 'POST',
+    body: { nodes, edges },
+  })
+}
+
+export function validateFlowchart(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/validate`)
+}
+
+export function runFlowchart(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/run`, { method: 'POST' })
+}
+
+export function getFlowchartHistory(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/history`)
+}
+
+export function getFlowchartHistoryRun(flowchartId, runId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedRunId = parsePositiveId(runId, 'runId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/history/${parsedRunId}`)
+}
+
+export function getFlowchartRun(runId) {
+  const parsedRunId = parsePositiveId(runId, 'runId')
+  return requestJson(`/flowcharts/runs/${parsedRunId}`)
+}
+
+export function getFlowchartRunStatus(runId) {
+  const parsedRunId = parsePositiveId(runId, 'runId')
+  return requestJson(`/flowcharts/runs/${parsedRunId}/status`)
+}
+
+export function getFlowchartRuntime(flowchartId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/runtime`)
+}
+
+export function cancelFlowchartRun(runId, { force = false } = {}) {
+  const parsedRunId = parsePositiveId(runId, 'runId')
+  return requestJson(`/flowcharts/runs/${parsedRunId}/cancel`, {
+    method: 'POST',
+    body: { force },
+  })
+}
+
+export function getFlowchartNodeUtilities(flowchartId, nodeId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/utilities`)
+}
+
+export function setFlowchartNodeModel(flowchartId, nodeId, { modelId = null } = {}) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/model`, {
+    method: 'POST',
+    body: { model_id: modelId },
+  })
+}
+
+export function attachFlowchartNodeMcp(flowchartId, nodeId, { mcpServerId } = {}) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/mcp-servers`, {
+    method: 'POST',
+    body: { mcp_server_id: mcpServerId },
+  })
+}
+
+export function detachFlowchartNodeMcp(flowchartId, nodeId, mcpId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  const parsedMcpId = parsePositiveId(mcpId, 'mcpId')
+  return requestJson(
+    `/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/mcp-servers/${parsedMcpId}/delete`,
+    { method: 'POST' },
+  )
+}
+
+export function attachFlowchartNodeScript(flowchartId, nodeId, { scriptId } = {}) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/scripts`, {
+    method: 'POST',
+    body: { script_id: scriptId },
+  })
+}
+
+export function detachFlowchartNodeScript(flowchartId, nodeId, scriptId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  const parsedScriptId = parsePositiveId(scriptId, 'scriptId')
+  return requestJson(
+    `/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/scripts/${parsedScriptId}/delete`,
+    { method: 'POST' },
+  )
+}
+
+export function reorderFlowchartNodeScripts(flowchartId, nodeId, { scriptIds = [] } = {}) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/scripts/reorder`, {
+    method: 'POST',
+    body: { script_ids: scriptIds },
+  })
+}
+
+export function attachFlowchartNodeSkill(flowchartId, nodeId, { skillId } = {}) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/skills`, {
+    method: 'POST',
+    body: { skill_id: skillId },
+  })
+}
+
+export function detachFlowchartNodeSkill(flowchartId, nodeId, skillId) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  const parsedSkillId = parsePositiveId(skillId, 'skillId')
+  return requestJson(
+    `/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/skills/${parsedSkillId}/delete`,
+    { method: 'POST' },
+  )
+}
+
+export function reorderFlowchartNodeSkills(flowchartId, nodeId, { skillIds = [] } = {}) {
+  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/skills/reorder`, {
+    method: 'POST',
+    body: { skill_ids: skillIds },
+  })
+}

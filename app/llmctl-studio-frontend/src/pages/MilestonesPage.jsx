@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
 import { getMilestones } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -125,6 +126,7 @@ export default function MilestonesPage() {
                   <th>Owner</th>
                   <th>Progress</th>
                   <th>Due date</th>
+                  <th className="table-actions-cell">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -149,6 +151,18 @@ export default function MilestonesPage() {
                       <td>{milestone.owner || '-'}</td>
                       <td>{milestone.progress_percent ?? 0}%</td>
                       <td>{milestone.due_date || '-'}</td>
+                      <td className="table-actions-cell">
+                        <div className="table-actions">
+                          <Link
+                            to={`/milestones/${milestone.id}/edit`}
+                            className="icon-button"
+                            aria-label="Edit milestone"
+                            title="Edit milestone"
+                          >
+                            <ActionIcon name="edit" />
+                          </Link>
+                        </div>
+                      </td>
                     </tr>
                   )
                 })}

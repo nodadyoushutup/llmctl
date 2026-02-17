@@ -96,9 +96,10 @@ export const parityChecklist = [
     wave: 'Wave 4',
     area: 'Flowcharts',
     legacyPath: '/flowcharts',
-    reactPath: '/flowcharts',
-    status: 'bridged',
-    notes: 'Graph/runtime/history available through bridge.',
+    reactPath:
+      '/flowcharts + /flowcharts/new + /flowcharts/:flowchartId + /flowcharts/:flowchartId/edit + /flowcharts/:flowchartId/history + /flowcharts/:flowchartId/history/:runId + /flowcharts/runs/:runId',
+    status: 'migrated',
+    notes: 'Native React coverage for list/new/detail/edit/history/run-detail with graph and node utility mutations.',
   },
   {
     wave: 'Wave 5',
