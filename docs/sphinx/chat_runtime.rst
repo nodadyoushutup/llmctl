@@ -108,7 +108,12 @@ UI routes:
 
 JSON routes:
 
+- `/api/chat/runtime`
+- `/api/chat/threads` (create)
 - `/api/chat/threads/<thread_id>`
+- `/api/chat/threads/<thread_id>/config`
+- `/api/chat/threads/<thread_id>/archive`
+- `/api/chat/threads/<thread_id>/clear`
 - `/api/chat/threads/<thread_id>/turn`
 - `/api/chat/activity`
 

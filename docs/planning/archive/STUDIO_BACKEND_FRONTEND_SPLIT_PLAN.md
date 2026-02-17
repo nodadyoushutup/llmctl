@@ -120,10 +120,10 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 ## Stage 9 - Full-Parity Gate and Backend GUI Decommission
 - [x] Improve bridge routing compatibility so legacy absolute-path navigation works from `/web` bridge mode.
 - [x] Execute final parity audit against all legacy backend GUI pages/routes.
-- [ ] Remove backend template-rendered GUI routes/templates/static assets after parity is confirmed.
-- [ ] Keep backend focused on API/realtime/service responsibilities only.
-- [ ] Perform naming cleanup and dead-code removal linked to retired GUI paths.
-- [ ] Acceptance criteria: Flask backend no longer serves GUI pages, React frontend is the only user-facing UI, and parity signoff is complete.
+- [x] Remove backend template-rendered GUI routes/templates/static assets after parity is confirmed.
+- [x] Keep backend focused on API/realtime/service responsibilities only.
+- [x] Perform naming cleanup and dead-code removal linked to retired GUI paths.
+- [x] Acceptance criteria: Flask backend no longer serves GUI pages, React frontend is the only user-facing UI, and parity signoff is complete.
 
 ## Stage 9 - Bridge Compatibility Notes
 - [x] Updated frontend routing so `/web` lands on legacy `/overview` bridge by default and keeps migration-native pages at explicit routes (for example `/web/migration`).
@@ -152,11 +152,11 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] `cd app/llmctl-studio-frontend && npm run build`
 
 ## Stage 11 - Docs Updates
-- [ ] Update docs for new app structure (`app/llmctl-studio-backend`, `app/llmctl-studio-frontend`).
-- [ ] Update container build and Kubernetes usage docs for dual-container Studio deployment.
-- [ ] Update Sphinx/Read the Docs content to reflect frontend/backend separation and ingress paths (`/web`, `/api`).
-- [ ] Update any developer workflow docs (including Minikube live-code overlay instructions).
-- [ ] Acceptance criteria: documentation is consistent with implemented architecture and deployment workflow.
+- [x] Update docs for new app structure (`app/llmctl-studio-backend`, `app/llmctl-studio-frontend`).
+- [x] Update container build and Kubernetes usage docs for dual-container Studio deployment.
+- [x] Update Sphinx/Read the Docs content to reflect frontend/backend separation and ingress paths (`/web`, `/api`).
+- [x] Update any developer workflow docs (including Minikube live-code overlay instructions).
+- [x] Acceptance criteria: documentation is consistent with implemented architecture and deployment workflow.
 
 ---
 

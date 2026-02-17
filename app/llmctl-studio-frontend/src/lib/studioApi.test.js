@@ -10,15 +10,18 @@ import {
   attachFlowchartNodeMcp,
   attachFlowchartNodeScript,
   attachFlowchartNodeSkill,
+  archiveChatThread,
   cancelFlowchartRun,
   cancelNode,
   createAgent,
   createAgentPriority,
   createFlowchart,
+  createChatThread,
   createNode,
   createPlanStage,
   createPlanTask,
   createQuickTask,
+  clearChatThread,
   deleteAgent,
   deleteAgentPriority,
   deleteMemory,
@@ -39,6 +42,7 @@ import {
   getAgents,
   getBackendHealth,
   getChatActivity,
+  getChatRuntime,
   getChatThread,
   getAttachment,
   getAttachments,
@@ -133,6 +137,7 @@ import {
   setFlowchartNodeModel,
   startAgent,
   stopAgent,
+  sendChatTurn,
   createMcp,
   createModel,
   createScript,
@@ -167,6 +172,7 @@ import {
   updateMilestone,
   updateFlowchart,
   updateFlowchartGraph,
+  updateChatThreadConfig,
   updatePlan,
   updatePlanStage,
   updatePlanTask,
@@ -206,6 +212,55 @@ describe('studioApi', () => {
     )
   })
 
+  test('chat runtime mutation endpoints map to expected api paths', () => {
+    getChatRuntime()
+    getChatRuntime({ threadId: '3' })
+    createChatThread({
+      title: 'New chat',
+      modelId: 4,
+      responseComplexity: 'high',
+      mcpServerIds: [1, '2'],
+      ragCollections: ['docs', ' code '],
+    })
+    updateChatThreadConfig(5, {
+      modelId: null,
+      responseComplexity: 'medium',
+      mcpServerIds: ['7', 'bad', 8],
+      ragCollections: ['docs', ''],
+    })
+    archiveChatThread(5)
+    clearChatThread(5)
+    sendChatTurn(5, ' hello ')
+
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/chat/runtime')
+    expect(requestJson).toHaveBeenNthCalledWith(2, '/chat/runtime?thread_id=3')
+    expect(requestJson).toHaveBeenNthCalledWith(3, '/chat/threads', {
+      method: 'POST',
+      body: {
+        title: 'New chat',
+        model_id: 4,
+        response_complexity: 'high',
+        mcp_server_ids: [1, 2],
+        rag_collections: ['docs', 'code'],
+      },
+    })
+    expect(requestJson).toHaveBeenNthCalledWith(4, '/chat/threads/5/config', {
+      method: 'POST',
+      body: {
+        model_id: null,
+        response_complexity: 'medium',
+        mcp_server_ids: [7, 8],
+        rag_collections: ['docs'],
+      },
+    })
+    expect(requestJson).toHaveBeenNthCalledWith(5, '/chat/threads/5/archive', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(6, '/chat/threads/5/clear', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(7, '/chat/threads/5/turn', {
+      method: 'POST',
+      body: { message: 'hello' },
+    })
+  })
+
   test('run and node reads validate ids and call expected endpoints', () => {
     getRun('7')
     getNodeStatus(11)
@@ -216,6 +271,9 @@ describe('studioApi', () => {
 
   test('chat thread read validates ids and preserves critical failure messaging', () => {
     expect(() => getChatThread('')).toThrow('threadId must be a positive integer.')
+    expect(() => getChatRuntime({ threadId: 'bad' })).toThrow('threadId must be a positive integer.')
+    expect(() => createChatThread({ modelId: 0 })).toThrow('modelId must be a positive integer when provided.')
+    expect(() => sendChatTurn(1, '   ')).toThrow('message is required.')
     expect(() => getRun(0)).toThrow('runId must be a positive integer.')
     expect(() => getNodeStatus('bad')).toThrow('nodeId must be a positive integer.')
   })

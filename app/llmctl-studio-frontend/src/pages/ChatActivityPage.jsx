@@ -204,7 +204,7 @@ export default function ChatActivityPage() {
               <tbody>
                 {events.map((item) => {
                   const parsedThreadId = parseThreadId(item?.thread_id)
-                  const href = parsedThreadId ? `/chat/threads/${parsedThreadId}` : ''
+                  const href = parsedThreadId ? `/chat?thread_id=${parsedThreadId}` : ''
                   return (
                     <tr
                       key={`chat-activity-${item.id ?? `${item.created_at}-${item.event_type}`}`}

@@ -43,6 +43,11 @@ describe('App routing', () => {
     expect(await screen.findByText('Inspect run and node execution status by id using live API responses.')).toBeInTheDocument()
   })
 
+  test('chat launch route is native react', async () => {
+    renderAt('/chat')
+    expect(await screen.findByRole('button', { name: 'Create thread' })).toBeInTheDocument()
+  })
+
   test('chat activity route is native react', async () => {
     renderAt('/chat/activity')
     expect(await screen.findByText('Thread lifecycle, turn, retrieval/tool, compaction, and failure audit events.')).toBeInTheDocument()

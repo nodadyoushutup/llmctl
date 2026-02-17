@@ -2,8 +2,9 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import AppLayout from './components/AppLayout'
 import OverviewPage from './pages/OverviewPage'
 import ApiDiagnosticsPage from './pages/ApiDiagnosticsPage'
+import ChatPage from './pages/ChatPage'
 import ChatActivityPage from './pages/ChatActivityPage'
-import ChatThreadPage from './pages/ChatThreadPage'
+import ChatThreadRedirectPage from './pages/ChatThreadRedirectPage'
 import ExecutionMonitorPage from './pages/ExecutionMonitorPage'
 import AgentsPage from './pages/AgentsPage'
 import AgentDetailPage from './pages/AgentDetailPage'
@@ -84,9 +85,9 @@ export default function App() {
       <Route path="/" element={<Navigate to="/overview" replace />} />
       <Route path="/migration" element={<AppLayout><OverviewPage /></AppLayout>} />
       <Route path="/parity-checklist" element={<AppLayout><ParityChecklistPage /></AppLayout>} />
-      <Route path="/chat" element={<Navigate to="/chat/activity" replace />} />
+      <Route path="/chat" element={<AppLayout><ChatPage /></AppLayout>} />
       <Route path="/chat/activity" element={<AppLayout><ChatActivityPage /></AppLayout>} />
-      <Route path="/chat/threads/:threadId" element={<AppLayout><ChatThreadPage /></AppLayout>} />
+      <Route path="/chat/threads/:threadId" element={<AppLayout><ChatThreadRedirectPage /></AppLayout>} />
       <Route path="/monitor" element={<Navigate to="/execution-monitor" replace />} />
       <Route path="/execution-monitor" element={<AppLayout><ExecutionMonitorPage /></AppLayout>} />
       <Route path="/api-diagnostics" element={<AppLayout><ApiDiagnosticsPage /></AppLayout>} />

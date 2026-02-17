@@ -8746,12 +8746,145 @@ def api_health():
     return {"ok": True, "service": "llmctl-studio-backend"}
 
 
+@bp.get("/api/chat/runtime")
+def api_chat_runtime():
+    models = _load_llm_models()
+    mcp_servers = _load_mcp_servers()
+    threads = list_chat_threads()
+    try:
+        selected_thread_id = _coerce_optional_int(
+            request.args.get("thread_id"),
+            field_name="thread_id",
+            minimum=1,
+        )
+    except ValueError:
+        return {"error": "thread_id must be an integer."}, 400
+    selected_thread = None
+    if selected_thread_id is not None:
+        selected_thread = get_chat_thread(selected_thread_id)
+    if selected_thread is not None and str(selected_thread.get("status") or "") != "active":
+        selected_thread = None
+    if selected_thread is None and threads:
+        selected_thread = get_chat_thread(int(threads[0]["id"]))
+    rag_health, rag_collections = _chat_rag_health_payload()
+    chat_default_settings = _resolved_chat_default_settings(
+        models=models,
+        mcp_servers=mcp_servers,
+        rag_collections=rag_collections,
+    )
+    return {
+        "threads": threads,
+        "selected_thread_id": (
+            int(selected_thread["id"])
+            if isinstance(selected_thread, dict) and selected_thread.get("id") is not None
+            else None
+        ),
+        "selected_thread": selected_thread,
+        "models": [
+            {"id": model.id, "name": model.name, "provider": model.provider}
+            for model in models
+        ],
+        "mcp_servers": [
+            {"id": server.id, "name": server.name, "server_key": server.server_key}
+            for server in mcp_servers
+        ],
+        "rag_health": rag_health,
+        "rag_collections": rag_collections,
+        "chat_default_settings": chat_default_settings,
+    }
+
+
+@bp.post("/api/chat/threads")
+def api_create_chat_thread():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return {"error": "Invalid JSON payload."}, 400
+    try:
+        title = str(payload.get("title") or "").strip() or CHAT_DEFAULT_THREAD_TITLE
+        default_settings = load_chat_default_settings_payload()
+        default_response_complexity = normalize_chat_response_complexity(
+            default_settings.get("default_response_complexity"),
+            default=CHAT_RESPONSE_COMPLEXITY_DEFAULT,
+        )
+        response_complexity = normalize_chat_response_complexity(
+            payload.get("response_complexity"),
+            default=default_response_complexity,
+        )
+        model_id_raw = payload.get("model_id")
+        if model_id_raw is None or not str(model_id_raw).strip():
+            default_model_id = default_settings.get("default_model_id")
+            if isinstance(default_model_id, int):
+                model_id = default_model_id
+            else:
+                model_id = resolve_default_model_id(_load_integration_settings("llm"))
+        else:
+            model_id = _coerce_optional_int(
+                model_id_raw,
+                field_name="model_id",
+                minimum=1,
+            )
+        mcp_raw = payload.get("mcp_server_ids")
+        if mcp_raw is None:
+            mcp_values = [
+                str(value)
+                for value in default_settings.get("default_mcp_server_ids", [])
+                if isinstance(value, int)
+            ]
+        elif isinstance(mcp_raw, list):
+            mcp_values = list(mcp_raw)
+        else:
+            return {"error": "mcp_server_ids must be an array."}, 400
+        mcp_server_ids = _coerce_chat_id_list(
+            mcp_values,
+            field_name="mcp_server_id",
+        )
+        rag_raw = payload.get("rag_collections")
+        if rag_raw is None:
+            rag_values = [
+                str(value)
+                for value in default_settings.get("default_rag_collections", [])
+            ]
+        elif isinstance(rag_raw, list):
+            rag_values = list(rag_raw)
+        else:
+            return {"error": "rag_collections must be an array."}, 400
+        rag_collections = _coerce_chat_collection_list(rag_values)
+        thread = create_chat_thread(
+            title=title,
+            model_id=model_id,
+            mcp_server_ids=mcp_server_ids,
+            rag_collections=rag_collections,
+            response_complexity=response_complexity,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    thread_payload = get_chat_thread(int(thread["id"]))
+    return {"ok": True, "thread": thread_payload or thread}
+
+
 @bp.get("/api/chat/threads/<int:thread_id>")
 def api_chat_thread(thread_id: int):
     payload = get_chat_thread(thread_id)
     if payload is None:
         return {"error": "Thread not found."}, 404
     return payload
+
+
+@bp.post("/api/chat/threads/<int:thread_id>/archive")
+def api_archive_chat_thread(thread_id: int):
+    if not archive_chat_thread(thread_id):
+        return {"error": "Thread not found."}, 404
+    return {"ok": True, "thread_id": thread_id}
+
+
+@bp.post("/api/chat/threads/<int:thread_id>/clear")
+def api_clear_chat_thread(thread_id: int):
+    if not clear_chat_thread(thread_id):
+        return {"error": "Thread not found."}, 404
+    payload = get_chat_thread(thread_id)
+    if payload is None:
+        return {"error": "Thread not found."}, 404
+    return {"ok": True, "thread": payload}
 
 
 @bp.post("/api/chat/threads/<int:thread_id>/config")

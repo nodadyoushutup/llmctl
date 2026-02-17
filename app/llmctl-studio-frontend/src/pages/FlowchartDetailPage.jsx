@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import FlowchartWorkspaceEditor from '../components/FlowchartWorkspaceEditor'
 import { HttpError } from '../lib/httpClient'
 import {
   attachFlowchartNodeMcp,
@@ -64,19 +65,6 @@ function toJsonText(value) {
   return JSON.stringify(value, null, 2)
 }
 
-function parseJsonArray(raw, label) {
-  let parsed
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw new Error(`${label} must be valid JSON.`)
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error(`${label} must be a JSON array.`)
-  }
-  return parsed
-}
-
 function parseCsvIds(raw) {
   if (!String(raw || '').trim()) {
     return []
@@ -86,6 +74,8 @@ function parseCsvIds(raw) {
     .map((item) => Number.parseInt(item.trim(), 10))
     .filter((item) => Number.isInteger(item) && item > 0)
 }
+
+const DEFAULT_FLOWCHART_NODE_TYPES = ['start', 'end', 'flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag']
 
 export default function FlowchartDetailPage() {
   const navigate = useNavigate()
@@ -97,7 +87,10 @@ export default function FlowchartDetailPage() {
   const [actionInfo, setActionInfo] = useState('')
   const [busyAction, setBusyAction] = useState('')
   const [graphDraft, setGraphDraft] = useState({ nodesText: '[]', edgesText: '[]' })
+  const [editorGraph, setEditorGraph] = useState({ nodes: [], edges: [] })
+  const [editorRevision, setEditorRevision] = useState(0)
   const [validationState, setValidationState] = useState(null)
+  const [runtimeWarning, setRuntimeWarning] = useState('')
 
   const [selectedNodeId, setSelectedNodeId] = useState('')
   const [utilityState, setUtilityState] = useState({ loading: false, payload: null, error: '' })
@@ -117,20 +110,40 @@ export default function FlowchartDetailPage() {
       setState((current) => ({ ...current, loading: true, error: '' }))
     }
     try {
-      const [detail, edit, runtime] = await Promise.all([
+      const [detailResult, editResult, runtimeResult] = await Promise.allSettled([
         getFlowchart(parsedFlowchartId),
         getFlowchartEdit(parsedFlowchartId),
         getFlowchartRuntime(parsedFlowchartId),
       ])
+      if (detailResult.status !== 'fulfilled') {
+        throw detailResult.reason
+      }
+      if (editResult.status !== 'fulfilled') {
+        throw editResult.reason
+      }
+
+      const detail = detailResult.value
+      const edit = editResult.value
+      const runtime = runtimeResult.status === 'fulfilled'
+        ? runtimeResult.value
+        : { active_run_id: null, active_run_status: null, running_node_ids: [] }
+
       setState({
         loading: false,
         payload: { detail, edit, runtime },
         error: '',
       })
+      if (runtimeResult.status !== 'fulfilled') {
+        setRuntimeWarning(errorMessage(runtimeResult.reason, 'Runtime status is temporarily unavailable.'))
+      } else {
+        setRuntimeWarning('')
+      }
       const graph = detail?.graph && typeof detail.graph === 'object' ? detail.graph : { nodes: [], edges: [] }
       const nextNodes = Array.isArray(graph.nodes) ? graph.nodes : []
       const nextEdges = Array.isArray(graph.edges) ? graph.edges : []
       setGraphDraft({ nodesText: toJsonText(nextNodes), edgesText: toJsonText(nextEdges) })
+      setEditorGraph({ nodes: nextNodes, edges: nextEdges })
+      setEditorRevision((current) => current + 1)
       setValidationState(detail?.validation && typeof detail.validation === 'object' ? detail.validation : null)
     } catch (error) {
       setState((current) => ({
@@ -138,6 +151,7 @@ export default function FlowchartDetailPage() {
         payload: silent ? current.payload : null,
         error: errorMessage(error, 'Failed to load flowchart.'),
       }))
+      setRuntimeWarning('')
     }
   }, [parsedFlowchartId])
 
@@ -174,38 +188,47 @@ export default function FlowchartDetailPage() {
   const runtime = payload?.runtime && typeof payload.runtime === 'object' ? payload.runtime : null
 
   const flowchart = detail?.flowchart && typeof detail.flowchart === 'object' ? detail.flowchart : null
-  const graph = detail?.graph && typeof detail.graph === 'object' ? detail.graph : null
-  const nodes = useMemo(
-    () => (Array.isArray(graph?.nodes) ? graph.nodes : []),
-    [graph],
+  const nodes = useMemo(() => (Array.isArray(editorGraph?.nodes) ? editorGraph.nodes : []), [editorGraph])
+  const edges = useMemo(() => (Array.isArray(editorGraph?.edges) ? editorGraph.edges : []), [editorGraph])
+  const persistedNodes = useMemo(
+    () => nodes.filter((node) => parseId(node?.id)),
+    [nodes],
   )
-  const edges = useMemo(
-    () => (Array.isArray(graph?.edges) ? graph.edges : []),
-    [graph],
-  )
+  const selectedPersistedNodeId = useMemo(() => parseId(selectedNodeId), [selectedNodeId])
   const runs = Array.isArray(detail?.runs) ? detail.runs : []
   const catalog = edit?.catalog && typeof edit.catalog === 'object' ? edit.catalog : null
+  const nodeTypeOptions = useMemo(() => {
+    const raw = edit?.node_types
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return DEFAULT_FLOWCHART_NODE_TYPES
+    }
+    return raw
+  }, [edit])
   const runtimeStatus = runtime?.active_run_status || ''
   const activeRunId = runtime?.active_run_id || null
   const activeRun = isRunActive(runtimeStatus)
+  const runningNodeIds = Array.isArray(runtime?.running_node_ids) ? runtime.running_node_ids : []
 
   useEffect(() => {
-    if (!selectedNodeId && nodes.length > 0) {
-      setSelectedNodeId(String(nodes[0].id))
+    if (!selectedNodeId && persistedNodes.length > 0) {
+      setSelectedNodeId(String(persistedNodes[0].id))
       return
     }
-    if (selectedNodeId && nodes.every((node) => String(node.id) !== String(selectedNodeId))) {
-      setSelectedNodeId(nodes.length > 0 ? String(nodes[0].id) : '')
+    if (
+      selectedNodeId &&
+      persistedNodes.every((node) => String(node.id) !== String(selectedNodeId))
+    ) {
+      setSelectedNodeId(persistedNodes.length > 0 ? String(persistedNodes[0].id) : '')
     }
-  }, [nodes, selectedNodeId])
+  }, [persistedNodes, selectedNodeId])
 
   useEffect(() => {
-    if (!selectedNodeId) {
+    if (!selectedPersistedNodeId) {
       setUtilityState({ loading: false, payload: null, error: '' })
       return
     }
-    refreshUtilities(selectedNodeId)
-  }, [selectedNodeId, refreshUtilities])
+    refreshUtilities(selectedPersistedNodeId)
+  }, [selectedPersistedNodeId, refreshUtilities])
 
   useEffect(() => {
     if (!activeRun || !parsedFlowchartId) {
@@ -304,8 +327,8 @@ export default function FlowchartDetailPage() {
       return
     }
     await withAction('save-graph', async () => {
-      const nodesPayload = parseJsonArray(graphDraft.nodesText, 'nodes')
-      const edgesPayload = parseJsonArray(graphDraft.edgesText, 'edges')
+      const nodesPayload = Array.isArray(editorGraph?.nodes) ? editorGraph.nodes : []
+      const edgesPayload = Array.isArray(editorGraph?.edges) ? editorGraph.edges : []
       const payload = await updateFlowchartGraph(parsedFlowchartId, {
         nodes: nodesPayload,
         edges: edgesPayload,
@@ -333,34 +356,40 @@ export default function FlowchartDetailPage() {
         }
       })
       setGraphDraft({ nodesText: toJsonText(nextNodes), edgesText: toJsonText(nextEdges) })
+      setEditorGraph({ nodes: nextNodes, edges: nextEdges })
+      setEditorRevision((current) => current + 1)
       setValidationState(nextValidation)
       setActionInfo('Graph saved.')
-      await refreshUtilities(selectedNodeId, { silent: true })
+      if (selectedPersistedNodeId) {
+        await refreshUtilities(selectedPersistedNodeId, { silent: true })
+      }
     })
   }
 
   function handleResetGraph() {
     setGraphDraft({ nodesText: toJsonText(nodes), edgesText: toJsonText(edges) })
+    setEditorGraph({ nodes, edges })
+    setEditorRevision((current) => current + 1)
     setActionError('')
-    setActionInfo('Graph editor reset to latest server payload.')
+    setActionInfo('Graph workspace reset to latest server payload.')
   }
 
   async function handleSetModel() {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     await withAction('set-model', async () => {
-      await setFlowchartNodeModel(parsedFlowchartId, selectedNodeId, {
+      await setFlowchartNodeModel(parsedFlowchartId, selectedPersistedNodeId, {
         modelId: parseId(modelIdInput),
       })
       setActionInfo('Node model updated.')
       await refresh({ silent: true })
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleAttachMcp() {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     const parsedMcpId = parseId(mcpServerIdInput)
@@ -369,27 +398,27 @@ export default function FlowchartDetailPage() {
       return
     }
     await withAction('attach-mcp', async () => {
-      await attachFlowchartNodeMcp(parsedFlowchartId, selectedNodeId, { mcpServerId: parsedMcpId })
+      await attachFlowchartNodeMcp(parsedFlowchartId, selectedPersistedNodeId, { mcpServerId: parsedMcpId })
       setActionInfo('MCP server attached.')
       await refresh({ silent: true })
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleDetachMcp(mcpId) {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     await withAction(`detach-mcp-${mcpId}`, async () => {
-      await detachFlowchartNodeMcp(parsedFlowchartId, selectedNodeId, mcpId)
+      await detachFlowchartNodeMcp(parsedFlowchartId, selectedPersistedNodeId, mcpId)
       setActionInfo('MCP server detached.')
       await refresh({ silent: true })
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleAttachScript() {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     const parsedScriptId = parseId(scriptIdInput)
@@ -398,41 +427,41 @@ export default function FlowchartDetailPage() {
       return
     }
     await withAction('attach-script', async () => {
-      await attachFlowchartNodeScript(parsedFlowchartId, selectedNodeId, { scriptId: parsedScriptId })
+      await attachFlowchartNodeScript(parsedFlowchartId, selectedPersistedNodeId, { scriptId: parsedScriptId })
       setActionInfo('Script attached.')
       await refresh({ silent: true })
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleDetachScript(scriptId) {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     await withAction(`detach-script-${scriptId}`, async () => {
-      await detachFlowchartNodeScript(parsedFlowchartId, selectedNodeId, scriptId)
+      await detachFlowchartNodeScript(parsedFlowchartId, selectedPersistedNodeId, scriptId)
       setActionInfo('Script detached.')
       await refresh({ silent: true })
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleReorderScripts() {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     await withAction('reorder-scripts', async () => {
-      await reorderFlowchartNodeScripts(parsedFlowchartId, selectedNodeId, {
+      await reorderFlowchartNodeScripts(parsedFlowchartId, selectedPersistedNodeId, {
         scriptIds: parseCsvIds(scriptIdsInput),
       })
       setActionInfo('Script order updated.')
       await refresh({ silent: true })
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleAttachSkill() {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     const parsedSkillId = parseId(skillIdInput)
@@ -441,7 +470,7 @@ export default function FlowchartDetailPage() {
       return
     }
     await withAction('attach-skill', async () => {
-      const payload = await attachFlowchartNodeSkill(parsedFlowchartId, selectedNodeId, {
+      const payload = await attachFlowchartNodeSkill(parsedFlowchartId, selectedPersistedNodeId, {
         skillId: parsedSkillId,
       })
       if (payload?.warning) {
@@ -449,12 +478,12 @@ export default function FlowchartDetailPage() {
       } else {
         setActionInfo('Skill attach request sent.')
       }
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleDetachSkill() {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     const parsedSkillId = parseId(skillIdInput)
@@ -463,22 +492,22 @@ export default function FlowchartDetailPage() {
       return
     }
     await withAction('detach-skill', async () => {
-      const payload = await detachFlowchartNodeSkill(parsedFlowchartId, selectedNodeId, parsedSkillId)
+      const payload = await detachFlowchartNodeSkill(parsedFlowchartId, selectedPersistedNodeId, parsedSkillId)
       if (payload?.warning) {
         setActionInfo(payload.warning)
       } else {
         setActionInfo('Skill detach request sent.')
       }
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
   async function handleReorderSkills() {
-    if (!parsedFlowchartId || !selectedNodeId) {
+    if (!parsedFlowchartId || !selectedPersistedNodeId) {
       return
     }
     await withAction('reorder-skills', async () => {
-      const payload = await reorderFlowchartNodeSkills(parsedFlowchartId, selectedNodeId, {
+      const payload = await reorderFlowchartNodeSkills(parsedFlowchartId, selectedPersistedNodeId, {
         skillIds: parseCsvIds(skillIdsInput),
       })
       if (payload?.warning) {
@@ -486,7 +515,7 @@ export default function FlowchartDetailPage() {
       } else {
         setActionInfo('Skill reorder request sent.')
       }
-      await refreshUtilities(selectedNodeId, { silent: true })
+      await refreshUtilities(selectedPersistedNodeId, { silent: true })
     })
   }
 
@@ -495,7 +524,26 @@ export default function FlowchartDetailPage() {
     : detail?.validation
   const validationErrors = Array.isArray(activeValidation?.errors) ? activeValidation.errors : []
 
-  const selectedNode = nodes.find((node) => String(node.id) === String(selectedNodeId)) || null
+  function handleWorkspaceNotice(message) {
+    const text = String(message || '').trim()
+    if (!text) {
+      return
+    }
+    setActionError(text)
+  }
+
+  function handleWorkspaceGraphChange(nextGraph) {
+    const nextNodes = Array.isArray(nextGraph?.nodes) ? nextGraph.nodes : []
+    const nextEdges = Array.isArray(nextGraph?.edges) ? nextGraph.edges : []
+    setEditorGraph({ nodes: nextNodes, edges: nextEdges })
+    setGraphDraft({ nodesText: toJsonText(nextNodes), edgesText: toJsonText(nextEdges) })
+  }
+
+  function handleWorkspaceSelectionChange(nextNodeId) {
+    setSelectedNodeId(String(nextNodeId || ''))
+  }
+
+  const selectedNode = persistedNodes.find((node) => String(node.id) === String(selectedNodeId)) || null
   const utilityNode = utilityState.payload?.node && typeof utilityState.payload.node === 'object'
     ? utilityState.payload.node
     : null
@@ -546,6 +594,7 @@ export default function FlowchartDetailPage() {
         </div>
         {state.loading ? <p>Loading flowchart...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
+        {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
         {flowchart ? (
@@ -665,83 +714,46 @@ export default function FlowchartDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Graph Snapshot</h2>
-        {nodes.length === 0 ? <p>No nodes found.</p> : null}
-        {nodes.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Node</th>
-                  <th>Type</th>
-                  <th>Ref</th>
-                  <th>Model</th>
-                  <th>MCP</th>
-                  <th>Scripts</th>
-                  <th>Position</th>
-                </tr>
-              </thead>
-              <tbody>
-                {nodes.map((node) => {
-                  const isSelected = String(node.id) === String(selectedNodeId)
-                  return (
-                    <tr key={node.id}>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn-link btn-secondary"
-                          onClick={() => setSelectedNodeId(String(node.id))}
-                        >
-                          {node.title || `Node ${node.id}`}
-                          {isSelected ? ' (selected)' : ''}
-                        </button>
-                      </td>
-                      <td>{node.node_type || '-'}</td>
-                      <td>{node.ref_id || '-'}</td>
-                      <td>{node.model_id || '-'}</td>
-                      <td>{Array.isArray(node.mcp_server_ids) ? node.mcp_server_ids.join(', ') || '-' : '-'}</td>
-                      <td>{Array.isArray(node.script_ids) ? node.script_ids.join(', ') || '-' : '-'}</td>
-                      <td>{`${node.x ?? 0}, ${node.y ?? 0}`}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+        <h2>Flowchart Workspace</h2>
+        <FlowchartWorkspaceEditor
+          key={`flowchart-workspace-${editorRevision}`}
+          initialNodes={nodes}
+          initialEdges={edges}
+          catalog={catalog}
+          nodeTypes={nodeTypeOptions}
+          runningNodeIds={runningNodeIds}
+          onGraphChange={handleWorkspaceGraphChange}
+          onNodeSelectionChange={handleWorkspaceSelectionChange}
+          onNotice={handleWorkspaceNotice}
+        />
         <div className="stack-sm">
-          <label className="field">
-            <span>nodes[] JSON</span>
-            <textarea
-              className="table-textarea"
-              value={graphDraft.nodesText}
-              onChange={(event) => setGraphDraft((current) => ({ ...current, nodesText: event.target.value }))}
-            />
-          </label>
-          <label className="field">
-            <span>edges[] JSON</span>
-            <textarea
-              className="table-textarea"
-              value={graphDraft.edgesText}
-              onChange={(event) => setGraphDraft((current) => ({ ...current, edgesText: event.target.value }))}
-            />
-          </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={isBusy('save-graph')}
-                onClick={handleSaveGraph}
-              >
-                <i className="fa-solid fa-floppy-disk" />
-                save graph
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={handleResetGraph}>
-                <i className="fa-solid fa-rotate-left" />
-                reset json
-              </button>
-            </div>
+          <div className="form-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={isBusy('save-graph')}
+              onClick={handleSaveGraph}
+            >
+              <i className="fa-solid fa-floppy-disk" />
+              save graph
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={handleResetGraph}>
+              <i className="fa-solid fa-rotate-left" />
+              reset workspace
+            </button>
           </div>
+          <details>
+            <summary className="toolbar-meta">Raw graph JSON</summary>
+            <label className="field">
+              <span>nodes[] JSON</span>
+              <textarea className="table-textarea" value={graphDraft.nodesText} readOnly />
+            </label>
+            <label className="field">
+              <span>edges[] JSON</span>
+              <textarea className="table-textarea" value={graphDraft.edgesText} readOnly />
+            </label>
+          </details>
+        </div>
       </article>
 
       <article className="card">
@@ -754,7 +766,8 @@ export default function FlowchartDetailPage() {
             value={selectedNodeId}
             onChange={(event) => setSelectedNodeId(event.target.value)}
           >
-            {nodes.map((node) => (
+            <option value="">Select node</option>
+            {persistedNodes.map((node) => (
               <option key={node.id} value={node.id}>
                 {node.title || `Node ${node.id}`} ({node.node_type})
               </option>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -22,6 +23,8 @@ os.environ.setdefault(
 
 import core.db as core_db
 from core.config import Config
+from core.db import session_scope
+from core.models import LLMModel, MCPServer
 from rag.web.views import bp as rag_bp
 import web.views as studio_views
 
@@ -83,6 +86,38 @@ class Stage8ApiRouteTests(unittest.TestCase):
             core_db._engine.dispose()
         core_db._engine = None
         core_db.SessionLocal = None
+
+    def _create_model(
+        self,
+        *,
+        name: str,
+        provider: str = "vllm_remote",
+        context_window_tokens: int = 256,
+    ) -> LLMModel:
+        with session_scope() as session:
+            return LLMModel.create(
+                session,
+                name=name,
+                description=f"{name} description",
+                provider=provider,
+                config_json=json.dumps(
+                    {
+                        "model": "stub-model",
+                        "context_window_tokens": context_window_tokens,
+                    }
+                ),
+            )
+
+    def _create_mcp_server(self, *, name: str = "MCP Test") -> MCPServer:
+        with session_scope() as session:
+            return MCPServer.create(
+                session,
+                name=name,
+                server_key=f"{name.lower().replace(' ', '-')}-{uuid.uuid4().hex[:8]}",
+                description="test",
+                config_json=json.dumps({"command": "python3", "args": ["-V"]}),
+                server_type="custom",
+            )
 
     def test_github_workspace_and_pull_request_json(self) -> None:
         def _integration_settings(provider: str):
@@ -232,6 +267,54 @@ class Stage8ApiRouteTests(unittest.TestCase):
         delete = self.client.post(f"/api/rag/sources/{source_id}/delete", json={}, headers=headers)
         self.assertEqual(200, delete.status_code)
         self.assertTrue(bool((delete.get_json() or {}).get("ok")))
+
+    def test_chat_runtime_and_thread_mutation_routes(self) -> None:
+        model = self._create_model(name="Chat Runtime API Model")
+        mcp_server = self._create_mcp_server(name="Runtime MCP")
+
+        create = self.client.post(
+            "/api/chat/threads",
+            json={
+                "title": "Launch Runtime",
+                "model_id": model.id,
+                "response_complexity": "high",
+                "mcp_server_ids": [mcp_server.id],
+                "rag_collections": [],
+            },
+        )
+        self.assertEqual(200, create.status_code)
+        create_payload = create.get_json() or {}
+        self.assertTrue(bool(create_payload.get("ok")))
+        thread_payload = create_payload.get("thread") or {}
+        thread_id = int(thread_payload.get("id") or 0)
+        self.assertGreater(thread_id, 0)
+
+        runtime = self.client.get(f"/api/chat/runtime?thread_id={thread_id}")
+        self.assertEqual(200, runtime.status_code)
+        runtime_payload = runtime.get_json() or {}
+        self.assertEqual(thread_id, int(runtime_payload.get("selected_thread_id") or 0))
+        self.assertTrue(any(int(item.get("id") or 0) == model.id for item in runtime_payload.get("models", [])))
+        self.assertTrue(any(int(item.get("id") or 0) == mcp_server.id for item in runtime_payload.get("mcp_servers", [])))
+        self.assertTrue(any(int(item.get("id") or 0) == thread_id for item in runtime_payload.get("threads", [])))
+
+        clear = self.client.post(f"/api/chat/threads/{thread_id}/clear")
+        self.assertEqual(200, clear.status_code)
+        clear_payload = clear.get_json() or {}
+        self.assertTrue(bool(clear_payload.get("ok")))
+        self.assertEqual([], (clear_payload.get("thread") or {}).get("messages"))
+
+        archive = self.client.post(f"/api/chat/threads/{thread_id}/archive")
+        self.assertEqual(200, archive.status_code)
+        archive_payload = archive.get_json() or {}
+        self.assertTrue(bool(archive_payload.get("ok")))
+        self.assertEqual(thread_id, int(archive_payload.get("thread_id") or 0))
+
+        runtime_after_archive = self.client.get("/api/chat/runtime")
+        self.assertEqual(200, runtime_after_archive.status_code)
+        runtime_after_archive_payload = runtime_after_archive.get_json() or {}
+        self.assertFalse(
+            any(int(item.get("id") or 0) == thread_id for item in runtime_after_archive_payload.get("threads", []))
+        )
 
 
 if __name__ == "__main__":

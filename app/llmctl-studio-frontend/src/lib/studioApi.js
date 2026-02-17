@@ -44,6 +44,113 @@ export function getChatThread(threadId) {
   return requestJson(`/chat/threads/${parsedId}`)
 }
 
+export function getChatRuntime({ threadId = '' } = {}) {
+  const params = new URLSearchParams()
+  const parsedThreadId = Number.parseInt(String(threadId || '').trim(), 10)
+  if (String(threadId || '').trim() && (!Number.isInteger(parsedThreadId) || parsedThreadId <= 0)) {
+    throw new Error('threadId must be a positive integer.')
+  }
+  if (Number.isInteger(parsedThreadId) && parsedThreadId > 0) {
+    params.set('thread_id', String(parsedThreadId))
+  }
+  const query = params.toString()
+  const path = query ? `/chat/runtime?${query}` : '/chat/runtime'
+  return requestJson(path)
+}
+
+export function createChatThread({
+  title = '',
+  modelId = null,
+  responseComplexity = '',
+  mcpServerIds = null,
+  ragCollections = null,
+} = {}) {
+  const body = {}
+  const cleanTitle = String(title || '').trim()
+  if (cleanTitle) {
+    body.title = cleanTitle
+  }
+  if (modelId != null && String(modelId).trim() !== '') {
+    const parsedModelId = Number.parseInt(String(modelId), 10)
+    if (!Number.isInteger(parsedModelId) || parsedModelId <= 0) {
+      throw new Error('modelId must be a positive integer when provided.')
+    }
+    body.model_id = parsedModelId
+  }
+  const cleanComplexity = String(responseComplexity || '').trim()
+  if (cleanComplexity) {
+    body.response_complexity = cleanComplexity
+  }
+  if (Array.isArray(mcpServerIds)) {
+    body.mcp_server_ids = mcpServerIds
+      .map((value) => Number.parseInt(String(value), 10))
+      .filter((value) => Number.isInteger(value) && value > 0)
+  }
+  if (Array.isArray(ragCollections)) {
+    body.rag_collections = ragCollections
+      .map((value) => String(value || '').trim())
+      .filter((value) => value)
+  }
+  return requestJson('/chat/threads', {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateChatThreadConfig(
+  threadId,
+  {
+    modelId = null,
+    responseComplexity = 'medium',
+    mcpServerIds = [],
+    ragCollections = [],
+  } = {},
+) {
+  const parsedThreadId = parsePositiveId(threadId, 'threadId')
+  const body = {
+    model_id: modelId == null || String(modelId).trim() === ''
+      ? null
+      : parsePositiveId(modelId, 'modelId'),
+    response_complexity: String(responseComplexity || '').trim() || 'medium',
+    mcp_server_ids: Array.isArray(mcpServerIds)
+      ? mcpServerIds
+        .map((value) => Number.parseInt(String(value), 10))
+        .filter((value) => Number.isInteger(value) && value > 0)
+      : [],
+    rag_collections: Array.isArray(ragCollections)
+      ? ragCollections
+        .map((value) => String(value || '').trim())
+        .filter((value) => value)
+      : [],
+  }
+  return requestJson(`/chat/threads/${parsedThreadId}/config`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function archiveChatThread(threadId) {
+  const parsedThreadId = parsePositiveId(threadId, 'threadId')
+  return requestJson(`/chat/threads/${parsedThreadId}/archive`, { method: 'POST' })
+}
+
+export function clearChatThread(threadId) {
+  const parsedThreadId = parsePositiveId(threadId, 'threadId')
+  return requestJson(`/chat/threads/${parsedThreadId}/clear`, { method: 'POST' })
+}
+
+export function sendChatTurn(threadId, message) {
+  const parsedThreadId = parsePositiveId(threadId, 'threadId')
+  const cleanMessage = String(message || '').trim()
+  if (!cleanMessage) {
+    throw new Error('message is required.')
+  }
+  return requestJson(`/chat/threads/${parsedThreadId}/turn`, {
+    method: 'POST',
+    body: { message: cleanMessage },
+  })
+}
+
 export function getRun(runId) {
   const parsedId = Number.parseInt(String(runId ?? ''), 10)
   if (!Number.isInteger(parsedId) || parsedId <= 0) {
