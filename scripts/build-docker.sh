@@ -10,4 +10,7 @@ echo "Building llmctl-studio:latest in current Docker context..."
 echo "Building llmctl-executor:latest in current Docker context..."
 "${REPO_ROOT}/app/llmctl-executor/build-executor.sh"
 
-echo "Done: built llmctl-studio:latest and llmctl-executor:latest."
+echo "Building llmctl-celery-worker:latest in current Docker context..."
+"${REPO_ROOT}/app/llmctl-celery-worker/docker/build-celery-worker.sh"
+
+echo "Done: built llmctl-studio:latest, llmctl-executor:latest, and llmctl-celery-worker:latest."

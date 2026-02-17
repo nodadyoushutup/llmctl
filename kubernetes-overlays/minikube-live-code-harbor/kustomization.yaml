@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../harbor-images
+patches:
+  - path: studio-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-studio-backend
+      namespace: llmctl
+  - path: studio-frontend-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-studio-frontend
+      namespace: llmctl

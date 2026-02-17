@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-studio-backend
+  namespace: llmctl
+spec:
+  template:
+    spec:
+      containers:
+        - name: studio
+          command:
+            - python3
+            - app/llmctl-studio-backend/run.py
+          volumeMounts:
+            - $patch: replace
+            - name: studio-project-code
+              mountPath: /app/app/llmctl-studio-backend/run.py
+              subPath: app/llmctl-studio-backend/run.py
+            - name: studio-project-code
+              mountPath: /app/app/llmctl-studio-backend/src
+              subPath: app/llmctl-studio-backend/src
+            - name: studio-project-code
+              mountPath: /app/app/llmctl-studio-backend/seed-skills
+              subPath: app/llmctl-studio-backend/seed-skills
+            - name: studio-data
+              mountPath: /app/data
+      volumes:
+        - $patch: replace
+        - name: studio-project-code
+          hostPath:
+            path: /workspace/llmctl
+            type: Directory
+        - name: studio-data
+          persistentVolumeClaim:
+            claimName: llmctl-studio-data

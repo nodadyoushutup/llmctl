@@ -13,7 +13,7 @@ Usage: scripts/build-harbor.sh [options]
 Build and push llmctl images to Harbor.
 
 Defaults:
-  - Builds and pushes all images: llmctl-studio, llmctl-mcp, llmctl-executor
+  - Builds and pushes all images: llmctl-studio, llmctl-studio-frontend, llmctl-mcp, llmctl-executor
   - Pushes tag: latest
   - Project: llmctl
   - Harbor login user: admin
@@ -29,6 +29,7 @@ Options:
   --no-login               Skip docker login before push
 
   --studio                 Build/push llmctl-studio only
+  --frontend               Build/push llmctl-studio-frontend only
   --mcp                    Build/push llmctl-mcp only
   --executor               Build/push llmctl-executor only
   --all                    Build/push all images
@@ -100,6 +101,7 @@ HARBOR_API_SCHEME="${HARBOR_API_SCHEME:-http}"
 DO_LOGIN=true
 
 SELECTED_STUDIO=false
+SELECTED_FRONTEND=false
 SELECTED_MCP=false
 SELECTED_EXECUTOR=false
 SELECTION_MADE=false
@@ -160,6 +162,11 @@ while [ $# -gt 0 ]; do
       SELECTION_MADE=true
       shift
       ;;
+    --frontend)
+      SELECTED_FRONTEND=true
+      SELECTION_MADE=true
+      shift
+      ;;
     --mcp)
       SELECTED_MCP=true
       SELECTION_MADE=true
@@ -172,6 +179,7 @@ while [ $# -gt 0 ]; do
       ;;
     --all)
       SELECTED_STUDIO=true
+      SELECTED_FRONTEND=true
       SELECTED_MCP=true
       SELECTED_EXECUTOR=true
       SELECTION_MADE=true
@@ -191,6 +199,7 @@ done
 
 if [ "${SELECTION_MADE}" = false ]; then
   SELECTED_STUDIO=true
+  SELECTED_FRONTEND=true
   SELECTED_MCP=true
   SELECTED_EXECUTOR=true
 fi
@@ -392,6 +401,10 @@ ensure_harbor_project
 
 if [ "${SELECTED_STUDIO}" = true ]; then
   build_and_push "llmctl-studio" "${REPO_ROOT}/app/llmctl-studio-backend/docker/build-studio.sh"
+fi
+
+if [ "${SELECTED_FRONTEND}" = true ]; then
+  build_and_push "llmctl-studio-frontend" "${REPO_ROOT}/app/llmctl-studio-frontend/docker/build-frontend.sh"
 fi
 
 if [ "${SELECTED_MCP}" = true ]; then
