@@ -24,7 +24,7 @@ os.environ.setdefault(
 import core.db as core_db
 from core.config import Config
 from core.db import session_scope
-from core.models import LLMModel, MCPServer
+from core.models import LLMModel, MCPServer, Memory
 from rag.web.views import bp as rag_bp
 import web.views as studio_views
 
@@ -118,6 +118,10 @@ class Stage8ApiRouteTests(unittest.TestCase):
                 config_json=json.dumps({"command": "python3", "args": ["-V"]}),
                 server_type="custom",
             )
+
+    def _create_memory(self, *, description: str) -> Memory:
+        with session_scope() as session:
+            return Memory.create(session, description=description)
 
     def test_github_workspace_and_pull_request_json(self) -> None:
         def _integration_settings(provider: str):
@@ -314,6 +318,20 @@ class Stage8ApiRouteTests(unittest.TestCase):
         runtime_after_archive_payload = runtime_after_archive.get_json() or {}
         self.assertFalse(
             any(int(item.get("id") or 0) == thread_id for item in runtime_after_archive_payload.get("threads", []))
+        )
+
+    def test_flowchart_catalog_handles_memories_without_title_field(self) -> None:
+        self._create_memory(description="Remember to validate deployment readiness before promotion.")
+
+        response = self.client.get("/api/flowcharts/new")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        catalog = payload.get("catalog") or {}
+        memories = catalog.get("memories") or []
+        self.assertGreaterEqual(len(memories), 1)
+        self.assertTrue(all("title" in memory for memory in memories))
+        self.assertTrue(
+            any("Remember to validate deployment readiness" in str(memory.get("title") or "") for memory in memories)
         )
 
 

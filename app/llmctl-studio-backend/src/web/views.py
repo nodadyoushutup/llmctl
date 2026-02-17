@@ -6751,6 +6751,16 @@ def _flowchart_catalog(session) -> dict[str, object]:
     memories = (
         session.execute(select(Memory).order_by(Memory.created_at.desc())).scalars().all()
     )
+    memory_rows = []
+    for memory in memories:
+        description = str(memory.description or "").strip()
+        if description:
+            title = description.splitlines()[0].strip() or f"Memory {memory.id}"
+        else:
+            title = f"Memory {memory.id}"
+        if len(title) > 80:
+            title = f"{title[:77].rstrip()}..."
+        memory_rows.append({"id": memory.id, "title": title})
     return {
         "agents": [
             {
@@ -6822,7 +6832,7 @@ def _flowchart_catalog(session) -> dict[str, object]:
         "milestones": [
             {"id": milestone.id, "name": milestone.name} for milestone in milestones
         ],
-        "memories": [{"id": memory.id, "title": memory.title} for memory in memories],
+        "memories": memory_rows,
         "rag_health": {
             "state": str(rag_health.get("state") or RAG_DOMAIN_HEALTH_UNCONFIGURED),
             "provider": str(rag_health.get("provider") or "chroma"),

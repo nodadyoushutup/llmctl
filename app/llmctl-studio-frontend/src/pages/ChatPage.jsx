@@ -425,14 +425,15 @@ export default function ChatPage() {
       setChatError('Message is required.')
       return
     }
-    const controlsSynced = await saveSessionControls()
-    if (!controlsSynced) {
-      return
-    }
-
     setSending(true)
     setShowPendingAssistantBubble(true)
     setChatError('')
+    const controlsSynced = await saveSessionControls()
+    if (!controlsSynced) {
+      setShowPendingAssistantBubble(false)
+      setSending(false)
+      return
+    }
     try {
       const response = await sendChatTurn(selectedThreadId, message)
       setShowPendingAssistantBubble(false)

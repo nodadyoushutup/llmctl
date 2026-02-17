@@ -80,6 +80,13 @@
 - Run `~/.codex/skills/argocd-commit-push-autosync/scripts/commit_push_enable_autosync.sh --app <argocd-app-name>`.
 - Default ArgoCD behavior for this workflow is autosync enablement with `--auto-prune --self-heal` (no immediate one-off sync).
 
+# Multi-Agent Git Workspace
+
+- Multiple agents may work in this repository at the same time; unrelated or unexpected file changes can be assumed to come from other active agents.
+- Do not treat unrelated git diffs or untracked files as immediate blockers while executing assigned work.
+- Do not revert or delete unrelated changes unless explicitly instructed.
+- If a workflow requires committing the current workspace state, it is acceptable to include unrelated/unknown files in the commit when necessary.
+
 # Kubernetes Reload Behavior
 
 - If a task changes only UI files (templates, CSS, JS, or other frontend assets), restart the impacted Kubernetes deployment so changes are visible immediately.
