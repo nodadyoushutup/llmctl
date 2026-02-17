@@ -32,7 +32,7 @@ class SplitDeploymentStage10IntegrationTests(unittest.TestCase):
         self.assertIn("location /web/ {", content)
         self.assertIn("try_files $uri $uri/ /web/index.html;", content)
         self.assertIn("location /api/ {", content)
-        self.assertIn("location /socket.io/ {", content)
+        self.assertIn("location /api/socket.io {", content)
         self.assertRegex(
             content,
             re.compile(
@@ -43,16 +43,15 @@ class SplitDeploymentStage10IntegrationTests(unittest.TestCase):
         self.assertRegex(
             content,
             re.compile(
-                r"location /socket.io/\s*\{[^}]*proxy_pass http://llmctl-studio-backend:5155;",
+                r"location /api/socket\.io\s*\{[^}]*proxy_pass http://llmctl-studio-backend:5155;",
                 re.S,
             ),
         )
-        self.assertRegex(
+        self.assertNotIn("location /socket.io/ {", content)
+        self.assertNotIn("# Legacy Flask routes stay available behind the frontend service", content)
+        self.assertNotRegex(
             content,
-            re.compile(
-                r"location /\s*\{[^}]*proxy_pass http://llmctl-studio-backend:5155;",
-                re.S,
-            ),
+            re.compile(r"location /\s*\{[^}]*proxy_pass http://llmctl-studio-backend:5155;", re.S),
         )
         self.assertIn("return 302 $scheme://$http_host/web/overview;", content)
         self.assertIn(

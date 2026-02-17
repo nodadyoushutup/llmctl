@@ -1,6 +1,6 @@
 export const parityStatusLabels = {
   migrated: 'Native React',
-  bridged: 'Legacy Bridge',
+  pending: 'Needs Migration',
 }
 
 export const parityChecklist = [
@@ -187,7 +187,7 @@ export const parityChecklist = [
 export function buildParitySummary(items) {
   return items.reduce(
     (summary, item) => {
-      const status = parityStatusLabels[item.status] ? item.status : 'bridged'
+      const status = item.status === 'migrated' ? 'migrated' : 'pending'
       summary.total += 1
       summary[status] = (summary[status] || 0) + 1
       return summary
@@ -195,7 +195,7 @@ export function buildParitySummary(items) {
     {
       total: 0,
       migrated: 0,
-      bridged: 0,
+      pending: 0,
     },
   )
 }

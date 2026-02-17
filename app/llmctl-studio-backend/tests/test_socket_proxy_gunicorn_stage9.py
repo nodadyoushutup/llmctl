@@ -30,7 +30,8 @@ from web.realtime import (  # noqa: E402
 )
 import web.realtime as realtime_module  # noqa: E402
 
-BASE_TEMPLATE = STUDIO_SRC / "web" / "templates" / "base.html"
+LEGACY_TEMPLATE_DIR = STUDIO_SRC / "web" / "templates"
+LEGACY_STATIC_DIR = STUDIO_SRC / "web" / "static"
 GUNICORN_ENV_KEYS = [
     "FLASK_HOST",
     "FLASK_PORT",
@@ -422,20 +423,9 @@ class SocketIOStage9Tests(unittest.TestCase):
 
 
 class SocketFallbackStage9Tests(unittest.TestCase):
-    def test_fallback_only_triggers_on_verified_socket_failures(self) -> None:
-        source = BASE_TEMPLATE.read_text(encoding="utf-8")
-        self.assertIn('triggerFailure("socket_connect_timeout")', source)
-        self.assertIn('triggerFailure("socket_disconnected_before_ready")', source)
-        self.assertIn('triggerFailure("socket_disconnected")', source)
-        self.assertIn("window.setTimeout(() => {", source)
-        self.assertIn("}, 5000);", source)
-        self.assertIn("}, 3000);", source)
-
-        connect_error_start = source.index('socket.on("connect_error", () => {')
-        connect_error_end = source.index('socket.onAny((eventName, payload) => {')
-        connect_error_block = source[connect_error_start:connect_error_end]
-        self.assertNotIn("triggerFailure(", connect_error_block)
-        self.assertIn("Wait for connection timeout window before failing over to polling", source)
+    def test_react_only_cutover_removes_legacy_template_and_static_surfaces(self) -> None:
+        self.assertFalse(LEGACY_TEMPLATE_DIR.exists())
+        self.assertFalse(LEGACY_STATIC_DIR.exists())
 
 
 class RuntimeParityStage9Tests(unittest.TestCase):

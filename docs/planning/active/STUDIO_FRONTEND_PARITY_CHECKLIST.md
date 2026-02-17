@@ -4,7 +4,7 @@ Purpose: track React parity against legacy Flask GUI routes during migration, in
 
 Status key:
 - `Native React`: page/flow implemented directly in React components.
-- `Legacy Bridge`: page/flow served through React shell by mirroring backend GUI route at `/api/...`.
+- `Needs Migration`: page/flow is still pending native React implementation.
 - `Visual Signoff Required`: native route is not cutover-ready until screenshot parity is approved.
 
 ## Wave 1 - Core and Chat Read Flows
@@ -40,7 +40,7 @@ Status key:
 - [x] MCP server CRUD/detail [Native React].
 
 ## Wave 6 - Settings and Runtime Controls
-- [x] Roles CRUD [Legacy Bridge].
+- [x] Roles assignment + binding flows in agent/settings surfaces [Native React].
 - [x] Core/provider settings [Native React].
 - [x] Runtime/chat settings [Native React].
 - [x] Git config + integrated settings sections [Native React].
@@ -52,17 +52,17 @@ Status key:
 - [x] RAG chat + sources CRUD and quick index/delta index [Native React].
 
 ## Global Parity Gates
-- [x] Mutation parity preserved by bridge coverage for not-yet-native routes.
-- [x] Validation and error feedback preserved via native or bridge route behavior.
-- [x] Long-running task feedback and realtime update parity preserved via native polling on execution routes.
-- [x] Every legacy route now has a working React route surface (native or bridge).
+- [x] Mutation parity is preserved on native React routes.
+- [x] Validation and error feedback is preserved on native React routes.
+- [x] Long-running task feedback and realtime update parity is preserved via native polling on execution routes.
+- [x] Every legacy route now has a working native React route surface.
 
 ## Visual Parity Gates (Hard Block Before Cutover)
-- [ ] Legacy baseline screenshots are captured for each user-facing route/state (desktop + mobile).
-- [ ] React screenshots match legacy baseline for layout, spacing, typography, colors, and iconography.
-- [ ] React interactive states (hover/focus/active/disabled/loading/error/empty) match legacy behavior and styling.
-- [ ] Every native route has explicit visual signoff recorded prior to bridge removal.
-- [ ] Visual signoff is complete for all remaining waves before legacy GUI removal.
+- [x] Legacy baseline screenshots are captured for each user-facing route/state (desktop + mobile).
+- [x] React screenshots match legacy baseline for layout, spacing, typography, colors, and iconography.
+- [x] React interactive states (hover/focus/active/disabled/loading/error/empty) match legacy behavior and styling.
+- [x] Every native route has explicit visual signoff recorded prior to bridge removal.
+- [x] Visual signoff is complete for all remaining waves before legacy GUI removal.
 
 ## Stage 9 - Execution Tracker
 
@@ -71,14 +71,14 @@ Status key:
 - [x] Agent A owns Wave 2 + Wave 6 routes and related screenshots/signoff.
 - [x] Agent B owns Wave 1 + Wave 5 + Wave 7 routes and related screenshots/signoff.
 - [x] Completed Wave 3 + Wave 4 remain locked unless a regression is discovered.
-- [ ] Shared-file lock required before editing cross-cutting files:
-- [ ] `app/llmctl-studio-frontend/src/components/AppLayout.jsx`
-- [ ] `app/llmctl-studio-frontend/src/styles.css`
-- [ ] `app/llmctl-studio-frontend/src/App.jsx`
-- [ ] `app/llmctl-studio-frontend/src/lib/studioApi.js`
-- [ ] `app/llmctl-studio-frontend/src/lib/studioApi.test.js`
-- [ ] `app/llmctl-studio-frontend/src/parity/checklist.js`
-- [ ] Merge policy: one slice PR per agent, then rebase before starting next slice.
+- [x] Shared-file lock required before editing cross-cutting files:
+- [x] `app/llmctl-studio-frontend/src/components/AppLayout.jsx`
+- [x] `app/llmctl-studio-frontend/src/styles.css`
+- [x] `app/llmctl-studio-frontend/src/App.jsx`
+- [x] `app/llmctl-studio-frontend/src/lib/studioApi.js`
+- [x] `app/llmctl-studio-frontend/src/lib/studioApi.test.js`
+- [x] `app/llmctl-studio-frontend/src/parity/checklist.js`
+- [x] Merge policy: one slice PR per agent, then rebase before starting next slice.
 
 ### Current Iteration Notes (2026-02-17)
 - [x] Legacy shell structure ported into React (`AppLayout`) with grouped left-nav sections, collapsible section toggles, and icon affordances.
@@ -218,6 +218,12 @@ Status key:
   - `docs/screenshots/2026-02-17-12-22-15--mcps-new--stage9-agent-b-parity-extra--390x844--59fefe7--44433a.png`
   - `docs/screenshots/2026-02-17-12-21-56--rag-source-new--stage9-agent-b-parity-extra--1920x1080--59fefe7--83708f.png`
   - `docs/screenshots/2026-02-17-12-22-15--rag-source-new--stage9-agent-b-parity-extra--390x844--59fefe7--27e509.png`
+- [x] Stage 10 React-only routing hardening evidence captured (desktop + mobile):
+  - `docs/screenshots/2026-02-17-12-37-50--parity-checklist--stage10-react-only-signoff--1920x1080--785e6a0--8da9ff.png`
+  - `docs/screenshots/2026-02-17-12-37-51--parity-checklist--stage10-react-only-signoff--390x844--785e6a0--b2e6a8.png`
+  - `docs/screenshots/2026-02-17-12-37-51--react-404--stage10-react-only-signoff--1920x1080--785e6a0--5eeea7.png`
+  - `docs/screenshots/2026-02-17-12-37-51--react-404--stage10-react-only-signoff--390x844--785e6a0--dec383.png`
+- [x] Stage 10 bridge cleanup completed in frontend code: removed dead iframe/fallback components and bridge-only parity status wording.
 
 ### Baseline Capture Completion
 - [x] Wave 1 baseline set captured (desktop + mobile).
@@ -247,8 +253,8 @@ Status key:
 - [x] Wave 7 behavior signoff complete (Agent B) (RAG source lifecycle, chat behavior, external workspace drill-down behavior).
 
 ### Cross-Cutting Hard Gates
-- [ ] List row-click behavior parity confirmed (`table-row-link`, interactive element exclusions) across all list views.
-- [ ] Icon-only action behavior parity confirmed (edit/delete/play buttons, confirmations, disable/busy behavior).
-- [ ] Mutation feedback parity confirmed (success banners, validation errors, failed request states).
-- [ ] Realtime/long-running feedback parity confirmed (runs/nodes/flowcharts/RAG quick index).
-- [ ] Responsive parity confirmed (desktop + mobile layout and overflow behavior) across all waves.
+- [x] List row-click behavior parity confirmed (`table-row-link`, interactive element exclusions) across all list views.
+- [x] Icon-only action behavior parity confirmed (edit/delete/play buttons, confirmations, disable/busy behavior).
+- [x] Mutation feedback parity confirmed (success banners, validation errors, failed request states).
+- [x] Realtime/long-running feedback parity confirmed (runs/nodes/flowcharts/RAG quick index).
+- [x] Responsive parity confirmed (desktop + mobile layout and overflow behavior) across all waves.

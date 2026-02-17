@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable
 
-from flask import Flask
+from flask import Flask, jsonify, request
 from flask_seeder import FlaskSeeder
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -101,6 +100,57 @@ def _configure_socketio_api_prefix_alias(app: Flask) -> None:
     )
 
 
+def _normalize_socketio_path(raw: object) -> str:
+    value = str(raw or "").strip().strip("/")
+    if not value:
+        value = "socket.io"
+    return f"/{value}"
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
+def _is_react_only_allowed_path(
+    path: str,
+    *,
+    api_prefix: str,
+    socketio_path: str,
+) -> bool:
+    normalized_path = str(path or "")
+    if _path_matches_prefix(normalized_path, api_prefix):
+        return True
+    if _path_matches_prefix(normalized_path, socketio_path):
+        return True
+    return False
+
+
+def _configure_react_only_runtime_guard(app: Flask) -> None:
+    if not bool(app.config.get("REACT_ONLY_RUNTIME", True)):
+        return
+
+    api_prefix = _normalize_api_prefix(app.config.get("API_PREFIX", "/api"))
+    socketio_path = _normalize_socketio_path(app.config.get("SOCKETIO_PATH", "socket.io"))
+
+    @app.before_request
+    def _react_only_runtime_guard():
+        if _is_react_only_allowed_path(
+            request.path or "",
+            api_prefix=api_prefix,
+            socketio_path=socketio_path,
+        ):
+            return None
+        return (
+            jsonify(
+                {
+                    "error": "Not found.",
+                    "reason": "react_only_runtime_api_surface",
+                }
+            ),
+            404,
+        )
+
+
 def _register_blueprints(app: Flask) -> None:
     api_prefix = _normalize_api_prefix(app.config.get("API_PREFIX", "/api"))
     app.register_blueprint(agents_bp)
@@ -114,12 +164,12 @@ def _register_blueprints(app: Flask) -> None:
 
 
 def create_app() -> Flask:
-    template_dir = Path(__file__).resolve().parent / "templates"
-    app = Flask(__name__, template_folder=str(template_dir))
+    app = Flask(__name__, template_folder=None, static_folder=None)
     app.config.from_object(Config)
     _configure_proxy_middleware(app)
     init_socketio(app)
     _configure_socketio_api_prefix_alias(app)
+    _configure_react_only_runtime_guard(app)
 
     init_engine(app.config["SQLALCHEMY_DATABASE_URI"])
     init_db()

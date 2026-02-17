@@ -111,6 +111,7 @@ class Config:
 
     SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev")
     API_PREFIX = _env_path_prefix("LLMCTL_STUDIO_API_PREFIX", "/api")
+    REACT_ONLY_RUNTIME = _env_bool("LLMCTL_STUDIO_REACT_ONLY_RUNTIME", True)
     PREFERRED_URL_SCHEME = os.getenv("LLMCTL_STUDIO_PREFERRED_URL_SCHEME", "http")
 
     # Reverse proxy trust controls. Keep disabled unless explicitly enabled.

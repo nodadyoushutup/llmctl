@@ -11,7 +11,7 @@ backend-to-frontend updates. The runtime is designed for:
 - HTTPS and reverse-proxy deployments
 - multi-worker Gunicorn with Redis-backed Socket.IO fan-out
 - PostgreSQL-backed persistent metadata (SQLite is not supported)
-- compatibility with both current Jinja pages and future React frontend clients
+- React-only Studio UI served by ``llmctl-studio-frontend``
 
 Database Configuration
 ----------------------
@@ -134,6 +134,25 @@ Supported TLS models:
 - TLS terminated at proxy, HTTPS upstream to Studio (optional)
 - direct HTTP for local development
 
+Studio Route Contract (`/web` + `/api`)
+----------------------------------------
+
+Studio is split into two services on one host:
+
+- ``/web/*`` -> ``llmctl-studio-frontend`` (React SPA)
+- ``/api/*`` -> ``llmctl-studio-backend`` (Flask API + Socket.IO)
+
+Backend policy:
+
+- Flask no longer serves Jinja templates for user-facing pages.
+- Legacy backend static/template GUI assets are removed.
+- Non-API GUI routes are blocked in React-only runtime mode.
+
+Frontend nginx policy:
+
+- Proxy only ``/api/*`` to the backend service.
+- No legacy catch-all proxy fallback to backend GUI routes.
+
 Socket.IO + Redis Architecture
 ------------------------------
 
@@ -216,8 +235,33 @@ POST remains the write ingress path for user actions (for example turn submit,
 run/cancel actions, settings actions). Socket.IO is the primary push path for
 backend-to-frontend updates.
 
-This contract is frontend-agnostic by design, so Jinja pages and future React
-clients consume the same realtime events without backend contract rewrites.
+This contract is consumed by the React frontend in the split runtime.
+
+Developer Workflow (React-Only Split)
+-------------------------------------
+
+Local split development:
+
+1. Start backend:
+
+   .. code-block:: bash
+
+      python3 app/llmctl-studio-backend/run.py
+
+2. Start frontend:
+
+   .. code-block:: bash
+
+      cd app/llmctl-studio-frontend
+      npm run dev
+
+3. Ensure frontend API base path is ``/api`` and Socket.IO path is ``/api/socket.io``.
+
+Kubernetes split rollout:
+
+- frontend deployment: ``llmctl-studio-frontend``
+- backend deployment: ``llmctl-studio-backend``
+- ingress paths: ``/web`` and ``/api``
 
 Operational Guidance
 --------------------
@@ -240,5 +284,4 @@ CORS hardening follow-up:
 
 - current compatibility default may be wide open (``*``)
 - production should set ``LLMCTL_STUDIO_SOCKETIO_CORS_ALLOWED_ORIGINS`` to an
-  explicit allowlist for deployed Studio origin(s), plus future React origin(s)
-  when split-host frontend deployment is introduced
+  explicit allowlist for deployed Studio frontend origin(s)

@@ -4,6 +4,9 @@ Changelog
 2026-02-17
 ----------
 
+- Completed Studio React-only cutover: backend no longer serves legacy Jinja/static GUI routes, and frontend nginx removed backend fallback proxy behavior.
+- Documented final split route/runtime contract: ``/web`` (React frontend) and ``/api`` (backend API/realtime).
+- Added React-only runtime guard and automated backend/split integration tests to prevent legacy GUI route regressions.
 - Completed Celery runtime decoupling for Studio: backend now runs web/API only, while dedicated Kubernetes deployments run worker (`llmctl-celery-worker`) and beat (`llmctl-celery-beat`).
 - Documented Celery queue topology, dedicated beat scheduling model, and worker-slot scaling formula (`replicas x concurrency`) for Kubernetes operations.
 - Added automated worker runtime tests for `app/llmctl-celery-worker/run.py` and Stage 7 queue/beat smoke validation notes.

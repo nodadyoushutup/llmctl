@@ -17,7 +17,12 @@ os.environ.setdefault(
     "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
 )
 
-from web.app import _configure_socketio_api_prefix_alias, _register_blueprints  # noqa: E402
+from web.app import (  # noqa: E402
+    _configure_react_only_runtime_guard,
+    _configure_socketio_api_prefix_alias,
+    _is_react_only_allowed_path,
+    _register_blueprints,
+)
 
 
 class BackendSplitStage10Tests(unittest.TestCase):
@@ -76,6 +81,57 @@ class BackendSplitStage10Tests(unittest.TestCase):
         self.assertEqual(200, login_response.status_code)
         self.assertEqual(200, me_response.status_code)
         self.assertEqual({"user": "stage10"}, me_response.get_json())
+
+    def test_react_only_runtime_blocks_legacy_gui_routes_and_keeps_api_health(self) -> None:
+        app = Flask(__name__)
+        app.config.update(
+            API_PREFIX="/api",
+            SOCKETIO_PATH="socket.io",
+            REACT_ONLY_RUNTIME=True,
+        )
+        _configure_react_only_runtime_guard(app)
+        _register_blueprints(app)
+        client = app.test_client()
+
+        legacy_response = client.get("/agents")
+        api_health = client.get("/api/health")
+
+        self.assertEqual(404, legacy_response.status_code)
+        self.assertEqual(
+            {
+                "error": "Not found.",
+                "reason": "react_only_runtime_api_surface",
+            },
+            legacy_response.get_json(),
+        )
+        self.assertEqual(200, api_health.status_code)
+        self.assertEqual(
+            {"ok": True, "service": "llmctl-studio-backend"},
+            api_health.get_json(),
+        )
+
+    def test_react_only_allowed_path_checks_api_and_socketio_surfaces(self) -> None:
+        self.assertTrue(
+            _is_react_only_allowed_path(
+                "/api/agents",
+                api_prefix="/api",
+                socketio_path="/socket.io",
+            )
+        )
+        self.assertTrue(
+            _is_react_only_allowed_path(
+                "/socket.io/",
+                api_prefix="/api",
+                socketio_path="/socket.io",
+            )
+        )
+        self.assertFalse(
+            _is_react_only_allowed_path(
+                "/agents",
+                api_prefix="/api",
+                socketio_path="/socket.io",
+            )
+        )
 
 
 if __name__ == "__main__":

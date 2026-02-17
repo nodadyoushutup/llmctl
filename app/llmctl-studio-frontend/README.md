@@ -1,48 +1,49 @@
 # llmctl-studio-frontend
 
-React/Vite frontend for Studio migration. This app is the Stage 4 bootstrap for the backend/frontend split.
+React/Vite frontend for Studio. This is the only user-facing Studio UI runtime.
 
 ## Commands
 
 ```bash
 npm install
 npm run dev
+npm run lint
+npm test
 npm run build
 npm run preview
 ```
 
-## Runtime env model
+## Runtime Environment
 
 Copy `.env.example` to `.env` (optional) and adjust as needed:
 
 - `VITE_API_BASE_URL`: explicit backend origin. Leave empty for same-origin ingress routing.
 - `VITE_API_BASE_PATH`: backend API prefix, default `/api`.
-- `VITE_WEB_BASE_PATH`: frontend mount path for router basename.
-- `VITE_SOCKET_PATH`: Socket.IO transport path.
+- `VITE_WEB_BASE_PATH`: frontend mount path for router basename (typically `/web` in Kubernetes ingress).
+- `VITE_SOCKET_PATH`: Socket.IO transport path (default `/api/socket.io`).
 - `VITE_SOCKET_NAMESPACE`: Socket namespace, default `/rt`.
 - `VITE_DEV_API_PROXY_TARGET`: optional Vite dev proxy target for `/api` requests.
 
-## What Stage 4 includes
+## Split Runtime Contract
 
-- App shell and router skeleton for migration waves.
-- Shared HTTP utilities with consistent auth/error handling.
-- API diagnostics view that probes `/api/health` and `/api/chat/activity`.
+- Frontend routes are served from `/web/*`.
+- Backend API/realtime routes are served from `/api/*`.
+- Frontend nginx proxies only `/api/*` to `llmctl-studio-backend`.
+- No legacy Flask GUI bridge/fallback is used in this runtime.
 
-## Stage 5 progress (Wave 1)
+## Local Development
 
-- Parity tracker route at `/parity-checklist` with wave-by-wave legacy-to-react mapping.
-- Migrated chat activity route at `/chat/activity` (read from `/api/chat/activity`).
-- Migrated chat thread detail route at `/chat/threads/:threadId` (read from `/api/chat/threads/:threadId`).
-- Each migrated view keeps a legacy fallback link while backend templates remain online.
+1. Start backend from repo root:
 
-## Stage 5 progress (Wave 2 partial)
+   ```bash
+   python3 app/llmctl-studio-backend/run.py
+   ```
 
-- Execution monitor route at `/execution-monitor`.
-- Run detail read probe wired to `/api/runs/:id`.
-- Node status read probe wired to `/api/nodes/:id/status`.
+2. Start frontend:
 
-## Stage 5 completion mode
+   ```bash
+   cd app/llmctl-studio-frontend
+   npm run dev
+   ```
 
-- Native React routes currently cover shell, parity tracker, diagnostics, chat activity/thread, and execution monitor.
-- All remaining legacy GUI paths are covered by React bridge mode via mirrored `/api/...` pages rendered in-app.
-- This keeps full behavior parity while native replacements continue in later stages.
+3. If needed, set `VITE_DEV_API_PROXY_TARGET` (for example `http://127.0.0.1:5155`) so frontend `/api` requests reach the backend.

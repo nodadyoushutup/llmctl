@@ -119,7 +119,7 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 
 ## Stage 9 - Full-Parity Gate and Backend GUI Decommission
 - [x] Improve bridge routing compatibility so legacy absolute-path navigation works from `/web` bridge mode.
-- [ ] Execute final parity audit against all legacy backend GUI pages/routes.
+- [x] Execute final parity audit against all legacy backend GUI pages/routes.
 - [ ] Remove backend template-rendered GUI routes/templates/static assets after parity is confirmed.
 - [ ] Keep backend focused on API/realtime/service responsibilities only.
 - [ ] Perform naming cleanup and dead-code removal linked to retired GUI paths.
@@ -195,8 +195,8 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Stage 6: Settings, provider/runtime/chat config, and integrations.
 - [x] Stage 7: Skills, scripts, attachments, models, MCP servers.
 - [x] Stage 8: RAG pages and external tools surfaces (GitHub/Jira/Confluence/Chroma).
-- [ ] Stage 9: Visual parity recreation and screenshot signoff (legacy-exact target).
-- [ ] Stage 10: React-only routing hardening and bridge decommission prep.
+- [x] Stage 9: Visual parity recreation and screenshot signoff (legacy-exact target).
+- [x] Stage 10: React-only routing hardening and bridge decommission prep.
 - [ ] Stage 11: Legacy backend GUI removal and backend API-only cleanup.
 - [ ] Stage 12: Automated Testing.
 - [ ] Stage 13: Docs Updates.
@@ -310,21 +310,21 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 ## Stage 9 - Visual + Behavioral Parity Recreation (Legacy-Exact)
 - [x] Lock Stage 9 scope and artifact naming conventions for baseline/current/diff screenshot sets.
 - [x] Maintain a route/state signoff matrix in `docs/planning/active/STUDIO_FRONTEND_PARITY_CHECKLIST.md`.
-- [ ] Enforce hard gate: no Stage 9 checkbox may remain open at cutover.
+- [x] Enforce hard gate: no Stage 9 checkbox may remain open at cutover.
 
 ## Stage 9 - Parallel Execution Model (Two Agents, Same Plan)
 - [x] Use route-family ownership (not visual-vs-functional ownership): each agent delivers both visual and behavioral parity for assigned slices.
-- [ ] Run two concurrent branches/worktrees from current HEAD (`stage9-agent-a`, `stage9-agent-b`) and keep all slice work isolated until merge.
-- [ ] Enforce no-overlap rule: one agent owns each open slice until that slice reaches visual + behavioral signoff.
-- [ ] Enforce shared-file lock rule for cross-cutting files:
-- [ ] `app/llmctl-studio-frontend/src/components/AppLayout.jsx`
-- [ ] `app/llmctl-studio-frontend/src/styles.css`
-- [ ] `app/llmctl-studio-frontend/src/App.jsx`
-- [ ] `app/llmctl-studio-frontend/src/lib/studioApi.js`
-- [ ] `app/llmctl-studio-frontend/src/lib/studioApi.test.js`
-- [ ] `app/llmctl-studio-frontend/src/parity/checklist.js`
-- [ ] Merge cadence: complete one slice PR per agent, merge, rebase the other agent, then continue to next assigned slice.
-- [ ] After every merge, run `npm run lint`, `npm run test -- --run`, and `npm run build` in `app/llmctl-studio-frontend` before next handoff.
+- [x] Run two concurrent branches/worktrees from current HEAD (`stage9-agent-a`, `stage9-agent-b`) and keep all slice work isolated until merge.
+- [x] Enforce no-overlap rule: one agent owns each open slice until that slice reaches visual + behavioral signoff.
+- [x] Enforce shared-file lock rule for cross-cutting files:
+- [x] `app/llmctl-studio-frontend/src/components/AppLayout.jsx`
+- [x] `app/llmctl-studio-frontend/src/styles.css`
+- [x] `app/llmctl-studio-frontend/src/App.jsx`
+- [x] `app/llmctl-studio-frontend/src/lib/studioApi.js`
+- [x] `app/llmctl-studio-frontend/src/lib/studioApi.test.js`
+- [x] `app/llmctl-studio-frontend/src/parity/checklist.js`
+- [x] Merge cadence: complete one slice PR per agent, merge, rebase the other agent, then continue to next assigned slice.
+- [x] After every merge, run `npm run lint`, `npm run test -- --run`, and `npm run build` in `app/llmctl-studio-frontend` before next handoff.
 
 ## Stage 9 - Parallel Slice Ownership
 - [x] Agent A owns Slice 2 + Slice 6 (execution surfaces and settings/integrations).
@@ -332,16 +332,16 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Slice 3 + Slice 4 are completed and should stay locked unless a parity regression is discovered during Stage 9D audit.
 
 ## Stage 9A - Baseline and Diff Tooling
-- [ ] Capture legacy baseline screenshots for all cutover routes at desktop (`1920x1080`) and mobile (`390x844`).
-- [ ] Capture React current screenshots for the same route/state matrix.
-- [ ] Store baseline/current captures under `docs/screenshots` with deterministic naming and route/state labels.
-- [ ] Track every visual mismatch as an explicit delta item with target file/component and closure note.
+- [x] Capture legacy baseline screenshots for all cutover routes at desktop (`1920x1080`) and mobile (`390x844`).
+- [x] Capture React current screenshots for the same route/state matrix.
+- [x] Store baseline/current captures under `docs/screenshots` with deterministic naming and route/state labels.
+- [x] Track every visual mismatch as an explicit delta item with target file/component and closure note.
 
 ## Stage 9B - Shell and Shared UI Parity
 - [x] Recreate legacy shell frame in React (left navigation, header, content container, spacing, and breakpoints).
 - [x] Match global typography (family, size scale, weights, letter spacing, line height).
 - [x] Match global visual tokens (colors, gradients, borders, shadows, radius, icon size).
-- [ ] Match shared component primitives (cards, tables, forms, badges, icon-only action buttons, empty/loading/error panels).
+- [x] Match shared component primitives (cards, tables, forms, badges, icon-only action buttons, empty/loading/error panels).
 
 ## Stage 9C - Route Family Visual Parity Slices
 - [x] Slice 1 (Agent B): Core shell routes (`/overview`, `/parity-checklist`, `/api-diagnostics`).
@@ -385,28 +385,35 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Captured Stage 9 Wave 3 legacy baseline screenshots (`stage9-wave3-baseline`) for planning routes (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`) at desktop + mobile.
 - [x] Captured Stage 9 Wave 3 React parity screenshots (`stage9-wave3-parity`) for planning routes (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`) at desktop + mobile.
 - [x] Completed Wave 3 behavioral parity audit for planning routes (row navigation exclusions, destructive confirmations, and CRUD feedback states).
+- [x] Completed Stage 10 React-only bridge cleanup in frontend code by deleting dead iframe/fallback components (`src/pages/LegacyMirrorPage.jsx`, `src/components/LegacyFallbackNote.jsx`) and removing bridge-only parity status wording.
+- [x] Added Stage 10 parity guard test coverage at `app/llmctl-studio-frontend/src/parity/checklist.test.js` to assert all tracked route families are native React with zero pending migration gaps.
+- [x] Captured Stage 10 React-only signoff screenshots (desktop + mobile) for native parity checklist and unknown-route 404 behavior:
+- [x] `docs/screenshots/2026-02-17-12-37-50--parity-checklist--stage10-react-only-signoff--1920x1080--785e6a0--8da9ff.png`
+- [x] `docs/screenshots/2026-02-17-12-37-51--parity-checklist--stage10-react-only-signoff--390x844--785e6a0--b2e6a8.png`
+- [x] `docs/screenshots/2026-02-17-12-37-51--react-404--stage10-react-only-signoff--1920x1080--785e6a0--5eeea7.png`
+- [x] `docs/screenshots/2026-02-17-12-37-51--react-404--stage10-react-only-signoff--390x844--785e6a0--dec383.png`
 
 ## Stage 9D - Behavioral Parity Audit
 - [x] Agent A closes Stage 9D checks for Slice 2 + Slice 6 routes.
 - [x] Agent B closes Stage 9D checks for Slice 1 + Slice 5 + Slice 7 routes.
-- [ ] Verify list-row behavior parity (`table-row-link` navigation + interactive element click exclusion).
-- [ ] Verify CRUD mutation behavior parity (success/error messaging, validation errors, disabled/busy states).
-- [ ] Verify destructive action parity (icon-only trash actions, confirmation prompts, post-action redirects).
-- [ ] Verify pagination/filter/search/sort parity on all list-heavy routes.
-- [ ] Verify long-running/polling/realtime feedback parity (runs, nodes, flowcharts, RAG quick index).
-- [ ] Verify keyboard/focus/tab-order parity for primary forms and table actions.
+- [x] Verify list-row behavior parity (`table-row-link` navigation + interactive element click exclusion).
+- [x] Verify CRUD mutation behavior parity (success/error messaging, validation errors, disabled/busy states).
+- [x] Verify destructive action parity (icon-only trash actions, confirmation prompts, post-action redirects).
+- [x] Verify pagination/filter/search/sort parity on all list-heavy routes.
+- [x] Verify long-running/polling/realtime feedback parity (runs, nodes, flowcharts, RAG quick index).
+- [x] Verify keyboard/focus/tab-order parity for primary forms and table actions.
 
 ## Stage 9E - Signoff and Exit Criteria
-- [ ] Desktop screenshot signoff complete for all Stage 9 route families.
-- [ ] Mobile screenshot signoff complete for all Stage 9 route families.
-- [ ] Behavioral signoff complete for all Stage 9 route families.
-- [ ] All visual delta items are closed and documented with artifact references.
+- [x] Desktop screenshot signoff complete for all Stage 9 route families.
+- [x] Mobile screenshot signoff complete for all Stage 9 route families.
+- [x] Behavioral signoff complete for all Stage 9 route families.
+- [x] All visual delta items are closed and documented with artifact references.
 
 ## Stage 10 - React-Only Routing Hardening
-- [ ] Remove React iframe bridge route usage from app router.
-- [ ] Remove bridge-focused frontend navigation/runtime notes.
-- [ ] Ensure unknown routes use React 404 handling.
-- [ ] Verify all previously bridged routes are now native React routes.
+- [x] Remove React iframe bridge route usage from app router.
+- [x] Remove bridge-focused frontend navigation/runtime notes.
+- [x] Ensure unknown routes use React 404 handling.
+- [x] Verify all previously bridged routes are now native React routes.
 
 ## Stage 11 - Legacy Backend GUI Removal
 - [ ] Delete backend template-rendered GUI route handlers.
@@ -468,5 +475,5 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Wave 5 visual+behavior signoff (skills/scripts/attachments/models/mcps).
 - [x] Wave 6 visual+behavior signoff (settings/runtime/integrations controls).
 - [x] Wave 7 visual+behavior signoff (RAG + GitHub/Jira/Confluence/Chroma).
-- [ ] Desktop + mobile responsive signoff complete across all waves.
-- [ ] Interactive states signoff complete across all waves (hover/focus/active/disabled/loading/error).
+- [x] Desktop + mobile responsive signoff complete across all waves.
+- [x] Interactive states signoff complete across all waves (hover/focus/active/disabled/loading/error).
