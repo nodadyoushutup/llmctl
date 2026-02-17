@@ -15898,7 +15898,7 @@ def settings():
     }
     core_overview = {
         "DATA_DIR": Config.DATA_DIR,
-        "DATABASE_FILENAME": Config.DATABASE_FILENAME,
+        "DATABASE_FILENAME": _database_filename_setting(),
         "CODEX_MODEL": Config.CODEX_MODEL or "default",
         "VLLM_LOCAL_CMD": Config.VLLM_LOCAL_CMD,
         "VLLM_LOCAL_CUSTOM_MODELS_DIR": Config.VLLM_LOCAL_CUSTOM_MODELS_DIR,
@@ -16063,12 +16063,25 @@ def delete_role(role_id: int):
     return redirect(next_url)
 
 
+def _database_filename_setting() -> str:
+    configured = str(getattr(Config, "DATABASE_FILENAME", "") or "").strip()
+    if configured:
+        return configured
+    uri = str(getattr(Config, "SQLALCHEMY_DATABASE_URI", "") or "").strip()
+    if not uri:
+        return "not set"
+    base_uri = uri.split("?", 1)[0]
+    if base_uri.lower().startswith("sqlite:"):
+        return base_uri.rsplit("/", 1)[-1] or base_uri
+    return "managed by database URI"
+
+
 @bp.get("/settings/core")
 def settings_core():
     summary = _settings_summary()
     core_config = {
         "DATA_DIR": Config.DATA_DIR,
-        "DATABASE_FILENAME": Config.DATABASE_FILENAME,
+        "DATABASE_FILENAME": _database_filename_setting(),
         "SQLALCHEMY_DATABASE_URI": Config.SQLALCHEMY_DATABASE_URI,
         "AGENT_POLL_SECONDS": Config.AGENT_POLL_SECONDS,
         "LLM_PROVIDER": resolve_llm_provider() or "not set",

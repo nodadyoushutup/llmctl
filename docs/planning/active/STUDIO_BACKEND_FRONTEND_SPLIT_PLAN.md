@@ -328,7 +328,7 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 
 ## Stage 9 - Parallel Slice Ownership
 - [x] Agent A owns Slice 2 + Slice 6 (execution surfaces and settings/integrations).
-- [ ] Agent B owns Slice 1 + Slice 5 + Slice 7 (core/chat, asset catalogs, and RAG/external tooling).
+- [x] Agent B owns Slice 1 + Slice 5 + Slice 7 (core/chat, asset catalogs, and RAG/external tooling).
 - [x] Slice 3 + Slice 4 are completed and should stay locked unless a parity regression is discovered during Stage 9D audit.
 
 ## Stage 9A - Baseline and Diff Tooling
@@ -344,13 +344,13 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [ ] Match shared component primitives (cards, tables, forms, badges, icon-only action buttons, empty/loading/error panels).
 
 ## Stage 9C - Route Family Visual Parity Slices
-- [ ] Slice 1 (Agent B): Core shell routes (`/overview`, `/parity-checklist`, `/api-diagnostics`).
+- [x] Slice 1 (Agent B): Core shell routes (`/overview`, `/parity-checklist`, `/api-diagnostics`).
 - [x] Slice 2 (Agent A): Execution routes (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`).
 - [x] Slice 3 (Complete, lock): Planning/knowledge routes (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`).
 - [x] Slice 4 (Complete, lock): Flowchart routes (`/flowcharts*`, history/run detail/runtime views).
-- [ ] Slice 5 (Agent B): Settings routes (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`).
-- [ ] Slice 6 (Agent A): Asset/catalog routes (`/skills*`, `/scripts*`, `/attachments*`, `/models*`, `/mcps*`).
-- [ ] Slice 7 (Agent B): RAG + external tool routes (`/rag*`, `/github*`, `/jira*`, `/confluence`, `/chroma*`).
+- [x] Slice 5 (Agent B): Asset/catalog routes (`/skills*`, `/scripts*`, `/attachments*`, `/models*`, `/mcps*`).
+- [x] Slice 6 (Agent A): Settings routes (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`).
+- [x] Slice 7 (Agent B): RAG + external tool routes (`/rag*`, `/github*`, `/jira*`, `/confluence`, `/chroma*`).
 
 ## Stage 9 - Current Slice Notes (2026-02-17)
 - [x] Migrated `/chat/activity` from migration placeholder copy to legacy-style filter/table layout.
@@ -374,10 +374,17 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] `/flowcharts/:flowchartId/history` and `/flowcharts/:flowchartId/history/:runId` now mirror legacy history/run table structures and run controls.
 - [x] Updated `/flowcharts/:flowchartId` top action and control labels to match legacy terminology (`back to flowcharts`, `edit metadata`, `history`, `save graph`, `run flowchart`, `stop flowchart`, `force stop`).
 - [x] Captured Stage 9 Slice 4 screenshots for flowchart routes (`/flowcharts`, `/flowcharts/new`, `/flowcharts/:flowchartId`, `/flowcharts/:flowchartId/edit`, `/flowcharts/:flowchartId/history`, `/flowcharts/:flowchartId/history/:runId`, `/flowcharts/runs/:runId`).
+- [x] Validated Agent B behavioral parity on Wave 1/5/7 list surfaces (`table-row-link` navigation + interactive exclusion; icon-only delete actions with confirm/busy states) across chat activity, skills/scripts/attachments/models/mcps, rag sources, github/jira, and chroma collections routes.
+- [x] Captured Stage 9 Agent A Wave 2 desktop+mobile screenshot set for execution routes (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`) using `stage9-agent-a-parity` artifacts.
+- [x] Captured Stage 9 Agent A Wave 6 desktop+mobile screenshot set for settings/integrations routes (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`) using `stage9-agent-a-parity` artifacts.
+- [x] Captured Stage 9 Agent A Wave 2/Wave 6 legacy baseline set using `stage9-agent-a-baseline` artifacts (desktop + mobile).
+- [x] Fixed backend settings core route parity blocker by replacing missing `Config.DATABASE_FILENAME` dependency with URI-derived fallback metadata (`/api/settings/core` and `/settings/core` now return successfully).
+- [x] Added frontend test coverage for list row-click interactive exclusion in `app/llmctl-studio-frontend/src/lib/tableRowLink.test.js`.
+- [x] Captured additional Agent B desktop+mobile parity screenshots for wildcard new/import flows (`/skills/new`, `/skills/import`, `/scripts/new`, `/models/new`, `/mcps/new`, `/rag/sources/new`) using `stage9-agent-b-parity-extra` artifacts.
 
 ## Stage 9D - Behavioral Parity Audit
 - [x] Agent A closes Stage 9D checks for Slice 2 + Slice 6 routes.
-- [ ] Agent B closes Stage 9D checks for Slice 1 + Slice 5 + Slice 7 routes.
+- [x] Agent B closes Stage 9D checks for Slice 1 + Slice 5 + Slice 7 routes.
 - [ ] Verify list-row behavior parity (`table-row-link` navigation + interactive element click exclusion).
 - [ ] Verify CRUD mutation behavior parity (success/error messaging, validation errors, disabled/busy states).
 - [ ] Verify destructive action parity (icon-only trash actions, confirmation prompts, post-action redirects).
@@ -450,12 +457,12 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] External Tools (GitHub/Jira/Confluence/Chroma)
 
 ## React Visual Signoff Tracker (Legacy-Exact)
-- [ ] Wave 1 visual+behavior signoff (core shell + chat read flows).
-- [ ] Wave 2 visual+behavior signoff (agents/runs/quick/nodes/execution monitor).
+- [x] Wave 1 visual+behavior signoff (core shell + chat read flows).
+- [x] Wave 2 visual+behavior signoff (agents/runs/quick/nodes/execution monitor).
 - [ ] Wave 3 visual+behavior signoff (plans/milestones/memories/templates).
 - [ ] Wave 4 visual+behavior signoff (flowcharts).
-- [ ] Wave 5 visual+behavior signoff (skills/scripts/attachments/models/mcps).
-- [ ] Wave 6 visual+behavior signoff (settings/runtime/integrations controls).
-- [ ] Wave 7 visual+behavior signoff (RAG + GitHub/Jira/Confluence/Chroma).
+- [x] Wave 5 visual+behavior signoff (skills/scripts/attachments/models/mcps).
+- [x] Wave 6 visual+behavior signoff (settings/runtime/integrations controls).
+- [x] Wave 7 visual+behavior signoff (RAG + GitHub/Jira/Confluence/Chroma).
 - [ ] Desktop + mobile responsive signoff complete across all waves.
 - [ ] Interactive states signoff complete across all waves (hover/focus/active/disabled/loading/error).

@@ -94,6 +94,10 @@ Status key:
   - `docs/screenshots/2026-02-17-10-04-02--quick--stage9-slice2-parity--1920x1080--6c88ada--35f187.png`
 - [x] Stage 9 Slice 2 `/execution-monitor` parity screenshot captured:
   - `docs/screenshots/2026-02-17-10-04-02--execution-monitor--stage9-slice2-parity--1920x1080--6c88ada--2c2ad6.png`
+- [x] Stage 9 Agent A Wave 2 desktop+mobile screenshot set captured (`stage9-agent-a-parity`) for `/agents*`, `/runs*`, `/quick`, `/nodes*`, and `/execution-monitor`.
+- [x] Stage 9 Agent A Wave 6 desktop+mobile screenshot set captured (`stage9-agent-a-parity`) for `/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, and `/settings/integrations*`.
+- [x] Stage 9 Agent A Wave 2/Wave 6 legacy baseline screenshot set captured (`stage9-agent-a-baseline`) for desktop + mobile.
+- [x] Baseline capture note: legacy backend route `/execution-monitor` renders a legacy `404` page (captured as baseline) because the route is React-native only.
 - [x] Stage 9 Slice 3 `/chat/activity` parity screenshot captured:
   - `docs/screenshots/2026-02-17-10-23-32--chat-activity--stage9-slice3-parity--1920x1080--6c88ada--45880a.png`
 - [x] Stage 9 Slice 3 `/execution-monitor` parity screenshot recaptured after monitor default-load fix:
@@ -153,18 +157,56 @@ Status key:
 - [x] Stage 9 Agent B Wave 1/5/7 parity screenshots captured (desktop + mobile):
   - `docs/screenshots/2026-02-17-12-07-25--overview--stage9-agent-b-parity--1920x1080--e23efc0--f5417c.png`
   - `docs/screenshots/2026-02-17-12-07-26--overview--stage9-agent-b-parity--390x844--e23efc0--14dd38.png`
+  - `docs/screenshots/2026-02-17-12-07-27--parity-checklist--stage9-agent-b-parity--1920x1080--e23efc0--5bde53.png`
+  - `docs/screenshots/2026-02-17-12-07-28--parity-checklist--stage9-agent-b-parity--390x844--e23efc0--031dd4.png`
+  - `docs/screenshots/2026-02-17-12-07-29--api-diagnostics--stage9-agent-b-parity--1920x1080--e23efc0--c63887.png`
+  - `docs/screenshots/2026-02-17-12-07-30--api-diagnostics--stage9-agent-b-parity--390x844--e23efc0--603926.png`
+  - `docs/screenshots/2026-02-17-12-07-31--chat-activity--stage9-agent-b-parity--1920x1080--e23efc0--409893.png`
+  - `docs/screenshots/2026-02-17-12-07-32--chat-activity--stage9-agent-b-parity--390x844--e23efc0--98e5a1.png`
+  - `docs/screenshots/2026-02-17-12-07-33--chat-thread--stage9-agent-b-parity--1920x1080--e23efc0--f9b4ab.png`
+  - `docs/screenshots/2026-02-17-12-07-34--chat-thread--stage9-agent-b-parity--390x844--e23efc0--17cc79.png`
   - `docs/screenshots/2026-02-17-12-07-35--skills--stage9-agent-b-parity--1920x1080--e23efc0--11588a.png`
   - `docs/screenshots/2026-02-17-12-07-36--skills--stage9-agent-b-parity--390x844--e23efc0--657b36.png`
+  - `docs/screenshots/2026-02-17-12-07-37--scripts--stage9-agent-b-parity--1920x1080--e23efc0--177d1f.png`
+  - `docs/screenshots/2026-02-17-12-07-38--scripts--stage9-agent-b-parity--390x844--e23efc0--7771e0.png`
+  - `docs/screenshots/2026-02-17-12-07-39--attachments--stage9-agent-b-parity--1920x1080--e23efc0--42c2c1.png`
+  - `docs/screenshots/2026-02-17-12-07-40--attachments--stage9-agent-b-parity--390x844--e23efc0--d33ff6.png`
+  - `docs/screenshots/2026-02-17-12-07-41--models--stage9-agent-b-parity--1920x1080--e23efc0--62b243.png`
+  - `docs/screenshots/2026-02-17-12-07-42--models--stage9-agent-b-parity--390x844--e23efc0--92bbcd.png`
+  - `docs/screenshots/2026-02-17-12-07-43--mcps--stage9-agent-b-parity--1920x1080--e23efc0--ac18c2.png`
+  - `docs/screenshots/2026-02-17-12-07-44--mcps--stage9-agent-b-parity--390x844--e23efc0--1e65ee.png`
   - `docs/screenshots/2026-02-17-12-07-45--rag-chat--stage9-agent-b-parity--1920x1080--e23efc0--65c68f.png`
   - `docs/screenshots/2026-02-17-12-07-46--rag-chat--stage9-agent-b-parity--390x844--e23efc0--441e29.png`
+  - `docs/screenshots/2026-02-17-12-07-47--rag-sources--stage9-agent-b-parity--1920x1080--e23efc0--9574cd.png`
+  - `docs/screenshots/2026-02-17-12-07-48--rag-sources--stage9-agent-b-parity--390x844--e23efc0--8afc24.png`
+  - `docs/screenshots/2026-02-17-12-07-49--github--stage9-agent-b-parity--1920x1080--e23efc0--fcf121.png`
+  - `docs/screenshots/2026-02-17-12-07-50--github--stage9-agent-b-parity--390x844--e23efc0--924946.png`
+  - `docs/screenshots/2026-02-17-12-07-51--jira--stage9-agent-b-parity--1920x1080--e23efc0--96befd.png`
+  - `docs/screenshots/2026-02-17-12-07-52--jira--stage9-agent-b-parity--390x844--e23efc0--aaf9aa.png`
+  - `docs/screenshots/2026-02-17-12-07-53--confluence--stage9-agent-b-parity--1920x1080--e23efc0--5377f4.png`
+  - `docs/screenshots/2026-02-17-12-07-54--confluence--stage9-agent-b-parity--390x844--e23efc0--b75257.png`
+  - `docs/screenshots/2026-02-17-12-07-55--chroma-collections--stage9-agent-b-parity--1920x1080--e23efc0--750ca4.png`
+  - `docs/screenshots/2026-02-17-12-07-56--chroma-collections--stage9-agent-b-parity--390x844--e23efc0--052636.png`
+  - `docs/screenshots/2026-02-17-12-21-46--skills-new--stage9-agent-b-parity-extra--1920x1080--59fefe7--1aa6ff.png`
+  - `docs/screenshots/2026-02-17-12-22-04--skills-new--stage9-agent-b-parity-extra--390x844--59fefe7--870c63.png`
+  - `docs/screenshots/2026-02-17-12-21-46--skills-import--stage9-agent-b-parity-extra--1920x1080--59fefe7--45b83b.png`
+  - `docs/screenshots/2026-02-17-12-22-04--skills-import--stage9-agent-b-parity-extra--390x844--59fefe7--00f1e7.png`
+  - `docs/screenshots/2026-02-17-12-21-46--scripts-new--stage9-agent-b-parity-extra--1920x1080--59fefe7--dbcf12.png`
+  - `docs/screenshots/2026-02-17-12-22-04--scripts-new--stage9-agent-b-parity-extra--390x844--59fefe7--317384.png`
+  - `docs/screenshots/2026-02-17-12-21-56--models-new--stage9-agent-b-parity-extra--1920x1080--59fefe7--718903.png`
+  - `docs/screenshots/2026-02-17-12-22-15--models-new--stage9-agent-b-parity-extra--390x844--59fefe7--14a892.png`
+  - `docs/screenshots/2026-02-17-12-21-56--mcps-new--stage9-agent-b-parity-extra--1920x1080--59fefe7--68fa29.png`
+  - `docs/screenshots/2026-02-17-12-22-15--mcps-new--stage9-agent-b-parity-extra--390x844--59fefe7--44433a.png`
+  - `docs/screenshots/2026-02-17-12-21-56--rag-source-new--stage9-agent-b-parity-extra--1920x1080--59fefe7--83708f.png`
+  - `docs/screenshots/2026-02-17-12-22-15--rag-source-new--stage9-agent-b-parity-extra--390x844--59fefe7--27e509.png`
 
 ### Baseline Capture Completion
 - [x] Wave 1 baseline set captured (desktop + mobile).
-- [ ] Wave 2 baseline set captured (desktop + mobile).
+- [x] Wave 2 baseline set captured (desktop + mobile).
 - [ ] Wave 3 baseline set captured (desktop + mobile).
 - [ ] Wave 4 baseline set captured (desktop + mobile).
 - [x] Wave 5 baseline set captured (desktop + mobile).
-- [ ] Wave 6 baseline set captured (desktop + mobile).
+- [x] Wave 6 baseline set captured (desktop + mobile).
 - [x] Wave 7 baseline set captured (desktop + mobile).
 
 ### Visual Signoff by Route Family
