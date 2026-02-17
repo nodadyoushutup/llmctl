@@ -9,12 +9,12 @@ import {
   attachAgentSkill,
   attachFlowchartNodeMcp,
   attachFlowchartNodeScript,
-  attachFlowchartNodeSkill,
   archiveChatThread,
   cancelFlowchartRun,
   cancelNode,
   createAgent,
   createAgentPriority,
+  createRole,
   createFlowchart,
   createChatThread,
   createNode,
@@ -31,11 +31,11 @@ import {
   deletePlan,
   deletePlanStage,
   deletePlanTask,
+  deleteRole,
   deleteRun,
   detachAgentSkill,
   detachFlowchartNodeMcp,
   detachFlowchartNodeScript,
-  detachFlowchartNodeSkill,
   getAgent,
   getAgentMeta,
   getAgents,
@@ -123,7 +123,6 @@ import {
   moveAgentSkill,
   previewSkillImport,
   reorderFlowchartNodeScripts,
-  reorderFlowchartNodeSkills,
   removeNodeAttachment,
   runFlowchart,
   setFlowchartNodeModel,
@@ -153,7 +152,6 @@ import {
   updateSettingsRuntimeChat,
   updateSettingsRuntimeInstructions,
   updateSettingsRuntimeNodeExecutor,
-  updateSettingsRuntimeNodeSkillBinding,
   updateSettingsRuntimeRag,
   updateMcp,
   updateModel,
@@ -170,6 +168,7 @@ import {
   updatePlanTask,
   updateAgent,
   updateAgentPriority,
+  updateRole,
   deleteMcp,
   deleteModel,
   deleteScript,
@@ -595,9 +594,6 @@ describe('studioApi', () => {
     attachFlowchartNodeScript(4, 11, { scriptId: 8 })
     detachFlowchartNodeScript(4, 11, 8)
     reorderFlowchartNodeScripts(4, 11, { scriptIds: [8, 5] })
-    attachFlowchartNodeSkill(4, 11, { skillId: 2 })
-    detachFlowchartNodeSkill(4, 11, 2)
-    reorderFlowchartNodeSkills(4, 11, { skillIds: [2, 9] })
 
     expect(requestJson).toHaveBeenNthCalledWith(1, '/flowcharts')
     expect(requestJson).toHaveBeenNthCalledWith(2, '/flowcharts/new')
@@ -663,17 +659,6 @@ describe('studioApi', () => {
       method: 'POST',
       body: { script_ids: [8, 5] },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(25, '/flowcharts/4/nodes/11/skills', {
-      method: 'POST',
-      body: { skill_id: 2 },
-    })
-    expect(requestJson).toHaveBeenNthCalledWith(26, '/flowcharts/4/nodes/11/skills/2/delete', {
-      method: 'POST',
-    })
-    expect(requestJson).toHaveBeenNthCalledWith(27, '/flowcharts/4/nodes/11/skills/reorder', {
-      method: 'POST',
-      body: { skill_ids: [2, 9] },
-    })
   })
 
   test('stage 6 settings endpoints map to expected api paths', () => {
@@ -702,7 +687,6 @@ describe('studioApi', () => {
       instruction_native_enabled_codex: true,
       instruction_fallback_enabled_codex: false,
     })
-    updateSettingsRuntimeNodeSkillBinding({ mode: 'warn' })
     updateSettingsRuntimeNodeExecutor({
       provider: 'kubernetes',
       workspaceIdentityKey: 'workspace',
@@ -809,11 +793,7 @@ describe('studioApi', () => {
         instruction_fallback_enabled_codex: false,
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(15, '/settings/runtime/node-skill-binding', {
-      method: 'POST',
-      body: { node_skill_binding_mode: 'warn' },
-    })
-    expect(requestJson).toHaveBeenNthCalledWith(16, '/settings/runtime/node-executor', {
+    expect(requestJson).toHaveBeenNthCalledWith(15, '/settings/runtime/node-executor', {
       method: 'POST',
       body: {
         provider: 'kubernetes',
@@ -834,7 +814,7 @@ describe('studioApi', () => {
         k8s_in_cluster: true,
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(17, '/settings/runtime/rag', {
+    expect(requestJson).toHaveBeenNthCalledWith(16, '/settings/runtime/rag', {
       method: 'POST',
       body: {
         rag_db_provider: 'chroma',
@@ -855,7 +835,7 @@ describe('studioApi', () => {
         rag_embed_parallel_requests: '1',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(18, '/settings/runtime/chat', {
+    expect(requestJson).toHaveBeenNthCalledWith(17, '/settings/runtime/chat', {
       method: 'POST',
       body: {
         history_budget_percent: 45,
@@ -870,8 +850,8 @@ describe('studioApi', () => {
         return_to: 'runtime',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(19, '/settings/chat')
-    expect(requestJson).toHaveBeenNthCalledWith(20, '/settings/chat/defaults', {
+    expect(requestJson).toHaveBeenNthCalledWith(18, '/settings/chat')
+    expect(requestJson).toHaveBeenNthCalledWith(19, '/settings/chat/defaults', {
       method: 'POST',
       body: {
         default_model_id: 4,
@@ -1318,3 +1298,7 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(20, '/rag/sources/10/delete', { method: 'POST' })
   })
 })
+  getRole,
+  getRoleEdit,
+  getRoleMeta,
+  getRoles,

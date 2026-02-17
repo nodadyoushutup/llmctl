@@ -249,7 +249,9 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         limits = (
             manifest["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
         )
+        container = manifest["spec"]["template"]["spec"]["containers"][0]
         self.assertNotIn("nvidia.com/gpu", limits)
+        self.assertEqual("IfNotPresent", container.get("imagePullPolicy"))
         self.assertEqual(1800, manifest["spec"]["ttlSecondsAfterFinished"])
 
     def test_build_job_manifest_adds_project_mount_when_live_code_enabled(self) -> None:

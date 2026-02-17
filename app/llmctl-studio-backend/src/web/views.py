@@ -76,19 +76,14 @@ from services.integrations import (
     LLM_PROVIDER_LABELS,
     LLM_PROVIDERS,
     NODE_EXECUTOR_PROVIDER_CHOICES,
-    NODE_SKILL_BINDING_MODE_CHOICES,
-    NODE_SKILL_BINDING_MODE_REJECT,
-    NODE_SKILL_BINDING_MODE_WARN,
     integration_overview as _integration_overview,
     load_integration_settings as _load_integration_settings,
     load_node_executor_settings,
     node_executor_effective_config_summary,
     migrate_legacy_google_integration_settings,
-    normalize_node_skill_binding_mode,
     resolve_default_model_id,
     resolve_enabled_llm_providers,
     resolve_llm_provider,
-    resolve_node_skill_binding_mode,
     save_node_executor_settings,
     save_integration_settings as _save_integration_settings,
 )
@@ -409,13 +404,6 @@ RAG_CHAT_RESPONSE_STYLE_ALIASES = {
     "detailed": "high",
     "verbose": "high",
 }
-NODE_SKILL_BINDING_WRITE_ERROR = (
-    "Node-level skill binding is disabled. Assign skills on the Agent instead."
-)
-NODE_SKILL_BINDING_WRITE_WARNING = (
-    "Node-level skill payloads are deprecated and ignored. Assign skills on the Agent."
-)
-
 MILESTONE_STATUS_LABELS = {
     "planned": "planned",
     "in_progress": "in progress",
@@ -778,6 +766,48 @@ def _serialize_role_option(role: Role) -> dict[str, object]:
     }
 
 
+def _serialize_role_list_item(
+    role: Role,
+    *,
+    binding_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "id": role.id,
+        "name": role.name,
+        "description": role.description or "",
+        "binding_count": max(0, int(binding_count or 0)),
+        "is_system": bool(role.is_system),
+        "created_at": _human_time(role.created_at),
+        "updated_at": _human_time(role.updated_at),
+    }
+
+
+def _serialize_role_assigned_agent(agent: Agent) -> dict[str, object]:
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "description": agent.description or "",
+    }
+
+
+def _serialize_role_detail(
+    role: Role,
+    *,
+    assigned_agents: list[Agent] | None = None,
+) -> dict[str, object]:
+    assigned = assigned_agents or []
+    details = _load_role_details(role)
+    return {
+        **_serialize_role_list_item(role, binding_count=len(assigned)),
+        "details": details,
+        "details_json": json.dumps(details, indent=2, sort_keys=True),
+        "assigned_agents": [
+            _serialize_role_assigned_agent(agent)
+            for agent in assigned
+        ],
+    }
+
+
 def _serialize_agent_list_item(
     agent: Agent,
     *,
@@ -977,27 +1007,6 @@ def _set_flowchart_node_scripts(
     session.execute(flowchart_node_scripts.insert(), rows)
 
 
-def _set_flowchart_node_skills(
-    session,
-    node_id: int,
-    skill_ids: list[int],
-) -> None:
-    session.execute(
-        delete(flowchart_node_skills).where(flowchart_node_skills.c.flowchart_node_id == node_id)
-    )
-    if not skill_ids:
-        return
-    rows = [
-        {
-            "flowchart_node_id": node_id,
-            "skill_id": skill_id,
-            "position": position,
-        }
-        for position, skill_id in enumerate(skill_ids, start=1)
-    ]
-    session.execute(flowchart_node_skills.insert(), rows)
-
-
 def _set_flowchart_node_attachments(
     session,
     node_id: int,
@@ -1041,56 +1050,6 @@ def _set_agent_skills(
 
 def _ordered_agent_skills(agent: Agent) -> list[Skill]:
     return list(agent.skills or [])
-
-
-def _node_skill_binding_mode(settings: dict[str, str] | None = None) -> str:
-    return resolve_node_skill_binding_mode(settings or _load_integration_settings("llm"))
-
-
-def _node_skill_binding_write_rejected(*, mode: str | None = None) -> tuple[dict[str, object], int]:
-    normalized_mode = normalize_node_skill_binding_mode(mode)
-    return {
-        "error": NODE_SKILL_BINDING_WRITE_ERROR,
-        "deprecated": True,
-        "node_skill_binding_mode": normalized_mode,
-    }, 400
-
-
-def _node_skill_binding_deprecation_warning(*, mode: str | None = None) -> dict[str, object]:
-    normalized_mode = normalize_node_skill_binding_mode(mode)
-    return {
-        "deprecated": True,
-        "ignored": True,
-        "warning": NODE_SKILL_BINDING_WRITE_WARNING,
-        "node_skill_binding_mode": normalized_mode,
-    }
-
-
-def _log_node_skill_binding_deprecation_event(
-    *,
-    source: str,
-    mode: str,
-    flowchart_id: int | None = None,
-    node_id: int | None = None,
-    extra: dict[str, object] | None = None,
-) -> None:
-    event: dict[str, object] = {
-        "event": "deprecated_node_skill_binding_payload",
-        "source": source,
-        "mode": normalize_node_skill_binding_mode(mode),
-        "path": request.path,
-        "method": request.method,
-    }
-    if flowchart_id is not None:
-        event["flowchart_id"] = flowchart_id
-    if node_id is not None:
-        event["flowchart_node_id"] = node_id
-    if extra:
-        event.update(extra)
-    logger.warning(
-        "Deprecated node-level skill payload encountered: %s",
-        json.dumps(event, sort_keys=True, default=str),
-    )
 
 
 def _assert_flowchart_node_owner(session, *, flowchart_id: int, node_id: int) -> None:
@@ -7795,20 +7754,46 @@ def delete_agent_priority(agent_id: int, priority_id: int):
 
 @bp.post("/roles")
 def create_role():
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    raw_details = request.form.get("details_json", "").strip()
+    is_api_request = _agent_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name = str(
+        payload.get("name") if is_api_request else request.form.get("name", "")
+    ).strip()
+    description = str(
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    ).strip()
+    raw_details = str(
+        payload.get("details_json")
+        if is_api_request
+        else request.form.get("details_json", "")
+    ).strip()
+    details_payload = payload.get("details") if is_api_request else None
 
     if not description:
+        if is_api_request:
+            return {"error": "Role description is required."}, 400
         flash("Role description is required.", "error")
         return redirect(url_for("agents.new_role"))
 
     try:
-        formatted_details = _parse_role_details(raw_details)
+        if details_payload is not None:
+            if not isinstance(details_payload, dict):
+                raise ValueError("Role details must be a JSON object.")
+            formatted_details = json.dumps(details_payload, indent=2, sort_keys=True)
+        else:
+            formatted_details = _parse_role_details(raw_details)
     except json.JSONDecodeError as exc:
+        if is_api_request:
+            return {"error": f"Invalid JSON: {exc.msg}"}, 400
         flash(f"Invalid JSON: {exc.msg}", "error")
         return redirect(url_for("agents.new_role"))
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("agents.new_role"))
 
@@ -7824,6 +7809,8 @@ def create_role():
             is_system=False,
         )
 
+    if is_api_request:
+        return {"role": _serialize_role_detail(role)}, 201
     flash("Role created.", "success")
     return redirect(url_for("agents.view_role", role_id=role.id))
 
@@ -11055,8 +11042,6 @@ def upsert_flowchart_graph(flowchart_id: int):
     if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
         return {"error": "Graph payload must contain nodes[] and edges[] arrays."}, 400
 
-    node_skill_binding_mode = _node_skill_binding_mode()
-    node_skill_warnings: list[str] = []
     try:
         with session_scope() as session:
             flowchart = session.get(Flowchart, flowchart_id)
@@ -11292,39 +11277,8 @@ def upsert_flowchart_graph(flowchart_id: int):
                     _set_flowchart_node_attachments(session, flowchart_node.id, attachment_ids)
 
                 if "skill_ids" in raw_node:
-                    if node_skill_binding_mode == NODE_SKILL_BINDING_MODE_REJECT:
-                        raise ValueError(
-                            f"nodes[{index}].skill_ids is no longer writable; assign skills on the Agent."
-                        )
-                    skill_ids_raw = raw_node.get("skill_ids")
-                    if not isinstance(skill_ids_raw, list):
-                        raise ValueError(f"nodes[{index}].skill_ids must be an array.")
-                    skill_ids: list[int] = []
-                    for skill_index, skill_id_raw in enumerate(skill_ids_raw):
-                        skill_id = _coerce_optional_int(
-                            skill_id_raw,
-                            field_name=f"nodes[{index}].skill_ids[{skill_index}]",
-                            minimum=1,
-                        )
-                        if skill_id is None:
-                            raise ValueError(
-                                f"nodes[{index}].skill_ids[{skill_index}] is invalid."
-                            )
-                        skill_ids.append(skill_id)
-                    if len(skill_ids) != len(set(skill_ids)):
-                        raise ValueError(f"nodes[{index}].skill_ids cannot contain duplicates.")
-                    _log_node_skill_binding_deprecation_event(
-                        source="flowchart_graph_upsert",
-                        mode=node_skill_binding_mode,
-                        flowchart_id=flowchart_id,
-                        node_id=flowchart_node.id,
-                        extra={
-                            "field": f"nodes[{index}].skill_ids",
-                            "skill_id_count": len(skill_ids),
-                        },
-                    )
-                    node_skill_warnings.append(
-                        f"nodes[{index}].skill_ids was ignored; assign skills on the Agent."
+                    raise ValueError(
+                        f"nodes[{index}].skill_ids is no longer writable; assign skills on the Agent."
                     )
 
                 keep_node_ids.add(flowchart_node.id)
@@ -11408,13 +11362,7 @@ def upsert_flowchart_graph(flowchart_id: int):
     except ValueError as exc:
         return {"error": str(exc)}, 400
 
-    response_payload = get_flowchart_graph(flowchart_id)
-    if node_skill_warnings:
-        response_payload.update(
-            _node_skill_binding_deprecation_warning(mode=node_skill_binding_mode)
-        )
-        response_payload["warnings"] = sorted(set(node_skill_warnings))
-    return response_payload
+    return get_flowchart_graph(flowchart_id)
 
 
 @bp.get("/flowcharts/<int:flowchart_id>/validate")
@@ -12044,137 +11992,6 @@ def reorder_flowchart_node_scripts(flowchart_id: int, node_id: int):
             .first()
         )
         return {"node": _serialize_flowchart_node(refreshed)}
-
-
-@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills")
-def attach_flowchart_node_skill(flowchart_id: int, node_id: int):
-    payload = _flowchart_request_payload()
-    skill_id_raw = payload.get("skill_id") if payload else request.form.get("skill_id")
-    try:
-        skill_id = _coerce_optional_int(skill_id_raw, field_name="skill_id", minimum=1)
-    except ValueError as exc:
-        return {"error": str(exc)}, 400
-    if skill_id is None:
-        return {"error": "skill_id is required."}, 400
-    mode = _node_skill_binding_mode()
-    if mode == NODE_SKILL_BINDING_MODE_REJECT:
-        return _node_skill_binding_write_rejected(mode=mode)
-    with session_scope() as session:
-        flowchart_node = (
-            session.execute(
-                select(FlowchartNode)
-                .options(
-                    selectinload(FlowchartNode.mcp_servers),
-                    selectinload(FlowchartNode.scripts),
-                )
-                .where(FlowchartNode.id == node_id)
-            )
-            .scalars()
-            .first()
-        )
-        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
-            abort(404)
-        _log_node_skill_binding_deprecation_event(
-            source="flowchart_node_skill_attach",
-            mode=mode,
-            flowchart_id=flowchart_id,
-            node_id=node_id,
-            extra={"skill_id": skill_id},
-        )
-        response_payload = {
-            "node": _serialize_flowchart_node(flowchart_node),
-        }
-        response_payload.update(_node_skill_binding_deprecation_warning(mode=mode))
-        return response_payload
-
-
-@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills/<int:skill_id>/delete")
-def detach_flowchart_node_skill(flowchart_id: int, node_id: int, skill_id: int):
-    mode = _node_skill_binding_mode()
-    if mode == NODE_SKILL_BINDING_MODE_REJECT:
-        return _node_skill_binding_write_rejected(mode=mode)
-    with session_scope() as session:
-        flowchart_node = (
-            session.execute(
-                select(FlowchartNode)
-                .options(
-                    selectinload(FlowchartNode.mcp_servers),
-                    selectinload(FlowchartNode.scripts),
-                )
-                .where(FlowchartNode.id == node_id)
-            )
-            .scalars()
-            .first()
-        )
-        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
-            abort(404)
-        _log_node_skill_binding_deprecation_event(
-            source="flowchart_node_skill_detach",
-            mode=mode,
-            flowchart_id=flowchart_id,
-            node_id=node_id,
-            extra={"skill_id": skill_id},
-        )
-        response_payload = {
-            "node": _serialize_flowchart_node(flowchart_node),
-        }
-        response_payload.update(_node_skill_binding_deprecation_warning(mode=mode))
-        return response_payload
-
-
-@bp.post("/flowcharts/<int:flowchart_id>/nodes/<int:node_id>/skills/reorder")
-def reorder_flowchart_node_skills(flowchart_id: int, node_id: int):
-    payload = _flowchart_request_payload()
-    skill_ids_raw = payload.get("skill_ids")
-    if skill_ids_raw is None:
-        skill_ids_raw = [value.strip() for value in request.form.getlist("skill_ids")]
-    if not isinstance(skill_ids_raw, list):
-        return {"error": "skill_ids must be an array."}, 400
-    skill_ids: list[int] = []
-    for index, skill_id_raw in enumerate(skill_ids_raw):
-        try:
-            skill_id = _coerce_optional_int(
-                skill_id_raw,
-                field_name=f"skill_ids[{index}]",
-                minimum=1,
-            )
-        except ValueError as exc:
-            return {"error": str(exc)}, 400
-        if skill_id is None:
-            return {"error": f"skill_ids[{index}] is invalid."}, 400
-        skill_ids.append(skill_id)
-    if len(skill_ids) != len(set(skill_ids)):
-        return {"error": "skill_ids cannot contain duplicates."}, 400
-    mode = _node_skill_binding_mode()
-    if mode == NODE_SKILL_BINDING_MODE_REJECT:
-        return _node_skill_binding_write_rejected(mode=mode)
-    with session_scope() as session:
-        flowchart_node = (
-            session.execute(
-                select(FlowchartNode)
-                .options(
-                    selectinload(FlowchartNode.mcp_servers),
-                    selectinload(FlowchartNode.scripts),
-                )
-                .where(FlowchartNode.id == node_id)
-            )
-            .scalars()
-            .first()
-        )
-        if flowchart_node is None or flowchart_node.flowchart_id != flowchart_id:
-            abort(404)
-        _log_node_skill_binding_deprecation_event(
-            source="flowchart_node_skill_reorder",
-            mode=mode,
-            flowchart_id=flowchart_id,
-            node_id=node_id,
-            extra={"skill_id_count": len(skill_ids)},
-        )
-        response_payload = {
-            "node": _serialize_flowchart_node(flowchart_node),
-        }
-        response_payload.update(_node_skill_binding_deprecation_warning(mode=mode))
-        return response_payload
 
 
 @bp.get("/mcps")
@@ -15554,8 +15371,33 @@ def list_roles():
                 .offset(offset)
             )
             .scalars()
-            .all()
+                .all()
         )
+        role_ids = [role.id for role in roles]
+        binding_count_by_role_id: dict[int, int] = {}
+        if role_ids:
+            binding_rows = session.execute(
+                select(Agent.role_id, func.count(Agent.id))
+                .where(Agent.role_id.in_(role_ids))
+                .group_by(Agent.role_id)
+            ).all()
+            binding_count_by_role_id = {
+                int(role_id): int(count)
+                for role_id, count in binding_rows
+                if role_id is not None
+            }
+    if _agents_wants_json():
+        return {
+            "roles": [
+                _serialize_role_list_item(
+                    role,
+                    binding_count=binding_count_by_role_id.get(role.id, 0),
+                )
+                for role in roles
+            ],
+            "pagination": pagination,
+            "total_count": total_count,
+        }
     return render_template(
         "roles.html",
         roles=roles,
@@ -15569,6 +15411,15 @@ def list_roles():
 @bp.get("/settings/roles/new")
 @bp.get("/roles/new")
 def new_role():
+    if _agents_wants_json():
+        return {
+            "role": {
+                "name": "",
+                "description": "",
+                "details": {},
+                "details_json": "{}",
+            }
+        }
     return render_template(
         "role_new.html",
         page_title="Create Role",
@@ -15583,6 +15434,19 @@ def view_role(role_id: int):
         role = session.get(Role, role_id)
         if role is None:
             abort(404)
+        assigned_agents = (
+            session.execute(
+                select(Agent)
+                .where(Agent.role_id == role_id)
+                .order_by(Agent.name.asc(), Agent.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+    if _agents_wants_json():
+        return {
+            "role": _serialize_role_detail(role, assigned_agents=assigned_agents),
+        }
     return render_template(
         "role_detail.html",
         role=role,
@@ -15599,6 +15463,10 @@ def edit_role(role_id: int):
         role = session.get(Role, role_id)
         if role is None:
             abort(404)
+    if _agents_wants_json():
+        return {
+            "role": _serialize_role_detail(role),
+        }
     return render_template(
         "role_edit.html",
         role=role,
@@ -15610,20 +15478,46 @@ def edit_role(role_id: int):
 @bp.post("/settings/roles/<int:role_id>")
 @bp.post("/roles/<int:role_id>")
 def update_role(role_id: int):
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    raw_details = request.form.get("details_json", "").strip()
+    is_api_request = _agent_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name = str(
+        payload.get("name") if is_api_request else request.form.get("name", "")
+    ).strip()
+    description = str(
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    ).strip()
+    raw_details = str(
+        payload.get("details_json")
+        if is_api_request
+        else request.form.get("details_json", "")
+    ).strip()
+    details_payload = payload.get("details") if is_api_request else None
 
     if not description:
+        if is_api_request:
+            return {"error": "Role description is required."}, 400
         flash("Role description is required.", "error")
         return redirect(url_for("agents.edit_role", role_id=role_id))
 
     try:
-        formatted_details = _parse_role_details(raw_details)
+        if details_payload is not None:
+            if not isinstance(details_payload, dict):
+                raise ValueError("Role details must be a JSON object.")
+            formatted_details = json.dumps(details_payload, indent=2, sort_keys=True)
+        else:
+            formatted_details = _parse_role_details(raw_details)
     except json.JSONDecodeError as exc:
+        if is_api_request:
+            return {"error": f"Invalid JSON: {exc.msg}"}, 400
         flash(f"Invalid JSON: {exc.msg}", "error")
         return redirect(url_for("agents.edit_role", role_id=role_id))
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("agents.edit_role", role_id=role_id))
 
@@ -15636,7 +15530,20 @@ def update_role(role_id: int):
         role.name = name
         role.description = description
         role.details_json = formatted_details
+        assigned_agents = (
+            session.execute(
+                select(Agent)
+                .where(Agent.role_id == role_id)
+                .order_by(Agent.name.asc(), Agent.id.asc())
+            )
+            .scalars()
+            .all()
+        )
 
+    if is_api_request:
+        return {
+            "role": _serialize_role_detail(role, assigned_agents=assigned_agents),
+        }
     flash("Role updated.", "success")
     return redirect(url_for("agents.view_role", role_id=role_id))
 
@@ -15644,6 +15551,7 @@ def update_role(role_id: int):
 @bp.post("/settings/roles/<int:role_id>/delete")
 @bp.post("/roles/<int:role_id>/delete")
 def delete_role(role_id: int):
+    is_api_request = _agent_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_roles")
     )
@@ -15662,6 +15570,12 @@ def delete_role(role_id: int):
             agent.role_id = None
         session.delete(role)
 
+    if is_api_request:
+        return {
+            "ok": True,
+            "deleted_role_id": role_id,
+            "removed_from_agent_count": len(assigned_agents),
+        }
     flash("Role deleted.", "success")
     if assigned_agents:
         flash(
@@ -16275,21 +16189,8 @@ def _settings_runtime_context() -> dict[str, object]:
         settings=llm_settings, enabled_providers=enabled_providers
     )
     instruction_runtime_flags = _instruction_runtime_flags(llm_settings)
-    node_skill_binding_mode = _node_skill_binding_mode(llm_settings)
     node_executor_settings = load_node_executor_settings()
     node_executor_options = _node_executor_settings_options()
-    node_skill_binding_modes = [
-        {
-            "value": NODE_SKILL_BINDING_MODE_WARN,
-            "label": "warn",
-            "description": "Accept legacy node skill payloads, ignore writes, and emit warnings.",
-        },
-        {
-            "value": NODE_SKILL_BINDING_MODE_REJECT,
-            "label": "reject",
-            "description": "Reject legacy node skill payloads with validation errors.",
-        },
-    ]
     rag_settings = _effective_rag_settings()
     openai_auth_configured = bool((llm_settings.get("codex_api_key") or "").strip())
     gemini_auth_configured = bool((llm_settings.get("gemini_api_key") or "").strip())
@@ -16300,8 +16201,6 @@ def _settings_runtime_context() -> dict[str, object]:
         "config": config,
         "llm_config": llm_config,
         "instruction_runtime_flags": instruction_runtime_flags,
-        "node_skill_binding_mode": node_skill_binding_mode,
-        "node_skill_binding_modes": node_skill_binding_modes,
         "node_executor_settings": node_executor_settings,
         "node_executor_options": node_executor_options,
         "rag_settings": rag_settings,
@@ -16569,32 +16468,6 @@ def update_instruction_runtime_settings_route():
             ),
         }
     flash("Instruction runtime adapter flags updated.", "success")
-    return redirect(url_for("agents.settings_runtime"))
-
-
-@bp.post("/settings/runtime/node-skill-binding")
-def update_node_skill_binding_mode_route():
-    payload = _settings_request_payload()
-    is_api_request = _workflow_api_request()
-    raw_mode = _settings_form_value(payload, "node_skill_binding_mode").strip().lower()
-    if raw_mode and raw_mode not in NODE_SKILL_BINDING_MODE_CHOICES:
-        if is_api_request:
-            return {"error": "Node skill compatibility mode is invalid."}, 400
-        flash("Node skill compatibility mode is invalid.", "error")
-        return redirect(url_for("agents.settings_runtime"))
-    selected_mode = normalize_node_skill_binding_mode(raw_mode)
-    _save_integration_settings(
-        "llm", {"node_skill_binding_mode": selected_mode}
-    )
-    if is_api_request:
-        return {
-            "ok": True,
-            "node_skill_binding_mode": selected_mode,
-        }
-    flash(
-        f"Node skill compatibility mode set to {selected_mode}.",
-        "success",
-    )
     return redirect(url_for("agents.settings_runtime"))
 
 

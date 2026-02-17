@@ -6,22 +6,29 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from flask import Flask
-from sqlalchemy import insert, select, text
+import psycopg
+from sqlalchemy import insert, select
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
+
 import core.db as core_db
 from core.config import Config
 from core.db import session_scope
 from core.models import (
-    Agent,
     AgentTask,
     FLOWCHART_NODE_TYPE_TASK,
     Flowchart,
@@ -29,9 +36,6 @@ from core.models import (
     LLMModel,
     Script,
     Skill,
-    SkillFile,
-    SkillVersion,
-    agent_skill_bindings,
     agent_task_scripts,
     flowchart_node_scripts,
     flowchart_node_skills,
@@ -50,16 +54,20 @@ class StudioDbTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         tmp_dir = Path(self._tmp.name)
+        self._base_db_uri = os.environ["LLMCTL_STUDIO_DATABASE_URI"]
+        self._schema_name = f"skills_stage6_{uuid.uuid4().hex}"
         self._data_dir = tmp_dir / "data"
         self._data_dir.mkdir(parents=True, exist_ok=True)
-        self._db_name = "skills-stage6.sqlite3"
-        self._db_path = self._data_dir / self._db_name
 
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
         self._orig_workspaces_dir = Config.WORKSPACES_DIR
         self._orig_data_dir = Config.DATA_DIR
 
-        Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{self._db_path}"
+        self._create_schema(self._schema_name)
+        Config.SQLALCHEMY_DATABASE_URI = self._with_search_path(
+            self._base_db_uri,
+            self._schema_name,
+        )
         Config.WORKSPACES_DIR = str(tmp_dir / "workspaces")
         Config.DATA_DIR = str(self._data_dir)
         Path(Config.WORKSPACES_DIR).mkdir(parents=True, exist_ok=True)
@@ -78,6 +86,7 @@ class StudioDbTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._dispose_engine()
+        self._drop_schema(self._schema_name)
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
         Config.WORKSPACES_DIR = self._orig_workspaces_dir
         Config.DATA_DIR = self._orig_data_dir
@@ -88,6 +97,43 @@ class StudioDbTestCase(unittest.TestCase):
             core_db._engine.dispose()
         core_db._engine = None
         core_db.SessionLocal = None
+
+    @staticmethod
+    def _as_psycopg_uri(database_uri: str) -> str:
+        if database_uri.startswith("postgresql+psycopg://"):
+            return "postgresql://" + database_uri.split("://", 1)[1]
+        return database_uri
+
+    @staticmethod
+    def _with_search_path(database_uri: str, schema_name: str) -> str:
+        parts = urlsplit(database_uri)
+        query_items = parse_qsl(parts.query, keep_blank_values=True)
+        updated_items: list[tuple[str, str]] = []
+        options_value = f"-csearch_path={schema_name}"
+        options_updated = False
+        for key, value in query_items:
+            if key == "options":
+                merged = value.strip()
+                if options_value not in merged:
+                    merged = f"{merged} {options_value}".strip()
+                updated_items.append((key, merged))
+                options_updated = True
+            else:
+                updated_items.append((key, value))
+        if not options_updated:
+            updated_items.append(("options", options_value))
+        query = urlencode(updated_items, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+    def _create_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+    def _drop_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
 
 
 class SkillsStage6Tests(StudioDbTestCase):
@@ -198,8 +244,7 @@ class SkillsStage6Tests(StudioDbTestCase):
 
         report_path = Path(self._tmp.name) / "backfill-report.json"
         env = os.environ.copy()
-        env["LLMCTL_STUDIO_DATA_DIR"] = str(self._data_dir)
-        env["LLMCTL_STUDIO_DB_NAME"] = self._db_name
+        env["LLMCTL_STUDIO_DATABASE_URI"] = Config.SQLALCHEMY_DATABASE_URI
         result = subprocess.run(
             [
                 sys.executable,
@@ -245,227 +290,10 @@ class SkillsStage6Tests(StudioDbTestCase):
         assert migrated_skill is not None
         self.assertEqual([int(migrated_skill.id)], attached_skill_ids)
 
-    def test_node_skill_migration_is_idempotent_and_deterministic(self) -> None:
-        with session_scope() as session:
-            model = LLMModel.create(
-                session,
-                name="stage6-migration-model",
-                provider="codex",
-                config_json="{}",
-            )
-            primary_agent = Agent.create(
-                session,
-                name="stage6-primary-agent",
-                prompt_json=json.dumps({"instruction": "stage6"}),
-            )
-            template_agent = Agent.create(
-                session,
-                name="stage6-template-agent",
-                prompt_json=json.dumps({"instruction": "stage6"}),
-            )
-            flowchart = Flowchart.create(session, name="stage6-migration-flowchart")
-            config_bound_node = FlowchartNode.create(
-                session,
-                flowchart_id=flowchart.id,
-                node_type=FLOWCHART_NODE_TYPE_TASK,
-                model_id=model.id,
-                config_json=json.dumps({"agent_id": primary_agent.id}, sort_keys=True),
-            )
-            template_bound_node = FlowchartNode.create(
-                session,
-                flowchart_id=flowchart.id,
-                node_type=FLOWCHART_NODE_TYPE_TASK,
-                model_id=model.id,
-                config_json=json.dumps({"agent_id": template_agent.id}, sort_keys=True),
-            )
-            duplicate_node = FlowchartNode.create(
-                session,
-                flowchart_id=flowchart.id,
-                node_type=FLOWCHART_NODE_TYPE_TASK,
-                model_id=model.id,
-                config_json=json.dumps({"agent_id": primary_agent.id}, sort_keys=True),
-            )
-
-            def _create_skill(name: str) -> int:
-                skill = Skill.create(
-                    session,
-                    name=name,
-                    display_name=name.replace("-", " ").title(),
-                    description="stage6 migration skill",
-                    status="active",
-                    source_type="ui",
-                )
-                version = SkillVersion.create(
-                    session,
-                    skill_id=skill.id,
-                    version="1.0.0",
-                    manifest_hash="",
-                )
-                skill_md = (
-                    "---\n"
-                    f"name: {name}\n"
-                    f"display_name: {name.replace('-', ' ').title()}\n"
-                    "description: stage6 migration skill\n"
-                    "version: 1.0.0\n"
-                    "status: active\n"
-                    "---\n\n"
-                    f"# {name}\n"
-                )
-                SkillFile.create(
-                    session,
-                    skill_version_id=version.id,
-                    path="SKILL.md",
-                    content=skill_md,
-                    checksum="",
-                    size_bytes=len(skill_md.encode("utf-8")),
-                )
-                return int(skill.id)
-
-            skill_alpha_id = _create_skill("stage6-alpha")
-            skill_beta_id = _create_skill("stage6-beta")
-            skill_gamma_id = _create_skill("stage6-gamma")
-
-            # Existing binding should be preserved; migration must only append new unique pairs.
-            session.execute(
-                agent_skill_bindings.insert().values(
-                    agent_id=primary_agent.id,
-                    skill_id=skill_beta_id,
-                    position=1,
-                )
-            )
-
-            session.execute(
-                flowchart_node_skills.insert().values(
-                    flowchart_node_id=config_bound_node.id,
-                    skill_id=skill_beta_id,
-                    position=1,
-                )
-            )
-            session.execute(
-                flowchart_node_skills.insert().values(
-                    flowchart_node_id=config_bound_node.id,
-                    skill_id=skill_alpha_id,
-                    position=2,
-                )
-            )
-            session.execute(
-                flowchart_node_skills.insert().values(
-                    flowchart_node_id=template_bound_node.id,
-                    skill_id=skill_gamma_id,
-                    position=1,
-                )
-            )
-            session.execute(
-                flowchart_node_skills.insert().values(
-                    flowchart_node_id=duplicate_node.id,
-                    skill_id=skill_alpha_id,
-                    position=1,
-                )
-            )
-            primary_agent_id = int(primary_agent.id)
-            template_agent_id = int(template_agent.id)
-
-        assert core_db._engine is not None
-        with core_db._engine.begin() as connection:
-            core_db._migrate_flowchart_node_skills_to_agent_bindings(connection)
-            core_db._migrate_flowchart_node_skills_to_agent_bindings(connection)
-
-        with session_scope() as session:
-            primary_rows = session.execute(
-                select(agent_skill_bindings.c.skill_id, agent_skill_bindings.c.position)
-                .where(agent_skill_bindings.c.agent_id == primary_agent_id)
-                .order_by(agent_skill_bindings.c.position.asc(), agent_skill_bindings.c.skill_id.asc())
-            ).all()
-            template_rows = session.execute(
-                select(agent_skill_bindings.c.skill_id, agent_skill_bindings.c.position)
-                .where(agent_skill_bindings.c.agent_id == template_agent_id)
-                .order_by(agent_skill_bindings.c.position.asc(), agent_skill_bindings.c.skill_id.asc())
-            ).all()
-
-        self.assertEqual(
-            [(skill_beta_id, 1), (skill_alpha_id, 2)],
-            [(int(skill_id), int(position)) for skill_id, position in primary_rows],
+    def test_legacy_node_skill_migration_helper_removed(self) -> None:
+        self.assertFalse(
+            hasattr(core_db, "_migrate_flowchart_node_skills_to_agent_bindings")
         )
-        self.assertEqual(
-            [(skill_gamma_id, 1)],
-            [(int(skill_id), int(position)) for skill_id, position in template_rows],
-        )
-
-    def test_node_skill_migration_archives_unmapped_rows(self) -> None:
-        with session_scope() as session:
-            model = LLMModel.create(
-                session,
-                name="stage6-unmapped-model",
-                provider="codex",
-                config_json="{}",
-            )
-            flowchart = Flowchart.create(session, name="stage6-unmapped-flowchart")
-            node = FlowchartNode.create(
-                session,
-                flowchart_id=flowchart.id,
-                node_type=FLOWCHART_NODE_TYPE_TASK,
-                model_id=model.id,
-                config_json=json.dumps({"agent_id": 999999}, sort_keys=True),
-            )
-            skill = Skill.create(
-                session,
-                name="stage6-unmapped-skill",
-                display_name="Stage6 Unmapped Skill",
-                description="stage6 unmapped migration skill",
-                status="active",
-                source_type="ui",
-            )
-            version = SkillVersion.create(
-                session,
-                skill_id=skill.id,
-                version="1.0.0",
-                manifest_hash="",
-            )
-            skill_md = (
-                "---\n"
-                "name: stage6-unmapped-skill\n"
-                "display_name: Stage6 Unmapped Skill\n"
-                "description: stage6 unmapped migration skill\n"
-                "version: 1.0.0\n"
-                "status: active\n"
-                "---\n\n"
-                "# Stage6 Unmapped Skill\n"
-            )
-            SkillFile.create(
-                session,
-                skill_version_id=version.id,
-                path="SKILL.md",
-                content=skill_md,
-                checksum="",
-                size_bytes=len(skill_md.encode("utf-8")),
-            )
-            session.execute(
-                flowchart_node_skills.insert().values(
-                    flowchart_node_id=node.id,
-                    skill_id=skill.id,
-                    position=1,
-                )
-            )
-            node_id = int(node.id)
-            skill_id = int(skill.id)
-
-        assert core_db._engine is not None
-        with core_db._engine.begin() as connection:
-            core_db._migrate_flowchart_node_skills_to_agent_bindings(connection)
-            archive_rows = connection.execute(
-                text(
-                    "SELECT flowchart_node_id, skill_id, reason "
-                    "FROM legacy_unmapped_node_skills "
-                    "WHERE flowchart_node_id = :node_id AND skill_id = :skill_id"
-                ),
-                {"node_id": node_id, "skill_id": skill_id},
-            ).fetchall()
-
-        self.assertEqual(1, len(archive_rows))
-        archived = archive_rows[0]
-        self.assertEqual(node_id, int(archived[0]))
-        self.assertEqual(skill_id, int(archived[1]))
-        self.assertEqual("node_config_agent_not_found", str(archived[2]))
 
     def test_concurrency_stress_100_runs_zero_skill_bleed(self) -> None:
         root = Path(self._tmp.name) / "skill-stress"

@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from unittest.mock import patch
 
+import psycopg
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 MCP_SRC = REPO_ROOT / "app" / "llmctl-mcp" / "src"
 for path in (str(STUDIO_SRC), str(MCP_SRC)):
     if path not in sys.path:
         sys.path.insert(0, path)
+
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
 
 import core.db as core_db
 from core.config import Config
@@ -26,7 +35,6 @@ from core.models import (
     MCPServer,
     SCRIPT_TYPE_INIT,
     Script,
-    flowchart_node_skills,
     flowchart_node_scripts,
 )
 import tools as mcp_tools
@@ -47,9 +55,14 @@ class _DummyMCP:
 class FlowchartStage9McpToolTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        tmp_dir = Path(self._tmp.name)
+        self._base_db_uri = os.environ["LLMCTL_STUDIO_DATABASE_URI"]
+        self._schema_name = f"mcp_stage9_{uuid.uuid4().hex}"
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
-        Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_dir / 'stage9-mcp.sqlite3'}"
+        self._create_schema(self._schema_name)
+        Config.SQLALCHEMY_DATABASE_URI = self._with_search_path(
+            self._base_db_uri,
+            self._schema_name,
+        )
         self._dispose_engine()
         core_db.init_engine(Config.SQLALCHEMY_DATABASE_URI)
         core_db.init_db()
@@ -59,6 +72,7 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._dispose_engine()
+        self._drop_schema(self._schema_name)
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
         self._tmp.cleanup()
 
@@ -67,6 +81,43 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
             core_db._engine.dispose()
         core_db._engine = None
         core_db.SessionLocal = None
+
+    @staticmethod
+    def _as_psycopg_uri(database_uri: str) -> str:
+        if database_uri.startswith("postgresql+psycopg://"):
+            return "postgresql://" + database_uri.split("://", 1)[1]
+        return database_uri
+
+    @staticmethod
+    def _with_search_path(database_uri: str, schema_name: str) -> str:
+        parts = urlsplit(database_uri)
+        query_items = parse_qsl(parts.query, keep_blank_values=True)
+        updated_items: list[tuple[str, str]] = []
+        options_value = f"-csearch_path={schema_name}"
+        options_updated = False
+        for key, value in query_items:
+            if key == "options":
+                merged = value.strip()
+                if options_value not in merged:
+                    merged = f"{merged} {options_value}".strip()
+                updated_items.append((key, merged))
+                options_updated = True
+            else:
+                updated_items.append((key, value))
+        if not options_updated:
+            updated_items.append(("options", options_value))
+        query = urlencode(updated_items, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+    def _create_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+    def _drop_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
 
     def test_flowchart_and_node_mcp_tools_coverage(self) -> None:
         with session_scope() as session:
@@ -111,9 +162,6 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
         get_skill = self.mcp.tools["llmctl_get_skill"]
         update_skill = self.mcp.tools["llmctl_update_skill"]
         archive_skill = self.mcp.tools["llmctl_archive_skill"]
-        bind_skill = self.mcp.tools["llmctl_bind_flowchart_node_skill"]
-        unbind_skill = self.mcp.tools["llmctl_unbind_flowchart_node_skill"]
-        reorder_skills = self.mcp.tools["llmctl_reorder_flowchart_node_skills"]
         start_flowchart = self.mcp.tools["start_flowchart"]
         get_run = self.mcp.tools["llmctl_get_flowchart_run"]
         cancel_run = self.mcp.tools["cancel_flowchart_run"]
@@ -240,54 +288,9 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
         self.assertTrue(updated_skill["ok"])
         self.assertEqual("MCP Skill A Updated", updated_skill["item"]["display_name"])
 
-        self.assertTrue(
-            bind_skill(
-                flowchart_id=flowchart_id,
-                node_id=task_node_id,
-                skill_id=skill_a_id,
-            )["ok"]
-        )
-        self.assertTrue(
-            bind_skill(
-                flowchart_id=flowchart_id,
-                node_id=task_node_id,
-                skill_id=skill_b_id,
-            )["ok"]
-        )
-        reordered_skills = reorder_skills(
-            flowchart_id=flowchart_id,
-            node_id=task_node_id,
-            skill_ids=[skill_b_id, skill_a_id],
-        )
-        self.assertTrue(reordered_skills["ok"])
-        self.assertEqual({skill_a_id, skill_b_id}, set(reordered_skills["node"]["skill_ids"]))
-        with session_scope() as session:
-            ordered_skill_ids = [
-                int(row[0])
-                for row in session.execute(
-                    select(flowchart_node_skills.c.skill_id)
-                    .where(flowchart_node_skills.c.flowchart_node_id == task_node_id)
-                    .order_by(flowchart_node_skills.c.position.asc())
-                ).all()
-            ]
-        self.assertEqual([skill_b_id, skill_a_id], ordered_skill_ids)
-
-        self.assertTrue(
-            unbind_skill(
-                flowchart_id=flowchart_id,
-                node_id=task_node_id,
-                skill_id=skill_b_id,
-            )["ok"]
-        )
         archived = archive_skill(skill_id=skill_b_id)
         self.assertTrue(archived["ok"])
         self.assertEqual("archived", archived["item"]["status"])
-        archived_attach = bind_skill(
-            flowchart_id=flowchart_id,
-            node_id=task_node_id,
-            skill_id=skill_b_id,
-        )
-        self.assertFalse(archived_attach["ok"])
 
         fetched = get_flowchart(
             flowchart_id=flowchart_id,
@@ -302,8 +305,6 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
         self.assertEqual(model_id, task_node["model_id"])
         self.assertIn(mcp_server_id, task_node["mcp_server_ids"])
         self.assertEqual({script_a_id, script_b_id}, set(task_node["script_ids"]))
-        self.assertIn(skill_a_id, task_node["skill_ids"])
-        self.assertNotIn(skill_b_id, task_node["skill_ids"])
 
         with patch.object(
             mcp_tools.run_flowchart, "delay", return_value=SimpleNamespace(id="flow-job")

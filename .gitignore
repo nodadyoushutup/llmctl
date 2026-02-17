@@ -7,6 +7,8 @@ __pycache__/
 *.egg-info/
 .eggs/
 build/
+!scripts/build/
+!scripts/build/*.sh
 dist/
 .cache/
 .pytest_cache/

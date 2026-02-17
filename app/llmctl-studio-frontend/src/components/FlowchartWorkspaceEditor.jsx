@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import ActionIcon from './ActionIcon'
+import PanelHeader from './PanelHeader'
 
 const DEFAULT_NODE_TYPES = ['start', 'end', 'flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag']
 const NODE_TYPE_WITH_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
@@ -537,7 +538,7 @@ function hasTaskPrompt(config) {
   return typeof prompt === 'string' && Boolean(prompt.trim())
 }
 
-function refLabel(item, nodeType) {
+function refLabel(item) {
   if (!item || typeof item !== 'object') {
     return '-'
   }
@@ -1577,9 +1578,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   return (
     <div className="flow-ws-layout">
       <aside className="flow-ws-sidebar">
-        <div className="flow-ws-panel-header">
-          <h3>Node Bar</h3>
-        </div>
+        <PanelHeader className="flow-ws-panel-header" title="Node Bar" />
         <div className="flow-ws-panel-body">
           <div className="flow-ws-palette">
             {paletteNodeTypes.map((nodeType) => {
@@ -1787,10 +1786,11 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       </div>
 
       <aside className="flow-ws-inspector">
-        <div className="flow-ws-panel-header flow-ws-inspector-header">
-          <h3>{inspectorTitle}</h3>
-          {selectedNode ? (
-            <div className="table-actions">
+        <PanelHeader
+          className="flow-ws-panel-header flow-ws-inspector-header"
+          title={inspectorTitle}
+          actions={selectedNode ? (
+            <>
               <button
                 type="button"
                 className="icon-button"
@@ -1814,9 +1814,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
               >
                 <ActionIcon name="trash" />
               </button>
-            </div>
+            </>
           ) : null}
-        </div>
+        />
         <div className="flow-ws-panel-body">
         {selectedNode ? (
           <div className="stack-sm">

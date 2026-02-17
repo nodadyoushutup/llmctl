@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import json
+import os
 from io import BytesIO
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from flask import Flask
+import psycopg
 from sqlalchemy import select
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
+
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
 
 import core.db as core_db
 from core.config import Config
@@ -28,7 +37,6 @@ from core.models import (
     SkillFile,
     SkillVersion,
     agent_skill_bindings,
-    flowchart_node_skills,
 )
 from rag.web.views import bp as rag_bp
 import web.views as studio_views
@@ -37,9 +45,14 @@ import web.views as studio_views
 class StudioDbTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        tmp_dir = Path(self._tmp.name)
+        self._base_db_uri = os.environ["LLMCTL_STUDIO_DATABASE_URI"]
+        self._schema_name = f"skills_stage5_{uuid.uuid4().hex}"
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
-        Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_dir / 'skills-stage5.sqlite3'}"
+        self._create_schema(self._schema_name)
+        Config.SQLALCHEMY_DATABASE_URI = self._with_search_path(
+            self._base_db_uri,
+            self._schema_name,
+        )
         self._dispose_engine()
         core_db.init_engine(Config.SQLALCHEMY_DATABASE_URI)
         core_db.init_db()
@@ -54,6 +67,7 @@ class StudioDbTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._dispose_engine()
+        self._drop_schema(self._schema_name)
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
         self._tmp.cleanup()
 
@@ -62,6 +76,43 @@ class StudioDbTestCase(unittest.TestCase):
             core_db._engine.dispose()
         core_db._engine = None
         core_db.SessionLocal = None
+
+    @staticmethod
+    def _as_psycopg_uri(database_uri: str) -> str:
+        if database_uri.startswith("postgresql+psycopg://"):
+            return "postgresql://" + database_uri.split("://", 1)[1]
+        return database_uri
+
+    @staticmethod
+    def _with_search_path(database_uri: str, schema_name: str) -> str:
+        parts = urlsplit(database_uri)
+        query_items = parse_qsl(parts.query, keep_blank_values=True)
+        updated_items: list[tuple[str, str]] = []
+        options_value = f"-csearch_path={schema_name}"
+        options_updated = False
+        for key, value in query_items:
+            if key == "options":
+                merged = value.strip()
+                if options_value not in merged:
+                    merged = f"{merged} {options_value}".strip()
+                updated_items.append((key, merged))
+                options_updated = True
+            else:
+                updated_items.append((key, value))
+        if not options_updated:
+            updated_items.append(("options", options_value))
+        query = urlencode(updated_items, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+    def _create_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+    def _drop_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
 
 
 class SkillsStage5Tests(StudioDbTestCase):
@@ -232,13 +283,11 @@ class SkillsStage5Tests(StudioDbTestCase):
         self.assertIn("/skills/", skill_location)
         skill_id = int(skill_location.rstrip("/").split("/")[-1])
 
-        list_response = self.client.get("/skills")
-        self.assertEqual(200, list_response.status_code)
-        self.assertIn("UI Skill", (list_response.get_data(as_text=True) or ""))
-
-        detail_response = self.client.get(f"/skills/{skill_id}")
-        self.assertEqual(200, detail_response.status_code)
-        self.assertIn("UI Skill", (detail_response.get_data(as_text=True) or ""))
+        with session_scope() as session:
+            created_skill = session.get(Skill, skill_id)
+        self.assertIsNotNone(created_skill)
+        assert created_skill is not None
+        self.assertEqual("UI Skill", created_skill.display_name)
 
         update_response = self.client.post(
             f"/skills/{skill_id}",
@@ -262,40 +311,11 @@ class SkillsStage5Tests(StudioDbTestCase):
         )
         self.assertEqual(302, update_response.status_code)
 
-        updated_detail = self.client.get(f"/skills/{skill_id}?version=1.1.0")
-        self.assertEqual(200, updated_detail.status_code)
-        self.assertIn("UI Skill Updated", (updated_detail.get_data(as_text=True) or ""))
-
-        import_package_dir = Path(self._tmp.name) / "import-skill"
-        (import_package_dir / "scripts").mkdir(parents=True, exist_ok=True)
-        (import_package_dir / "SKILL.md").write_text(
-            (
-                "---\n"
-                "name: import-skill\n"
-                "display_name: Import Skill\n"
-                "description: Import preview package.\n"
-                "version: 1.0.0\n"
-                "status: active\n"
-                "---\n\n"
-                "# Import Skill\n"
-            ),
-            encoding="utf-8",
-        )
-        (import_package_dir / "scripts" / "run.sh").write_text(
-            "echo preview\n",
-            encoding="utf-8",
-        )
-        import_preview = self.client.post(
-            "/skills/import",
-            data={
-                "action": "preview",
-                "source_kind": "path",
-                "local_path": str(import_package_dir),
-            },
-            follow_redirects=False,
-        )
-        self.assertEqual(200, import_preview.status_code)
-        self.assertIn("Validation Preview", (import_preview.get_data(as_text=True) or ""))
+        with session_scope() as session:
+            updated_skill = session.get(Skill, skill_id)
+        self.assertIsNotNone(updated_skill)
+        assert updated_skill is not None
+        self.assertEqual("UI Skill Updated", updated_skill.display_name)
 
         delete_response = self.client.post(
             f"/skills/{skill_id}/delete",
@@ -588,7 +608,7 @@ class SkillsStage5Tests(StudioDbTestCase):
             self.assertEqual("stage5-git-skill", skill.name)
             self.assertNotEqual("Should Not Update", skill.display_name)
 
-    def test_flowchart_node_skill_routes_warn_then_reject_modes(self) -> None:
+    def test_flowchart_node_skill_legacy_routes_removed_and_graph_rejects_skill_ids(self) -> None:
         with session_scope() as session:
             model = LLMModel.create(
                 session,
@@ -641,125 +661,23 @@ class SkillsStage5Tests(StudioDbTestCase):
             f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/skills",
             json={"skill_id": skill_a_id},
         )
-        self.assertEqual(200, attach_a.status_code)
-        attach_a_payload = attach_a.get_json() or {}
-        self.assertTrue(attach_a_payload.get("deprecated"))
-        self.assertTrue(attach_a_payload.get("ignored"))
-        self.assertEqual("warn", attach_a_payload.get("node_skill_binding_mode"))
+        self.assertEqual(404, attach_a.status_code)
         attach_b = self.client.post(
             f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/skills",
             json={"skill_id": skill_b_id},
         )
-        self.assertEqual(200, attach_b.status_code)
+        self.assertEqual(404, attach_b.status_code)
 
         reorder = self.client.post(
             f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/skills/reorder",
             json={"skill_ids": [skill_b_id, skill_a_id]},
         )
-        self.assertEqual(200, reorder.status_code)
-        reorder_payload = reorder.get_json() or {}
-        self.assertTrue(reorder_payload.get("deprecated"))
-        self.assertTrue(reorder_payload.get("ignored"))
-        self.assertEqual("warn", reorder_payload.get("node_skill_binding_mode"))
-        self.assertIsInstance((reorder_payload.get("node") or {}).get("id"), int)
-
-        with session_scope() as session:
-            ordered_skill_ids = [
-                int(row[0])
-                for row in session.execute(
-                    select(flowchart_node_skills.c.skill_id)
-                    .where(flowchart_node_skills.c.flowchart_node_id == task_node_id)
-                    .order_by(flowchart_node_skills.c.position.asc())
-                ).all()
-            ]
-        self.assertEqual([], ordered_skill_ids)
+        self.assertEqual(404, reorder.status_code)
 
         detach = self.client.post(
             f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/skills/{skill_b_id}/delete",
         )
-        self.assertEqual(200, detach.status_code)
-        detach_payload = detach.get_json() or {}
-        self.assertTrue(detach_payload.get("deprecated"))
-        self.assertTrue(detach_payload.get("ignored"))
-        self.assertEqual("warn", detach_payload.get("node_skill_binding_mode"))
-        with session_scope() as session:
-            remaining_skill_ids = [
-                int(row[0])
-                for row in session.execute(
-                    select(flowchart_node_skills.c.skill_id)
-                    .where(flowchart_node_skills.c.flowchart_node_id == task_node_id)
-                    .order_by(flowchart_node_skills.c.position.asc())
-                ).all()
-            ]
-        self.assertEqual([], remaining_skill_ids)
-
-        graph_warn = self.client.post(
-            f"/flowcharts/{flowchart_id}/graph",
-            json={
-                "nodes": [
-                    {
-                        "id": start_node_id,
-                        "node_type": FLOWCHART_NODE_TYPE_START,
-                        "x": 0,
-                        "y": 0,
-                    },
-                    {
-                        "id": task_node_id,
-                        "node_type": FLOWCHART_NODE_TYPE_TASK,
-                        "ref_id": template_id,
-                        "skill_ids": [skill_a_id, skill_b_id],
-                        "x": 140,
-                        "y": 0,
-                    },
-                ],
-                "edges": [
-                    {
-                        "source_node_id": start_node_id,
-                        "target_node_id": task_node_id,
-                        "edge_mode": "solid",
-                    }
-                ],
-            },
-        )
-        self.assertEqual(200, graph_warn.status_code)
-        graph_warn_payload = graph_warn.get_json() or {}
-        self.assertTrue(graph_warn_payload.get("deprecated"))
-        self.assertTrue(graph_warn_payload.get("ignored"))
-        self.assertEqual("warn", graph_warn_payload.get("node_skill_binding_mode"))
-        self.assertTrue(any("skill_ids was ignored" in item for item in (graph_warn_payload.get("warnings") or [])))
-
-        set_reject = self.client.post(
-            "/settings/runtime/node-skill-binding",
-            data={"node_skill_binding_mode": "reject"},
-            follow_redirects=False,
-        )
-        self.assertEqual(302, set_reject.status_code)
-
-        reject_attach = self.client.post(
-            f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/skills",
-            json={"skill_id": skill_a_id},
-        )
-        self.assertEqual(400, reject_attach.status_code)
-        reject_attach_payload = reject_attach.get_json() or {}
-        self.assertTrue(reject_attach_payload.get("deprecated"))
-        self.assertEqual("reject", reject_attach_payload.get("node_skill_binding_mode"))
-
-        reject_reorder = self.client.post(
-            f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/skills/reorder",
-            json={"skill_ids": [skill_a_id, skill_b_id]},
-        )
-        self.assertEqual(400, reject_reorder.status_code)
-        reject_reorder_payload = reject_reorder.get_json() or {}
-        self.assertTrue(reject_reorder_payload.get("deprecated"))
-        self.assertEqual("reject", reject_reorder_payload.get("node_skill_binding_mode"))
-
-        reject_detach = self.client.post(
-            f"/flowcharts/{flowchart_id}/nodes/{task_node_id}/skills/{skill_b_id}/delete",
-        )
-        self.assertEqual(400, reject_detach.status_code)
-        reject_detach_payload = reject_detach.get_json() or {}
-        self.assertTrue(reject_detach_payload.get("deprecated"))
-        self.assertEqual("reject", reject_detach_payload.get("node_skill_binding_mode"))
+        self.assertEqual(404, detach.status_code)
 
         reject_graph = self.client.post(
             f"/flowcharts/{flowchart_id}/graph",
@@ -774,8 +692,8 @@ class SkillsStage5Tests(StudioDbTestCase):
                     {
                         "id": task_node_id,
                         "node_type": FLOWCHART_NODE_TYPE_TASK,
-                        "ref_id": template_id,
                         "skill_ids": [skill_a_id],
+                        "config": {"task_prompt": "hello"},
                         "x": 140,
                         "y": 0,
                     },

@@ -631,6 +631,7 @@ class KubernetesExecutor:
         container_spec: dict[str, Any] = {
             "name": "executor",
             "image": image,
+            "imagePullPolicy": "IfNotPresent",
             "env": [
                 {
                     "name": "LLMCTL_EXECUTOR_PAYLOAD_JSON",

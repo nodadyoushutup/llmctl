@@ -7,24 +7,19 @@ Overview
 Studio skill binding is Agent-first. Skills are authored and managed on Agent
 records, then resolved at runtime for nodes that reference those Agents.
 
-Compatibility Mode
-------------------
+Contract
+--------
 
-Runtime compatibility mode is controlled by
-``node_skill_binding_mode`` in runtime settings:
-
-- ``warn``: ignore legacy node-level ``skill_ids`` writes and surface
-  deprecation metadata
-- ``reject``: fail legacy node-level ``skill_ids`` writes with explicit
-  validation errors
+- Node-level ``skill_ids`` writes are unsupported and rejected.
+- Flowchart graph updates must assign skills on the referenced Agent.
+- Task nodes are prompt-driven and must provide ``config.task_prompt``.
 
 Migration Notes
 ---------------
 
-- Existing environments can run in ``warn`` mode during transition.
-- New integrations should use Agent-level skill assignment only.
-- Node payloads should not carry direct skill-binding state once migration is
-  complete.
+- Legacy runtime compatibility modes have been removed.
+- Existing integrations must migrate to Agent-level skill assignment only.
+- Node payloads should not carry direct skill-binding state.
 
 See Also
 --------

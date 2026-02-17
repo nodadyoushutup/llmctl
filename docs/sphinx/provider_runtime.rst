@@ -135,14 +135,12 @@ Credential split:
   (for example ``llmctl-mcp-secrets``), not from Studio-local embedded MCP
   binaries.
 
-Agent Skill Binding Compatibility Mode
---------------------------------------
+Agent Skill Binding Contract
+----------------------------
 
-Runtime settings also expose ``node_skill_binding_mode`` for legacy client
-compatibility during Agent-only skill binding cutover:
+Runtime enforces Agent-level skill ownership:
 
-- ``warn``: ignore node-level ``skill_ids`` writes and emit deprecation metadata/logs.
-- ``reject``: return explicit validation errors for node-level ``skill_ids`` writes.
+- node-level ``skill_ids`` graph writes are rejected
+- skills must be bound to Agents and resolved through node agent references
 
-See :doc:`agent_skill_binding` for full Agent/node binding behavior and
-migration notes.
+See :doc:`agent_skill_binding` for binding behavior and migration notes.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
 import { cancelNode, deleteNode, getNode, getNodeStatus, removeNodeAttachment } from '../lib/studioApi'
@@ -275,24 +276,27 @@ export default function NodeDetailPage() {
     <section className="node-detail-fixed-page" aria-label="Node detail">
       <div className="node-detail-fixed-layout">
         <article className="card node-detail-panel node-detail-panel-main">
-          <div className="node-panel-toolbar">
-            <h2 className="node-panel-title">{nodeTitle}</h2>
-            <div className="node-panel-actions">
-              <Link to="/nodes" className="icon-button" aria-label="All nodes" title="All nodes">
-                <i className="fa-solid fa-list" />
-              </Link>
-              <button
-                type="button"
-                className="icon-button icon-button-danger"
-                aria-label="Delete node"
-                title="Delete node"
-                disabled={busy || !task}
-                onClick={handleDelete}
-              >
-                <ActionIcon name="trash" />
-              </button>
-            </div>
-          </div>
+          <PanelHeader
+            title={nodeTitle}
+            className="node-panel-header"
+            actions={(
+              <>
+                <Link to="/nodes" className="icon-button" aria-label="All nodes" title="All nodes">
+                  <i className="fa-solid fa-list" />
+                </Link>
+                <button
+                  type="button"
+                  className="icon-button icon-button-danger"
+                  aria-label="Delete node"
+                  title="Delete node"
+                  disabled={busy || !task}
+                  onClick={handleDelete}
+                >
+                  <ActionIcon name="trash" />
+                </button>
+              </>
+            )}
+          />
           <div className="node-detail-scroll">
             <header className="node-detail-header">
               {state.loading ? <p>Loading node...</p> : null}
@@ -470,10 +474,11 @@ export default function NodeDetailPage() {
         </article>
 
         <article className="card node-detail-panel node-detail-panel-stages">
-          <div className="node-panel-toolbar">
-            <h2 className="node-panel-title">Stages</h2>
-            {stageEntries.length > 0 ? <p className="toolbar-meta">{stageEntries.length} total</p> : null}
-          </div>
+          <PanelHeader
+            title="Stages"
+            className="node-panel-header"
+            actions={stageEntries.length > 0 ? <p className="panel-header-meta">{stageEntries.length} total</p> : null}
+          />
           <div className="node-stage-shell">
             {stageEntries.length === 0 ? <p className="toolbar-meta node-stage-empty">No stage data yet.</p> : null}
             {stageEntries.length > 0 ? (

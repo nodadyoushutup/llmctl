@@ -294,7 +294,6 @@ def _ensure_schema() -> None:
         _ensure_columns(connection, "flowchart_node_skills", {"position": "INTEGER"})
         _ensure_flowchart_node_attachment_schema(connection)
         _ensure_agent_skill_binding_schema(connection)
-        _migrate_flowchart_node_skills_to_agent_bindings(connection)
 
         milestone_columns = {
             "status": "TEXT NOT NULL DEFAULT 'planned'",
@@ -351,7 +350,6 @@ def _ensure_schema() -> None:
         _migrate_agent_task_agent_nullable(connection)
         _migrate_agent_task_kind_values(connection)
         _drop_pipeline_schema(connection)
-        _drop_task_template_schema(connection)
         _ensure_flowchart_indexes(connection)
         _ensure_rag_schema(connection)
         _ensure_rag_indexes(connection)
@@ -1551,31 +1549,6 @@ def _drop_pipeline_schema(connection) -> None:
     connection.execute(text("DROP TABLE IF EXISTS pipelines"))
 
 
-def _drop_task_template_schema(connection) -> None:
-    if connection.dialect.name == "postgresql":
-        connection.execute(
-            text("ALTER TABLE agent_tasks DROP COLUMN IF EXISTS task_template_id")
-        )
-        connection.execute(text("DROP INDEX IF EXISTS ix_agent_tasks_task_template_id"))
-    _drop_columns_sqlite(
-        connection,
-        "agent_tasks",
-        {"task_template_id"},
-        index_statements=[
-            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_agent_id ON agent_tasks (agent_id)",
-            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_run_id ON agent_tasks (run_id)",
-            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)",
-            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)",
-            "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)",
-        ],
-    )
-    connection.execute(text("DROP VIEW IF EXISTS tasks"))
-    connection.execute(text("DROP TABLE IF EXISTS task_template_attachments"))
-    connection.execute(text("DROP TABLE IF EXISTS task_template_mcp_servers"))
-    connection.execute(text("DROP TABLE IF EXISTS task_template_scripts"))
-    connection.execute(text("DROP TABLE IF EXISTS task_templates"))
-
-
 def _migrate_agent_task_agent_nullable(connection) -> None:
     if connection.dialect.name != "sqlite":
         return
@@ -1783,35 +1756,6 @@ def _ensure_agent_priority_schema(connection) -> None:
     )
 
 
-def _parse_optional_positive_int(value) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if not cleaned:
-            return None
-        try:
-            parsed = int(cleaned)
-        except ValueError:
-            return None
-        return parsed if parsed > 0 else None
-    return None
-
-
-def _extract_agent_id_from_node_config(raw_config_json: str | None) -> int | None:
-    if not raw_config_json:
-        return None
-    try:
-        payload = json.loads(raw_config_json)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return _parse_optional_positive_int(payload.get("agent_id"))
-
-
 def _ensure_agent_skill_binding_schema(connection) -> None:
     _execute_ddl(
         connection,
@@ -1851,52 +1795,6 @@ def _ensure_agent_skill_binding_schema(connection) -> None:
             "ON agent_skill_bindings (skill_id)"
         )
     )
-    _execute_ddl(
-        connection,
-        (
-            "CREATE TABLE IF NOT EXISTS legacy_unmapped_node_skills ("
-            "id INTEGER PRIMARY KEY, "
-            "flowchart_node_id INTEGER NOT NULL, "
-            "skill_id INTEGER NOT NULL, "
-            "legacy_position INTEGER, "
-            "node_ref_id INTEGER, "
-            "node_config_json TEXT, "
-            "reason TEXT NOT NULL, "
-            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
-            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
-            "UNIQUE(flowchart_node_id, skill_id)"
-            ")"
-        ),
-    )
-    _ensure_columns(
-        connection,
-        "legacy_unmapped_node_skills",
-        {
-            "flowchart_node_id": "INTEGER NOT NULL",
-            "skill_id": "INTEGER NOT NULL",
-            "legacy_position": "INTEGER",
-            "node_ref_id": "INTEGER",
-            "node_config_json": "TEXT",
-            "reason": "TEXT NOT NULL",
-            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
-            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
-        },
-    )
-    connection.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS ix_legacy_unmapped_node_skills_flowchart_node_id "
-            "ON legacy_unmapped_node_skills (flowchart_node_id)"
-        )
-    )
-    connection.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS ix_legacy_unmapped_node_skills_skill_id "
-            "ON legacy_unmapped_node_skills (skill_id)"
-        )
-    )
-    _ensure_node_skill_binding_deprecation_triggers(connection)
-
-
 def _ensure_flowchart_node_attachment_schema(connection) -> None:
     _execute_ddl(
         connection,
@@ -1934,184 +1832,6 @@ def _ensure_flowchart_node_attachment_schema(connection) -> None:
             "ON flowchart_node_attachments (attachment_id)"
         )
     )
-
-
-def _ensure_node_skill_binding_deprecation_triggers(connection) -> None:
-    if connection.dialect.name != "sqlite":
-        return
-    connection.execute(
-        text(
-            "CREATE TRIGGER IF NOT EXISTS trg_flowchart_node_skills_reject_insert "
-            "BEFORE INSERT ON flowchart_node_skills "
-            "WHEN EXISTS ("
-            "  SELECT 1 FROM integration_settings "
-            "  WHERE provider = 'llm' "
-            "    AND key = 'node_skill_binding_mode' "
-            "    AND lower(trim(value)) = 'reject'"
-            ") "
-            "BEGIN "
-            "  SELECT RAISE(ABORT, 'Node-level skill bindings are deprecated. Assign skills to the Agent.'); "
-            "END"
-        )
-    )
-    connection.execute(
-        text(
-            "CREATE TRIGGER IF NOT EXISTS trg_flowchart_node_skills_reject_update "
-            "BEFORE UPDATE ON flowchart_node_skills "
-            "WHEN EXISTS ("
-            "  SELECT 1 FROM integration_settings "
-            "  WHERE provider = 'llm' "
-            "    AND key = 'node_skill_binding_mode' "
-            "    AND lower(trim(value)) = 'reject'"
-            ") "
-            "BEGIN "
-            "  SELECT RAISE(ABORT, 'Node-level skill bindings are deprecated. Assign skills to the Agent.'); "
-            "END"
-        )
-    )
-
-
-def _migrate_flowchart_node_skills_to_agent_bindings(connection) -> None:
-    if connection.dialect.name != "sqlite":
-        return
-    tables = _table_names(connection)
-    required_tables = {
-        "flowchart_node_skills",
-        "flowchart_nodes",
-        "agents",
-        "skills",
-        "agent_skill_bindings",
-        "legacy_unmapped_node_skills",
-    }
-    if not required_tables.issubset(tables):
-        return
-
-    valid_agent_ids = {
-        int(row[0])
-        for row in connection.execute(text("SELECT id FROM agents")).fetchall()
-        if row[0] is not None
-    }
-    valid_skill_ids = {
-        int(row[0])
-        for row in connection.execute(text("SELECT id FROM skills")).fetchall()
-        if row[0] is not None
-    }
-    existing_pairs: set[tuple[int, int]] = set()
-    max_position_by_agent: dict[int, int] = {}
-    existing_rows = connection.execute(
-        text(
-            "SELECT agent_id, skill_id, position "
-            "FROM agent_skill_bindings "
-            "ORDER BY agent_id ASC, position ASC, skill_id ASC"
-        )
-    ).fetchall()
-    for row in existing_rows:
-        agent_id = _parse_optional_positive_int(row[0])
-        skill_id = _parse_optional_positive_int(row[1])
-        if agent_id is None or skill_id is None:
-            continue
-        existing_pairs.add((agent_id, skill_id))
-        position = _parse_optional_positive_int(row[2]) or 0
-        max_position_by_agent[agent_id] = max(
-            max_position_by_agent.get(agent_id, 0), position
-        )
-
-    legacy_rows = connection.execute(
-        text(
-            "SELECT "
-            "  fns.flowchart_node_id, "
-            "  fns.skill_id, "
-            "  fns.position, "
-            "  fn.ref_id, "
-            "  fn.config_json "
-            "FROM flowchart_node_skills AS fns "
-            "JOIN flowchart_nodes AS fn "
-            "  ON fn.id = fns.flowchart_node_id "
-            "ORDER BY "
-            "  fns.flowchart_node_id ASC, "
-            "  CASE WHEN fns.position IS NULL THEN 1 ELSE 0 END ASC, "
-            "  fns.position ASC, "
-            "  fns.skill_id ASC"
-        )
-    ).fetchall()
-
-    for row in legacy_rows:
-        flowchart_node_id = _parse_optional_positive_int(row[0])
-        skill_id = _parse_optional_positive_int(row[1])
-        legacy_position = _parse_optional_positive_int(row[2])
-        node_ref_id = _parse_optional_positive_int(row[3])
-        node_config_json = row[4] if isinstance(row[4], str) else None
-        if flowchart_node_id is None or skill_id is None:
-            continue
-
-        if skill_id not in valid_skill_ids:
-            connection.execute(
-                text(
-                    "INSERT OR IGNORE INTO legacy_unmapped_node_skills ("
-                    "flowchart_node_id, skill_id, legacy_position, node_ref_id, node_config_json, reason"
-                    ") VALUES ("
-                    ":flowchart_node_id, :skill_id, :legacy_position, :node_ref_id, :node_config_json, :reason"
-                    ")"
-                ),
-                {
-                    "flowchart_node_id": flowchart_node_id,
-                    "skill_id": skill_id,
-                    "legacy_position": legacy_position,
-                    "node_ref_id": node_ref_id,
-                    "node_config_json": node_config_json,
-                    "reason": "skill_not_found",
-                },
-            )
-            continue
-
-        resolved_agent_id = None
-        config_agent_id = _extract_agent_id_from_node_config(node_config_json)
-        if config_agent_id is not None and config_agent_id in valid_agent_ids:
-            resolved_agent_id = config_agent_id
-        if resolved_agent_id is None:
-            reason = "missing_agent_mapping"
-            if config_agent_id is not None and config_agent_id not in valid_agent_ids:
-                reason = "node_config_agent_not_found"
-            connection.execute(
-                text(
-                    "INSERT OR IGNORE INTO legacy_unmapped_node_skills ("
-                    "flowchart_node_id, skill_id, legacy_position, node_ref_id, node_config_json, reason"
-                    ") VALUES ("
-                    ":flowchart_node_id, :skill_id, :legacy_position, :node_ref_id, :node_config_json, :reason"
-                    ")"
-                ),
-                {
-                    "flowchart_node_id": flowchart_node_id,
-                    "skill_id": skill_id,
-                    "legacy_position": legacy_position,
-                    "node_ref_id": node_ref_id,
-                    "node_config_json": node_config_json,
-                    "reason": reason,
-                },
-            )
-            continue
-
-        pair = (resolved_agent_id, skill_id)
-        if pair in existing_pairs:
-            continue
-
-        next_position = max_position_by_agent.get(resolved_agent_id, 0) + 1
-        connection.execute(
-            text(
-                "INSERT OR IGNORE INTO agent_skill_bindings ("
-                "agent_id, skill_id, position"
-                ") VALUES ("
-                ":agent_id, :skill_id, :position"
-                ")"
-            ),
-            {
-                "agent_id": resolved_agent_id,
-                "skill_id": skill_id,
-                "position": next_position,
-            },
-        )
-        existing_pairs.add(pair)
-        max_position_by_agent[resolved_agent_id] = next_position
 
 
 def _ensure_rag_schema(connection) -> None:

@@ -8,7 +8,6 @@ import {
   updateSettingsRuntimeChat,
   updateSettingsRuntimeInstructions,
   updateSettingsRuntimeNodeExecutor,
-  updateSettingsRuntimeNodeSkillBinding,
   updateSettingsRuntimeRag,
 } from '../lib/studioApi'
 
@@ -99,7 +98,6 @@ export default function SettingsRuntimePage() {
     k8sImagePullSecretsJson: '',
     k8sInCluster: false,
   })
-  const [nodeSkillBindingMode, setNodeSkillBindingMode] = useState('warn')
   const [instructionFlags, setInstructionFlags] = useState({})
 
   const [ragForm, setRagForm] = useState({
@@ -163,7 +161,6 @@ export default function SettingsRuntimePage() {
         k8sInCluster: asBool(nodeExecutor.k8s_in_cluster),
       })
 
-      setNodeSkillBindingMode(String(payload?.node_skill_binding_mode || 'warn'))
       const flags = {}
       const flagRows = Array.isArray(payload?.instruction_runtime_flags)
         ? payload.instruction_runtime_flags
@@ -266,9 +263,6 @@ export default function SettingsRuntimePage() {
       icon: sectionIcon(itemId),
     }
   })
-  const nodeSkillBindingModes = Array.isArray(payload?.node_skill_binding_modes)
-    ? payload.node_skill_binding_modes
-    : []
   const instructionRows = Array.isArray(payload?.instruction_runtime_flags)
     ? payload.instruction_runtime_flags
     : []
@@ -331,36 +325,6 @@ export default function SettingsRuntimePage() {
                       onClick={() => save(() => updateSettingsRuntimeNodeExecutor(nodeExecutorForm), 'Node executor runtime settings updated.')}
                     >
                       Save Node Executor
-                    </button>
-                  </div>
-                </div>
-
-                <h3>Node skill binding mode</h3>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Compatibility mode</span>
-                    <select
-                      value={nodeSkillBindingMode}
-                      onChange={(event) => setNodeSkillBindingMode(event.target.value)}
-                    >
-                      {nodeSkillBindingModes.map((mode) => (
-                        <option key={mode.value} value={mode.value}>
-                          {mode.label}: {mode.description}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="form-actions">
-                    <button
-                      type="button"
-                      className="btn-link btn-secondary"
-                      disabled={busy}
-                      onClick={() => save(
-                        () => updateSettingsRuntimeNodeSkillBinding({ mode: nodeSkillBindingMode }),
-                        'Node skill binding mode updated.',
-                      )}
-                    >
-                      Save Mode
                     </button>
                   </div>
                 </div>

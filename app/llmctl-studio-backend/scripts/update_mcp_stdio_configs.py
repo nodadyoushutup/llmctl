@@ -57,11 +57,6 @@ def _parse_args() -> argparse.Namespace:
         help="Limit to a specific server key (repeatable).",
     )
     parser.add_argument(
-        "--llmctl-stdio-tap",
-        action="store_true",
-        help="No-op retained for compatibility.",
-    )
-    parser.add_argument(
         "--print",
         action="store_true",
         help="Print the rendered config JSON for each target server.",

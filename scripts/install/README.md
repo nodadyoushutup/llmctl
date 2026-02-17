@@ -13,6 +13,12 @@ Centralized install/setup scripts live in this directory.
 
 ## New local Kubernetes scripts
 
+- `scripts/minikube-up.sh` (top-level convenience wrapper)
+  - One-command local restore flow for Minikube + llmctl dev overlay.
+  - Starts/resumes profile, validates live-code mount, applies overlay, and waits for rollout.
+  - Example:
+    - `scripts/minikube-up.sh`
+
 - `install-minikube-single-node.sh`
   - Installs `kubectl` + `minikube` and starts a single-node local cluster.
   - Default profile: `llmctl`

@@ -7,7 +7,7 @@ DEFAULT_PROJECT_ROOT="/home/nodadyoushutup/llmctl"
 PROJECT_ROOT_INPUT="${1:-${DEFAULT_PROJECT_ROOT}}"
 
 fail() {
-  echo "[minikube-live-code-mount.sh] ERROR: $*" >&2
+  echo "[live-code.sh] ERROR: $*" >&2
   exit 1
 }
 
@@ -25,7 +25,7 @@ fi
 
 PROJECT_ROOT="$(cd "${PROJECT_ROOT_INPUT}" && pwd)"
 
-echo "[minikube-live-code-mount.sh] profile=${PROFILE} source=${PROJECT_ROOT} target=${MOUNT_TARGET}"
-echo "[minikube-live-code-mount.sh] keep this process running while using kubernetes/llmctl-studio/overlays/dev"
+echo "[live-code.sh] profile=${PROFILE} source=${PROJECT_ROOT} target=${MOUNT_TARGET}"
+echo "[live-code.sh] keep this process running while using kubernetes/llmctl-studio/overlays/dev"
 
 exec minikube -p "${PROFILE}" mount "${PROJECT_ROOT}:${MOUNT_TARGET}"

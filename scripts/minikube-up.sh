@@ -15,6 +15,8 @@ ROLLOUT_TIMEOUT_SECONDS="${ROLLOUT_TIMEOUT_SECONDS:-600}"
 
 MOUNT_LOG_FILE="${MINIKUBE_MOUNT_LOG_FILE:-${REPO_ROOT}/data/minikube/live-code-mount.log}"
 MOUNT_PID_FILE="${MINIKUBE_MOUNT_PID_FILE:-${REPO_ROOT}/data/minikube/live-code-mount.pid}"
+MOUNT_TARGET="${MINIKUBE_LIVE_CODE_TARGET:-/workspace/llmctl}"
+LIVE_MOUNT_SCRIPT=""
 
 log() {
   echo "[${SCRIPT_NAME}] $*"
@@ -93,45 +95,142 @@ parse_args() {
 }
 
 ensure_minikube() {
+  local status
   local minikube_script
   minikube_script="${REPO_ROOT}/scripts/install/install-minikube-single-node.sh"
   [[ -x "${minikube_script}" ]] || fail "Missing executable: ${minikube_script}"
+
+  if command -v minikube >/dev/null 2>&1; then
+    status="$(minikube -p "${PROFILE}" status 2>/dev/null || true)"
+    if grep -q "host: Running" <<<"${status}" && grep -q "kubelet: Running" <<<"${status}" && grep -q "apiserver: Running" <<<"${status}"; then
+      log "Minikube profile '${PROFILE}' is already running."
+      kubectl config use-context "${PROFILE}" >/dev/null 2>&1 || true
+      return
+    fi
+  fi
 
   log "Starting Minikube profile '${PROFILE}' (GPU mode: ${GPU_MODE})..."
   "${minikube_script}" --profile "${PROFILE}" --gpu-mode "${GPU_MODE}"
 }
 
+resolve_live_mount_script() {
+  local candidate
+  local candidates=(
+    "${REPO_ROOT}/scripts/minikube/live-code.sh"
+    "${REPO_ROOT}/scripts/minikube-live-code-mount.sh"
+  )
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "${candidate}" ]]; then
+      LIVE_MOUNT_SCRIPT="${candidate}"
+      return
+    fi
+  done
+  fail "Could not find a live-code mount script under scripts/minikube/live-code.sh or scripts/minikube-live-code-mount.sh."
+}
+
+mount_target_is_healthy() {
+  minikube -p "${PROFILE}" ssh -- "test -d '${MOUNT_TARGET}'" >/dev/null 2>&1
+}
+
+stop_mount_process() {
+  local pid="$1"
+  if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" >/dev/null 2>&1; then
+    kill "${pid}" >/dev/null 2>&1 || true
+    sleep 1
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      kill -9 "${pid}" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+reset_mount_target() {
+  minikube -p "${PROFILE}" ssh -- "sudo umount '${MOUNT_TARGET}' || umount '${MOUNT_TARGET}' || true" >/dev/null 2>&1 || true
+}
+
 start_live_mount() {
   local pid
+  local attempt
+  local max_attempts=3
 
   mkdir -p "$(dirname "${MOUNT_LOG_FILE}")"
 
   if [[ -f "${MOUNT_PID_FILE}" ]]; then
     pid="$(cat "${MOUNT_PID_FILE}" 2>/dev/null || true)"
     if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" >/dev/null 2>&1; then
-      log "Live-code mount already running (pid ${pid})."
-      return
+      if mount_target_is_healthy; then
+        log "Live-code mount already running (pid ${pid})."
+        return
+      fi
+      log "Live-code mount process exists (pid ${pid}) but target '${MOUNT_TARGET}' is unhealthy. Restarting mount..."
+      stop_mount_process "${pid}"
+      reset_mount_target
     fi
   fi
 
-  log "Starting live-code mount in background..."
-  MINIKUBE_PROFILE="${PROFILE}" nohup "${REPO_ROOT}/scripts/minikube-live-code-mount.sh" >"${MOUNT_LOG_FILE}" 2>&1 &
-  pid=$!
-  echo "${pid}" > "${MOUNT_PID_FILE}"
-
-  sleep 2
-  if ! kill -0 "${pid}" >/dev/null 2>&1; then
-    tail -n 60 "${MOUNT_LOG_FILE}" >&2 || true
-    fail "Live-code mount failed to start."
+  pid="$(pgrep -f "minikube -p ${PROFILE} mount .+:${MOUNT_TARGET}" | head -n1 || true)"
+  if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" >/dev/null 2>&1; then
+    if mount_target_is_healthy; then
+      echo "${pid}" > "${MOUNT_PID_FILE}"
+      log "Live-code mount already running (pid ${pid})."
+      return
+    fi
+    log "Detected stale live-code mount process (pid ${pid}). Restarting mount..."
+    stop_mount_process "${pid}"
+    reset_mount_target
   fi
 
-  log "Live-code mount running (pid ${pid})."
-  log "Live-code mount log: ${MOUNT_LOG_FILE}"
+  for attempt in $(seq 1 "${max_attempts}"); do
+    log "Starting live-code mount in background (attempt ${attempt}/${max_attempts})..."
+    : > "${MOUNT_LOG_FILE}"
+    MINIKUBE_PROFILE="${PROFILE}" nohup "${LIVE_MOUNT_SCRIPT}" "${REPO_ROOT}" >"${MOUNT_LOG_FILE}" 2>&1 &
+    pid=$!
+    echo "${pid}" > "${MOUNT_PID_FILE}"
+
+    sleep 4
+    if kill -0 "${pid}" >/dev/null 2>&1 && mount_target_is_healthy; then
+      log "Live-code mount running (pid ${pid})."
+      log "Live-code mount log: ${MOUNT_LOG_FILE}"
+      return
+    fi
+
+    stop_mount_process "${pid}"
+    reset_mount_target
+    log "Live-code mount attempt ${attempt} exited early. Retrying..."
+    sleep 2
+  done
+
+  tail -n 60 "${MOUNT_LOG_FILE}" >&2 || true
+  fail "Live-code mount failed to start."
 }
 
 apply_dev_overlay() {
-  log "Applying Kubernetes dev overlay..."
-  kubectl apply -k "${REPO_ROOT}/kubernetes/llmctl-studio/overlays/dev"
+  local attempt
+  local max_attempts=5
+  local apply_log
+
+  apply_log="$(mktemp)"
+  for attempt in $(seq 1 "${max_attempts}"); do
+    log "Applying Kubernetes dev overlay (attempt ${attempt}/${max_attempts})..."
+    if kubectl apply -k "${REPO_ROOT}/kubernetes/llmctl-studio/overlays/dev" >"${apply_log}" 2>&1; then
+      cat "${apply_log}"
+      rm -f "${apply_log}"
+      return
+    fi
+
+    cat "${apply_log}" >&2
+    if grep -q "validate.nginx.ingress.kubernetes.io" "${apply_log}"; then
+      log "Ingress admission webhook not ready yet; waiting and retrying..."
+      kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s || true
+      sleep 5
+      continue
+    fi
+
+    rm -f "${apply_log}"
+    fail "kubectl apply -k failed."
+  done
+
+  rm -f "${apply_log}"
+  fail "kubectl apply -k failed after ${max_attempts} attempts."
 }
 
 maybe_warn_missing_secrets() {
@@ -192,6 +291,7 @@ main() {
   ensure_minikube
 
   if [[ "${ENABLE_LIVE_MOUNT}" == "1" ]]; then
+    resolve_live_mount_script
     start_live_mount
   fi
 

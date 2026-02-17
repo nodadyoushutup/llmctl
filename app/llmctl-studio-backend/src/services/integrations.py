@@ -50,12 +50,6 @@ GOOGLE_WORKSPACE_KEYS = (
     "workspace_delegated_user_email",
     "google_workspace_mcp_enabled",
 )
-NODE_SKILL_BINDING_MODE_WARN = "warn"
-NODE_SKILL_BINDING_MODE_REJECT = "reject"
-NODE_SKILL_BINDING_MODE_CHOICES = (
-    NODE_SKILL_BINDING_MODE_WARN,
-    NODE_SKILL_BINDING_MODE_REJECT,
-)
 NODE_EXECUTOR_PROVIDER = "node_executor"
 NODE_EXECUTOR_PROVIDER_KUBERNETES = "kubernetes"
 NODE_EXECUTOR_PROVIDER_CHOICES = (
@@ -262,20 +256,6 @@ def resolve_default_model_id(settings: dict[str, str] | None = None) -> int | No
         return int(raw)
     except ValueError:
         return None
-
-
-def normalize_node_skill_binding_mode(value: str | None) -> str:
-    cleaned = (value or "").strip().lower()
-    if cleaned in NODE_SKILL_BINDING_MODE_CHOICES:
-        return cleaned
-    return NODE_SKILL_BINDING_MODE_WARN
-
-
-def resolve_node_skill_binding_mode(
-    settings: dict[str, str] | None = None,
-) -> str:
-    settings = settings or load_integration_settings("llm")
-    return normalize_node_skill_binding_mode(settings.get("node_skill_binding_mode"))
 
 
 def normalize_node_executor_provider(value: str | None) -> str:

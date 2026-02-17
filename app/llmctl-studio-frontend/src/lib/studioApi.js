@@ -188,6 +188,52 @@ export function getAgentMeta() {
   return requestJson('/agents/new')
 }
 
+export function getRoles() {
+  return requestJson('/roles')
+}
+
+export function getRoleMeta() {
+  return requestJson('/roles/new')
+}
+
+export function getRole(roleId) {
+  const parsedId = parsePositiveId(roleId, 'roleId')
+  return requestJson(`/roles/${parsedId}`)
+}
+
+export function getRoleEdit(roleId) {
+  const parsedId = parsePositiveId(roleId, 'roleId')
+  return requestJson(`/roles/${parsedId}/edit`)
+}
+
+export function createRole({ name = '', description = '', detailsJson = '{}' }) {
+  return requestJson('/roles', {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      details_json: detailsJson,
+    },
+  })
+}
+
+export function updateRole(roleId, { name = '', description = '', detailsJson = '{}' }) {
+  const parsedId = parsePositiveId(roleId, 'roleId')
+  return requestJson(`/roles/${parsedId}`, {
+    method: 'POST',
+    body: {
+      name,
+      description,
+      details_json: detailsJson,
+    },
+  })
+}
+
+export function deleteRole(roleId) {
+  const parsedId = parsePositiveId(roleId, 'roleId')
+  return requestJson(`/roles/${parsedId}/delete`, { method: 'POST' })
+}
+
 export function createAgent({ name = '', description = '', roleId = null }) {
   return requestJson('/agents', {
     method: 'POST',
@@ -883,34 +929,6 @@ export function reorderFlowchartNodeScripts(flowchartId, nodeId, { scriptIds = [
   })
 }
 
-export function attachFlowchartNodeSkill(flowchartId, nodeId, { skillId } = {}) {
-  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
-  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
-  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/skills`, {
-    method: 'POST',
-    body: { skill_id: skillId },
-  })
-}
-
-export function detachFlowchartNodeSkill(flowchartId, nodeId, skillId) {
-  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
-  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
-  const parsedSkillId = parsePositiveId(skillId, 'skillId')
-  return requestJson(
-    `/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/skills/${parsedSkillId}/delete`,
-    { method: 'POST' },
-  )
-}
-
-export function reorderFlowchartNodeSkills(flowchartId, nodeId, { skillIds = [] } = {}) {
-  const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
-  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
-  return requestJson(`/flowcharts/${parsedFlowchartId}/nodes/${parsedNodeId}/skills/reorder`, {
-    method: 'POST',
-    body: { skill_ids: skillIds },
-  })
-}
-
 const SETTINGS_PROVIDER_IDS = ['codex', 'gemini', 'claude', 'vllm_local', 'vllm_remote']
 const SETTINGS_INTEGRATION_IDS = [
   'git',
@@ -1079,13 +1097,6 @@ export function updateSettingsRuntimeInstructions(flags = {}) {
   return requestJson('/settings/runtime/instructions', {
     method: 'POST',
     body: flags,
-  })
-}
-
-export function updateSettingsRuntimeNodeSkillBinding({ mode = '' } = {}) {
-  return requestJson('/settings/runtime/node-skill-binding', {
-    method: 'POST',
-    body: { node_skill_binding_mode: mode },
   })
 }
 

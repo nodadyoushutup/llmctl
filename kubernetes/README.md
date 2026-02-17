@@ -23,6 +23,12 @@ ArgoCD tracks this as one application (`llmctl-studio`) for core services. pgAdm
 
 ## Quick start
 
+One-command local Minikube restore (profile start/resume + live-code mount + dev overlay apply + rollout wait):
+
+```bash
+scripts/minikube-up.sh
+```
+
 Create secrets before applying manifests:
 
 ```bash
@@ -136,7 +142,7 @@ Use this when you want to keep stable base images in Minikube and mount your loc
 1) Keep a Minikube mount session running in a separate terminal:
 
 ```bash
-scripts/minikube-live-code-mount.sh
+scripts/minikube/live-code.sh
 ```
 
 2) Apply the dev overlay:

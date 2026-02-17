@@ -7209,6 +7209,8 @@ def _execute_flowchart_node(
 def _execute_flowchart_node_request(
     request: ExecutionRequest,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    init_engine(Config.SQLALCHEMY_DATABASE_URI)
+    init_db()
     return _execute_flowchart_node(
         node_id=request.node_id,
         node_type=request.node_type,

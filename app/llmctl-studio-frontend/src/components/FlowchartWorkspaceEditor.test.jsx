@@ -140,7 +140,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
       <FlowchartWorkspaceEditor
         initialNodes={[
           { id: 1, node_type: 'start', x: 200, y: 200 },
-          { id: 2, node_type: 'task', x: 500, y: 220, ref_id: null, config: { task_prompt: '' } },
+          { id: 2, node_type: 'task', x: 500, y: 220, config: { task_prompt: '' } },
         ]}
         initialEdges={[{ source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1' }]}
         onGraphChange={onGraphChange}

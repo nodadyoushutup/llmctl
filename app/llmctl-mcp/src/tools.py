@@ -308,29 +308,6 @@ def _set_flowchart_node_scripts(
     session.execute(flowchart_node_scripts.insert(), rows)
 
 
-def _set_flowchart_node_skills(
-    session,
-    node_id: int,
-    skill_ids: list[int],
-) -> None:
-    session.execute(
-        delete(flowchart_node_skills).where(
-            flowchart_node_skills.c.flowchart_node_id == node_id
-        )
-    )
-    if not skill_ids:
-        return
-    rows = [
-        {
-            "flowchart_node_id": node_id,
-            "skill_id": skill_id,
-            "position": position,
-        }
-        for position, skill_id in enumerate(skill_ids, start=1)
-    ]
-    session.execute(flowchart_node_skills.insert(), rows)
-
-
 def _serialize_flowchart_item(flowchart: Flowchart) -> dict[str, Any]:
     return _serialize_model(flowchart, include_relationships=False)
 
@@ -444,13 +421,11 @@ def _validate_flowchart_graph_snapshot(
             errors.append(f"Node {node_id} ({node_type}) requires ref_id.")
         if node_type not in FLOWCHART_NODE_TYPE_WITH_REF and ref_id is not None:
             errors.append(f"Node {node_id} ({node_type}) does not allow ref_id.")
-        if (
-            node_type == FLOWCHART_NODE_TYPE_TASK
-            and ref_id is None
-            and not _task_node_has_prompt(node.get("config"))
+        if node_type == FLOWCHART_NODE_TYPE_TASK and not _task_node_has_prompt(
+            node.get("config")
         ):
             errors.append(
-                f"Node {node_id} ({node_type}) requires ref_id or config.task_prompt."
+                f"Node {node_id} ({node_type}) requires config.task_prompt."
             )
 
         compatibility = _flowchart_node_compatibility(node_type)
@@ -1133,11 +1108,10 @@ def register(mcp: FastMCP) -> None:
                         )
                     if (
                         node_type == FLOWCHART_NODE_TYPE_TASK
-                        and ref_id is None
                         and not _task_node_has_prompt(config_payload)
                     ):
                         raise ValueError(
-                            f"nodes[{index}] task node requires ref_id or config.task_prompt."
+                            f"nodes[{index}] task node requires config.task_prompt."
                         )
                     compatibility_errors = _validate_flowchart_utility_compatibility(
                         node_type,
@@ -1255,42 +1229,14 @@ def register(mcp: FastMCP) -> None:
                             for item in selected_scripts
                         ):
                             raise ValueError(
-                                f"nodes[{index}] cannot attach legacy script_type=skill records; use skill_ids."
+                                f"nodes[{index}] cannot attach legacy script_type=skill records; assign skills on the Agent."
                             )
                         _set_flowchart_node_scripts(session, flowchart_node.id, script_ids)
 
                     if "skill_ids" in raw_node:
-                        skill_ids_raw = raw_node.get("skill_ids")
-                        if not isinstance(skill_ids_raw, list):
-                            raise ValueError(f"nodes[{index}].skill_ids must be an array.")
-                        skill_ids: list[int] = []
-                        for skill_index, skill_id_raw in enumerate(skill_ids_raw):
-                            skill_id = _coerce_optional_int(
-                                skill_id_raw,
-                                field_name=f"nodes[{index}].skill_ids[{skill_index}]",
-                                minimum=1,
-                            )
-                            if skill_id is None:
-                                raise ValueError(
-                                    f"nodes[{index}].skill_ids[{skill_index}] is invalid."
-                                )
-                            skill_ids.append(skill_id)
-                        if len(skill_ids) != len(set(skill_ids)):
-                            raise ValueError(f"nodes[{index}] has duplicate skill_ids.")
-                        compatibility_errors = _validate_flowchart_utility_compatibility(
-                            node_type,
-                            skill_ids=skill_ids,
+                        raise ValueError(
+                            f"nodes[{index}].skill_ids is no longer writable; assign skills on the Agent."
                         )
-                        if compatibility_errors:
-                            raise ValueError(compatibility_errors[0])
-                        selected_skills = (
-                            session.execute(select(Skill.id).where(Skill.id.in_(skill_ids)))
-                            .scalars()
-                            .all()
-                        )
-                        if len(selected_skills) != len(set(skill_ids)):
-                            raise ValueError(f"nodes[{index}] contains unknown skill IDs.")
-                        _set_flowchart_node_skills(session, flowchart_node.id, skill_ids)
 
                     keep_node_ids.add(flowchart_node.id)
                     if node_id_raw is not None:
@@ -2104,177 +2050,6 @@ def register(mcp: FastMCP) -> None:
                 return {"ok": False, "error": f"Skill {skill_id} not found."}
             skill.status = SKILL_STATUS_ARCHIVED
             return {"ok": True, "item": _serialize_model(skill, include_relationships=False)}
-
-    @mcp.tool()
-    def llmctl_bind_flowchart_node_skill(
-        flowchart_id: int,
-        node_id: int,
-        skill_id: int,
-    ) -> dict[str, Any]:
-        """Bind a skill to a flowchart node."""
-        with session_scope() as session:
-            node = (
-                session.execute(
-                    select(FlowchartNode)
-                    .options(
-                        selectinload(FlowchartNode.scripts),
-                        selectinload(FlowchartNode.skills),
-                    )
-                    .where(FlowchartNode.id == node_id)
-                )
-                .scalars()
-                .first()
-            )
-            if node is None or node.flowchart_id != flowchart_id:
-                return {
-                    "ok": False,
-                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
-                }
-            errors = _validate_flowchart_utility_compatibility(
-                node.node_type,
-                skill_ids=[skill_id],
-            )
-            if errors:
-                return {"ok": False, "error": errors[0]}
-            skill = session.get(Skill, skill_id)
-            if skill is None:
-                return {"ok": False, "error": f"Skill {skill_id} was not found."}
-            if (skill.status or "active") == SKILL_STATUS_ARCHIVED:
-                return {"ok": False, "error": f"Skill {skill_id} is archived and cannot be attached."}
-            ordered_ids = [item.id for item in node.skills]
-            if skill_id not in ordered_ids:
-                ordered_ids.append(skill_id)
-                _set_flowchart_node_skills(session, node.id, ordered_ids)
-            refreshed = (
-                session.execute(
-                    select(FlowchartNode)
-                    .options(
-                        selectinload(FlowchartNode.scripts),
-                        selectinload(FlowchartNode.skills),
-                    )
-                    .where(FlowchartNode.id == node_id)
-                )
-                .scalars()
-                .first()
-            )
-            if refreshed is None:
-                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
-            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
-
-    @mcp.tool()
-    def llmctl_unbind_flowchart_node_skill(
-        flowchart_id: int,
-        node_id: int,
-        skill_id: int,
-    ) -> dict[str, Any]:
-        """Unbind a skill from a flowchart node."""
-        with session_scope() as session:
-            node = (
-                session.execute(
-                    select(FlowchartNode)
-                    .options(
-                        selectinload(FlowchartNode.scripts),
-                        selectinload(FlowchartNode.skills),
-                    )
-                    .where(FlowchartNode.id == node_id)
-                )
-                .scalars()
-                .first()
-            )
-            if node is None or node.flowchart_id != flowchart_id:
-                return {
-                    "ok": False,
-                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
-                }
-            ordered_ids = [item.id for item in node.skills if item.id != skill_id]
-            _set_flowchart_node_skills(session, node.id, ordered_ids)
-            refreshed = (
-                session.execute(
-                    select(FlowchartNode)
-                    .options(
-                        selectinload(FlowchartNode.scripts),
-                        selectinload(FlowchartNode.skills),
-                    )
-                    .where(FlowchartNode.id == node_id)
-                )
-                .scalars()
-                .first()
-            )
-            if refreshed is None:
-                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
-            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
-
-    @mcp.tool()
-    def llmctl_reorder_flowchart_node_skills(
-        flowchart_id: int,
-        node_id: int,
-        skill_ids: list[int],
-    ) -> dict[str, Any]:
-        """Reorder all skills attached to a flowchart node."""
-        if not isinstance(skill_ids, list):
-            return {"ok": False, "error": "skill_ids must be an array."}
-        parsed_skill_ids: list[int] = []
-        for index, skill_id in enumerate(skill_ids):
-            try:
-                parsed = _coerce_optional_int(
-                    skill_id,
-                    field_name=f"skill_ids[{index}]",
-                    minimum=1,
-                )
-            except ValueError as exc:
-                return {"ok": False, "error": str(exc)}
-            if parsed is None:
-                return {"ok": False, "error": f"skill_ids[{index}] is invalid."}
-            parsed_skill_ids.append(parsed)
-        if len(parsed_skill_ids) != len(set(parsed_skill_ids)):
-            return {"ok": False, "error": "skill_ids cannot contain duplicates."}
-
-        with session_scope() as session:
-            node = (
-                session.execute(
-                    select(FlowchartNode)
-                    .options(
-                        selectinload(FlowchartNode.scripts),
-                        selectinload(FlowchartNode.skills),
-                    )
-                    .where(FlowchartNode.id == node_id)
-                )
-                .scalars()
-                .first()
-            )
-            if node is None or node.flowchart_id != flowchart_id:
-                return {
-                    "ok": False,
-                    "error": f"Flowchart node {node_id} was not found in flowchart {flowchart_id}.",
-                }
-            errors = _validate_flowchart_utility_compatibility(
-                node.node_type,
-                skill_ids=parsed_skill_ids,
-            )
-            if errors:
-                return {"ok": False, "error": errors[0]}
-            existing_ids = {skill.id for skill in node.skills}
-            if set(parsed_skill_ids) != existing_ids:
-                return {
-                    "ok": False,
-                    "error": "skill_ids must include each attached skill exactly once.",
-                }
-            _set_flowchart_node_skills(session, node.id, parsed_skill_ids)
-            refreshed = (
-                session.execute(
-                    select(FlowchartNode)
-                    .options(
-                        selectinload(FlowchartNode.scripts),
-                        selectinload(FlowchartNode.skills),
-                    )
-                    .where(FlowchartNode.id == node_id)
-                )
-                .scalars()
-                .first()
-            )
-            if refreshed is None:
-                return {"ok": False, "error": f"Flowchart node {node_id} was not found."}
-            return {"ok": True, "node": _serialize_flowchart_node_item(refreshed)}
 
     @mcp.tool()
     def llmctl_get_memory(
