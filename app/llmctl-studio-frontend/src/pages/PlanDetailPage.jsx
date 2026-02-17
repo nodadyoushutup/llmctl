@@ -359,7 +359,7 @@ export default function PlanDetailPage() {
                       handleEditStage(stage)
                     }}
                   >
-                    <ActionIcon name="save" />
+                    <ActionIcon name="edit" />
                   </button>
                   <button
                     type="button"
@@ -408,7 +408,7 @@ export default function PlanDetailPage() {
                                   disabled={busy}
                                   onClick={() => handleEditTask(stage.id, task)}
                                 >
-                                  <ActionIcon name="save" />
+                                  <ActionIcon name="edit" />
                                 </button>
                                 <button
                                   type="button"

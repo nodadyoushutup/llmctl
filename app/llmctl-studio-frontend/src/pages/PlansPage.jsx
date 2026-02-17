@@ -174,7 +174,7 @@ export default function PlansPage() {
                             aria-label="Edit plan"
                             title="Edit plan"
                           >
-                            <ActionIcon name="save" />
+                            <ActionIcon name="edit" />
                           </Link>
                           <button
                             type="button"

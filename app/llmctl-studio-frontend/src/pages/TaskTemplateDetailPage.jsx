@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
@@ -30,24 +30,28 @@ export default function TaskTemplateDetailPage() {
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
     if (!parsedTemplateId) {
-      setState({ loading: false, payload: null, error: 'Invalid task template id.' })
       return
     }
-    setState((current) => ({ ...current, loading: true, error: '' }))
-    try {
-      const payload = await getTaskTemplate(parsedTemplateId)
-      setState({ loading: false, payload, error: '' })
-    } catch (error) {
-      setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load task template.') })
+    let cancelled = false
+    getTaskTemplate(parsedTemplateId)
+      .then((payload) => {
+        if (!cancelled) {
+          setState({ loading: false, payload, error: '' })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load task template.') })
+        }
+      })
+    return () => {
+      cancelled = true
     }
   }, [parsedTemplateId])
 
-  useEffect(() => {
-    refresh()
-  }, [refresh])
-
+  const invalidId = parsedTemplateId == null
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const template = payload && payload.template && typeof payload.template === 'object'
     ? payload.template
@@ -102,8 +106,10 @@ export default function TaskTemplateDetailPage() {
             ) : null}
           </div>
         </div>
-        {state.loading ? <p>Loading task template...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
+        {(!invalidId && state.loading) ? <p>Loading task template...</p> : null}
+        {(invalidId || state.error) ? (
+          <p className="error-text">{invalidId ? 'Invalid task template id.' : state.error}</p>
+        ) : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {template ? (
           <>

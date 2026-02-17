@@ -44,6 +44,21 @@ describe('App routing', () => {
     expect(await screen.findByText('Native React replacement for `/nodes` list, filters, and task lifecycle actions.')).toBeInTheDocument()
   })
 
+  test('plans route is native react', async () => {
+    renderAt('/plans')
+    expect(await screen.findByText('Native React replacement for `/plans` list and plan actions.')).toBeInTheDocument()
+  })
+
+  test('milestones route is native react', async () => {
+    renderAt('/milestones')
+    expect(await screen.findByText('Native React replacement for `/milestones` list and detail navigation.')).toBeInTheDocument()
+  })
+
+  test('memories route is native react', async () => {
+    renderAt('/memories')
+    expect(await screen.findByText('Native React replacement for `/memories` list and detail navigation.')).toBeInTheDocument()
+  })
+
   test('unknown route still bridges through backend api path', async () => {
     renderAt('/does-not-exist')
     const iframe = await screen.findByTitle('Legacy Studio page')

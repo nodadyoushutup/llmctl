@@ -193,6 +193,12 @@ If you are migrating from older bundled pgAdmin resources in namespace `llmctl`,
 kubectl -n llmctl delete svc/llmctl-pgadmin deploy/llmctl-pgadmin pvc/llmctl-pgadmin-data --ignore-not-found
 ```
 
+If you already deployed the previous manifest-based pgAdmin in namespace `llmctl-pgadmin`, run this one-time cleanup before first sync (Deployment selector changed and is immutable):
+
+```bash
+kubectl -n llmctl-pgadmin delete deploy/llmctl-pgadmin svc/llmctl-pgadmin configmap/llmctl-pgadmin-config --ignore-not-found
+```
+
 ## Harbor ArgoCD application
 
 Create the Harbor ArgoCD application resource:

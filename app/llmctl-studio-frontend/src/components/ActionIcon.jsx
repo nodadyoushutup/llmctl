@@ -41,6 +41,13 @@ export default function ActionIcon({ name }) {
       </svg>
     )
   }
+  if (name === 'edit') {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M11.9 1.8l2.3 2.3-7.9 7.9-3 .7.7-3zM2 13h12v1H2z" />
+      </svg>
+    )
+  }
   if (name === 'plus') {
     return (
       <svg viewBox="0 0 16 16" aria-hidden="true">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getMemories } from '../lib/studioApi'
@@ -30,19 +30,23 @@ export default function MemoriesPage() {
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
 
-  const refresh = useCallback(async () => {
-    setState((current) => ({ ...current, loading: true, error: '' }))
-    try {
-      const payload = await getMemories({ page, perPage })
-      setState({ loading: false, payload, error: '' })
-    } catch (error) {
-      setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load memories.') })
+  useEffect(() => {
+    let cancelled = false
+    getMemories({ page, perPage })
+      .then((payload) => {
+        if (!cancelled) {
+          setState({ loading: false, payload, error: '' })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load memories.') })
+        }
+      })
+    return () => {
+      cancelled = true
     }
   }, [page, perPage])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const memories = payload && Array.isArray(payload.memories) ? payload.memories : []

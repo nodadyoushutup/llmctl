@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
@@ -30,24 +30,28 @@ export default function MilestoneDetailPage() {
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
     if (!parsedMilestoneId) {
-      setState({ loading: false, payload: null, error: 'Invalid milestone id.' })
       return
     }
-    setState((current) => ({ ...current, loading: true, error: '' }))
-    try {
-      const payload = await getMilestone(parsedMilestoneId)
-      setState({ loading: false, payload, error: '' })
-    } catch (error) {
-      setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load milestone.') })
+    let cancelled = false
+    getMilestone(parsedMilestoneId)
+      .then((payload) => {
+        if (!cancelled) {
+          setState({ loading: false, payload, error: '' })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load milestone.') })
+        }
+      })
+    return () => {
+      cancelled = true
     }
   }, [parsedMilestoneId])
 
-  useEffect(() => {
-    refresh()
-  }, [refresh])
-
+  const invalidId = parsedMilestoneId == null
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const milestone = payload && payload.milestone && typeof payload.milestone === 'object'
     ? payload.milestone
@@ -97,8 +101,10 @@ export default function MilestoneDetailPage() {
             ) : null}
           </div>
         </div>
-        {state.loading ? <p>Loading milestone...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
+        {(!invalidId && state.loading) ? <p>Loading milestone...</p> : null}
+        {(invalidId || state.error) ? (
+          <p className="error-text">{invalidId ? 'Invalid milestone id.' : state.error}</p>
+        ) : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {milestone ? (
           <>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getTaskTemplates } from '../lib/studioApi'
@@ -30,19 +30,23 @@ export default function TaskTemplatesPage() {
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
 
-  const refresh = useCallback(async () => {
-    setState((current) => ({ ...current, loading: true, error: '' }))
-    try {
-      const payload = await getTaskTemplates({ page, perPage })
-      setState({ loading: false, payload, error: '' })
-    } catch (error) {
-      setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load workflow nodes.') })
+  useEffect(() => {
+    let cancelled = false
+    getTaskTemplates({ page, perPage })
+      .then((payload) => {
+        if (!cancelled) {
+          setState({ loading: false, payload, error: '' })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load workflow nodes.') })
+        }
+      })
+    return () => {
+      cancelled = true
     }
   }, [page, perPage])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const taskNodes = payload && Array.isArray(payload.task_nodes) ? payload.task_nodes : []

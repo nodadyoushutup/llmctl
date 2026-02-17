@@ -17,6 +17,22 @@ import NodesPage from './pages/NodesPage'
 import NodeDetailPage from './pages/NodeDetailPage'
 import NodeNewPage from './pages/NodeNewPage'
 import QuickTaskPage from './pages/QuickTaskPage'
+import PlansPage from './pages/PlansPage'
+import PlanDetailPage from './pages/PlanDetailPage'
+import PlanEditPage from './pages/PlanEditPage'
+import PlanNewPage from './pages/PlanNewPage'
+import MilestonesPage from './pages/MilestonesPage'
+import MilestoneDetailPage from './pages/MilestoneDetailPage'
+import MilestoneEditPage from './pages/MilestoneEditPage'
+import MilestoneNewPage from './pages/MilestoneNewPage'
+import MemoriesPage from './pages/MemoriesPage'
+import MemoryDetailPage from './pages/MemoryDetailPage'
+import MemoryEditPage from './pages/MemoryEditPage'
+import MemoryNewPage from './pages/MemoryNewPage'
+import TaskTemplatesPage from './pages/TaskTemplatesPage'
+import TaskTemplateDetailPage from './pages/TaskTemplateDetailPage'
+import TaskTemplateEditPage from './pages/TaskTemplateEditPage'
+import TaskTemplateNewPage from './pages/TaskTemplateNewPage'
 import LegacyMirrorPage from './pages/LegacyMirrorPage'
 import ParityChecklistPage from './pages/ParityChecklistPage'
 
@@ -42,6 +58,22 @@ export default function App() {
       <Route path="/nodes" element={<AppLayout><NodesPage /></AppLayout>} />
       <Route path="/nodes/new" element={<AppLayout><NodeNewPage /></AppLayout>} />
       <Route path="/nodes/:nodeId" element={<AppLayout><NodeDetailPage /></AppLayout>} />
+      <Route path="/plans" element={<AppLayout><PlansPage /></AppLayout>} />
+      <Route path="/plans/new" element={<AppLayout><PlanNewPage /></AppLayout>} />
+      <Route path="/plans/:planId" element={<AppLayout><PlanDetailPage /></AppLayout>} />
+      <Route path="/plans/:planId/edit" element={<AppLayout><PlanEditPage /></AppLayout>} />
+      <Route path="/milestones" element={<AppLayout><MilestonesPage /></AppLayout>} />
+      <Route path="/milestones/new" element={<AppLayout><MilestoneNewPage /></AppLayout>} />
+      <Route path="/milestones/:milestoneId" element={<AppLayout><MilestoneDetailPage /></AppLayout>} />
+      <Route path="/milestones/:milestoneId/edit" element={<AppLayout><MilestoneEditPage /></AppLayout>} />
+      <Route path="/memories" element={<AppLayout><MemoriesPage /></AppLayout>} />
+      <Route path="/memories/new" element={<AppLayout><MemoryNewPage /></AppLayout>} />
+      <Route path="/memories/:memoryId" element={<AppLayout><MemoryDetailPage /></AppLayout>} />
+      <Route path="/memories/:memoryId/edit" element={<AppLayout><MemoryEditPage /></AppLayout>} />
+      <Route path="/task-templates" element={<AppLayout><TaskTemplatesPage /></AppLayout>} />
+      <Route path="/task-templates/new" element={<AppLayout><TaskTemplateNewPage /></AppLayout>} />
+      <Route path="/task-templates/:templateId" element={<AppLayout><TaskTemplateDetailPage /></AppLayout>} />
+      <Route path="/task-templates/:templateId/edit" element={<AppLayout><TaskTemplateEditPage /></AppLayout>} />
       <Route path="/overview" element={<LegacyMirrorPage />} />
       <Route path="*" element={<LegacyMirrorPage />} />
     </Routes>

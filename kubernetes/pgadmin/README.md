@@ -22,6 +22,12 @@ If migrating from the legacy bundled pgAdmin in namespace `llmctl`, remove old r
 kubectl -n llmctl delete svc/llmctl-pgadmin deploy/llmctl-pgadmin pvc/llmctl-pgadmin-data --ignore-not-found
 ```
 
+If migrating from the previous manifest-based pgAdmin in namespace `llmctl-pgadmin`, delete the old Deployment/Service/ConfigMap once before the first Helm-backed sync (the Deployment selector changed and is immutable):
+
+```bash
+kubectl -n llmctl-pgadmin delete deploy/llmctl-pgadmin svc/llmctl-pgadmin configmap/llmctl-pgadmin-config --ignore-not-found
+```
+
 Guard before ArgoCD sync:
 
 ```bash

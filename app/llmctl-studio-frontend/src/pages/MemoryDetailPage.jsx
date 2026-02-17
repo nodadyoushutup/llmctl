@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
@@ -30,24 +30,28 @@ export default function MemoryDetailPage() {
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
     if (!parsedMemoryId) {
-      setState({ loading: false, payload: null, error: 'Invalid memory id.' })
       return
     }
-    setState((current) => ({ ...current, loading: true, error: '' }))
-    try {
-      const payload = await getMemory(parsedMemoryId)
-      setState({ loading: false, payload, error: '' })
-    } catch (error) {
-      setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load memory.') })
+    let cancelled = false
+    getMemory(parsedMemoryId)
+      .then((payload) => {
+        if (!cancelled) {
+          setState({ loading: false, payload, error: '' })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load memory.') })
+        }
+      })
+    return () => {
+      cancelled = true
     }
   }, [parsedMemoryId])
 
-  useEffect(() => {
-    refresh()
-  }, [refresh])
-
+  const invalidId = parsedMemoryId == null
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const memory = payload && payload.memory && typeof payload.memory === 'object' ? payload.memory : null
 
@@ -91,8 +95,10 @@ export default function MemoryDetailPage() {
             ) : null}
           </div>
         </div>
-        {state.loading ? <p>Loading memory...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
+        {(!invalidId && state.loading) ? <p>Loading memory...</p> : null}
+        {(invalidId || state.error) ? (
+          <p className="error-text">{invalidId ? 'Invalid memory id.' : state.error}</p>
+        ) : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
         {memory ? (
           <dl className="kv-grid">
