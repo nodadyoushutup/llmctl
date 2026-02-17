@@ -117,20 +117,22 @@ def _system_prompt(response_style: str) -> str:
     if normalized_style == "low":
         return (
             _BASE_SYSTEM_PROMPT
-            + "Keep responses concise, direct, and grounded. "
+            + "Keep responses natural, conversational, concise, direct, and grounded. "
             + "Prioritize the main answer and only the most important supporting detail."
         )
     if normalized_style == "medium":
         return (
             _BASE_SYSTEM_PROMPT
-            + "Provide a balanced answer: a short summary first, then key supporting details. "
-            + "Use brief structure when helpful."
+            + "Provide a balanced answer with natural, conversational flow and clear detail. "
+            + "Do not force a fixed output template. "
+            + "Use brief structure only when helpful."
         )
     return (
         _BASE_SYSTEM_PROMPT
-        + "Provide detailed, structured answers grounded in the retrieved context. "
+        + "Provide detailed answers grounded in the retrieved context while keeping a natural, "
+        + "conversational tone. "
         + "Be thorough but avoid filler; include useful detail only. "
-        + "Use clear markdown sections or bullet points when helpful. "
+        + "Use clear markdown sections or bullet points when helpful, not as a rigid template. "
         + "If the user asks for a table, return a markdown table and include as much relevant context-backed data as possible. "
         + "If context is incomplete, clearly state what is missing."
     )

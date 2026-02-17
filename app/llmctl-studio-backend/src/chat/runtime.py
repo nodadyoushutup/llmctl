@@ -730,24 +730,25 @@ def _build_prompt(
     normalized_complexity = normalize_response_complexity(response_complexity)
     if normalized_complexity == CHAT_RESPONSE_COMPLEXITY_LOW:
         complexity_instruction = (
-            "Response complexity: LOW. Keep the response concise, direct, and focused "
-            "on essentials only."
+            "Response complexity: LOW. Keep a natural, conversational tone. Be concise "
+            "and direct, focusing on essentials only."
         )
     elif normalized_complexity == CHAT_RESPONSE_COMPLEXITY_MEDIUM:
         complexity_instruction = (
-            "Response complexity: MEDIUM. Start with a short summary, then provide the "
-            "key supporting details."
+            "Response complexity: MEDIUM. Keep a natural, conversational tone with a "
+            "balanced level of detail. Do not force a fixed output template."
         )
     elif normalized_complexity == CHAT_RESPONSE_COMPLEXITY_HIGH:
         complexity_instruction = (
-            "Response complexity: HIGH. Provide a detailed, structured response with "
-            "thorough reasoning and relevant caveats."
+            "Response complexity: HIGH. Keep a natural, conversational tone while "
+            "providing detailed explanations, reasoning, and relevant caveats."
         )
     else:
         complexity_instruction = (
-            "Response complexity: EXTRA HIGH. Be exhaustive and completeness-focused. "
-            "When the user asks for structured data, include comprehensive Markdown "
-            "tables and ensure requested fields are not omitted."
+            "Response complexity: EXTRA HIGH. Keep a natural, conversational tone while "
+            "being exhaustive and completeness-focused. Use comprehensive Markdown "
+            "tables when requested or when tabular format clearly improves clarity, and "
+            "ensure requested fields are not omitted."
         )
     sections = [
         "You are a helpful assistant in a multi-turn chat session.",

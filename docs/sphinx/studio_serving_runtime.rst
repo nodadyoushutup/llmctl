@@ -263,6 +263,9 @@ Kubernetes split rollout:
 - frontend deployment: ``llmctl-studio-frontend``
 - backend deployment: ``llmctl-studio-backend``
 - ingress paths: ``/web`` and ``/api``
+- Minikube ``overlays/dev`` frontend runs Vite dev server with polling file watch,
+  so edits in ``app/llmctl-studio-frontend/src`` hot-reload without restarting the
+  frontend deployment.
 
 Operational Guidance
 --------------------

@@ -741,14 +741,12 @@ export default function ChatPage() {
               {visibleMessages.length > 0
                 ? visibleMessages.map((item) => {
                   const role = String(item?.role || 'assistant').toLowerCase()
-                  const roleLabel = role === 'user' ? 'you' : role === 'assistant' ? 'LLMCTL' : role
                   const isPending = Boolean(item?.pending)
                   return (
                     <div
                       key={`chat-message-${item.id || `${role}-${item.created_at}`}`}
                       className={`chat-message ${role === 'user' ? 'chat-message-user' : 'chat-message-assistant'}${isPending ? ' chat-message-pending' : ''}`}
                     >
-                      <p className="chat-message-header">{roleLabel}</p>
                       {isPending ? (
                         <p className="chat-message-content chat-message-thinking">{item.content || 'Thinking...'}</p>
                       ) : (

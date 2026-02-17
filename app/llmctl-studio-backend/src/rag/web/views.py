@@ -101,10 +101,21 @@ def _normalize_chat_response_style(value: str | None, default: str = "high") -> 
 def _system_prompt(response_style: str) -> str:
     normalized_style = _normalize_chat_response_style(response_style, "high")
     if normalized_style == "low":
-        return BASE_SYSTEM_PROMPT + " Keep responses concise and direct."
+        return (
+            BASE_SYSTEM_PROMPT
+            + " Keep responses natural, conversational, concise, and direct."
+        )
     if normalized_style == "medium":
-        return BASE_SYSTEM_PROMPT + " Start with a short summary, then key details."
-    return BASE_SYSTEM_PROMPT + " Provide a detailed and structured answer."
+        return (
+            BASE_SYSTEM_PROMPT
+            + " Keep a natural, conversational tone with balanced detail and clarity. "
+            + "Do not force a fixed output template."
+        )
+    return (
+        BASE_SYSTEM_PROMPT
+        + " Keep a natural, conversational tone while providing thorough, detailed "
+        + "answers. Use structure only when it improves clarity."
+    )
 
 
 def _sanitize_history(history: Any, limit: int) -> list[dict[str, str]]:

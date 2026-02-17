@@ -7,8 +7,8 @@ images:
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-studio-backend
     newTag: __HARBOR_TAG__
   - name: llmctl-studio-frontend
-    newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-studio-frontend
-    newTag: __HARBOR_TAG__
+    newName: node
+    newTag: 22-alpine
   - name: llmctl-mcp
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-mcp
     newTag: __HARBOR_TAG__

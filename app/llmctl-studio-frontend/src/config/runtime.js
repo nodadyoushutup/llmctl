@@ -1,5 +1,5 @@
 const DEFAULT_API_BASE_PATH = '/api'
-const DEFAULT_WEB_BASE_PATH = '/'
+const DEFAULT_WEB_BASE_PATH = import.meta.env.DEV ? '/' : '/web'
 const DEFAULT_SOCKET_NAMESPACE = '/rt'
 
 function normalizePathPrefix(value, fallback) {

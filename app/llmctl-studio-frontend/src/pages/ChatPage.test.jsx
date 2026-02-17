@@ -127,4 +127,21 @@ describe('ChatPage', () => {
     })
     expect(sendChatTurn).not.toHaveBeenCalled()
   })
+
+  test('renders message bubbles without role badge headers', async () => {
+    const runtime = buildRuntimePayload()
+    runtime.selected_thread.messages = [
+      {
+        id: 101,
+        role: 'assistant',
+        content: 'A compact assistant reply.',
+      },
+    ]
+    getChatRuntime.mockResolvedValueOnce(runtime)
+
+    const { container } = renderPage()
+    await screen.findByText('A compact assistant reply.')
+
+    expect(container.querySelector('.chat-message-header')).toBeNull()
+  })
 })

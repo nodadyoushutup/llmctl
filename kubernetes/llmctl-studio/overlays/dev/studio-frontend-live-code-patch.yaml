@@ -8,11 +8,51 @@ spec:
     spec:
       containers:
         - name: studio-frontend
+          image: node:22-alpine
+          workingDir: /app/app/llmctl-studio-frontend
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+              lock_hash="$(sha256sum package-lock.json | awk '{print $1}')"
+              hash_file="node_modules/.llmctl-lock-hash"
+              if [ ! -f "$hash_file" ] || [ "$lock_hash" != "$(cat "$hash_file")" ]; then
+                npm ci --no-audit --no-fund
+                printf '%s' "$lock_hash" > "$hash_file"
+              fi
+              exec npm run dev -- --host 0.0.0.0 --port 8080 --strictPort
+          env:
+            - name: CHOKIDAR_USEPOLLING
+              value: "true"
+            - name: CHOKIDAR_INTERVAL
+              value: "250"
+            - name: WATCHPACK_POLLING
+              value: "true"
+            - name: VITE_DEV_API_PROXY_TARGET
+              value: http://llmctl-studio-backend.llmctl.svc.cluster.local:5155
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
           volumeMounts:
-            - name: studio-frontend-dist
-              mountPath: /usr/share/nginx/html/web
+            - name: studio-frontend-project-code
+              mountPath: /app
+            - name: studio-frontend-node-modules
+              mountPath: /app/app/llmctl-studio-frontend/node_modules
       volumes:
-        - name: studio-frontend-dist
+        - name: studio-frontend-project-code
           hostPath:
-            path: /workspace/llmctl/app/llmctl-studio-frontend/dist
-            type: DirectoryOrCreate
+            path: /workspace/llmctl
+            type: Directory
+        - name: studio-frontend-node-modules
+          emptyDir: {}

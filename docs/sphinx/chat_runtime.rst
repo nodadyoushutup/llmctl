@@ -78,11 +78,12 @@ Each thread includes a response-complexity selector in session controls:
 
 - ``low``: concise/direct
 - ``medium``: balanced detail
-- ``high``: detailed/structured
+- ``high``: detailed with deeper reasoning
 - ``extra_high``: exhaustive/completeness-focused
 
-Prompt assembly always includes Markdown formatting guidance so responses can
-return structured output (including tables) when appropriate.
+Prompt assembly keeps responses conversational at every complexity level and
+uses formatting only when it improves clarity. Markdown output (including
+tables) is used when appropriate, especially for high-detail requests.
 
 Audit And Activity
 ------------------

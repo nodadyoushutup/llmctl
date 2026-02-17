@@ -145,7 +145,7 @@ scripts/minikube-live-code-mount.sh
 kubectl apply -k kubernetes/llmctl-studio/overlays/dev
 ```
 
-3) Restart impacted workloads after code changes:
+3) Restart impacted Python workloads after code changes:
 
 ```bash
 kubectl -n llmctl rollout restart deploy/llmctl-studio-backend
@@ -156,13 +156,23 @@ kubectl -n llmctl rollout restart deploy/llmctl-celery-worker
 kubectl -n llmctl rollout status deploy/llmctl-celery-worker
 kubectl -n llmctl rollout restart deploy/llmctl-celery-beat
 kubectl -n llmctl rollout status deploy/llmctl-celery-beat
+```
+
+4) Frontend live edits hot-reload automatically in the `dev` overlay:
+
+- `llmctl-studio-frontend` runs `npm run dev` (Vite) with polling file watching.
+- Source edits under `app/llmctl-studio-frontend/src` should apply without a pod restart.
+- Restart the frontend deployment only when dependencies or startup env/config change:
+
+```bash
 kubectl -n llmctl rollout restart deploy/llmctl-studio-frontend
 kubectl -n llmctl rollout status deploy/llmctl-studio-frontend
 ```
 
 Notes:
 
-- The `dev` overlay mounts `/workspace/llmctl` from the Minikube node into `/app` for Studio backend, `llmctl-mcp`, celery worker, and celery beat; frontend still mounts `/workspace/llmctl/app/llmctl-studio-frontend/dist` to `/usr/share/nginx/html/web`.
+- The `dev` overlay mounts `/workspace/llmctl` from the Minikube node into `/app` for Studio backend, frontend, `llmctl-mcp`, celery worker, and celery beat.
+- Frontend `node_modules` is mounted as an in-pod `emptyDir`, so dependencies are isolated from the host checkout.
 - Executor Jobs spawned by Studio also mount `/workspace/llmctl` into `/app` when `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED=true`.
 - Keep the `minikube mount` process running; if it stops, the pod cannot read mounted code paths.
 - This is intended for local Minikube development, not shared/remote clusters.

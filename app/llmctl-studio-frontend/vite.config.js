@@ -6,18 +6,20 @@ function normalizeProxyTarget(value) {
   return raw ? raw : ''
 }
 
-function normalizeBasePath(value) {
+function normalizeBasePath(value, fallback = '/') {
   const raw = String(value ?? '').trim()
-  if (!raw || raw === '/') {
+  const effective = raw || String(fallback ?? '').trim()
+  if (!effective || effective === '/') {
     return '/'
   }
-  return `/${raw.replace(/^\/+|\/+$/g, '')}/`
+  return `/${effective.replace(/^\/+|\/+$/g, '')}/`
 }
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const devApiProxyTarget = normalizeProxyTarget(env.VITE_DEV_API_PROXY_TARGET)
-  const basePath = normalizeBasePath(env.VITE_WEB_BASE_PATH)
+  const defaultWebBasePath = mode === 'development' ? '/' : '/web'
+  const basePath = normalizeBasePath(env.VITE_WEB_BASE_PATH, defaultWebBasePath)
 
   return {
     base: basePath,
