@@ -58,7 +58,8 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm>=0.8.5"; fi
 
 COPY . /app
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data \
+    && chown -R "${APP_UID}:${APP_GID}" /app/data
 
 USER llmctl-celery-worker
 
