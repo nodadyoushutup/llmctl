@@ -1,6 +1,13 @@
 Changelog
 =========
 
+2026-02-17
+----------
+
+- Migrated integrated MCP runtime architecture to Kubernetes-hosted services and removed Studio runtime dependence on bundled MCP executables.
+- Added integrated MCP endpoint contract and lifecycle documentation (startup migration sync + seed alignment) for DB-backed ``mcp_servers`` rows.
+- Added Kubernetes operator documentation for integrated MCP Deployments/Services, secret inputs, and one-release cutover gate controls.
+
 2026-02-16
 ----------
 

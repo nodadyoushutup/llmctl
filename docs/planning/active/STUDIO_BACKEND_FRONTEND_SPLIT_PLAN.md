@@ -105,11 +105,11 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [ ] Acceptance criteria: both pods/services deploy cleanly and are independently restartable/scalable.
 
 ## Stage 8 - Kubernetes Ingress and Overlay Updates (`/web`, `/api`)
-- [ ] Add ingress manifest routing same host:
-- [ ] `/web` -> `llmctl-studio-frontend` service.
-- [ ] `/api` -> `llmctl-studio-backend` service.
-- [ ] Update backend/frontend env vars for forwarded headers, external URL scheme, and API/realtime pathing behind ingress.
-- [ ] Update Minikube live-code overlay to mount renamed backend paths and frontend code paths.
+- [x] Add ingress manifest routing same host:
+- [x] `/web` -> `llmctl-studio-frontend` service.
+- [x] `/api` -> `llmctl-studio-backend` service.
+- [x] Update backend/frontend env vars for forwarded headers, external URL scheme, and API/realtime pathing behind ingress.
+- [x] Update Minikube live-code overlay to mount renamed backend paths and frontend code paths.
 - [ ] Acceptance criteria: one host serves frontend at `/web` and backend API at `/api` with stable routing in cluster.
 
 ## Stage 9 - Full-Parity Gate and Backend GUI Decommission

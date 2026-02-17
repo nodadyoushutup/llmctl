@@ -19,3 +19,4 @@ resources:
   - studio-service.yaml
   - studio-frontend-deployment.yaml
   - studio-frontend-service.yaml
+  - studio-ingress.yaml

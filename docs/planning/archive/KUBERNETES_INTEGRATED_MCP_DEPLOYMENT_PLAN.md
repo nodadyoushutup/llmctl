@@ -172,7 +172,13 @@ Stage 8 execution notes:
 - [x] `python3 -m py_compile app/llmctl-studio-backend/src/core/integrated_mcp.py app/llmctl-studio-backend/src/core/seed.py app/llmctl-studio-backend/src/services/tasks.py app/llmctl-studio-backend/src/web/app.py app/llmctl-studio-backend/tests/test_google_cloud_integrated_mcp_stage10.py app/llmctl-studio-backend/tests/test_seed_stage11.py app/llmctl-studio-backend/tests/test_agent_role_markdown_stage6.py`
 
 ## Stage 9 - Docs Updates
-- [ ] Update Kubernetes docs in `kubernetes/README.md` for new MCP Deployments/Services, required secrets, and cutover expectations.
-- [ ] Update architecture/runtime docs to describe Studio->MCP in-cluster service model and removal of bundled MCP runtimes.
-- [ ] Update Sphinx/Read the Docs content to reflect Kubernetes-hosted integrated MCP operations and seed/migration behavior.
-- [ ] Acceptance criteria: docs consistently describe the new Kubernetes-first integrated MCP architecture and operator workflow.
+- [x] Update Kubernetes docs in `kubernetes/README.md` for new MCP Deployments/Services, required secrets, and cutover expectations.
+- [x] Update architecture/runtime docs to describe Studio->MCP in-cluster service model and removal of bundled MCP runtimes.
+- [x] Update Sphinx/Read the Docs content to reflect Kubernetes-hosted integrated MCP operations and seed/migration behavior.
+- [x] Acceptance criteria: docs consistently describe the new Kubernetes-first integrated MCP architecture and operator workflow.
+
+Stage 9 execution notes:
+- [x] Updated `kubernetes/README.md` to document integrated MCP Deployments/Services, MCP secret + Harbor pull secret handling, startup cutover gate behavior, and corrected backend/frontend service names and Minikube live-code mount notes.
+- [x] Updated architecture/runtime documentation in `docs/sphinx/provider_runtime.rst` with the integrated MCP Kubernetes endpoint contract, migration/seed lifecycle ordering, legacy key normalization, and credential split.
+- [x] Updated serving runtime documentation in `docs/sphinx/studio_serving_runtime.rst` with init-container based integrated MCP startup gating controls and rollback bypass toggle.
+- [x] Updated `docs/sphinx/changelog.rst` with a dated entry summarizing the Kubernetes-hosted integrated MCP architecture and documentation rollout.

@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: llmctl-studio
+  namespace: llmctl
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-studio-backend
+                port:
+                  name: http
+          - path: /web
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-studio-frontend
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-studio-frontend
+                port:
+                  name: http

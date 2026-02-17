@@ -46,6 +46,27 @@ Standalone CLI check:
 
    python3 app/llmctl-studio-backend/scripts/check_database_health.py
 
+Integrated MCP Startup Gate (Kubernetes)
+----------------------------------------
+
+In Kubernetes deployments, Studio backend startup is guarded by init-container
+``wait-for-integrated-mcp`` in ``kubernetes/studio-deployment.yaml``.
+
+Purpose:
+
+- enforce MCP-first startup ordering during one-release cutover
+- prevent Studio migration/seed sync from racing unavailable MCP services
+
+Controls (``kubernetes/studio-configmap.yaml``):
+
+- ``LLMCTL_STUDIO_MCP_WAIT_ENABLED`` (default ``true``)
+- ``LLMCTL_STUDIO_MCP_WAIT_TIMEOUT_SECONDS`` (default ``240``)
+- ``LLMCTL_STUDIO_MCP_REQUIRED_ENDPOINTS`` (comma-separated URL list; default
+  includes ``http://llmctl-mcp.<namespace>.svc.cluster.local:9020/mcp``)
+
+If the gate times out, Studio pod startup fails fast. For rollback/debug
+scenarios, set ``LLMCTL_STUDIO_MCP_WAIT_ENABLED=false`` to bypass the wait.
+
 SQLite One-Time Migration Utility
 ---------------------------------
 
