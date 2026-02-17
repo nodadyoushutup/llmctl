@@ -131,11 +131,25 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] Added frontend server-side redirects for `/` and `/web` to `/web/overview` and set `index.html` `Cache-Control: no-store` to avoid stale bootstrap bundles in browsers.
 
 ## Stage 10 - Automated Testing
-- [ ] Add/update backend tests for API prefixing, auth/session expectations, and realtime route/path behavior.
-- [ ] Add/update frontend tests for routing, API integration, and critical user flows.
-- [ ] Add/update integration tests that exercise split deployment behavior.
-- [ ] Run automated test suite(s) and fix regressions before closure.
-- [ ] Acceptance criteria: automated tests pass for backend, frontend, and split integration paths.
+- [x] Add/update backend tests for API prefixing, auth/session expectations, and realtime route/path behavior.
+- [x] Add/update frontend tests for routing, API integration, and critical user flows.
+- [x] Add/update integration tests that exercise split deployment behavior.
+- [x] Run automated test suite(s) and fix regressions before closure.
+- [x] Acceptance criteria: automated tests pass for backend, frontend, and split integration paths.
+
+## Stage 10 - Validation Notes
+- [x] Added backend Stage 10 tests at `app/llmctl-studio-backend/tests/test_backend_split_stage10.py` covering API route compatibility, Socket.IO API-prefix aliasing, and API session cookie roundtrip behavior.
+- [x] Added split deployment integration tests at `app/llmctl-studio-backend/tests/test_split_deployment_stage10.py` covering ingress path-to-service mappings and frontend nginx split-proxy contract.
+- [x] Added frontend automated tests with Vitest at:
+- [x] `app/llmctl-studio-frontend/src/App.routing.test.jsx`
+- [x] `app/llmctl-studio-frontend/src/lib/httpClient.test.js`
+- [x] `app/llmctl-studio-frontend/src/lib/studioApi.test.js`
+- [x] Executed checks:
+- [x] `.venv/bin/python -m unittest app/llmctl-studio-backend/tests/test_backend_api_boundary_stage3.py app/llmctl-studio-backend/tests/test_socket_proxy_gunicorn_stage9.py app/llmctl-studio-backend/tests/test_backend_split_stage10.py app/llmctl-studio-backend/tests/test_split_deployment_stage10.py`
+- [x] `.venv/bin/python -m unittest app/llmctl-studio-backend/tests/test_backend_split_stage10.py app/llmctl-studio-backend/tests/test_split_deployment_stage10.py`
+- [x] `cd app/llmctl-studio-frontend && npm run lint`
+- [x] `cd app/llmctl-studio-frontend && npm test`
+- [x] `cd app/llmctl-studio-frontend && npm run build`
 
 ## Stage 11 - Docs Updates
 - [ ] Update docs for new app structure (`app/llmctl-studio-backend`, `app/llmctl-studio-frontend`).

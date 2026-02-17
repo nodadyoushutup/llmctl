@@ -22,6 +22,11 @@ export default defineConfig(({ mode }) => {
   return {
     base: basePath,
     plugins: [react()],
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: './src/test/setup.js',
+    },
     server: devApiProxyTarget
       ? {
           proxy: {

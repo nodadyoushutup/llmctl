@@ -200,8 +200,21 @@ Goal: decouple Celery worker and beat execution from `llmctl-studio` by introduc
 - [x] Fixed one Stage 7 test regression during implementation (PYTHONPATH assertion timing under `patch.dict` context), then re-ran the full Stage 7 check set successfully.
 
 ## Stage 8 - Docs Updates
-- [ ] Update architecture docs to describe Studio/Celery decoupling and responsibilities.
-- [ ] Document worker scaling model (`replicas x concurrency = worker slots`) and initial baseline.
-- [ ] Update Kubernetes deployment docs for `llmctl-celery-worker` and `llmctl-celery-beat`.
-- [ ] Update Sphinx/Read the Docs content for new operational workflow and runtime topology.
-- [ ] Acceptance criteria: docs consistently describe the new worker image, deployments, scaling, and cutover behavior.
+- [x] Update architecture docs to describe Studio/Celery decoupling and responsibilities.
+- [x] Document worker scaling model (`replicas x concurrency = worker slots`) and initial baseline.
+- [x] Update Kubernetes deployment docs for `llmctl-celery-worker` and `llmctl-celery-beat`.
+- [x] Update Sphinx/Read the Docs content for new operational workflow and runtime topology.
+- [x] Acceptance criteria: docs consistently describe the new worker image, deployments, scaling, and cutover behavior.
+
+## Stage 8 - Implementation Notes
+- [x] Updated Kubernetes operations docs in `kubernetes/README.md`:
+- [x] Added explicit stack/file coverage for `llmctl-celery-worker` and `llmctl-celery-beat`.
+- [x] Added dedicated Celery runtime topology guidance clarifying Studio producer-only role vs dedicated worker/beat responsibilities.
+- [x] Documented queue contract and scaling formula (`worker slots = replicas x concurrency`) with current runtime baseline.
+- [x] Added worker/beat sizing guidance under runtime knobs with single-beat recommendation.
+- [x] Updated Sphinx/RTD runtime architecture docs in `docs/sphinx/studio_serving_runtime.rst`:
+- [x] Corrected startup flow wording to web/API startup.
+- [x] Added `Celery Runtime Topology (Decoupled)` section covering responsibilities, queue contract, scaling model, and operations guidance.
+- [x] Updated release notes in `docs/sphinx/changelog.rst` for 2026-02-17 with Celery decoupling + Stage 7 automation coverage.
+- [x] Built Sphinx docs to validate updated RTD content path:
+- [x] `./.venv-docs/bin/sphinx-build -b html docs/sphinx docs/sphinx/_build/html` (success; existing autodoc warnings remain due DB-required imports, no new build failure).
