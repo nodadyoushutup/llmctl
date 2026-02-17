@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from unittest.mock import patch
 
 from flask import Flask
+import psycopg
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
+
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
 
 import core.db as core_db
 from core.config import Config
@@ -25,15 +34,22 @@ class StudioDbTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         tmp_dir = Path(self._tmp.name)
+        self._base_db_uri = os.environ["LLMCTL_STUDIO_DATABASE_URI"]
+        self._schema_name = f"rag_stage7_{uuid.uuid4().hex}"
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
         self._orig_data_dir = Config.DATA_DIR
-        Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_dir / 'stage7.sqlite3'}"
+        self._create_schema(self._schema_name)
+        Config.SQLALCHEMY_DATABASE_URI = self._with_search_path(
+            self._base_db_uri,
+            self._schema_name,
+        )
         Config.DATA_DIR = str(tmp_dir / "data")
         Path(Config.DATA_DIR).mkdir(parents=True, exist_ok=True)
         self._reset_engine()
 
     def tearDown(self) -> None:
         self._dispose_engine()
+        self._drop_schema(self._schema_name)
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
         Config.DATA_DIR = self._orig_data_dir
         self._tmp.cleanup()
@@ -48,6 +64,43 @@ class StudioDbTestCase(unittest.TestCase):
         self._dispose_engine()
         core_db.init_engine(Config.SQLALCHEMY_DATABASE_URI)
         core_db.init_db()
+
+    @staticmethod
+    def _as_psycopg_uri(database_uri: str) -> str:
+        if database_uri.startswith("postgresql+psycopg://"):
+            return "postgresql://" + database_uri.split("://", 1)[1]
+        return database_uri
+
+    @staticmethod
+    def _with_search_path(database_uri: str, schema_name: str) -> str:
+        parts = urlsplit(database_uri)
+        query_items = parse_qsl(parts.query, keep_blank_values=True)
+        updated_items: list[tuple[str, str]] = []
+        options_value = f"-csearch_path={schema_name}"
+        options_updated = False
+        for key, value in query_items:
+            if key == "options":
+                merged = value.strip()
+                if options_value not in merged:
+                    merged = f"{merged} {options_value}".strip()
+                updated_items.append((key, merged))
+                options_updated = True
+            else:
+                updated_items.append((key, value))
+        if not options_updated:
+            updated_items.append(("options", options_value))
+        query = urlencode(updated_items, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+    def _create_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+    def _drop_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
 
 
 class RagStage7ContractApiTests(StudioDbTestCase):

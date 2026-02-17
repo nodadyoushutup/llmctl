@@ -93,6 +93,8 @@ class ExecutionResult:
     artifacts: dict[str, Any] | None = None
     warnings: list[str] | None = None
     metrics: dict[str, Any] | None = None
+    output_state: dict[str, Any] | None = None
+    routing_state: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         if self.status not in STATUS_CHOICES:
@@ -116,4 +118,8 @@ class ExecutionResult:
             payload["warnings"] = self.warnings
         if self.metrics is not None:
             payload["metrics"] = self.metrics
+        if self.output_state is not None:
+            payload["output_state"] = self.output_state
+        if self.routing_state is not None:
+            payload["routing_state"] = self.routing_state
         return payload

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
@@ -49,7 +50,7 @@ function loadErrorMessage(error) {
 export default function AgentsPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, agents: [], error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busyById, setBusyById] = useState({})
 
   async function refresh() {

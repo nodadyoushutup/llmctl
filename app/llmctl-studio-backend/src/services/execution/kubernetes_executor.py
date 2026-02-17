@@ -33,6 +33,31 @@ _DEFAULT_JOB_TTL_SECONDS = 1800
 _EXECUTOR_LIVE_CODE_ENABLED_ENV = "LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED"
 _EXECUTOR_LIVE_CODE_HOST_PATH_ENV = "LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_HOST_PATH"
 _EXECUTOR_LIVE_CODE_HOST_PATH_DEFAULT = "/workspace/llmctl"
+_POD_ENV_ALLOWLIST = {
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "LLMCTL_POSTGRES_HOST",
+    "LLMCTL_POSTGRES_PORT",
+    "LLMCTL_POSTGRES_DB",
+    "LLMCTL_POSTGRES_USER",
+    "LLMCTL_POSTGRES_PASSWORD",
+    "LLMCTL_STUDIO_DATA_DIR",
+    "LLMCTL_STUDIO_WORKSPACES_DIR",
+}
+_POD_ENV_PREFIX_ALLOWLIST = (
+    "LLMCTL_",
+    "FLASK_",
+    "OPENAI_",
+    "ANTHROPIC_",
+    "GOOGLE_",
+    "GEMINI_",
+    "CLAUDE_",
+    "CODEX_",
+    "VLLM_",
+    "CHROMA_",
+    "HF_",
+    "HUGGINGFACE_",
+    "GITHUB_",
+)
 
 
 def _utcnow() -> datetime:
@@ -121,6 +146,7 @@ class _KubernetesDispatchOutcome:
     stderr: str
     startup_marker_seen: bool
     executor_result: dict[str, Any] | None
+    terminal_reason: str | None
 
 
 class _KubernetesDispatchFailure(Exception):
@@ -158,6 +184,7 @@ class KubernetesExecutor:
         request: ExecutionRequest,
         execute_callback,
     ) -> ExecutionResult:
+        del execute_callback
         started_at = _utcnow()
         settings = self._settings
         namespace = str(settings.get("k8s_namespace") or "default").strip() or "default"
@@ -258,6 +285,9 @@ class KubernetesExecutor:
                 fallback_reason=request.fallback_reason,
                 stdout=exc.stdout,
                 stderr=exc.stderr,
+                job_name=exc.job_name,
+                pod_name=exc.pod_name,
+                terminal_reason=exc.message,
             )
 
         provider_dispatch_id = f"kubernetes:{namespace}/{outcome.job_name}"
@@ -275,6 +305,9 @@ class KubernetesExecutor:
                 fallback_reason=request.fallback_reason,
                 stdout=outcome.stdout,
                 stderr=outcome.stderr,
+                job_name=outcome.job_name,
+                pod_name=outcome.pod_name,
+                terminal_reason=outcome.terminal_reason,
             )
 
         remote_status = str((outcome.executor_result or {}).get("status") or "").strip().lower()
@@ -292,6 +325,9 @@ class KubernetesExecutor:
                 fallback_reason=request.fallback_reason,
                 stdout=outcome.stdout,
                 stderr=outcome.stderr,
+                job_name=outcome.job_name,
+                pod_name=outcome.pod_name,
+                terminal_reason=outcome.terminal_reason,
             )
 
         if not register_dispatch_key(request.execution_id, provider_dispatch_id):
@@ -309,14 +345,37 @@ class KubernetesExecutor:
                 fallback_reason=request.fallback_reason,
                 stdout=outcome.stdout,
                 stderr=outcome.stderr,
+                job_name=outcome.job_name,
+                pod_name=outcome.pod_name,
+                terminal_reason=outcome.terminal_reason,
             )
 
-        output_state, routing_state = execute_callback(request)
+        output_state, routing_state, parse_error = self._extract_remote_node_states(
+            outcome.executor_result
+        )
+        if parse_error:
+            return self._execution_failed_after_confirmed_result(
+                request=request,
+                started_at=started_at,
+                message=parse_error,
+                provider_dispatch_id=provider_dispatch_id,
+                fallback_attempted=request.fallback_attempted,
+                fallback_reason=request.fallback_reason,
+                stdout=outcome.stdout,
+                stderr=outcome.stderr,
+                job_name=outcome.job_name,
+                pod_name=outcome.pod_name,
+                terminal_reason=outcome.terminal_reason,
+            )
+
         finished_at = _utcnow()
         run_metadata = {
             "selected_provider": self.provider,
             "final_provider": self.provider,
             "provider_dispatch_id": provider_dispatch_id,
+            "k8s_job_name": outcome.job_name,
+            "k8s_pod_name": outcome.pod_name or "",
+            "k8s_terminal_reason": outcome.terminal_reason or "",
             "workspace_identity": request.workspace_identity,
             "dispatch_status": EXECUTION_DISPATCH_CONFIRMED,
             "fallback_attempted": False,
@@ -338,6 +397,7 @@ class KubernetesExecutor:
             "k8s_live_code_host_path": live_code_host_path if live_code_enabled else "",
             "k8s_job_name": outcome.job_name,
             "k8s_pod_name": outcome.pod_name or "",
+            "k8s_terminal_reason": outcome.terminal_reason or "",
             "startup_marker_seen": outcome.startup_marker_seen,
         }
         if outcome.executor_result is not None:
@@ -392,11 +452,11 @@ class KubernetesExecutor:
                 kubectl_args,
                 job_ttl_seconds=job_ttl_seconds,
             )
+            job_name = self._job_name(request)
             payload_json = self._build_executor_payload_json(
                 request=request,
                 execution_timeout=execution_timeout,
             )
-            job_name = self._job_name(request)
             manifest = self._build_job_manifest(
                 request=request,
                 job_name=job_name,
@@ -527,6 +587,18 @@ class KubernetesExecutor:
             "llmctl.workspace_identity": request.workspace_identity,
         }
 
+    def _executor_runtime_env_entries(self) -> list[dict[str, str]]:
+        env_entries: list[dict[str, str]] = []
+        for key in sorted(os.environ):
+            if key == "LLMCTL_EXECUTOR_PAYLOAD_JSON":
+                continue
+            if key in _POD_ENV_ALLOWLIST or any(
+                key.startswith(prefix) for prefix in _POD_ENV_PREFIX_ALLOWLIST
+            ):
+                value = str(os.environ.get(key) or "")
+                env_entries.append({"name": key, "value": value})
+        return env_entries
+
     def _build_job_manifest(
         self,
         *,
@@ -558,7 +630,8 @@ class KubernetesExecutor:
                     "name": "LLMCTL_EXECUTOR_PAYLOAD_JSON",
                     "value": payload_json,
                 }
-            ],
+            ]
+            + self._executor_runtime_env_entries(),
             "resources": resources,
         }
         template_spec: dict[str, Any] = {
@@ -607,17 +680,54 @@ class KubernetesExecutor:
         request: ExecutionRequest,
         execution_timeout: int,
     ) -> str:
+        node_request_payload = {
+            "node_id": int(request.node_id),
+            "node_type": str(request.node_type or ""),
+            "node_ref_id": int(request.node_ref_id) if request.node_ref_id is not None else None,
+            "node_config": request.node_config if isinstance(request.node_config, dict) else {},
+            "input_context": (
+                request.input_context if isinstance(request.input_context, dict) else {}
+            ),
+            "execution_id": int(request.execution_id),
+            "execution_task_id": (
+                int(request.execution_task_id)
+                if request.execution_task_id is not None
+                else None
+            ),
+            "execution_index": int(request.execution_index),
+            "enabled_providers": sorted(
+                str(item).strip().lower()
+                for item in request.enabled_providers
+                if str(item).strip()
+            ),
+            "default_model_id": (
+                int(request.default_model_id) if request.default_model_id is not None else None
+            ),
+            "mcp_server_keys": [
+                str(item).strip()
+                for item in request.mcp_server_keys
+                if str(item).strip()
+            ],
+        }
         payload = {
             "contract_version": "v1",
             "result_contract_version": "v1",
             "provider": self.provider,
             "request_id": f"flowchart-node-{request.node_id}-run-{request.execution_id}",
-            "command": ["/bin/bash", "-lc", "echo llmctl-kubernetes-dispatch-ok"],
             "timeout_seconds": max(5, min(execution_timeout, 3600)),
             "emit_start_markers": True,
+            "node_execution": {
+                "entrypoint": "services.tasks:_execute_flowchart_node_request",
+                "python_paths": ["/app/app/llmctl-studio-backend/src"],
+                "request": node_request_payload,
+                "request_context": {
+                    "execution_contract_version": EXECUTION_CONTRACT_VERSION,
+                },
+            },
             "metadata": {
                 "flowchart_node_id": request.node_id,
                 "execution_id": request.execution_id,
+                "execution_mode": "flowchart_node_in_pod",
             },
         }
         return json.dumps(payload, separators=(",", ":"))
@@ -685,6 +795,11 @@ class KubernetesExecutor:
                     )
 
                 pod_name = self._resolve_job_pod_name(kubectl_args, job_name=job_name)
+                terminal_status, terminal_reason = self._job_terminal_status_with_reason(
+                    kubectl_args,
+                    job_name=job_name,
+                    pod_name=pod_name,
+                )
                 if pod_name:
                     logs = self._read_pod_logs(
                         kubectl_args,
@@ -697,8 +812,7 @@ class KubernetesExecutor:
                         latest_stdout,
                         latest_stderr,
                     )
-                    terminal = self._job_terminal_status(kubectl_args, job_name=job_name)
-                    if terminal == "complete":
+                    if terminal_status == "complete":
                         return _KubernetesDispatchOutcome(
                             job_name=job_name,
                             pod_name=pod_name,
@@ -706,11 +820,15 @@ class KubernetesExecutor:
                             stderr=latest_stderr,
                             startup_marker_seen=startup_seen,
                             executor_result=executor_result,
+                            terminal_reason=terminal_reason,
                         )
-                    if terminal == "failed":
+                    if terminal_status == "failed":
                         raise _KubernetesDispatchFailure(
                             fallback_reason="create_failed",
-                            message=f"Kubernetes job '{job_name}' failed before completion.",
+                            message=(
+                                f"Kubernetes job '{job_name}' failed before completion. "
+                                f"{terminal_reason or ''}"
+                            ).strip(),
                             job_name=job_name,
                             pod_name=pod_name,
                             dispatch_submitted=True,
@@ -736,6 +854,34 @@ class KubernetesExecutor:
                         dispatch_submitted=True,
                         stdout=latest_stdout,
                         stderr=latest_stderr,
+                    )
+
+                if terminal_status == "failed":
+                    raise _KubernetesDispatchFailure(
+                        fallback_reason="create_failed",
+                        message=(
+                            f"Kubernetes job '{job_name}' failed before completion. "
+                            f"{terminal_reason or ''}"
+                        ).strip(),
+                        job_name=job_name,
+                        pod_name=pod_name,
+                        dispatch_submitted=True,
+                        stdout=latest_stdout,
+                        stderr=latest_stderr,
+                    )
+                if terminal_status == "complete":
+                    startup_seen, executor_result = self._parse_executor_logs(
+                        latest_stdout,
+                        latest_stderr,
+                    )
+                    return _KubernetesDispatchOutcome(
+                        job_name=job_name,
+                        pod_name=pod_name,
+                        stdout=latest_stdout,
+                        stderr=latest_stderr,
+                        startup_marker_seen=startup_seen,
+                        executor_result=executor_result,
+                        terminal_reason=terminal_reason,
                     )
 
                 time.sleep(1.0)
@@ -829,17 +975,41 @@ class KubernetesExecutor:
         return str(completed.stdout or "")
 
     def _job_terminal_status(self, kubectl_args: list[str], *, job_name: str) -> str:
+        status, _ = self._job_terminal_status_with_reason(
+            kubectl_args,
+            job_name=job_name,
+            pod_name=None,
+        )
+        return status
+
+    def _job_terminal_status_with_reason(
+        self,
+        kubectl_args: list[str],
+        *,
+        job_name: str,
+        pod_name: str | None,
+    ) -> tuple[str, str | None]:
         payload = self._kubectl_json(kubectl_args, ["get", "job", job_name])
         status = payload.get("status")
         if not isinstance(status, dict):
-            return ""
+            return "", None
         if int(status.get("succeeded") or 0) > 0:
-            return "complete"
+            return "complete", self._normalize_terminal_reason(
+                kubectl_args=kubectl_args,
+                job_name=job_name,
+                pod_name=pod_name,
+                job_status=status,
+            )
         if int(status.get("failed") or 0) > 0:
-            return "failed"
+            return "failed", self._normalize_terminal_reason(
+                kubectl_args=kubectl_args,
+                job_name=job_name,
+                pod_name=pod_name,
+                job_status=status,
+            )
         conditions = status.get("conditions")
         if not isinstance(conditions, list):
-            return ""
+            return "", None
         for condition in conditions:
             if not isinstance(condition, dict):
                 continue
@@ -847,10 +1017,91 @@ class KubernetesExecutor:
                 continue
             condition_type = str(condition.get("type") or "").strip().lower()
             if condition_type == "complete":
-                return "complete"
+                return "complete", self._normalize_terminal_reason(
+                    kubectl_args=kubectl_args,
+                    job_name=job_name,
+                    pod_name=pod_name,
+                    job_status=status,
+                )
             if condition_type == "failed":
-                return "failed"
-        return ""
+                return "failed", self._normalize_terminal_reason(
+                    kubectl_args=kubectl_args,
+                    job_name=job_name,
+                    pod_name=pod_name,
+                    job_status=status,
+                )
+        return "", None
+
+    def _normalize_terminal_reason(
+        self,
+        *,
+        kubectl_args: list[str],
+        job_name: str,
+        pod_name: str | None,
+        job_status: dict[str, Any],
+    ) -> str | None:
+        conditions = job_status.get("conditions")
+        if isinstance(conditions, list):
+            for condition in conditions:
+                if not isinstance(condition, dict):
+                    continue
+                if str(condition.get("status") or "").lower() != "true":
+                    continue
+                condition_type = str(condition.get("type") or "").strip()
+                reason = str(condition.get("reason") or "").strip()
+                message = str(condition.get("message") or "").strip()
+                parts = [part for part in [condition_type, reason, message] if part]
+                if parts:
+                    return " | ".join(parts)
+        pod_reason = self._pod_terminal_reason(kubectl_args, pod_name)
+        if pod_reason:
+            return pod_reason
+        if int(job_status.get("succeeded") or 0) > 0:
+            return "Complete"
+        if int(job_status.get("failed") or 0) > 0:
+            return "Failed"
+        return None
+
+    def _pod_terminal_reason(
+        self,
+        kubectl_args: list[str],
+        pod_name: str | None,
+    ) -> str | None:
+        if not pod_name:
+            return None
+        try:
+            payload = self._kubectl_json(kubectl_args, ["get", "pod", pod_name])
+        except _KubernetesDispatchFailure:
+            return None
+        status = payload.get("status")
+        if not isinstance(status, dict):
+            return None
+        phase = str(status.get("phase") or "").strip()
+        reason = str(status.get("reason") or "").strip()
+        message = str(status.get("message") or "").strip()
+        for key in ["containerStatuses", "initContainerStatuses"]:
+            entries = status.get(key)
+            if not isinstance(entries, list):
+                continue
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                state = item.get("state")
+                if not isinstance(state, dict):
+                    continue
+                for state_name in ["terminated", "waiting"]:
+                    state_payload = state.get(state_name)
+                    if not isinstance(state_payload, dict):
+                        continue
+                    state_reason = str(state_payload.get("reason") or "").strip()
+                    state_message = str(state_payload.get("message") or "").strip()
+                    if state_reason or state_message:
+                        parts = [part for part in [phase, state_reason, state_message] if part]
+                        return " | ".join(parts)
+        parts = [part for part in [phase, reason, message] if part]
+        if parts:
+            return " | ".join(parts)
+        return None
 
     def _cancel_job(
         self,
@@ -977,6 +1228,33 @@ class KubernetesExecutor:
                     executor_result = None
         return startup_seen, executor_result
 
+    def _extract_remote_node_states(
+        self,
+        executor_result: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+        if not isinstance(executor_result, dict):
+            return {}, {}, "Kubernetes executor did not return a structured result payload."
+        output_state = executor_result.get("output_state")
+        routing_state = executor_result.get("routing_state")
+        if not isinstance(output_state, dict) or not isinstance(routing_state, dict):
+            artifacts = executor_result.get("artifacts")
+            if isinstance(artifacts, dict):
+                node_execution = artifacts.get("node_execution")
+                if isinstance(node_execution, dict):
+                    if not isinstance(output_state, dict):
+                        nested_output = node_execution.get("output_state")
+                        if isinstance(nested_output, dict):
+                            output_state = nested_output
+                    if not isinstance(routing_state, dict):
+                        nested_routing = node_execution.get("routing_state")
+                        if isinstance(nested_routing, dict):
+                            routing_state = nested_routing
+        if not isinstance(output_state, dict):
+            return {}, {}, "Kubernetes executor result is missing output_state."
+        if not isinstance(routing_state, dict):
+            return {}, {}, "Kubernetes executor result is missing routing_state."
+        return output_state, routing_state, None
+
     def _dispatch_failed_result(
         self,
         *,
@@ -990,6 +1268,9 @@ class KubernetesExecutor:
         fallback_reason: str | None,
         stdout: str,
         stderr: str,
+        job_name: str | None = None,
+        pod_name: str | None = None,
+        terminal_reason: str | None = None,
     ) -> ExecutionResult:
         finished_at = _utcnow()
         dispatch_status = EXECUTION_DISPATCH_FAILED
@@ -1016,6 +1297,9 @@ class KubernetesExecutor:
                 "selected_provider": self.provider,
                 "final_provider": self.provider,
                 "provider_dispatch_id": provider_dispatch_id,
+                "k8s_job_name": job_name or "",
+                "k8s_pod_name": pod_name or "",
+                "k8s_terminal_reason": terminal_reason or "",
             },
             output_state={},
             routing_state={},
@@ -1023,6 +1307,9 @@ class KubernetesExecutor:
                 "selected_provider": self.provider,
                 "final_provider": self.provider,
                 "provider_dispatch_id": provider_dispatch_id,
+                "k8s_job_name": job_name or "",
+                "k8s_pod_name": pod_name or "",
+                "k8s_terminal_reason": terminal_reason or "",
                 "workspace_identity": request.workspace_identity,
                 "dispatch_status": dispatch_status,
                 "fallback_attempted": fallback_attempted,
@@ -1045,6 +1332,9 @@ class KubernetesExecutor:
         fallback_reason: str | None,
         stdout: str,
         stderr: str,
+        job_name: str | None = None,
+        pod_name: str | None = None,
+        terminal_reason: str | None = None,
     ) -> ExecutionResult:
         finished_at = _utcnow()
         return ExecutionResult(
@@ -1065,6 +1355,9 @@ class KubernetesExecutor:
                 "selected_provider": self.provider,
                 "final_provider": self.provider,
                 "provider_dispatch_id": provider_dispatch_id,
+                "k8s_job_name": job_name or "",
+                "k8s_pod_name": pod_name or "",
+                "k8s_terminal_reason": terminal_reason or "",
             },
             output_state={},
             routing_state={},
@@ -1072,6 +1365,9 @@ class KubernetesExecutor:
                 "selected_provider": self.provider,
                 "final_provider": self.provider,
                 "provider_dispatch_id": provider_dispatch_id,
+                "k8s_job_name": job_name or "",
+                "k8s_pod_name": pod_name or "",
+                "k8s_terminal_reason": terminal_reason or "",
                 "workspace_identity": request.workspace_identity,
                 "dispatch_status": EXECUTION_DISPATCH_CONFIRMED,
                 "fallback_attempted": fallback_attempted,

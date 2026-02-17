@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getFlowchartEdit, updateFlowchart } from '../lib/studioApi'
@@ -35,7 +36,7 @@ export default function FlowchartEditPage() {
   const { flowchartId } = useParams()
   const parsedFlowchartId = useMemo(() => parseId(flowchartId), [flowchartId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({
     name: '',

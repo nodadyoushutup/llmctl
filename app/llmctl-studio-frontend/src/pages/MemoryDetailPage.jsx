@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { deleteMemory, getMemory } from '../lib/studioApi'
@@ -26,7 +27,7 @@ export default function MemoryDetailPage() {
   const { memoryId } = useParams()
   const parsedMemoryId = useMemo(() => parseId(memoryId), [memoryId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {

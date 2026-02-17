@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
@@ -39,7 +40,7 @@ export default function AgentEditPage() {
   const parsedAgentId = useMemo(() => parseId(agentId), [agentId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [formError, setFormError] = useState('')
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [savingAgent, setSavingAgent] = useState(false)
   const [busyPriorityId, setBusyPriorityId] = useState(null)
   const [busySkillId, setBusySkillId] = useState(null)

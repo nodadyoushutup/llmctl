@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getMcpEdit, updateMcp } from '../lib/studioApi'
@@ -37,7 +38,7 @@ export default function McpEditPage() {
   const { mcpId } = useParams()
   const parsedMcpId = useMemo(() => parseId(mcpId), [mcpId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ name: '', serverKey: '', description: '', configText: '{}' })
 

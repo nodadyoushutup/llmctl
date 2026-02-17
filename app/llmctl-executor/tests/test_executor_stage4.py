@@ -81,6 +81,87 @@ class ExecutorStage4Tests(unittest.TestCase):
         error = result.get("error") or {}
         self.assertEqual("infra_error", error.get("code"))
 
+    def test_node_execution_payload_returns_output_and_routing_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            module_path = Path(tmp_dir) / "node_entrypoint_test.py"
+            module_path.write_text(
+                "\n".join(
+                    [
+                        "from __future__ import annotations",
+                        "",
+                        "def run_node(request):",
+                        "    return (",
+                        '        {"node_type": str(getattr(request, "node_type", "")), "executed": True},',
+                        '        {"route_key": "next"},',
+                        "    )",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            code, result = self._run_executor(
+                {
+                    "contract_version": "v1",
+                    "provider": "kubernetes",
+                    "request_id": "unit-node-exec",
+                    "node_execution": {
+                        "entrypoint": "node_entrypoint_test:run_node",
+                        "python_paths": [tmp_dir],
+                        "request": {
+                            "node_type": "start",
+                            "enabled_providers": ["kubernetes"],
+                            "mcp_server_keys": [],
+                        },
+                    },
+                }
+            )
+        self.assertEqual(0, code)
+        self.assertEqual("success", result.get("status"))
+        self.assertEqual(
+            {"node_type": "start", "executed": True},
+            result.get("output_state"),
+        )
+        self.assertEqual({"route_key": "next"}, result.get("routing_state"))
+        provider_metadata = result.get("provider_metadata") or {}
+        self.assertEqual("node_execution", provider_metadata.get("execution_mode"))
+
+    def test_node_execution_payload_requires_structured_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            module_path = Path(tmp_dir) / "node_entrypoint_invalid.py"
+            module_path.write_text(
+                "\n".join(
+                    [
+                        "from __future__ import annotations",
+                        "",
+                        "def run_node(_request):",
+                        '    return "invalid"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            code, result = self._run_executor(
+                {
+                    "contract_version": "v1",
+                    "provider": "kubernetes",
+                    "request_id": "unit-node-invalid",
+                    "node_execution": {
+                        "entrypoint": "node_entrypoint_invalid:run_node",
+                        "python_paths": [tmp_dir],
+                        "request": {
+                            "node_type": "start",
+                            "enabled_providers": [],
+                            "mcp_server_keys": [],
+                        },
+                    },
+                }
+            )
+        self.assertEqual(1, code)
+        self.assertEqual("failed", result.get("status"))
+        error = result.get("error") or {}
+        self.assertEqual("execution_error", error.get("code"))
+        self.assertIn("Node execution failed", str(error.get("message") or ""))
+
 
 if __name__ == "__main__":
     unittest.main()

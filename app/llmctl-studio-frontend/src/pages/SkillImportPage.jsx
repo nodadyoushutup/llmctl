@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getSkillImportMeta, importSkillBundle, previewSkillImport } from '../lib/studioApi'
@@ -20,7 +21,7 @@ export default function SkillImportPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [preview, setPreview] = useState(null)
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({
     sourceKind: 'upload',

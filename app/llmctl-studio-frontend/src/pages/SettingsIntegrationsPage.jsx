@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
@@ -118,8 +119,8 @@ export default function SettingsIntegrationsPage() {
   const activeSection = useMemo(() => normalizeSection(section), [section])
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
-  const [actionInfo, setActionInfo] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
+  const [actionInfo, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
 
   const [gitForm, setGitForm] = useState({ gitconfigContent: '' })

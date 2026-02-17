@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getModelEdit, updateModel } from '../lib/studioApi'
@@ -37,7 +38,7 @@ export default function ModelEditPage() {
   const { modelId } = useParams()
   const parsedModelId = useMemo(() => parseId(modelId), [modelId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '', configText: '{}' })
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -66,7 +67,7 @@ export default function FlowchartRunDetailPage() {
   const parsedRunId = useMemo(() => parseId(runId), [runId])
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async ({ silent = false } = {}) => {

@@ -46,6 +46,34 @@ Execution plane:
 - ``app/llmctl-executor`` image runs one request payload and emits structured
   startup/result markers consumed by Studio.
 
+Runtime split:
+
+- node-like workloads (flowchart nodes, quick-RAG/index node-like paths) run
+  in ephemeral Kubernetes executor pods.
+- Chat remains service-runtime execution and does not dispatch pod-per-turn.
+
+Execution Contract
+------------------
+
+Executor payload to pod (``v1``):
+
+- ``contract_version`` and ``result_contract_version``.
+- ``provider='kubernetes'``.
+- ``request_id``, ``timeout_seconds``, ``emit_start_markers``.
+- ``node_execution`` with:
+  - ``entrypoint='services.tasks:_execute_flowchart_node_request'``
+  - ``python_paths`` (includes Studio backend source path)
+  - full serialized node request payload.
+
+Executor result from pod (``v1``):
+
+- envelope fields: ``status``, ``exit_code``, timestamps, ``stdout``, ``stderr``,
+  ``error``, ``provider_metadata``.
+- node output contract fields: ``output_state`` and ``routing_state``.
+
+Kubernetes dispatcher consumes ``output_state``/``routing_state`` from executor
+result and does not execute worker-side node compute on the success path.
+
 Dispatch Confirmation and State Machine
 ---------------------------------------
 
@@ -74,6 +102,9 @@ Node run metadata persisted for audit/filtering includes:
 
 - ``selected_provider`` and ``final_provider`` (both ``kubernetes``).
 - ``provider_dispatch_id``.
+- ``k8s_job_name``.
+- ``k8s_pod_name``.
+- ``k8s_terminal_reason``.
 - ``workspace_identity``.
 - ``dispatch_status`` and ``dispatch_uncertain``.
 - fallback/CLI compatibility fields remain in payload shape for v1 parity but are

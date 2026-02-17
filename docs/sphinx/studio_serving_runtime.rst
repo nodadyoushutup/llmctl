@@ -191,6 +191,12 @@ Runtime responsibilities:
 - ``llmctl-celery-worker``: consumes all Studio task queues.
 - ``llmctl-celery-beat``: single scheduler deployment for periodic tasks.
 
+Execution split:
+
+- node-like workloads are dispatched to Kubernetes executor Jobs/Pods
+  (see :doc:`node_executor_runtime`).
+- chat turns are not pod-dispatched and continue on service runtime.
+
 Active queue contract:
 
 - ``llmctl_studio``

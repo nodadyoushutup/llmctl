@@ -502,12 +502,12 @@ export default function ChatPage() {
         {selectedThread ? (
           <details className="chat-session-drawer" open>
             <summary>
-              <span>session controls</span>
+              <span className="chat-session-title">session controls</span>
               <span className="chat-session-summary">
-                <span>{sessionModelLabel}</span>
-                <span>{sessionComplexityLabel}</span>
-                <span>rag {sessionConfig.ragCollections.length}</span>
-                <span>mcp {sessionConfig.mcpServerIds.length}</span>
+                <span className="chat-session-pill">{sessionModelLabel}</span>
+                <span className="chat-session-pill">{sessionComplexityLabel}</span>
+                <span className="chat-session-pill">rag {sessionConfig.ragCollections.length}</span>
+                <span className="chat-session-pill">mcp {sessionConfig.mcpServerIds.length}</span>
               </span>
             </summary>
             <div className="chat-session-content">
@@ -519,130 +519,145 @@ export default function ChatPage() {
                   await saveSessionControls()
                 }}
               >
-                <label className="chat-control">
-                  model
-                  <select
-                    name="model_id"
-                    value={sessionConfig.modelId}
-                    onChange={(event) => {
-                      setSessionConfig((current) => ({ ...current, modelId: event.target.value }))
-                      setSessionDirty(true)
-                    }}
-                  >
-                    <option value="">Default model</option>
-                    {models.map((model) => (
-                      <option key={`chat-model-${model.id}`} value={model.id}>
-                        {model.name} ({model.provider})
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="chat-session-form-grid">
+                  <label className="chat-control">
+                    model
+                    <select
+                      name="model_id"
+                      value={sessionConfig.modelId}
+                      onChange={(event) => {
+                        setSessionConfig((current) => ({ ...current, modelId: event.target.value }))
+                        setSessionDirty(true)
+                      }}
+                    >
+                      <option value="">Default model</option>
+                      {models.map((model) => (
+                        <option key={`chat-model-${model.id}`} value={model.id}>
+                          {model.name} ({model.provider})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-                <label className="chat-control">
-                  complexity
-                  <select
-                    name="response_complexity"
-                    value={sessionConfig.responseComplexity}
-                    onChange={(event) => {
-                      setSessionConfig((current) => ({
-                        ...current,
-                        responseComplexity: event.target.value,
-                      }))
-                      setSessionDirty(true)
-                    }}
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="extra_high">Extra High</option>
-                  </select>
-                </label>
+                  <label className="chat-control">
+                    complexity
+                    <select
+                      name="response_complexity"
+                      value={sessionConfig.responseComplexity}
+                      onChange={(event) => {
+                        setSessionConfig((current) => ({
+                          ...current,
+                          responseComplexity: event.target.value,
+                        }))
+                        setSessionDirty(true)
+                      }}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="extra_high">Extra High</option>
+                    </select>
+                  </label>
+                </div>
 
-                <div className="chat-control">
-                  rag
-                  <details className="chat-picker">
-                    <summary>
-                      <span className="chat-picker-summary">
-                        <i className="fa-solid fa-database" />
-                        <span>{sessionConfig.ragCollections.length} selected</span>
-                      </span>
-                    </summary>
-                    {payload?.rag_health?.state === 'configured_healthy' && ragCollections.length > 0 ? (
+                <div className="chat-session-groups">
+                  <section className="chat-control-group">
+                    <div className="chat-control-group-header">
+                      <h3>rag collections</h3>
+                      <span>{sessionConfig.ragCollections.length} selected</span>
+                    </div>
+                    <details className="chat-picker">
+                      <summary>
+                        <span className="chat-picker-summary">
+                          <i className="fa-solid fa-database" />
+                          <span>choose collections</span>
+                        </span>
+                      </summary>
+                      {payload?.rag_health?.state === 'configured_healthy' && ragCollections.length > 0 ? (
+                        <div className="chat-checklist">
+                          {ragCollections.map((collection) => {
+                            const collectionId = String(collection?.id || '').trim()
+                            if (!collectionId) {
+                              return null
+                            }
+                            const checked = sessionConfig.ragCollections.includes(collectionId)
+                            return (
+                              <label key={`chat-rag-${collectionId || collection?.name}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setSessionConfig((current) => ({
+                                      ...current,
+                                      ragCollections: toggleStringValue(current.ragCollections, collectionId),
+                                    }))
+                                    setSessionDirty(true)
+                                  }}
+                                />
+                                <span>{collection.name}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="muted chat-picker-empty">
+                          RAG state: {String(payload?.rag_health?.state || 'unconfigured')}
+                          {payload?.rag_health?.error ? ` (${payload.rag_health.error})` : ''}
+                        </p>
+                      )}
+                    </details>
+                  </section>
+
+                  <section className="chat-control-group">
+                    <div className="chat-control-group-header">
+                      <h3>mcp servers</h3>
+                      <span>{sessionConfig.mcpServerIds.length} selected</span>
+                    </div>
+                    <details className="chat-picker">
+                      <summary>
+                        <span className="chat-picker-summary">
+                          <i className="fa-solid fa-plug" />
+                          <span>choose servers</span>
+                        </span>
+                      </summary>
                       <div className="chat-checklist">
-                        {ragCollections.map((collection) => {
-                          const collectionId = String(collection?.id || '').trim()
-                          if (!collectionId) {
+                        {mcpServers.map((mcp) => {
+                          const mcpId = Number(mcp?.id)
+                          if (!Number.isInteger(mcpId) || mcpId <= 0) {
                             return null
                           }
-                          const checked = sessionConfig.ragCollections.includes(collectionId)
+                          const checked = sessionConfig.mcpServerIds.includes(mcpId)
                           return (
-                            <label key={`chat-rag-${collectionId || collection?.name}`}>
+                            <label key={`chat-mcp-${mcp.id}`}>
                               <input
                                 type="checkbox"
                                 checked={checked}
                                 onChange={() => {
                                   setSessionConfig((current) => ({
                                     ...current,
-                                    ragCollections: toggleStringValue(current.ragCollections, collectionId),
+                                    mcpServerIds: toggleNumericValue(current.mcpServerIds, mcpId),
                                   }))
                                   setSessionDirty(true)
                                 }}
                               />
-                              <span>{collection.name}</span>
+                              <span>{mcp.name}</span>
                             </label>
                           )
                         })}
                       </div>
-                    ) : (
-                      <p className="muted chat-picker-empty">
-                        RAG state: {String(payload?.rag_health?.state || 'unconfigured')}
-                        {payload?.rag_health?.error ? ` (${payload.rag_health.error})` : ''}
-                      </p>
-                    )}
-                  </details>
+                    </details>
+                  </section>
                 </div>
 
-                <div className="chat-control">
-                  mcp
-                  <details className="chat-picker">
-                    <summary>
-                      <span className="chat-picker-summary">
-                        <i className="fa-solid fa-plug" />
-                        <span>{sessionConfig.mcpServerIds.length} selected</span>
-                      </span>
-                    </summary>
-                    <div className="chat-checklist">
-                      {mcpServers.map((mcp) => {
-                        const mcpId = Number(mcp?.id)
-                        if (!Number.isInteger(mcpId) || mcpId <= 0) {
-                          return null
-                        }
-                        const checked = sessionConfig.mcpServerIds.includes(mcpId)
-                        return (
-                          <label key={`chat-mcp-${mcp.id}`}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setSessionConfig((current) => ({
-                                  ...current,
-                                  mcpServerIds: toggleNumericValue(current.mcpServerIds, mcpId),
-                                }))
-                                setSessionDirty(true)
-                              }}
-                            />
-                            <span>{mcp.name}</span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  </details>
+                <div className="chat-session-actions">
+                  <p className="chat-session-dirty" aria-live="polite">
+                    {sessionDirty ? 'Unsaved changes' : 'Session is saved'}
+                  </p>
+                  <button type="submit" className="btn-link btn-secondary chat-session-save" disabled={!sessionDirty || savingSession}>
+                    <i className="fa-solid fa-floppy-disk" />
+                    save
+                  </button>
                 </div>
-
-                <button type="submit" className="btn-link btn-secondary chat-session-save" disabled={!sessionDirty || savingSession}>
-                  <i className="fa-solid fa-floppy-disk" />
-                  save
-                </button>
               </form>
             </div>
           </details>

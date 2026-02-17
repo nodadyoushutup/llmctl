@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
@@ -26,8 +27,8 @@ function errorMessage(error, fallback) {
 export default function RagSourcesPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
-  const [actionInfo, setActionInfo] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
+  const [actionInfo, setActionInfo] = useFlashState('success')
   const [busyById, setBusyById] = useState({})
 
   const refresh = useCallback(async ({ silent = false } = {}) => {

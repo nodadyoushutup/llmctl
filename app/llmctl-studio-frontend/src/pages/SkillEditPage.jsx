@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getSkillEdit, updateSkill } from '../lib/studioApi'
@@ -38,7 +39,7 @@ export default function SkillEditPage() {
   const parsedSkillId = useMemo(() => parseId(skillId), [skillId])
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({
     displayName: '',

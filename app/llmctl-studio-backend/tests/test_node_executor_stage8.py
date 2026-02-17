@@ -153,6 +153,16 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
                 api_failure_category=None,
                 cli_fallback_used=False,
                 cli_preflight_passed=None,
+                output=json.dumps(
+                    {
+                        "runtime_evidence": {
+                            "provider_dispatch_id": "kubernetes:default/job-42",
+                            "k8s_job_name": "job-42",
+                            "k8s_pod_name": "pod-42",
+                            "k8s_terminal_reason": "complete",
+                        }
+                    }
+                ),
             )
             run_id = int(run.id)
 
@@ -173,6 +183,9 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
             "kubernetes:default/job-42",
             run_task.get("provider_dispatch_id"),
         )
+        self.assertEqual("job-42", run_task.get("k8s_job_name"))
+        self.assertEqual("pod-42", run_task.get("k8s_pod_name"))
+        self.assertEqual("complete", run_task.get("k8s_terminal_reason"))
 
     def test_flowchart_history_run_api_includes_node_executor_metadata(self) -> None:
         with session_scope() as session:
@@ -212,6 +225,16 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
                 api_failure_category=None,
                 cli_fallback_used=False,
                 cli_preflight_passed=None,
+                output=json.dumps(
+                    {
+                        "runtime_evidence": {
+                            "provider_dispatch_id": "kubernetes:default/job-1",
+                            "k8s_job_name": "job-1",
+                            "k8s_pod_name": "pod-1",
+                            "k8s_terminal_reason": "complete",
+                        }
+                    }
+                ),
             )
             FlowchartRunNode.create(
                 session,
@@ -222,6 +245,16 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
                 status="succeeded",
                 input_context_json=json.dumps({}),
                 output_state_json=json.dumps({"message": "ok"}),
+                routing_state_json=json.dumps(
+                    {
+                        "runtime_evidence": {
+                            "provider_dispatch_id": "kubernetes:default/job-1",
+                            "k8s_job_name": "job-1",
+                            "k8s_pod_name": "pod-1",
+                            "k8s_terminal_reason": "complete",
+                        }
+                    }
+                ),
             )
             flowchart_id = int(flowchart.id)
             run_id = int(flowchart_run.id)
@@ -241,6 +274,88 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
             "kubernetes:default/job-1",
             node_run.get("provider_dispatch_id"),
         )
+        self.assertEqual("job-1", node_run.get("k8s_job_name"))
+        self.assertEqual("pod-1", node_run.get("k8s_pod_name"))
+        self.assertEqual("complete", node_run.get("k8s_terminal_reason"))
+
+    def test_node_detail_api_includes_runtime_evidence_metadata(self) -> None:
+        with session_scope() as session:
+            task = AgentTask.create(
+                session,
+                status="succeeded",
+                kind="rag_quick_index",
+                selected_provider="kubernetes",
+                final_provider="kubernetes",
+                provider_dispatch_id="kubernetes:default/job-node-1",
+                workspace_identity="workspace-main",
+                dispatch_status="dispatch_confirmed",
+                fallback_attempted=False,
+                fallback_reason=None,
+                dispatch_uncertain=False,
+                api_failure_category=None,
+                cli_fallback_used=False,
+                cli_preflight_passed=None,
+                output=json.dumps(
+                    {
+                        "runtime_evidence": {
+                            "provider_dispatch_id": "kubernetes:default/job-node-1",
+                            "k8s_job_name": "job-node-1",
+                            "k8s_pod_name": "pod-node-1",
+                            "k8s_terminal_reason": "complete",
+                        }
+                    }
+                ),
+            )
+            task_id = int(task.id)
+
+        response = self.client.get(f"/nodes/{task_id}?format=json")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        task_payload = payload.get("task") or {}
+        self.assertEqual("kubernetes", task_payload.get("selected_provider"))
+        self.assertEqual("dispatch_confirmed", task_payload.get("dispatch_status"))
+        self.assertEqual("job-node-1", task_payload.get("k8s_job_name"))
+        self.assertEqual("pod-node-1", task_payload.get("k8s_pod_name"))
+        self.assertEqual("complete", task_payload.get("k8s_terminal_reason"))
+
+    def test_node_status_api_includes_runtime_evidence_metadata(self) -> None:
+        with session_scope() as session:
+            task = AgentTask.create(
+                session,
+                status="failed",
+                kind="rag_quick_index",
+                selected_provider="kubernetes",
+                final_provider="kubernetes",
+                provider_dispatch_id="kubernetes:default/job-node-2",
+                workspace_identity="workspace-main",
+                dispatch_status="dispatch_confirmed",
+                fallback_attempted=True,
+                fallback_reason="create_failed",
+                dispatch_uncertain=False,
+                api_failure_category=None,
+                cli_fallback_used=False,
+                cli_preflight_passed=None,
+                output=json.dumps(
+                    {
+                        "runtime_evidence": {
+                            "provider_dispatch_id": "kubernetes:default/job-node-2",
+                            "k8s_job_name": "job-node-2",
+                            "k8s_pod_name": "pod-node-2",
+                            "k8s_terminal_reason": "create_failed",
+                        }
+                    }
+                ),
+            )
+            task_id = int(task.id)
+
+        response = self.client.get(f"/nodes/{task_id}/status")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        self.assertEqual("kubernetes", payload.get("selected_provider"))
+        self.assertEqual("dispatch_confirmed", payload.get("dispatch_status"))
+        self.assertEqual("job-node-2", payload.get("k8s_job_name"))
+        self.assertEqual("pod-node-2", payload.get("k8s_pod_name"))
+        self.assertEqual("create_failed", payload.get("k8s_terminal_reason"))
 
 
 if __name__ == "__main__":

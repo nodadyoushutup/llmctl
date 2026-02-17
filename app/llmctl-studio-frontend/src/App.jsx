@@ -77,99 +77,102 @@ import RagSourceDetailPage from './pages/RagSourceDetailPage'
 import RagSourceEditPage from './pages/RagSourceEditPage'
 import ParityChecklistPage from './pages/ParityChecklistPage'
 import NotFoundPage from './pages/NotFoundPage'
+import FlashProvider from './components/FlashProvider'
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/overview" replace />} />
-      <Route path="/migration" element={<AppLayout><OverviewPage /></AppLayout>} />
-      <Route path="/parity-checklist" element={<AppLayout><ParityChecklistPage /></AppLayout>} />
-      <Route path="/chat" element={<AppLayout><ChatPage /></AppLayout>} />
-      <Route path="/chat/activity" element={<AppLayout><ChatActivityPage /></AppLayout>} />
-      <Route path="/chat/threads/:threadId" element={<AppLayout><ChatThreadRedirectPage /></AppLayout>} />
-      <Route path="/monitor" element={<Navigate to="/execution-monitor" replace />} />
-      <Route path="/execution-monitor" element={<AppLayout><ExecutionMonitorPage /></AppLayout>} />
-      <Route path="/api-diagnostics" element={<AppLayout><ApiDiagnosticsPage /></AppLayout>} />
-      <Route path="/agents" element={<AppLayout><AgentsPage /></AppLayout>} />
-      <Route path="/agents/new" element={<AppLayout><AgentNewPage /></AppLayout>} />
-      <Route path="/agents/:agentId" element={<AppLayout><AgentDetailPage /></AppLayout>} />
-      <Route path="/agents/:agentId/edit" element={<AppLayout><AgentEditPage /></AppLayout>} />
-      <Route path="/runs" element={<AppLayout><RunsPage /></AppLayout>} />
-      <Route path="/runs/new" element={<AppLayout><RunNewPage /></AppLayout>} />
-      <Route path="/runs/:runId" element={<AppLayout><RunDetailPage /></AppLayout>} />
-      <Route path="/runs/:runId/edit" element={<AppLayout><RunEditPage /></AppLayout>} />
-      <Route path="/quick" element={<AppLayout><QuickTaskPage /></AppLayout>} />
-      <Route path="/nodes" element={<AppLayout><NodesPage /></AppLayout>} />
-      <Route path="/nodes/new" element={<AppLayout><NodeNewPage /></AppLayout>} />
-      <Route path="/nodes/:nodeId" element={<AppLayout><NodeDetailPage /></AppLayout>} />
-      <Route path="/plans" element={<AppLayout><PlansPage /></AppLayout>} />
-      <Route path="/plans/new" element={<AppLayout><PlanNewPage /></AppLayout>} />
-      <Route path="/plans/:planId" element={<AppLayout><PlanDetailPage /></AppLayout>} />
-      <Route path="/plans/:planId/edit" element={<AppLayout><PlanEditPage /></AppLayout>} />
-      <Route path="/milestones" element={<AppLayout><MilestonesPage /></AppLayout>} />
-      <Route path="/milestones/new" element={<AppLayout><MilestoneNewPage /></AppLayout>} />
-      <Route path="/milestones/:milestoneId" element={<AppLayout><MilestoneDetailPage /></AppLayout>} />
-      <Route path="/milestones/:milestoneId/edit" element={<AppLayout><MilestoneEditPage /></AppLayout>} />
-      <Route path="/memories" element={<AppLayout><MemoriesPage /></AppLayout>} />
-      <Route path="/memories/new" element={<AppLayout><MemoryNewPage /></AppLayout>} />
-      <Route path="/memories/:memoryId" element={<AppLayout><MemoryDetailPage /></AppLayout>} />
-      <Route path="/memories/:memoryId/edit" element={<AppLayout><MemoryEditPage /></AppLayout>} />
-      <Route path="/task-templates" element={<AppLayout><TaskTemplatesPage /></AppLayout>} />
-      <Route path="/task-templates/new" element={<AppLayout><TaskTemplateNewPage /></AppLayout>} />
-      <Route path="/task-templates/:templateId" element={<AppLayout><TaskTemplateDetailPage /></AppLayout>} />
-      <Route path="/task-templates/:templateId/edit" element={<AppLayout><TaskTemplateEditPage /></AppLayout>} />
-      <Route path="/flowcharts" element={<AppLayout><FlowchartsPage /></AppLayout>} />
-      <Route path="/flowcharts/new" element={<AppLayout><FlowchartNewPage /></AppLayout>} />
-      <Route path="/flowcharts/:flowchartId" element={<AppLayout><FlowchartDetailPage /></AppLayout>} />
-      <Route path="/flowcharts/:flowchartId/edit" element={<AppLayout><FlowchartEditPage /></AppLayout>} />
-      <Route path="/flowcharts/:flowchartId/history" element={<AppLayout><FlowchartHistoryPage /></AppLayout>} />
-      <Route path="/flowcharts/:flowchartId/history/:runId" element={<AppLayout><FlowchartRunDetailPage /></AppLayout>} />
-      <Route path="/flowcharts/runs/:runId" element={<AppLayout><FlowchartRunDetailPage /></AppLayout>} />
-      <Route path="/settings/core" element={<AppLayout><SettingsCorePage /></AppLayout>} />
-      <Route path="/settings/provider" element={<AppLayout><SettingsProviderPage /></AppLayout>} />
-      <Route path="/settings/provider/:section" element={<AppLayout><SettingsProviderPage /></AppLayout>} />
-      <Route path="/settings/runtime" element={<AppLayout><SettingsRuntimePage /></AppLayout>} />
-      <Route path="/settings/runtime/:section" element={<AppLayout><SettingsRuntimePage /></AppLayout>} />
-      <Route path="/settings/chat" element={<AppLayout><SettingsChatPage /></AppLayout>} />
-      <Route path="/settings/integrations" element={<AppLayout><SettingsIntegrationsPage /></AppLayout>} />
-      <Route path="/settings/integrations/:section" element={<AppLayout><SettingsIntegrationsPage /></AppLayout>} />
-      <Route path="/skills" element={<AppLayout><SkillsPage /></AppLayout>} />
-      <Route path="/skills/new" element={<AppLayout><SkillNewPage /></AppLayout>} />
-      <Route path="/skills/import" element={<AppLayout><SkillImportPage /></AppLayout>} />
-      <Route path="/skills/:skillId" element={<AppLayout><SkillDetailPage /></AppLayout>} />
-      <Route path="/skills/:skillId/edit" element={<AppLayout><SkillEditPage /></AppLayout>} />
-      <Route path="/scripts" element={<AppLayout><ScriptsPage /></AppLayout>} />
-      <Route path="/scripts/new" element={<AppLayout><ScriptNewPage /></AppLayout>} />
-      <Route path="/scripts/:scriptId" element={<AppLayout><ScriptDetailPage /></AppLayout>} />
-      <Route path="/scripts/:scriptId/edit" element={<AppLayout><ScriptEditPage /></AppLayout>} />
-      <Route path="/attachments" element={<AppLayout><AttachmentsPage /></AppLayout>} />
-      <Route path="/attachments/:attachmentId" element={<AppLayout><AttachmentDetailPage /></AppLayout>} />
-      <Route path="/models" element={<AppLayout><ModelsPage /></AppLayout>} />
-      <Route path="/models/new" element={<AppLayout><ModelNewPage /></AppLayout>} />
-      <Route path="/models/:modelId" element={<AppLayout><ModelDetailPage /></AppLayout>} />
-      <Route path="/models/:modelId/edit" element={<AppLayout><ModelEditPage /></AppLayout>} />
-      <Route path="/mcps" element={<AppLayout><McpsPage /></AppLayout>} />
-      <Route path="/mcps/new" element={<AppLayout><McpNewPage /></AppLayout>} />
-      <Route path="/mcps/:mcpId" element={<AppLayout><McpDetailPage /></AppLayout>} />
-      <Route path="/mcps/:mcpId/edit" element={<AppLayout><McpEditPage /></AppLayout>} />
-      <Route path="/github" element={<AppLayout><GithubPage /></AppLayout>} />
-      <Route path="/github/pulls/:prNumber" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
-      <Route path="/github/pulls/:prNumber/commits" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
-      <Route path="/github/pulls/:prNumber/checks" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
-      <Route path="/github/pulls/:prNumber/files" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
-      <Route path="/jira" element={<AppLayout><JiraPage /></AppLayout>} />
-      <Route path="/jira/issues/:issueKey" element={<AppLayout><JiraIssuePage /></AppLayout>} />
-      <Route path="/confluence" element={<AppLayout><ConfluencePage /></AppLayout>} />
-      <Route path="/chroma" element={<Navigate to="/chroma/collections" replace />} />
-      <Route path="/chroma/collections" element={<AppLayout><ChromaCollectionsPage /></AppLayout>} />
-      <Route path="/chroma/collections/detail" element={<AppLayout><ChromaCollectionDetailPage /></AppLayout>} />
-      <Route path="/rag/chat" element={<Navigate to="/rag/sources" replace />} />
-      <Route path="/rag/sources" element={<AppLayout><RagSourcesPage /></AppLayout>} />
-      <Route path="/rag/sources/new" element={<AppLayout><RagSourceNewPage /></AppLayout>} />
-      <Route path="/rag/sources/:sourceId" element={<AppLayout><RagSourceDetailPage /></AppLayout>} />
-      <Route path="/rag/sources/:sourceId/edit" element={<AppLayout><RagSourceEditPage /></AppLayout>} />
-      <Route path="/overview" element={<AppLayout><OverviewPage /></AppLayout>} />
-      <Route path="*" element={<AppLayout><NotFoundPage /></AppLayout>} />
-    </Routes>
+    <FlashProvider>
+      <Routes>
+        <Route path="/" element={<Navigate to="/overview" replace />} />
+        <Route path="/migration" element={<AppLayout><OverviewPage /></AppLayout>} />
+        <Route path="/parity-checklist" element={<AppLayout><ParityChecklistPage /></AppLayout>} />
+        <Route path="/chat" element={<AppLayout><ChatPage /></AppLayout>} />
+        <Route path="/chat/activity" element={<AppLayout><ChatActivityPage /></AppLayout>} />
+        <Route path="/chat/threads/:threadId" element={<AppLayout><ChatThreadRedirectPage /></AppLayout>} />
+        <Route path="/monitor" element={<Navigate to="/execution-monitor" replace />} />
+        <Route path="/execution-monitor" element={<AppLayout><ExecutionMonitorPage /></AppLayout>} />
+        <Route path="/api-diagnostics" element={<AppLayout><ApiDiagnosticsPage /></AppLayout>} />
+        <Route path="/agents" element={<AppLayout><AgentsPage /></AppLayout>} />
+        <Route path="/agents/new" element={<AppLayout><AgentNewPage /></AppLayout>} />
+        <Route path="/agents/:agentId" element={<AppLayout><AgentDetailPage /></AppLayout>} />
+        <Route path="/agents/:agentId/edit" element={<AppLayout><AgentEditPage /></AppLayout>} />
+        <Route path="/runs" element={<AppLayout><RunsPage /></AppLayout>} />
+        <Route path="/runs/new" element={<AppLayout><RunNewPage /></AppLayout>} />
+        <Route path="/runs/:runId" element={<AppLayout><RunDetailPage /></AppLayout>} />
+        <Route path="/runs/:runId/edit" element={<AppLayout><RunEditPage /></AppLayout>} />
+        <Route path="/quick" element={<AppLayout><QuickTaskPage /></AppLayout>} />
+        <Route path="/nodes" element={<AppLayout><NodesPage /></AppLayout>} />
+        <Route path="/nodes/new" element={<AppLayout><NodeNewPage /></AppLayout>} />
+        <Route path="/nodes/:nodeId" element={<AppLayout><NodeDetailPage /></AppLayout>} />
+        <Route path="/plans" element={<AppLayout><PlansPage /></AppLayout>} />
+        <Route path="/plans/new" element={<AppLayout><PlanNewPage /></AppLayout>} />
+        <Route path="/plans/:planId" element={<AppLayout><PlanDetailPage /></AppLayout>} />
+        <Route path="/plans/:planId/edit" element={<AppLayout><PlanEditPage /></AppLayout>} />
+        <Route path="/milestones" element={<AppLayout><MilestonesPage /></AppLayout>} />
+        <Route path="/milestones/new" element={<AppLayout><MilestoneNewPage /></AppLayout>} />
+        <Route path="/milestones/:milestoneId" element={<AppLayout><MilestoneDetailPage /></AppLayout>} />
+        <Route path="/milestones/:milestoneId/edit" element={<AppLayout><MilestoneEditPage /></AppLayout>} />
+        <Route path="/memories" element={<AppLayout><MemoriesPage /></AppLayout>} />
+        <Route path="/memories/new" element={<AppLayout><MemoryNewPage /></AppLayout>} />
+        <Route path="/memories/:memoryId" element={<AppLayout><MemoryDetailPage /></AppLayout>} />
+        <Route path="/memories/:memoryId/edit" element={<AppLayout><MemoryEditPage /></AppLayout>} />
+        <Route path="/task-templates" element={<AppLayout><TaskTemplatesPage /></AppLayout>} />
+        <Route path="/task-templates/new" element={<AppLayout><TaskTemplateNewPage /></AppLayout>} />
+        <Route path="/task-templates/:templateId" element={<AppLayout><TaskTemplateDetailPage /></AppLayout>} />
+        <Route path="/task-templates/:templateId/edit" element={<AppLayout><TaskTemplateEditPage /></AppLayout>} />
+        <Route path="/flowcharts" element={<AppLayout><FlowchartsPage /></AppLayout>} />
+        <Route path="/flowcharts/new" element={<AppLayout><FlowchartNewPage /></AppLayout>} />
+        <Route path="/flowcharts/:flowchartId" element={<AppLayout><FlowchartDetailPage /></AppLayout>} />
+        <Route path="/flowcharts/:flowchartId/edit" element={<AppLayout><FlowchartEditPage /></AppLayout>} />
+        <Route path="/flowcharts/:flowchartId/history" element={<AppLayout><FlowchartHistoryPage /></AppLayout>} />
+        <Route path="/flowcharts/:flowchartId/history/:runId" element={<AppLayout><FlowchartRunDetailPage /></AppLayout>} />
+        <Route path="/flowcharts/runs/:runId" element={<AppLayout><FlowchartRunDetailPage /></AppLayout>} />
+        <Route path="/settings/core" element={<AppLayout><SettingsCorePage /></AppLayout>} />
+        <Route path="/settings/provider" element={<AppLayout><SettingsProviderPage /></AppLayout>} />
+        <Route path="/settings/provider/:section" element={<AppLayout><SettingsProviderPage /></AppLayout>} />
+        <Route path="/settings/runtime" element={<AppLayout><SettingsRuntimePage /></AppLayout>} />
+        <Route path="/settings/runtime/:section" element={<AppLayout><SettingsRuntimePage /></AppLayout>} />
+        <Route path="/settings/chat" element={<AppLayout><SettingsChatPage /></AppLayout>} />
+        <Route path="/settings/integrations" element={<AppLayout><SettingsIntegrationsPage /></AppLayout>} />
+        <Route path="/settings/integrations/:section" element={<AppLayout><SettingsIntegrationsPage /></AppLayout>} />
+        <Route path="/skills" element={<AppLayout><SkillsPage /></AppLayout>} />
+        <Route path="/skills/new" element={<AppLayout><SkillNewPage /></AppLayout>} />
+        <Route path="/skills/import" element={<AppLayout><SkillImportPage /></AppLayout>} />
+        <Route path="/skills/:skillId" element={<AppLayout><SkillDetailPage /></AppLayout>} />
+        <Route path="/skills/:skillId/edit" element={<AppLayout><SkillEditPage /></AppLayout>} />
+        <Route path="/scripts" element={<AppLayout><ScriptsPage /></AppLayout>} />
+        <Route path="/scripts/new" element={<AppLayout><ScriptNewPage /></AppLayout>} />
+        <Route path="/scripts/:scriptId" element={<AppLayout><ScriptDetailPage /></AppLayout>} />
+        <Route path="/scripts/:scriptId/edit" element={<AppLayout><ScriptEditPage /></AppLayout>} />
+        <Route path="/attachments" element={<AppLayout><AttachmentsPage /></AppLayout>} />
+        <Route path="/attachments/:attachmentId" element={<AppLayout><AttachmentDetailPage /></AppLayout>} />
+        <Route path="/models" element={<AppLayout><ModelsPage /></AppLayout>} />
+        <Route path="/models/new" element={<AppLayout><ModelNewPage /></AppLayout>} />
+        <Route path="/models/:modelId" element={<AppLayout><ModelDetailPage /></AppLayout>} />
+        <Route path="/models/:modelId/edit" element={<AppLayout><ModelEditPage /></AppLayout>} />
+        <Route path="/mcps" element={<AppLayout><McpsPage /></AppLayout>} />
+        <Route path="/mcps/new" element={<AppLayout><McpNewPage /></AppLayout>} />
+        <Route path="/mcps/:mcpId" element={<AppLayout><McpDetailPage /></AppLayout>} />
+        <Route path="/mcps/:mcpId/edit" element={<AppLayout><McpEditPage /></AppLayout>} />
+        <Route path="/github" element={<AppLayout><GithubPage /></AppLayout>} />
+        <Route path="/github/pulls/:prNumber" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
+        <Route path="/github/pulls/:prNumber/commits" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
+        <Route path="/github/pulls/:prNumber/checks" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
+        <Route path="/github/pulls/:prNumber/files" element={<AppLayout><GithubPullRequestPage /></AppLayout>} />
+        <Route path="/jira" element={<AppLayout><JiraPage /></AppLayout>} />
+        <Route path="/jira/issues/:issueKey" element={<AppLayout><JiraIssuePage /></AppLayout>} />
+        <Route path="/confluence" element={<AppLayout><ConfluencePage /></AppLayout>} />
+        <Route path="/chroma" element={<Navigate to="/chroma/collections" replace />} />
+        <Route path="/chroma/collections" element={<AppLayout><ChromaCollectionsPage /></AppLayout>} />
+        <Route path="/chroma/collections/detail" element={<AppLayout><ChromaCollectionDetailPage /></AppLayout>} />
+        <Route path="/rag/chat" element={<Navigate to="/rag/sources" replace />} />
+        <Route path="/rag/sources" element={<AppLayout><RagSourcesPage /></AppLayout>} />
+        <Route path="/rag/sources/new" element={<AppLayout><RagSourceNewPage /></AppLayout>} />
+        <Route path="/rag/sources/:sourceId" element={<AppLayout><RagSourceDetailPage /></AppLayout>} />
+        <Route path="/rag/sources/:sourceId/edit" element={<AppLayout><RagSourceEditPage /></AppLayout>} />
+        <Route path="/overview" element={<AppLayout><OverviewPage /></AppLayout>} />
+        <Route path="*" element={<AppLayout><NotFoundPage /></AppLayout>} />
+      </Routes>
+    </FlashProvider>
   )
 }

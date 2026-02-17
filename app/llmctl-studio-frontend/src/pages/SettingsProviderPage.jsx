@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
@@ -98,9 +99,10 @@ function ProviderSectionCard({
   icon,
   children,
   actions,
+  className = '',
 }) {
   return (
-    <article className="card provider-settings-card">
+    <article className={`card provider-settings-card${className ? ` ${className}` : ''}`}>
       <header className="provider-settings-header">
         <div>
           <h2>{title}</h2>
@@ -124,8 +126,8 @@ export default function SettingsProviderPage() {
   const { section } = useParams()
   const activeSection = useMemo(() => normalizeSection(section), [section])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
-  const [actionInfo, setActionInfo] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
+  const [actionInfo, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
 
   const [controlsForm, setControlsForm] = useState({
@@ -224,19 +226,14 @@ export default function SettingsProviderPage() {
       icon: sectionIcon(itemId),
     }
   })
-  const activeDefaultLabel = providerDetails.find((provider) => {
-    const providerId = String(provider?.id || '').trim().toLowerCase()
-    return providerId === controlsForm.defaultProvider
-  })?.label || controlsForm.defaultProvider || 'None'
-  const enabledProviderCount = providerDetails.filter((provider) => {
-    const providerId = String(provider?.id || '').trim().toLowerCase()
-    return Boolean(controlsForm.enabledByProvider[providerId])
-  }).length
   const hasStatus = state.loading || state.error || actionError || actionInfo
 
   function toggleEnabled(providerId) {
     setControlsForm((current) => ({
       ...current,
+      defaultProvider: current.defaultProvider === providerId && current.enabledByProvider[providerId]
+        ? ''
+        : current.defaultProvider,
       enabledByProvider: {
         ...current.enabledByProvider,
         [providerId]: !current.enabledByProvider[providerId],
@@ -244,8 +241,22 @@ export default function SettingsProviderPage() {
     }))
   }
 
+  function toggleDefault(providerId) {
+    setControlsForm((current) => {
+      const isSameProvider = current.defaultProvider === providerId
+      return {
+        ...current,
+        defaultProvider: isSameProvider ? '' : providerId,
+        enabledByProvider: {
+          ...current.enabledByProvider,
+          [providerId]: isSameProvider ? current.enabledByProvider[providerId] : true,
+        },
+      }
+    })
+  }
+
   return (
-    <section className="stack" aria-label="Settings provider">
+    <section className="stack provider-fixed-page" aria-label="Settings provider">
       <SettingsInnerSidebar
         title="Provider Sections"
         ariaLabel="Provider sections"
@@ -287,59 +298,46 @@ export default function SettingsProviderPage() {
                   </button>
                 )}
               >
-                <div className="provider-controls-summary">
-                  <div className="provider-controls-stat">
-                    <span className="provider-controls-stat-label">Active default</span>
-                    <strong>{activeDefaultLabel}</strong>
-                  </div>
-                  <div className="provider-controls-stat">
-                    <span className="provider-controls-stat-label">Enabled now</span>
-                    <strong>{enabledProviderCount} providers</strong>
-                  </div>
+                <div className="provider-controls-list" role="list" aria-label="Provider controls">
+                  {providerDetails.length === 0 ? <p className="table-note">No providers available.</p> : null}
+                  {providerDetails.map((provider) => {
+                    const providerId = String(provider?.id || '').trim().toLowerCase()
+                    const providerName = provider.label || providerId
+                    const isEnabled = Boolean(controlsForm.enabledByProvider[providerId])
+                    const isDefault = controlsForm.defaultProvider === providerId
+                    return (
+                      <article key={providerId} className="provider-controls-row" role="listitem">
+                        <div className="provider-controls-provider-meta">
+                          <p className="provider-controls-provider-label">{providerName}</p>
+                          <p className="provider-controls-provider-state">
+                            {isEnabled ? 'Enabled' : 'Disabled'}
+                            {isDefault ? ' / Default' : ''}
+                          </p>
+                        </div>
+                        <div className="provider-controls-provider-toggles">
+                          <label className="provider-inline-switch">
+                            <input
+                              type="checkbox"
+                              checked={isEnabled}
+                              onChange={() => toggleEnabled(providerId)}
+                            />
+                            <span className="provider-inline-switch-track" aria-hidden="true" />
+                            <span>Enabled</span>
+                          </label>
+                          <label className="provider-inline-switch">
+                            <input
+                              type="checkbox"
+                              checked={isDefault}
+                              onChange={() => toggleDefault(providerId)}
+                            />
+                            <span className="provider-inline-switch-track" aria-hidden="true" />
+                            <span>Default</span>
+                          </label>
+                        </div>
+                      </article>
+                    )
+                  })}
                 </div>
-                <label className="field">
-                  <span>Default provider</span>
-                  <select
-                    value={controlsForm.defaultProvider}
-                    onChange={(event) => setControlsForm((current) => ({ ...current, defaultProvider: event.target.value }))}
-                  >
-                    <option value="">None</option>
-                    {providerDetails.map((provider) => {
-                      const providerId = String(provider?.id || '').trim().toLowerCase()
-                      return (
-                        <option key={providerId} value={providerId}>
-                          {provider.label || providerId}
-                        </option>
-                      )
-                    })}
-                  </select>
-                </label>
-                <fieldset className="field provider-toggle-fieldset">
-                  <legend>Enabled providers</legend>
-                  <div className="provider-toggle-grid">
-                    {providerDetails.map((provider) => {
-                      const providerId = String(provider?.id || '').trim().toLowerCase()
-                      const isEnabled = Boolean(controlsForm.enabledByProvider[providerId])
-                      return (
-                        <label
-                          key={providerId}
-                          className={`provider-toggle${isEnabled ? ' is-enabled' : ''}`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            onChange={() => toggleEnabled(providerId)}
-                          />
-                          <span className="provider-toggle-indicator" aria-hidden="true" />
-                          <span className="provider-toggle-copy">
-                            <span className="provider-toggle-label">{provider.label || providerId}</span>
-                            <span className="provider-toggle-meta">{isEnabled ? 'Enabled' : 'Disabled'}</span>
-                          </span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </fieldset>
               </ProviderSectionCard>
             ) : null}
 

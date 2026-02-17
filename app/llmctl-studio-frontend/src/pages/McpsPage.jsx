@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
@@ -92,7 +93,7 @@ function McpTable({ title, rows, onDelete, busyById, navigate, allowDelete }) {
 export default function McpsPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
   const [busyById, setBusyById] = useState({})
 
   const refresh = useCallback(async ({ silent = false } = {}) => {

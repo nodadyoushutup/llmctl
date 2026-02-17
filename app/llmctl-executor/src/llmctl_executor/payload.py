@@ -66,7 +66,63 @@ def _normalize_env(raw: Any) -> dict[str, str]:
     return normalized
 
 
-def _resolve_command(payload: dict[str, Any]) -> list[str]:
+@dataclass(frozen=True)
+class NodeExecutionPayload:
+    entrypoint: str
+    python_paths: list[str]
+    request: dict[str, Any]
+    request_context: dict[str, Any]
+
+
+def _normalize_node_execution(payload: dict[str, Any]) -> NodeExecutionPayload | None:
+    raw = payload.get("node_execution")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise PayloadError("payload.node_execution must be a JSON object.")
+
+    request = raw.get("request")
+    if not isinstance(request, dict):
+        raise PayloadError("payload.node_execution.request must be a JSON object.")
+    request_context = raw.get("request_context")
+    if request_context is None:
+        request_context = {}
+    if not isinstance(request_context, dict):
+        raise PayloadError("payload.node_execution.request_context must be a JSON object.")
+
+    entrypoint = str(raw.get("entrypoint") or "").strip()
+    if not entrypoint:
+        entrypoint = "services.tasks:_execute_flowchart_node_request"
+    if ":" not in entrypoint:
+        raise PayloadError(
+            "payload.node_execution.entrypoint must use '<module>:<callable>' format."
+        )
+
+    python_paths_raw = raw.get("python_paths")
+    python_paths: list[str] = []
+    if python_paths_raw is None:
+        python_paths = ["/app/app/llmctl-studio-backend/src"]
+    elif isinstance(python_paths_raw, list):
+        for item in python_paths_raw:
+            candidate = str(item or "").strip()
+            if candidate:
+                python_paths.append(candidate)
+    else:
+        raise PayloadError("payload.node_execution.python_paths must be an array when set.")
+
+    return NodeExecutionPayload(
+        entrypoint=entrypoint,
+        python_paths=python_paths,
+        request=request,
+        request_context=request_context,
+    )
+
+
+def _resolve_command(
+    payload: dict[str, Any],
+    *,
+    allow_empty: bool,
+) -> list[str] | None:
     command_raw = payload.get("command")
     shell_command = str(payload.get("shell_command") or "").strip()
 
@@ -81,6 +137,9 @@ def _resolve_command(payload: dict[str, Any]) -> list[str]:
     if shell_command:
         return ["/bin/bash", "-lc", shell_command]
 
+    if allow_empty:
+        return None
+
     raise PayloadError("payload must include command[] or shell_command.")
 
 
@@ -89,7 +148,7 @@ class ExecutionPayload:
     contract_version: str
     request_id: str
     provider: str
-    command: list[str]
+    command: list[str] | None
     cwd: str
     env: dict[str, str]
     stdin: str
@@ -97,6 +156,7 @@ class ExecutionPayload:
     capture_limit_bytes: int
     emit_start_markers: bool
     metadata: dict[str, Any]
+    node_execution: NodeExecutionPayload | None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "ExecutionPayload":
@@ -128,7 +188,8 @@ class ExecutionPayload:
                 "payload.provider must be one of workspace|docker|kubernetes."
             )
 
-        command = _resolve_command(payload)
+        node_execution = _normalize_node_execution(payload)
+        command = _resolve_command(payload, allow_empty=node_execution is not None)
         default_cwd = os.getenv("LLMCTL_EXECUTOR_DEFAULT_CWD", "/tmp/llmctl-workspace")
         cwd = str(payload.get("cwd") or default_cwd).strip() or default_cwd
         env = _normalize_env(payload.get("env"))
@@ -157,6 +218,7 @@ class ExecutionPayload:
             capture_limit_bytes=capture_limit_bytes,
             emit_start_markers=emit_start_markers,
             metadata=metadata,
+            node_execution=node_execution,
         )
 
 

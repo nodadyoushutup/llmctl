@@ -13,6 +13,9 @@ Changelog
 - Migrated integrated MCP runtime architecture to Kubernetes-hosted services and removed Studio runtime dependence on bundled MCP executables.
 - Added integrated MCP endpoint contract and lifecycle documentation (startup migration sync + seed alignment) for DB-backed ``mcp_servers`` rows.
 - Added Kubernetes operator documentation for integrated MCP Deployments/Services, secret inputs, and one-release cutover gate controls.
+- Completed Kubernetes-only node execution cutover: node-like compute now executes in Kubernetes executor pods using full ``node_execution`` payloads and structured ``output_state``/``routing_state`` results (no probe-only path).
+- Added runtime evidence contract docs for ``provider_dispatch_id``, ``k8s_job_name``, ``k8s_pod_name``, and ``k8s_terminal_reason``.
+- Documented final architecture split: chat remains service-runtime, node-like workloads run in executor pods.
 
 2026-02-16
 ----------

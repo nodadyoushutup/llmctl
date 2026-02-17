@@ -6065,6 +6065,59 @@ def _serialize_flowchart_run(run: FlowchartRun) -> dict[str, object]:
     }
 
 
+def _k8s_job_name_from_dispatch_id(provider_dispatch_id: str) -> str:
+    dispatch_id = str(provider_dispatch_id or "").strip()
+    if not dispatch_id.startswith("kubernetes:"):
+        return ""
+    native_id = dispatch_id.split(":", 1)[1]
+    if "/" not in native_id:
+        return ""
+    return native_id.split("/", 1)[1].strip()
+
+
+def _runtime_evidence_from_output(task: AgentTask | None) -> dict[str, str]:
+    if task is None:
+        return {
+            "provider_dispatch_id": "",
+            "k8s_job_name": "",
+            "k8s_pod_name": "",
+            "k8s_terminal_reason": "",
+        }
+    evidence: dict[str, str] = {
+        "provider_dispatch_id": "",
+        "k8s_job_name": "",
+        "k8s_pod_name": "",
+        "k8s_terminal_reason": "",
+    }
+    raw_output = str(task.output or "").strip()
+    if raw_output.startswith("{"):
+        try:
+            output_payload = json.loads(raw_output)
+        except json.JSONDecodeError:
+            output_payload = {}
+        if isinstance(output_payload, dict):
+            runtime_evidence = output_payload.get("runtime_evidence")
+            if isinstance(runtime_evidence, dict):
+                for key in evidence:
+                    value = runtime_evidence.get(key)
+                    if value is None:
+                        continue
+                    evidence[key] = str(value).strip()
+    provider_dispatch_id = (
+        evidence["provider_dispatch_id"] or str(task.provider_dispatch_id or "").strip()
+    )
+    evidence["provider_dispatch_id"] = provider_dispatch_id
+    if not evidence["k8s_job_name"]:
+        evidence["k8s_job_name"] = _k8s_job_name_from_dispatch_id(provider_dispatch_id)
+    if not evidence["k8s_terminal_reason"]:
+        evidence["k8s_terminal_reason"] = (
+            str(task.fallback_reason or "").strip()
+            or str(task.api_failure_category or "").strip()
+            or str(task.status or "").strip()
+        )
+    return evidence
+
+
 def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, object]:
     if task is None:
         return {
@@ -6079,6 +6132,9 @@ def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, objec
             "api_failure_category": "",
             "cli_fallback_used": False,
             "cli_preflight_passed": None,
+            "k8s_job_name": "",
+            "k8s_pod_name": "",
+            "k8s_terminal_reason": "",
             "provider_route": "",
             "dispatch_timeline": [],
         }
@@ -6095,13 +6151,27 @@ def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, objec
     cli_preflight_passed = (
         None if task.cli_preflight_passed is None else bool(task.cli_preflight_passed)
     )
+    runtime_evidence = _runtime_evidence_from_output(task)
+    provider_dispatch_id = (
+        str(runtime_evidence.get("provider_dispatch_id") or "").strip()
+        or provider_dispatch_id
+    )
+    k8s_job_name = str(runtime_evidence.get("k8s_job_name") or "").strip()
+    k8s_pod_name = str(runtime_evidence.get("k8s_pod_name") or "").strip()
+    k8s_terminal_reason = str(runtime_evidence.get("k8s_terminal_reason") or "").strip()
     timeline: list[str] = []
     if selected_provider:
         timeline.append(f"selected={selected_provider}")
     if provider_dispatch_id:
         timeline.append(f"dispatch_id={provider_dispatch_id}")
+    if k8s_job_name:
+        timeline.append(f"job={k8s_job_name}")
+    if k8s_pod_name:
+        timeline.append(f"pod={k8s_pod_name}")
     if dispatch_status:
         timeline.append(f"dispatch={dispatch_status}")
+    if k8s_terminal_reason:
+        timeline.append(f"terminal={k8s_terminal_reason}")
     if fallback_attempted:
         timeline.append(f"fallback={fallback_reason or 'unknown'}")
     if dispatch_uncertain:
@@ -6127,6 +6197,9 @@ def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, objec
         "api_failure_category": api_failure_category,
         "cli_fallback_used": cli_fallback_used,
         "cli_preflight_passed": cli_preflight_passed,
+        "k8s_job_name": k8s_job_name,
+        "k8s_pod_name": k8s_pod_name,
+        "k8s_terminal_reason": k8s_terminal_reason,
         "provider_route": provider_route,
         "dispatch_timeline": timeline,
     }
@@ -6576,6 +6649,34 @@ def _serialize_flowchart_run_node(
         input_context
     )
     run_metadata = _serialize_node_executor_metadata(task)
+    routing_state = _parse_json_dict(node_run.routing_state_json)
+    runtime_evidence = routing_state.get("runtime_evidence")
+    if isinstance(runtime_evidence, dict):
+        provider_dispatch_id = str(
+            runtime_evidence.get("provider_dispatch_id")
+            or run_metadata.get("provider_dispatch_id")
+            or ""
+        ).strip()
+        k8s_job_name = str(
+            runtime_evidence.get("k8s_job_name")
+            or run_metadata.get("k8s_job_name")
+            or _k8s_job_name_from_dispatch_id(provider_dispatch_id)
+            or ""
+        ).strip()
+        k8s_pod_name = str(
+            runtime_evidence.get("k8s_pod_name")
+            or run_metadata.get("k8s_pod_name")
+            or ""
+        ).strip()
+        k8s_terminal_reason = str(
+            runtime_evidence.get("k8s_terminal_reason")
+            or run_metadata.get("k8s_terminal_reason")
+            or ""
+        ).strip()
+        run_metadata["provider_dispatch_id"] = provider_dispatch_id
+        run_metadata["k8s_job_name"] = k8s_job_name
+        run_metadata["k8s_pod_name"] = k8s_pod_name
+        run_metadata["k8s_terminal_reason"] = k8s_terminal_reason
     return {
         "id": node_run.id,
         "flowchart_run_id": node_run.flowchart_run_id,
@@ -6589,7 +6690,7 @@ def _serialize_flowchart_run_node(
         "trigger_source_count": len(trigger_sources),
         "pulled_dotted_source_count": len(pulled_dotted_sources),
         "output_state": _parse_json_dict(node_run.output_state_json),
-        "routing_state": _parse_json_dict(node_run.routing_state_json),
+        "routing_state": routing_state,
         "error": node_run.error,
         "created_at": _human_time(node_run.created_at),
         "started_at": _human_time(node_run.started_at),
@@ -9340,6 +9441,7 @@ def view_node(task_id: int):
                 if key in TASK_INTEGRATION_LABELS
             ]
     if _nodes_wants_json():
+        task_runtime = _serialize_node_executor_metadata(task)
         return {
             "task": {
                 "id": task.id,
@@ -9356,6 +9458,7 @@ def view_node(task_id: int):
                 "current_stage": task.current_stage or "",
                 "error": task.error or "",
                 "output": task_output,
+                **task_runtime,
             },
             "agent": (
                 {
@@ -9470,6 +9573,7 @@ def node_status(task_id: int):
         if task is None:
             abort(404)
         _sync_quick_rag_task_from_index_job(session, task)
+        task_runtime = _serialize_node_executor_metadata(task)
         return {
             "id": task.id,
             "status": task.status,
@@ -9484,6 +9588,7 @@ def node_status(task_id: int):
             "started_at": _human_time(task.started_at),
             "finished_at": _human_time(task.finished_at),
             "created_at": _human_time(task.created_at),
+            **task_runtime,
         }
 
 

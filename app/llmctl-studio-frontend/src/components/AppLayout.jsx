@@ -115,6 +115,7 @@ function initialExpanded(pathname) {
 export default function AppLayout({ children }) {
   const location = useLocation()
   const active = useMemo(() => findActive(location.pathname), [location.pathname])
+  const isFlowchartDetailRoute = useMemo(() => /^\/flowcharts\/\d+\/?$/.test(location.pathname), [location.pathname])
   const [expandedBySection, setExpandedBySection] = useState(() => initialExpanded(location.pathname))
 
   const title = active?.item?.label || 'LLMCTL'
@@ -174,7 +175,7 @@ export default function AppLayout({ children }) {
           </nav>
         </aside>
 
-        <div className="main">
+        <div className={`main${isFlowchartDetailRoute ? ' main-is-fixed' : ''}`}>
           <header className="topbar content-header" id="content-header">
             <div className="topbar-row">
               <div>
@@ -182,7 +183,7 @@ export default function AppLayout({ children }) {
               </div>
             </div>
           </header>
-          <main className="content">{children}</main>
+          <main className={`content${isFlowchartDetailRoute ? ' content-is-fixed' : ''}`}>{children}</main>
         </div>
       </div>
     </div>

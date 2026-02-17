@@ -210,6 +210,79 @@ def _normalize_quick_rag_model_provider(value: Any) -> str:
     return "codex"
 
 
+def _kubernetes_job_name_from_dispatch_id(provider_dispatch_id: Any) -> str:
+    dispatch_id = str(provider_dispatch_id or "").strip()
+    if not dispatch_id.startswith("kubernetes:"):
+        return ""
+    native_id = dispatch_id.split(":", 1)[1]
+    if "/" not in native_id:
+        return ""
+    return native_id.split("/", 1)[1].strip()
+
+
+def _runtime_evidence_payload(
+    *,
+    run_metadata: dict[str, Any] | None,
+    provider_metadata: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
+    terminal_status: str | None = None,
+) -> dict[str, Any]:
+    run_metadata = run_metadata if isinstance(run_metadata, dict) else {}
+    provider_metadata = provider_metadata if isinstance(provider_metadata, dict) else {}
+    error = error if isinstance(error, dict) else {}
+
+    provider_dispatch_id = str(
+        run_metadata.get("provider_dispatch_id")
+        or provider_metadata.get("provider_dispatch_id")
+        or ""
+    ).strip()
+    k8s_job_name = str(
+        run_metadata.get("k8s_job_name")
+        or provider_metadata.get("k8s_job_name")
+        or _kubernetes_job_name_from_dispatch_id(provider_dispatch_id)
+        or ""
+    ).strip()
+    k8s_pod_name = str(
+        run_metadata.get("k8s_pod_name")
+        or provider_metadata.get("k8s_pod_name")
+        or ""
+    ).strip()
+
+    terminal_reason_candidates = [
+        run_metadata.get("k8s_terminal_reason"),
+        provider_metadata.get("k8s_terminal_reason"),
+        run_metadata.get("terminal_reason"),
+        provider_metadata.get("terminal_reason"),
+        run_metadata.get("fallback_reason"),
+        run_metadata.get("api_failure_category"),
+        error.get("code"),
+        error.get("message"),
+    ]
+    k8s_terminal_reason = ""
+    for candidate in terminal_reason_candidates:
+        text = str(candidate or "").strip()
+        if text:
+            k8s_terminal_reason = text
+            break
+    if not k8s_terminal_reason and terminal_status:
+        k8s_terminal_reason = str(terminal_status).strip().lower()
+
+    return {
+        "provider_dispatch_id": provider_dispatch_id,
+        "k8s_job_name": k8s_job_name,
+        "k8s_pod_name": k8s_pod_name,
+        "k8s_terminal_reason": k8s_terminal_reason,
+    }
+
+
+def _quick_rag_worker_compute_disabled(
+    _request: ExecutionRequest,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    raise RuntimeError(
+        "Quick RAG compute must execute in executor runtime; worker execution is disabled."
+    )
+
+
 def _task_runtime_metadata(
     task: AgentTask,
     *,
@@ -3437,58 +3510,150 @@ def run_quick_rag_task(self, task_id: int) -> None:
     )
     task_error: str | None = None
     output_payload: dict[str, Any] | None = None
+    runtime_payload: dict[str, Any] | None = None
+    runtime_evidence: dict[str, Any] = {}
     if mode is None:
         task_error = "Quick RAG mode is required."
     elif not collection:
         task_error = "Quick RAG collection is required."
     else:
         try:
-            index_summary = run_index_for_collections(
-                mode=mode,
-                collections=[collection],
-                model_provider=model_provider,
+            execution_router = ExecutionRouter(
+                runtime_settings=load_node_executor_runtime_settings()
             )
-            output_payload = {
-                "node_type": FLOWCHART_NODE_TYPE_RAG,
-                "answer": None,
-                "retrieval_context": [],
-                "retrieval_stats": {
-                    "provider": "chroma",
-                    "retrieved_count": 0,
-                    "top_k": 0,
-                    "source_count": int(index_summary.get("source_count") or 0),
-                    "total_files": int(index_summary.get("total_files") or 0),
-                    "total_chunks": int(index_summary.get("total_chunks") or 0),
-                },
-                "synthesis_error": None,
-                "mode": mode,
-                "collections": [collection],
-                "index_summary": index_summary,
-                "quick_rag": {
-                    "source_name": source_name,
-                    "collection": collection,
+            source_id = _parse_optional_int(
+                quick_context.get("source_id"),
+                default=task_id,
+                minimum=1,
+            )
+            execution_request = ExecutionRequest(
+                node_id=int(source_id),
+                node_type=FLOWCHART_NODE_TYPE_RAG,
+                node_ref_id=None,
+                node_config={
+                    "mode": mode,
+                    "collections": [collection],
                     "model_provider": model_provider,
                 },
-            }
+                input_context={
+                    "kind": "rag_quick_run",
+                    "task_id": int(task_id),
+                    "rag_quick_run": {
+                        "source_id": int(source_id),
+                        "source_name": source_name,
+                        "collection": collection,
+                        "mode": mode,
+                        "model_provider": model_provider,
+                    },
+                },
+                execution_id=int(task_id),
+                execution_task_id=int(task_id),
+                execution_index=1,
+                enabled_providers={model_provider},
+                default_model_id=None,
+                mcp_server_keys=[],
+            )
+            routed_execution_request = execution_router.route_request(execution_request)
+            runtime_payload = routed_execution_request.run_metadata_payload()
+            with session_scope() as session:
+                task = session.get(AgentTask, task_id)
+                if task is not None:
+                    _apply_flowchart_node_task_run_metadata(task, runtime_payload)
+                    _emit_task_event(
+                        "node.task.updated",
+                        task=task,
+                        payload={"transition": "routed"},
+                        runtime_override=runtime_payload,
+                    )
+            execution_result = execution_router.execute_routed(
+                routed_execution_request,
+                _quick_rag_worker_compute_disabled,
+            )
+            runtime_payload = (
+                execution_result.run_metadata
+                if isinstance(execution_result.run_metadata, dict)
+                else runtime_payload
+            )
+            runtime_evidence = _runtime_evidence_payload(
+                run_metadata=runtime_payload,
+                provider_metadata=(
+                    execution_result.provider_metadata
+                    if isinstance(execution_result.provider_metadata, dict)
+                    else None
+                ),
+                error=execution_result.error if isinstance(execution_result.error, dict) else None,
+                terminal_status=execution_result.status,
+            )
+            if execution_result.status != "success":
+                failure_error = execution_result.error
+                failure_message = (
+                    str(failure_error.get("message") or "").strip()
+                    if isinstance(failure_error, dict)
+                    else ""
+                )
+                task_error = (
+                    failure_message
+                    or f"Quick RAG execution failed with status '{execution_result.status}'."
+                )
+            else:
+                output_payload = (
+                    dict(execution_result.output_state)
+                    if isinstance(execution_result.output_state, dict)
+                    else {}
+                )
+                quick_payload = output_payload.get("quick_rag")
+                if not isinstance(quick_payload, dict):
+                    quick_payload = {}
+                quick_payload.update(
+                    {
+                        "source_name": source_name,
+                        "collection": collection,
+                        "model_provider": model_provider,
+                        "mode": mode,
+                    }
+                )
+                output_payload["quick_rag"] = quick_payload
+                output_payload["runtime_evidence"] = runtime_evidence
         except Exception as exc:
             task_error = str(exc) or "Quick RAG run failed."
+            runtime_evidence = _runtime_evidence_payload(
+                run_metadata=runtime_payload,
+                provider_metadata=None,
+                error={"message": task_error},
+                terminal_status="failed",
+            )
 
     now = _utcnow()
     with session_scope() as session:
         task = session.get(AgentTask, task_id)
         if task is None:
             return
+        if isinstance(runtime_payload, dict):
+            _apply_flowchart_node_task_run_metadata(task, runtime_payload)
         task.finished_at = now
         if task_error:
             task.status = "failed"
             task.error = task_error
+            task.output = _json_dumps(
+                {
+                    "quick_rag": {
+                        "source_name": source_name,
+                        "collection": collection,
+                        "model_provider": model_provider,
+                        "mode": mode,
+                    },
+                    "runtime_evidence": runtime_evidence,
+                }
+            )
             _emit_task_event(
                 "node.task.completed",
                 task=task,
                 payload={
                     "terminal_status": "failed",
                     "failure_message": task_error,
+                    "runtime_evidence": runtime_evidence,
                 },
+                runtime_override=runtime_payload,
             )
             return
         task.status = "succeeded"
@@ -3499,7 +3664,9 @@ def run_quick_rag_task(self, task_id: int) -> None:
             task=task,
             payload={
                 "terminal_status": "succeeded",
+                "runtime_evidence": runtime_evidence,
             },
+            runtime_override=runtime_payload,
         )
 
 
@@ -7310,6 +7477,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             routed_execution_request: ExecutionRequest | None = None
             execution_result = None
             node_task_id: int | None = None
+            runtime_evidence: dict[str, Any] = {}
             with session_scope() as session:
                 node_run_started_at = _utcnow()
                 node_task = _create_flowchart_node_task(
@@ -7390,6 +7558,21 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     routed_execution_request,
                     _execute_flowchart_node_request,
                 )
+                runtime_payload = (
+                    execution_result.run_metadata
+                    if isinstance(execution_result.run_metadata, dict)
+                    else routed_execution_request.run_metadata_payload()
+                )
+                runtime_evidence = _runtime_evidence_payload(
+                    run_metadata=runtime_payload,
+                    provider_metadata=(
+                        execution_result.provider_metadata
+                        if isinstance(execution_result.provider_metadata, dict)
+                        else None
+                    ),
+                    error=execution_result.error if isinstance(execution_result.error, dict) else None,
+                    terminal_status=execution_result.status,
+                )
                 if execution_result.status != "success":
                     failure_error = execution_result.error
                     failure_message = (
@@ -7402,8 +7585,19 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             f"Execution failed with status '{execution_result.status}'."
                         )
                     raise RuntimeError(failure_message)
-                output_state = execution_result.output_state
-                routing_state = execution_result.routing_state
+                output_state = (
+                    dict(execution_result.output_state)
+                    if isinstance(execution_result.output_state, dict)
+                    else {}
+                )
+                routing_state = (
+                    dict(execution_result.routing_state)
+                    if isinstance(execution_result.routing_state, dict)
+                    else {}
+                )
+                if runtime_evidence:
+                    routing_state["runtime_evidence"] = runtime_evidence
+                    output_state["runtime_evidence"] = runtime_evidence
             except Exception as exc:
                 logger.exception(
                     "Flowchart run %s failed in node %s (%s)",
@@ -7427,6 +7621,26 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             else None
                         )
                     )
+                    runtime_evidence = _runtime_evidence_payload(
+                        run_metadata=runtime_payload,
+                        provider_metadata=(
+                            execution_result.provider_metadata
+                            if execution_result is not None
+                            and isinstance(execution_result.provider_metadata, dict)
+                            else None
+                        ),
+                        error=(
+                            execution_result.error
+                            if execution_result is not None
+                            and isinstance(execution_result.error, dict)
+                            else {"message": str(exc)}
+                        ),
+                        terminal_status="failed",
+                    )
+                    if failed_node_run is not None:
+                        failed_node_run.routing_state_json = _json_dumps(
+                            {"runtime_evidence": runtime_evidence}
+                        )
                     _update_flowchart_node_task(
                         session,
                         node_run=failed_node_run,
@@ -7452,6 +7666,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                 "execution_index": failed_node_run.execution_index
                                 if failed_node_run is not None
                                 else execution_index,
+                                "runtime_evidence": runtime_evidence,
                             },
                             runtime_override=runtime_payload,
                         )
@@ -7480,6 +7695,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             else None
                         ),
                         finished_at=finished_at,
+                        routing_state={"runtime_evidence": runtime_evidence},
                         runtime=runtime_payload,
                     )
                     run = session.get(FlowchartRun, run_id)
@@ -7609,6 +7825,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             "terminal_status": "succeeded",
                             "flowchart_node_run_id": node_run_id,
                             "execution_index": succeeded_node_run.execution_index,
+                            "runtime_evidence": runtime_evidence,
                         },
                         runtime_override=runtime_payload,
                     )

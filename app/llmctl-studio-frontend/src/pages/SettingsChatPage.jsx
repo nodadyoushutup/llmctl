@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -24,8 +25,8 @@ function errorMessage(error, fallback) {
 
 export default function SettingsChatPage() {
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
-  const [actionInfo, setActionInfo] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
+  const [actionInfo, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
 
   const [defaultsForm, setDefaultsForm] = useState({

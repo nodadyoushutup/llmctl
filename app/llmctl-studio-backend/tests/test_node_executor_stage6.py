@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -21,6 +22,7 @@ from services.execution.contracts import ExecutionRequest
 from services.execution.kubernetes_executor import (
     KubernetesExecutor,
     _KubernetesDispatchFailure,
+    _KubernetesDispatchOutcome,
     _utcnow,
 )
 from services.execution.idempotency import clear_dispatch_registry
@@ -275,6 +277,124 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             "/app",
             pod_spec["containers"][0]["volumeMounts"][0]["mountPath"],
         )
+
+    def test_build_job_manifest_includes_runtime_env_passthrough(self) -> None:
+        executor = KubernetesExecutor({})
+        with patch.dict(
+            os.environ,
+            {
+                "LLMCTL_STUDIO_DATABASE_URI": "postgresql+psycopg://user:pw@db:5432/studio",
+                "OPENAI_API_KEY": "test-key",
+            },
+            clear=False,
+        ):
+            manifest = executor._build_job_manifest(
+                request=_request(),
+                job_name="job-env-pass",
+                namespace="default",
+                image="llmctl-executor:latest",
+                payload_json="{}",
+                service_account="",
+                image_pull_secrets=[],
+                k8s_gpu_limit=0,
+                execution_timeout=120,
+                job_ttl_seconds=1800,
+            )
+        env_entries = manifest["spec"]["template"]["spec"]["containers"][0]["env"]
+        env_map = {entry.get("name"): entry.get("value") for entry in env_entries}
+        self.assertEqual("{}", env_map.get("LLMCTL_EXECUTOR_PAYLOAD_JSON"))
+        self.assertEqual(
+            "postgresql+psycopg://user:pw@db:5432/studio",
+            env_map.get("LLMCTL_STUDIO_DATABASE_URI"),
+        )
+        self.assertEqual("test-key", env_map.get("OPENAI_API_KEY"))
+
+    def test_build_executor_payload_contains_full_node_request(self) -> None:
+        executor = KubernetesExecutor({})
+        payload_json = executor._build_executor_payload_json(
+            request=_request(),
+            execution_timeout=900,
+        )
+        payload = json.loads(payload_json)
+        self.assertEqual("v1", payload.get("contract_version"))
+        self.assertNotIn("command", payload)
+        node_execution = payload.get("node_execution") or {}
+        self.assertEqual(
+            "services.tasks:_execute_flowchart_node_request",
+            node_execution.get("entrypoint"),
+        )
+        node_request = node_execution.get("request") or {}
+        self.assertEqual(12, node_request.get("node_id"))
+        self.assertEqual("start", node_request.get("node_type"))
+        self.assertEqual([], node_request.get("enabled_providers"))
+        self.assertEqual([], node_request.get("mcp_server_keys"))
+
+    def test_kubernetes_executor_uses_remote_output_state_and_metadata(self) -> None:
+        executor = KubernetesExecutor({})
+        executor._dispatch_via_kubernetes = (  # type: ignore[method-assign]
+            lambda **_kwargs: _KubernetesDispatchOutcome(
+                job_name="job-remote-1",
+                pod_name="pod-remote-1",
+                stdout="executor stdout",
+                stderr="",
+                startup_marker_seen=True,
+                executor_result={
+                    "status": "success",
+                    "output_state": {"node_type": "start", "message": "remote"},
+                    "routing_state": {"route_key": "next"},
+                },
+                terminal_reason="Complete",
+            )
+        )
+        callback_called = {"value": False}
+
+        def _callback(_request: ExecutionRequest):
+            callback_called["value"] = True
+            return {"node_type": "start", "message": "local"}, {}
+
+        result = executor.execute(_request(), _callback)
+        self.assertFalse(callback_called["value"])
+        self.assertEqual("success", result.status)
+        self.assertEqual("remote", result.output_state.get("message"))
+        self.assertEqual("next", result.routing_state.get("route_key"))
+        self.assertEqual(
+            "kubernetes:default/job-remote-1",
+            result.run_metadata.get("provider_dispatch_id"),
+        )
+        self.assertEqual("job-remote-1", result.run_metadata.get("k8s_job_name"))
+        self.assertEqual("pod-remote-1", result.run_metadata.get("k8s_pod_name"))
+        self.assertEqual("Complete", result.run_metadata.get("k8s_terminal_reason"))
+        self.assertEqual("job-remote-1", result.provider_metadata.get("k8s_job_name"))
+        self.assertEqual("pod-remote-1", result.provider_metadata.get("k8s_pod_name"))
+        self.assertEqual("Complete", result.provider_metadata.get("k8s_terminal_reason"))
+
+    def test_kubernetes_executor_fails_when_remote_output_state_missing(self) -> None:
+        executor = KubernetesExecutor({})
+        executor._dispatch_via_kubernetes = (  # type: ignore[method-assign]
+            lambda **_kwargs: _KubernetesDispatchOutcome(
+                job_name="job-remote-2",
+                pod_name="pod-remote-2",
+                stdout="executor stdout",
+                stderr="",
+                startup_marker_seen=True,
+                executor_result={
+                    "status": "success",
+                    "routing_state": {"route_key": "next"},
+                },
+                terminal_reason="Complete",
+            )
+        )
+
+        result = executor.execute(_request(), lambda _request: ({"local": True}, {}))
+        self.assertEqual("failed", result.status)
+        self.assertEqual("execution_error", (result.error or {}).get("code"))
+        self.assertIn(
+            "missing output_state",
+            str((result.error or {}).get("message") or ""),
+        )
+        self.assertEqual("job-remote-2", result.run_metadata.get("k8s_job_name"))
+        self.assertEqual("pod-remote-2", result.run_metadata.get("k8s_pod_name"))
+        self.assertEqual("Complete", result.run_metadata.get("k8s_terminal_reason"))
 
 
 if __name__ == "__main__":

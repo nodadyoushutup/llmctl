@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -28,8 +29,8 @@ export default function RagSourceDetailPage() {
   const invalidId = !Number.isInteger(parsedSourceId) || parsedSourceId <= 0
 
   const [state, setState] = useState({ loading: !invalidId, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
-  const [actionInfo, setActionInfo] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
+  const [actionInfo, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { deleteChromaCollection, getChromaCollection } from '../lib/studioApi'
@@ -23,7 +24,7 @@ export default function ChromaCollectionDetailPage() {
   const missingName = collectionName.length === 0
 
   const [state, setState] = useState({ loading: !missingName, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
 
   const refresh = useCallback(async () => {
     if (missingName) {

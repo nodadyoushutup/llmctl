@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getGithubPullRequest, runGithubPullRequestCodeReview } from '../lib/studioApi'
@@ -37,8 +38,8 @@ export default function GithubPullRequestPage() {
 
   const invalidId = !Number.isInteger(parsedPrNumber) || parsedPrNumber <= 0
   const [state, setState] = useState({ loading: !invalidId, payload: null, error: '' })
-  const [actionError, setActionError] = useState('')
-  const [actionInfo, setActionInfo] = useState('')
+  const [actionError, setActionError] = useFlashState('error')
+  const [actionInfo, setActionInfo] = useFlashState('success')
 
   const refresh = useCallback(async () => {
     if (invalidId) {

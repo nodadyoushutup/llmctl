@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from unittest.mock import patch
+
+import psycopg
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
+
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
 
 from services.realtime_events import (
     build_event_envelope,
@@ -145,9 +154,13 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
         self.save_node_executor_settings = save_node_executor_settings
         self._tmp = tempfile.TemporaryDirectory()
         self._tmp_path = Path(self._tmp.name)
+        self._base_db_uri = os.environ["LLMCTL_STUDIO_DATABASE_URI"]
+        self._schema_name = f"realtime_stage6_{self._tmp_path.name}"
         self._orig_db_uri = self.Config.SQLALCHEMY_DATABASE_URI
-        self.Config.SQLALCHEMY_DATABASE_URI = (
-            f"sqlite:///{self._tmp_path / 'realtime-stage6.sqlite3'}"
+        self._create_schema(self._schema_name)
+        self.Config.SQLALCHEMY_DATABASE_URI = self._with_search_path(
+            self._base_db_uri,
+            self._schema_name,
         )
         self._dispose_engine()
         self.core_db.init_engine(self.Config.SQLALCHEMY_DATABASE_URI)
@@ -155,6 +168,7 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._dispose_engine()
+        self._drop_schema(self._schema_name)
         self.Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
         self._tmp.cleanup()
 
@@ -163,6 +177,43 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
             self.core_db._engine.dispose()
         self.core_db._engine = None
         self.core_db.SessionLocal = None
+
+    @staticmethod
+    def _as_psycopg_uri(database_uri: str) -> str:
+        if database_uri.startswith("postgresql+psycopg://"):
+            return "postgresql://" + database_uri.split("://", 1)[1]
+        return database_uri
+
+    @staticmethod
+    def _with_search_path(database_uri: str, schema_name: str) -> str:
+        parts = urlsplit(database_uri)
+        query_items = parse_qsl(parts.query, keep_blank_values=True)
+        updated_items: list[tuple[str, str]] = []
+        options_value = f"-csearch_path={schema_name}"
+        options_updated = False
+        for key, value in query_items:
+            if key == "options":
+                merged = value.strip()
+                if options_value not in merged:
+                    merged = f"{merged} {options_value}".strip()
+                updated_items.append((key, merged))
+                options_updated = True
+            else:
+                updated_items.append((key, value))
+        if not options_updated:
+            updated_items.append(("options", options_value))
+        query = urlencode(updated_items, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+    def _create_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+    def _drop_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
 
     def _create_simple_flowchart_run(self) -> tuple[int, int]:
         with self.session_scope() as session:
@@ -225,6 +276,9 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
             "selected_provider",
             "final_provider",
             "provider_dispatch_id",
+            "k8s_job_name",
+            "k8s_pod_name",
+            "k8s_terminal_reason",
             "workspace_identity",
             "dispatch_status",
             "fallback_attempted",
