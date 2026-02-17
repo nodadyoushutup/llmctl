@@ -443,7 +443,17 @@
         </summary>
         <div class="chat-session-content">
           <form method="post" action="{{ url_for('agents.update_chat_thread_route', thread_id=selected_thread.id) }}" class="chat-session-controls">
-            <input type="hidden" name="model_id" value="{{ selected_thread.model_id or '' }}" />
+            <label class="chat-control">
+              model
+              <select name="model_id">
+                <option value="">Default model</option>
+                {% for model in models %}
+                  <option value="{{ model.id }}" {% if selected_thread.model_id == model.id %}selected{% endif %}>
+                    {{ model.name }} ({{ model.provider }})
+                  </option>
+                {% endfor %}
+              </select>
+            </label>
             <label class="chat-control">
               complexity
               <select name="response_complexity">

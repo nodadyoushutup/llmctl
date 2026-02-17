@@ -8,8 +8,20 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
+from sqlalchemy import select
 
 from core.config import Config
+from core.db import session_scope
+from core.models import AgentTask
+from core.prompt_envelope import (
+    build_prompt_envelope,
+    parse_prompt_input,
+    serialize_prompt_envelope,
+)
+from core.task_kinds import (
+    RAG_QUICK_DELTA_TASK_KIND,
+    RAG_QUICK_INDEX_TASK_KIND,
+)
 from rag.domain import (
     RAG_REASON_RETRIEVAL_EXECUTION_FAILED,
     RAG_REASON_UNAVAILABLE_FOR_SELECTED_COLLECTIONS,
@@ -52,6 +64,7 @@ from rag.web.routes import (
     RAG_PAGE_SOURCES,
 )
 from services.integrations import load_integration_settings
+from services.tasks import run_quick_rag_task
 
 bp = Blueprint("rag", __name__)
 
@@ -70,6 +83,11 @@ BASE_SYSTEM_PROMPT = (
     "Use the provided context and the conversation history to answer. "
     "If context is empty, answer directly and be explicit about uncertainty."
 )
+QUICK_RAG_ACTIVE_STATUSES = {"queued", "running"}
+QUICK_RAG_TASK_KINDS = {
+    RAG_QUICK_INDEX_TASK_KIND,
+    RAG_QUICK_DELTA_TASK_KIND,
+}
 
 
 def _normalize_chat_response_style(value: str | None, default: str = "high") -> str:
@@ -210,6 +228,57 @@ def _parse_source_ids_csv(raw_ids: str | None) -> list[int]:
     return source_ids
 
 
+def _quick_rag_context_from_prompt(prompt: str | None) -> dict[str, Any]:
+    _user_request, payload = parse_prompt_input(prompt)
+    if not isinstance(payload, dict):
+        return {}
+    task_context = payload.get("task_context")
+    if not isinstance(task_context, dict):
+        return {}
+    quick_context = task_context.get("rag_quick_run")
+    if not isinstance(quick_context, dict):
+        return {}
+    return quick_context
+
+
+def _active_quick_rag_source_ids() -> set[int]:
+    with session_scope() as session:
+        tasks = (
+            session.execute(
+                select(AgentTask).where(
+                    AgentTask.kind.in_(tuple(QUICK_RAG_TASK_KINDS)),
+                    AgentTask.status.in_(tuple(QUICK_RAG_ACTIVE_STATUSES)),
+                )
+            )
+            .scalars()
+            .all()
+        )
+    source_ids: set[int] = set()
+    for task in tasks:
+        quick_context = _quick_rag_context_from_prompt(getattr(task, "prompt", None))
+        try:
+            source_id = int(quick_context.get("source_id") or 0)
+        except (TypeError, ValueError):
+            source_id = 0
+        if source_id > 0:
+            source_ids.add(source_id)
+    return source_ids
+
+
+def _normalize_quick_rag_mode(value: str | None) -> tuple[str, str]:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"delta", "delta_index"}:
+        return "delta", "delta_index"
+    return "fresh", "fresh_index"
+
+
+def _preferred_quick_rag_model_provider() -> str:
+    embed_provider = str(load_config().embed_provider or "").strip().lower()
+    if embed_provider == "gemini":
+        return "gemini"
+    return "codex"
+
+
 def _source_status_label(source: Any, *, has_active_job: bool) -> str:
     if has_active_job:
         return "Indexing"
@@ -336,9 +405,11 @@ def chat_page():
 @bp.get(RAG_PAGE_SOURCES)
 def sources_page():
     sources = list_sources(limit=None)
+    active_source_ids = _active_quick_rag_source_ids()
     return render_template(
         "rag/sources.html",
         sources=sources,
+        active_source_ids=active_source_ids,
         source_location=_source_location,
         source_schedule_text=_source_schedule_text,
         format_source_time=_format_source_time,
@@ -405,6 +476,8 @@ def source_detail_page(source_id: int):
     if not source:
         flash("Source not found.", "error")
         return redirect(url_for("rag.sources_page"))
+    active_source_ids = _active_quick_rag_source_ids()
+    has_active_job = source_id in active_source_ids
 
     file_types: list[dict[str, Any]] = []
     raw_types = getattr(source, "indexed_file_types", None)
@@ -421,6 +494,7 @@ def source_detail_page(source_id: int):
         "rag/source_detail.html",
         source=source,
         file_types=file_types,
+        has_active_job=has_active_job,
         source_location=_source_location,
         source_schedule_text=_source_schedule_text,
         format_source_time=_format_source_time,
@@ -512,19 +586,79 @@ def _start_source_quick_run_response(*, source_id: int, index_mode: str):
         flash(message, "error")
         return redirect(url_for("rag.sources_page"))
 
-    mode_text = "delta index" if str(index_mode).strip().lower() == "delta" else "index"
-    message = (
-        f"Quick source {mode_text} runs now execute through flowchart RAG nodes. "
-        "Use a flowchart run instead."
+    quick_mode, flowchart_mode = _normalize_quick_rag_mode(index_mode)
+    task_kind = (
+        RAG_QUICK_DELTA_TASK_KIND if quick_mode == "delta" else RAG_QUICK_INDEX_TASK_KIND
     )
+    mode_text = "delta index" if quick_mode == "delta" else "index"
+    active_source_ids = _active_quick_rag_source_ids()
+    if source_id in active_source_ids:
+        message = f"A quick {mode_text} run is already active for this source."
+        if _wants_json_response():
+            return {
+                "ok": False,
+                "error": message,
+                "source": _source_status_payload(source, has_active_job=True),
+            }, 409
+        flash(message, "warning")
+        return redirect(url_for("rag.source_detail_page", source_id=source_id))
+
+    quick_context = {
+        "source_id": int(source.id),
+        "source_name": str(source.name),
+        "collection": str(source.collection),
+        "mode": quick_mode,
+        "flowchart_mode": flowchart_mode,
+        "model_provider": _preferred_quick_rag_model_provider(),
+    }
+    prompt_payload = serialize_prompt_envelope(
+        build_prompt_envelope(
+            user_request=f"Quick RAG {mode_text} for source '{source.name}'.",
+            task_context={
+                "kind": task_kind,
+                "rag_quick_run": quick_context,
+            },
+            output_contract={"format": "json"},
+        )
+    )
+    with session_scope() as session:
+        task = AgentTask.create(
+            session,
+            status="queued",
+            kind=task_kind,
+            prompt=prompt_payload,
+        )
+        task_id = int(task.id)
+    try:
+        async_result = run_quick_rag_task.delay(task_id)
+    except Exception as exc:
+        now = datetime.now(timezone.utc)
+        with session_scope() as session:
+            task = session.get(AgentTask, task_id)
+            if task is not None:
+                task.status = "failed"
+                task.error = f"Failed to queue quick {mode_text} run: {exc}"
+                task.finished_at = now
+        message = f"Failed to queue quick {mode_text} run: {exc}"
+        if _wants_json_response():
+            return {"ok": False, "error": message}, 500
+        flash(message, "error")
+        return redirect(url_for("rag.source_detail_page", source_id=source_id))
+
+    with session_scope() as session:
+        task = session.get(AgentTask, task_id)
+        if task is not None:
+            task.celery_task_id = async_result.id
+
+    message = f"Queued quick {mode_text} run for {source.name}."
     if _wants_json_response():
         return {
-            "ok": False,
-            "deprecated": True,
-            "error": message,
-            "source": _source_status_payload(source, has_active_job=False),
-        }, 410
-    flash(message, "warning")
+            "ok": True,
+            "task_id": task_id,
+            "mode": quick_mode,
+            "source": _source_status_payload(source, has_active_job=True),
+        }, 202
+    flash(message, "success")
     return redirect(url_for("rag.source_detail_page", source_id=source_id))
 
 
@@ -542,6 +676,7 @@ def quick_delta_index_source_page(source_id: int):
 def api_source_status():
     source_ids = _parse_source_ids_csv(request.args.get("ids"))
     sources = list_sources(limit=None)
+    active_source_ids = _active_quick_rag_source_ids()
     source_by_id = {int(source.id): source for source in sources}
 
     if source_ids:
@@ -552,7 +687,7 @@ def api_source_status():
     payload = [
         _source_status_payload(
             source,
-            has_active_job=False,
+            has_active_job=int(source.id) in active_source_ids,
         )
         for source in selected_sources
     ]

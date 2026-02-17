@@ -1404,6 +1404,33 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         self.assertEqual("test-codex-key", env.get("OPENAI_API_KEY"))
         self.assertEqual("test-codex-key", env.get("CODEX_API_KEY"))
 
+    def test_run_llm_gemini_injects_api_key_env(self) -> None:
+        failed = subprocess.CompletedProcess(
+            args=["gemini"],
+            returncode=1,
+            stdout="",
+            stderr="unauthorized",
+        )
+
+        with patch.object(
+            studio_tasks, "_load_gemini_auth_key", return_value="test-gemini-key"
+        ), patch.object(
+            studio_tasks, "_ensure_gemini_mcp_servers", return_value=None
+        ), patch.object(
+            studio_tasks, "_run_llm_process", return_value=failed
+        ) as run_mock:
+            result = studio_tasks._run_llm(
+                provider="gemini",
+                prompt="hello",
+                mcp_configs={},
+                model_config={},
+            )
+
+        self.assertEqual(1, result.returncode)
+        env = run_mock.call_args.kwargs.get("env") or {}
+        self.assertEqual("test-gemini-key", env.get("GEMINI_API_KEY"))
+        self.assertEqual("test-gemini-key", env.get("GOOGLE_API_KEY"))
+
 
 class FlowchartStage9ApiTests(StudioDbTestCase):
     def setUp(self) -> None:

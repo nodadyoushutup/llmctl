@@ -24,15 +24,15 @@ class WebDeltaIndexTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_web_app_supports_index_modes(self) -> None:
-        self.assertIn("RAG_INDEX_MODE_DELTA", self.views_source)
-        self.assertIn('_normalize_index_mode(payload.get("mode"))', self.views_source)
-        self.assertIn('snapshot["started"] = started is not None', self.views_source)
+        self.assertIn("_normalize_quick_rag_mode", self.views_source)
+        self.assertIn('"delta_index"', self.views_source)
+        self.assertIn("run_quick_rag_task.delay(task_id)", self.views_source)
 
     def test_sources_templates_include_delta_actions(self) -> None:
-        self.assertIn('name="mode" value="delta"', self.sources_template)
-        self.assertIn('name="mode" value="delta"', self.source_detail_template)
-        self.assertIn("Delta index", self.sources_template)
-        self.assertIn("Delta index", self.source_detail_template)
+        self.assertIn("quick_delta_index_source_page", self.sources_template)
+        self.assertIn("quick_delta_index_source_page", self.source_detail_template)
+        self.assertIn("Delta index source", self.sources_template)
+        self.assertIn("Delta index source", self.source_detail_template)
 
 
 if __name__ == "__main__":

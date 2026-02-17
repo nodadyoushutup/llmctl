@@ -549,6 +549,24 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
         self.assertIn(b"Visible Thread", page.data)
         self.assertNotIn(b"Archived Thread", page.data)
 
+    def test_chat_page_session_controls_render_model_selector(self) -> None:
+        selected_model = self._create_model(name="Selected Session Model", provider="codex")
+        other_model = self._create_model(name="Other Session Model", provider="gemini")
+        thread = create_thread(title="Session model", model_id=selected_model.id)
+        thread_id = int(thread["id"])
+
+        page = self.client.get(f"/chat?thread_id={thread_id}")
+        self.assertEqual(200, page.status_code)
+        self.assertIn(b'<select name="model_id">', page.data)
+        self.assertIn(
+            f'value="{selected_model.id}" selected'.encode("utf-8"),
+            page.data,
+        )
+        self.assertIn(
+            f'value="{other_model.id}"'.encode("utf-8"),
+            page.data,
+        )
+
     def test_chat_page_sidebar_uses_settings_defaults_only(self) -> None:
         model = self._create_model(name="Sidebar Defaults Model")
         create_thread(title="Settings-driven thread", model_id=model.id)

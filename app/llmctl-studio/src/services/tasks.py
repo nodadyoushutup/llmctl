@@ -117,7 +117,11 @@ from rag.providers.adapters import (
 )
 from storage.script_storage import ensure_script_file
 from core.task_stages import TASK_STAGE_LABELS, TASK_STAGE_ORDER
-from core.task_kinds import is_quick_task_kind
+from core.task_kinds import (
+    RAG_QUICK_DELTA_TASK_KIND,
+    RAG_QUICK_INDEX_TASK_KIND,
+    is_quick_task_kind,
+)
 from core.quick_node import (
     build_quick_node_agent_profile,
     build_quick_node_system_contract,
@@ -156,6 +160,10 @@ INSTRUCTION_NATIVE_ENABLED_DEFAULTS: dict[str, bool] = {
 INSTRUCTION_FALLBACK_ENABLED_DEFAULTS: dict[str, bool] = {
     provider: True for provider in LLM_PROVIDERS
 }
+QUICK_RAG_TASK_KINDS = {
+    RAG_QUICK_INDEX_TASK_KIND,
+    RAG_QUICK_DELTA_TASK_KIND,
+}
 
 
 def _utcnow() -> datetime:
@@ -171,6 +179,35 @@ def _resolve_updated_at_version(value: datetime | None) -> str | None:
     else:
         timestamp = timestamp.astimezone(timezone.utc)
     return timestamp.isoformat()
+
+
+def _quick_rag_context_from_prompt(prompt: str | None) -> dict[str, Any]:
+    _user_request, payload = parse_prompt_input(prompt)
+    if not isinstance(payload, dict):
+        return {}
+    task_context = payload.get("task_context")
+    if not isinstance(task_context, dict):
+        return {}
+    quick_context = task_context.get("rag_quick_run")
+    if not isinstance(quick_context, dict):
+        return {}
+    return quick_context
+
+
+def _normalize_quick_rag_mode(value: Any) -> str | None:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"fresh", "index", RAG_FLOWCHART_MODE_FRESH_INDEX}:
+        return RAG_FLOWCHART_MODE_FRESH_INDEX
+    if cleaned in {"delta", RAG_FLOWCHART_MODE_DELTA_INDEX}:
+        return RAG_FLOWCHART_MODE_DELTA_INDEX
+    return None
+
+
+def _normalize_quick_rag_model_provider(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned == "gemini":
+        return "gemini"
+    return "codex"
 
 
 def _task_runtime_metadata(
@@ -3114,6 +3151,10 @@ def _run_llm(
         )
     elif provider == "gemini":
         env = dict(env or os.environ.copy())
+        gemini_api_key = _load_gemini_auth_key()
+        if gemini_api_key:
+            env["GEMINI_API_KEY"] = gemini_api_key
+            env["GOOGLE_API_KEY"] = gemini_api_key
         gemini_settings = _gemini_settings_from_model_config(model_config or {})
         _ensure_gemini_mcp_servers(mcp_configs, on_log=on_log, cwd=cwd, env=env)
         if gemini_settings.get("sandbox") is not None:
@@ -3430,6 +3471,106 @@ def run_agent(self, run_id: int) -> None:
                 task.celery_task_id = result.id
 
         time.sleep(poll_seconds)
+
+
+@celery_app.task(bind=True)
+def run_quick_rag_task(self, task_id: int) -> None:
+    init_engine(Config.SQLALCHEMY_DATABASE_URI)
+    init_db()
+
+    quick_context: dict[str, Any] = {}
+    with session_scope() as session:
+        task = session.get(AgentTask, task_id)
+        if task is None:
+            logger.warning("Quick RAG task %s not found", task_id)
+            return
+        if task.kind not in QUICK_RAG_TASK_KINDS:
+            logger.warning("Task %s is not a Quick RAG task (kind=%s)", task_id, task.kind)
+            return
+        if task.status not in {"queued", "running"}:
+            return
+        task.celery_task_id = self.request.id or task.celery_task_id
+        task.status = "running"
+        task.started_at = task.started_at or _utcnow()
+        quick_context = _quick_rag_context_from_prompt(task.prompt)
+        _emit_task_event(
+            "node.task.updated",
+            task=task,
+            payload={"transition": "started"},
+        )
+
+    mode = _normalize_quick_rag_mode(quick_context.get("mode"))
+    collection = str(quick_context.get("collection") or "").strip()
+    source_name = str(quick_context.get("source_name") or "").strip()
+    model_provider = _normalize_quick_rag_model_provider(
+        quick_context.get("model_provider")
+    )
+    task_error: str | None = None
+    output_payload: dict[str, Any] | None = None
+    if mode is None:
+        task_error = "Quick RAG mode is required."
+    elif not collection:
+        task_error = "Quick RAG collection is required."
+    else:
+        try:
+            index_summary = run_index_for_collections(
+                mode=mode,
+                collections=[collection],
+                model_provider=model_provider,
+            )
+            output_payload = {
+                "node_type": FLOWCHART_NODE_TYPE_RAG,
+                "answer": None,
+                "retrieval_context": [],
+                "retrieval_stats": {
+                    "provider": "chroma",
+                    "retrieved_count": 0,
+                    "top_k": 0,
+                    "source_count": int(index_summary.get("source_count") or 0),
+                    "total_files": int(index_summary.get("total_files") or 0),
+                    "total_chunks": int(index_summary.get("total_chunks") or 0),
+                },
+                "synthesis_error": None,
+                "mode": mode,
+                "collections": [collection],
+                "index_summary": index_summary,
+                "quick_rag": {
+                    "source_name": source_name,
+                    "collection": collection,
+                    "model_provider": model_provider,
+                },
+            }
+        except Exception as exc:
+            task_error = str(exc) or "Quick RAG run failed."
+
+    now = _utcnow()
+    with session_scope() as session:
+        task = session.get(AgentTask, task_id)
+        if task is None:
+            return
+        task.finished_at = now
+        if task_error:
+            task.status = "failed"
+            task.error = task_error
+            _emit_task_event(
+                "node.task.completed",
+                task=task,
+                payload={
+                    "terminal_status": "failed",
+                    "failure_message": task_error,
+                },
+            )
+            return
+        task.status = "succeeded"
+        task.error = None
+        task.output = _json_dumps(output_payload or {})
+        _emit_task_event(
+            "node.task.completed",
+            task=task,
+            payload={
+                "terminal_status": "succeeded",
+            },
+        )
 
 
 @celery_app.task(bind=True)

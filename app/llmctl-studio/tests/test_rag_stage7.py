@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from flask import Flask
@@ -140,29 +141,39 @@ class RagStage7ContractApiTests(StudioDbTestCase):
         self.assertIn("data-href=", html)
         self.assertNotIn("Index Jobs", html)
 
-    def test_quick_index_endpoint_is_decommissioned(self) -> None:
+    def test_quick_index_endpoint_queues_task(self) -> None:
         source = self._create_local_source("Quick Source")
-        response = self.client.post(
-            f"/rag/sources/{source.id}/quick-index",
-            headers={"Accept": "application/json"},
-        )
-        self.assertEqual(410, response.status_code)
+        with patch.object(
+            rag_views.run_quick_rag_task,
+            "delay",
+            return_value=SimpleNamespace(id="quick-rag-1"),
+        ):
+            response = self.client.post(
+                f"/rag/sources/{source.id}/quick-index",
+                headers={"Accept": "application/json"},
+            )
+        self.assertEqual(202, response.status_code)
         payload = response.get_json() or {}
-        self.assertFalse(payload.get("ok", True))
-        self.assertTrue(payload.get("deprecated"))
-        self.assertIn("flowchart RAG nodes", str(payload.get("error") or ""))
+        self.assertTrue(payload.get("ok"))
+        self.assertEqual("fresh", payload.get("mode"))
+        self.assertTrue(int(payload.get("task_id") or 0) > 0)
 
-    def test_quick_delta_endpoint_is_decommissioned(self) -> None:
+    def test_quick_delta_endpoint_queues_task(self) -> None:
         source = self._create_local_source("Quick Delta Source")
-        response = self.client.post(
-            f"/rag/sources/{source.id}/quick-delta-index",
-            headers={"Accept": "application/json"},
-        )
-        self.assertEqual(410, response.status_code)
+        with patch.object(
+            rag_views.run_quick_rag_task,
+            "delay",
+            return_value=SimpleNamespace(id="quick-rag-2"),
+        ):
+            response = self.client.post(
+                f"/rag/sources/{source.id}/quick-delta-index",
+                headers={"Accept": "application/json"},
+            )
+        self.assertEqual(202, response.status_code)
         payload = response.get_json() or {}
-        self.assertFalse(payload.get("ok", True))
-        self.assertTrue(payload.get("deprecated"))
-        self.assertIn("flowchart RAG nodes", str(payload.get("error") or ""))
+        self.assertTrue(payload.get("ok"))
+        self.assertEqual("delta", payload.get("mode"))
+        self.assertTrue(int(payload.get("task_id") or 0) > 0)
 
     def test_quick_index_endpoint_returns_404_for_missing_source(self) -> None:
         response = self.client.post(

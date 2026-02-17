@@ -36,6 +36,8 @@
             <th>Schedule</th>
             <th>Last Indexed</th>
             <th>Status</th>
+            <th class="table-actions-cell">Index</th>
+            <th class="table-actions-cell">Delta</th>
             <th class="table-actions-cell">Edit</th>
             <th class="table-actions-cell">Delete</th>
           </tr>
@@ -43,7 +45,9 @@
         <tbody>
           {% for source in sources %}
             {% set source_status = "Not indexed" %}
-            {% if source.last_error %}
+            {% if source.id in active_source_ids %}
+              {% set source_status = "Indexing" %}
+            {% elif source.last_error %}
               {% set source_status = "Error" %}
             {% elif source.last_indexed_at %}
               {% set source_status = "Indexed" %}
@@ -64,6 +68,32 @@
                 {{ format_source_time(source.last_indexed_at) }}
               </td>
               <td data-rag-source-status data-source-id="{{ source.id }}">{{ source_status }}</td>
+              <td class="table-actions-cell">
+                <form method="post" action="{{ url_for('rag.quick_index_source_page', source_id=source.id) }}">
+                  <button
+                    type="submit"
+                    class="icon-button"
+                    aria-label="Index source"
+                    title="Index source"
+                    {% if source.id in active_source_ids %}disabled{% endif %}
+                  >
+                    <i class="fa-solid fa-play"></i>
+                  </button>
+                </form>
+              </td>
+              <td class="table-actions-cell">
+                <form method="post" action="{{ url_for('rag.quick_delta_index_source_page', source_id=source.id) }}">
+                  <button
+                    type="submit"
+                    class="icon-button"
+                    aria-label="Delta index source"
+                    title="Delta index source"
+                    {% if source.id in active_source_ids %}disabled{% endif %}
+                  >
+                    <i class="fa-solid fa-rotate-right"></i>
+                  </button>
+                </form>
+              </td>
               <td class="table-actions-cell">
                 <a
                   class="icon-button"

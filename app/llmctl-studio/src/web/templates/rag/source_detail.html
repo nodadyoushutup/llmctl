@@ -2,6 +2,28 @@
 
 {% block action_header %}
   <div class="action-header-actions">
+    <form method="post" action="{{ url_for('rag.quick_index_source_page', source_id=source.id) }}">
+      <button
+        class="icon-button"
+        type="submit"
+        aria-label="Index source"
+        title="Index source"
+        {% if has_active_job %}disabled{% endif %}
+      >
+        <i class="fa-solid fa-play"></i>
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('rag.quick_delta_index_source_page', source_id=source.id) }}">
+      <button
+        class="icon-button"
+        type="submit"
+        aria-label="Delta index source"
+        title="Delta index source"
+        {% if has_active_job %}disabled{% endif %}
+      >
+        <i class="fa-solid fa-rotate-right"></i>
+      </button>
+    </form>
     <a
       class="icon-button"
       href="{{ url_for('rag.edit_source_page', source_id=source.id) }}"
@@ -30,7 +52,9 @@
 {% block content %}
 <section class="card">
   {% set source_status = "Not indexed" %}
-  {% if source.last_error %}
+  {% if has_active_job %}
+    {% set source_status = "Indexing" %}
+  {% elif source.last_error %}
     {% set source_status = "Error" %}
   {% elif source.last_indexed_at %}
     {% set source_status = "Indexed" %}

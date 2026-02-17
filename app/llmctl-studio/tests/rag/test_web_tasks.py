@@ -23,17 +23,21 @@ class WebTaskProgressTests(unittest.TestCase):
             STUDIO_SRC / "web" / "static" / "rag" / "app.js"
         ).read_text(encoding="utf-8")
 
-    def test_quick_run_routes_are_decommissioned(self) -> None:
-        self.assertIn("Quick source {mode_text} runs now execute through flowchart RAG nodes.", self.views_source)
-        self.assertIn('"deprecated": True', self.views_source)
-        self.assertIn("}, 410", self.views_source)
+    def test_quick_run_routes_queue_quick_rag_tasks(self) -> None:
+        self.assertIn("run_quick_rag_task.delay(task_id)", self.views_source)
+        self.assertIn("A quick {mode_text} run is already active for this source.", self.views_source)
+        self.assertIn("}, 202", self.views_source)
+        self.assertNotIn('"deprecated": True', self.views_source)
+        self.assertNotIn("}, 410", self.views_source)
 
-    def test_source_status_api_forces_inactive_jobs(self) -> None:
-        self.assertIn("has_active_job=False", self.views_source)
+    def test_source_status_api_reflects_active_quick_runs(self) -> None:
+        self.assertIn("active_source_ids = _active_quick_rag_source_ids()", self.views_source)
+        self.assertIn("has_active_job=int(source.id) in active_source_ids", self.views_source)
         self.assertIn("return {\"sources\": payload}", self.views_source)
 
-    def test_legacy_index_job_ui_is_removed(self) -> None:
-        self.assertNotIn("data-rag-quick-run", self.sources_template)
+    def test_sources_ui_exposes_quick_run_actions_without_legacy_jobs(self) -> None:
+        self.assertIn("quick_index_source_page", self.sources_template)
+        self.assertIn("quick_delta_index_source_page", self.sources_template)
         self.assertNotIn("rag-job-detail-progress", self.app_js_source)
         self.assertNotIn("index_jobs_page", self.views_source)
 

@@ -43,20 +43,20 @@ class WebSourceRoutesTests(unittest.TestCase):
     def test_sources_page_uses_row_link_and_quick_run_actions(self) -> None:
         self.assertIn("table-row-link", self.sources_template)
         self.assertIn("data-href", self.sources_template)
-        self.assertNotIn("data-rag-quick-run", self.sources_template)
-        self.assertNotIn('data-rag-quick-run-mode="fresh"', self.sources_template)
-        self.assertNotIn('data-rag-quick-run-mode="delta"', self.sources_template)
-        self.assertNotIn("index_source_page", self.sources_template)
+        self.assertIn("quick_index_source_page", self.sources_template)
+        self.assertIn("quick_delta_index_source_page", self.sources_template)
+        self.assertIn("Index source", self.sources_template)
+        self.assertIn("Delta index source", self.sources_template)
         self.assertNotIn("pause_source_page", self.sources_template)
         self.assertNotIn("resume_source_page", self.sources_template)
         self.assertNotIn("cancel_source_page", self.sources_template)
 
     def test_source_detail_uses_quick_run_actions_and_no_legacy_links(self) -> None:
-        self.assertNotIn("data-rag-quick-run", self.source_detail_template)
-        self.assertNotIn('data-rag-quick-run-mode="fresh"', self.source_detail_template)
-        self.assertNotIn('data-rag-quick-run-mode="delta"', self.source_detail_template)
+        self.assertIn("quick_index_source_page", self.source_detail_template)
+        self.assertIn("quick_delta_index_source_page", self.source_detail_template)
+        self.assertIn("Index source", self.source_detail_template)
+        self.assertIn("Delta index source", self.source_detail_template)
         self.assertNotIn("index_jobs_page", self.source_detail_template)
-        self.assertNotIn("index_source_page", self.source_detail_template)
 
     def test_contract_routes_use_contract_prefix(self) -> None:
         self.assertIn('RAG_API_CONTRACT_PREFIX = f"{RAG_API_ROUTE_PREFIX}/contract"', self.routes_source)
