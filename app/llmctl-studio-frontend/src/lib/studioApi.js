@@ -156,3 +156,117 @@ export function detachAgentSkill(agentId, skillId) {
     method: 'POST',
   })
 }
+
+function appendQuery(path, params) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value == null || value === '') {
+      continue
+    }
+    query.set(key, String(value))
+  }
+  const encoded = query.toString()
+  return encoded ? `${path}?${encoded}` : path
+}
+
+export function getRuns({ page = 1, perPage = 10 } = {}) {
+  return requestJson(
+    appendQuery('/runs', {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 10,
+    }),
+  )
+}
+
+export function getRunMeta({ agentId = null } = {}) {
+  return requestJson(appendQuery('/runs/new', { agent_id: agentId }))
+}
+
+export function getRunEdit(runId) {
+  const parsedRunId = parsePositiveId(runId, 'runId')
+  return requestJson(`/runs/${parsedRunId}/edit`)
+}
+
+export function deleteRun(runId) {
+  const parsedRunId = parsePositiveId(runId, 'runId')
+  return requestJson(`/runs/${parsedRunId}/delete`, { method: 'POST' })
+}
+
+export function getNodes({
+  page = 1,
+  perPage = 10,
+  agentId = '',
+  nodeType = '',
+  status = '',
+} = {}) {
+  return requestJson(
+    appendQuery('/nodes', {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 10,
+      agent_id: agentId,
+      node_type: nodeType,
+      status,
+    }),
+  )
+}
+
+export function getNode(nodeId) {
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/nodes/${parsedNodeId}`)
+}
+
+export function getNodeMeta() {
+  return requestJson('/nodes/new')
+}
+
+export function createNode({
+  agentId,
+  prompt,
+  integrationKeys = [],
+  scriptIdsByType = null,
+  scriptIds = [],
+} = {}) {
+  return requestJson('/nodes/new', {
+    method: 'POST',
+    body: {
+      agent_id: agentId,
+      prompt,
+      integration_keys: integrationKeys,
+      script_ids_by_type: scriptIdsByType,
+      script_ids: scriptIds,
+    },
+  })
+}
+
+export function cancelNode(nodeId) {
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/nodes/${parsedNodeId}/cancel`, { method: 'POST' })
+}
+
+export function deleteNode(nodeId) {
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/nodes/${parsedNodeId}/delete`, { method: 'POST' })
+}
+
+export function getQuickTaskMeta() {
+  return requestJson('/quick')
+}
+
+export function createQuickTask({
+  prompt,
+  agentId = null,
+  modelId = null,
+  mcpServerIds = [],
+  integrationKeys = [],
+} = {}) {
+  return requestJson('/quick', {
+    method: 'POST',
+    body: {
+      prompt,
+      agent_id: agentId,
+      model_id: modelId,
+      mcp_server_ids: mcpServerIds,
+      integration_keys: integrationKeys,
+    },
+  })
+}

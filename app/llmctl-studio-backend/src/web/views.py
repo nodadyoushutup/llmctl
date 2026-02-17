@@ -5772,6 +5772,22 @@ def _agent_api_request() -> bool:
     return _request_path_uses_api_prefix() or request.is_json
 
 
+def _nodes_wants_json() -> bool:
+    if _request_path_uses_api_prefix():
+        return True
+    if (request.args.get("format") or "").strip().lower() == "json":
+        return True
+    accepted = request.accept_mimetypes
+    return (
+        accepted["application/json"] > 0
+        and accepted["application/json"] >= accepted["text/html"]
+    )
+
+
+def _stage3_api_request() -> bool:
+    return _request_path_uses_api_prefix() or request.is_json
+
+
 def _flowchart_wants_json() -> bool:
     if _request_path_uses_api_prefix():
         return True
@@ -6059,6 +6075,51 @@ def _serialize_run_task(task: AgentTask) -> dict[str, object]:
         "status": task.status,
         "started_at": _human_time(task.started_at),
         "finished_at": _human_time(task.finished_at),
+        **metadata,
+    }
+
+
+def _serialize_run_list_item(run: Run) -> dict[str, object]:
+    agent = run.agent
+    return {
+        "id": run.id,
+        "name": run.name or (f"Autorun for {agent.name}" if agent is not None else f"Autorun {run.id}"),
+        "agent_id": run.agent_id,
+        "agent_name": agent.name if agent is not None else "",
+        "status": run.status,
+        "task_id": run.task_id,
+        "last_run_task_id": run.last_run_task_id,
+        "run_max_loops": run.run_max_loops,
+        "run_end_requested": bool(run.run_end_requested),
+        "created_at": _human_time(run.created_at),
+        "last_started_at": _human_time(run.last_started_at),
+        "last_stopped_at": _human_time(run.last_stopped_at),
+        "updated_at": _human_time(run.updated_at),
+    }
+
+
+def _serialize_node_list_item(
+    task: AgentTask,
+    *,
+    agent_name: str = "",
+    node_type: str | None = None,
+    node_name: str = "",
+) -> dict[str, object]:
+    metadata = _serialize_node_executor_metadata(task)
+    return {
+        "id": task.id,
+        "agent_id": task.agent_id,
+        "agent_name": agent_name,
+        "node_type": node_type or "",
+        "node_name": node_name or "-",
+        "status": task.status,
+        "kind": task.kind or "",
+        "run_task_id": task.run_task_id,
+        "celery_task_id": task.celery_task_id,
+        "started_at": _human_time(task.started_at),
+        "finished_at": _human_time(task.finished_at),
+        "created_at": _human_time(task.created_at),
+        "updated_at": _human_time(task.updated_at),
         **metadata,
     }
 
@@ -7571,6 +7632,11 @@ def delete_agent(agent_id: int):
 
 @bp.post("/runs/<int:run_id>/start")
 def start_run(run_id: int):
+    if _stage3_api_request():
+        return {
+            "error": "Autoruns are managed from the agent.",
+            "reason_code": "AGENT_MANAGED_AUTORUN",
+        }, 409
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -7582,6 +7648,11 @@ def start_run(run_id: int):
 
 @bp.post("/runs/<int:run_id>/cancel")
 def cancel_run(run_id: int):
+    if _stage3_api_request():
+        return {
+            "error": "Autoruns are managed from the agent.",
+            "reason_code": "AGENT_MANAGED_AUTORUN",
+        }, 409
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -7593,6 +7664,11 @@ def cancel_run(run_id: int):
 
 @bp.post("/runs/<int:run_id>/end")
 def end_run(run_id: int):
+    if _stage3_api_request():
+        return {
+            "error": "Autoruns are managed from the agent.",
+            "reason_code": "AGENT_MANAGED_AUTORUN",
+        }, 409
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -7604,6 +7680,7 @@ def end_run(run_id: int):
 
 @bp.post("/runs/<int:run_id>/delete")
 def delete_run(run_id: int):
+    is_api_request = _stage3_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.runs")
     )
@@ -7612,6 +7689,8 @@ def delete_run(run_id: int):
         if run is None:
             abort(404)
         if run.status in RUN_ACTIVE_STATUSES:
+            if is_api_request:
+                return {"error": "Disable autorun before deleting."}, 409
             flash("Disable autorun before deleting.", "error")
             return redirect(next_url)
         session.execute(
@@ -7620,6 +7699,8 @@ def delete_run(run_id: int):
             .values(run_id=None)
         )
         session.delete(run)
+    if is_api_request:
+        return {"ok": True}
     flash("Autorun deleted.", "success")
     return redirect(next_url)
 
@@ -7632,6 +7713,12 @@ def new_run():
     selected_agent: int | None = None
     if selected_agent_id.isdigit():
         selected_agent = int(selected_agent_id)
+    if _run_wants_json():
+        return {
+            "message": "Autoruns are created when you enable autorun on an agent.",
+            "selected_agent_id": selected_agent,
+            "agents": [_serialize_agent_list_item(agent) for agent in agents],
+        }
     return render_template(
         "run_new.html",
         agents=agents,
@@ -7779,6 +7866,15 @@ def edit_run(run_id: int):
             abort(404)
     run_max_loops = run.run_max_loops or 0
     run_is_forever = run_max_loops < 1
+    if _run_wants_json():
+        return {
+            "message": "Autoruns are managed from the agent.",
+            "run": _serialize_run_list_item(run),
+            "agent": _serialize_agent_list_item(agent),
+            "agents": [_serialize_agent_list_item(item) for item in agents],
+            "run_max_loops": run_max_loops,
+            "run_is_forever": run_is_forever,
+        }
     return render_template(
         "run_edit.html",
         run=run,
@@ -7794,6 +7890,11 @@ def edit_run(run_id: int):
 
 @bp.post("/runs/<int:run_id>")
 def update_run(run_id: int):
+    if _stage3_api_request():
+        return {
+            "error": "Autoruns are managed from the agent.",
+            "reason_code": "AGENT_MANAGED_AUTORUN",
+        }, 409
     with session_scope() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -7805,6 +7906,11 @@ def update_run(run_id: int):
 
 @bp.post("/runs")
 def create_run():
+    if _stage3_api_request():
+        return {
+            "error": "Autoruns are created automatically when you enable autorun on an agent.",
+            "reason_code": "AGENT_MANAGED_AUTORUN",
+        }, 409
     flash("Autoruns are created automatically when you enable autorun on an agent.", "info")
     return redirect(url_for("agents.list_agents"))
 
@@ -7822,6 +7928,18 @@ def runs():
     current_url = request.full_path
     if current_url.endswith("?"):
         current_url = current_url[:-1]
+    if _run_wants_json():
+        return {
+            "runs": [_serialize_run_list_item(run) for run in runs],
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total_pages": total_pages,
+                "total_runs": total_runs,
+                "per_page_options": list(RUNS_PER_PAGE_OPTIONS),
+                "items": pagination_items,
+            },
+        }
     return render_template(
         "runs.html",
         runs=runs,
@@ -7853,6 +7971,29 @@ def quick_task():
     ]
     _, summary = _agent_rollup(agents)
     default_model_id = _quick_node_default_model_id(models)
+    if _nodes_wants_json():
+        return {
+            "agents": [_serialize_agent_list_item(agent) for agent in agents],
+            "models": [
+                {
+                    "id": model.id,
+                    "name": model.name,
+                    "provider": model.provider,
+                }
+                for model in models
+            ],
+            "mcp_servers": [
+                {
+                    "id": server.id,
+                    "name": server.name,
+                    "server_key": server.server_key,
+                }
+                for server in mcp_servers
+            ],
+            "integration_options": integration_options,
+            "selected_integration_keys": default_selected_integration_keys,
+            "default_model_id": default_model_id,
+        }
     return render_template(
         "quick_task.html",
         agents=agents,
@@ -8086,20 +8227,50 @@ def delete_chat_thread_route(thread_id: int):
 
 @bp.post("/quick")
 def create_quick_task():
-    agent_id_raw = request.form.get("agent_id", "").strip()
-    model_id_raw = request.form.get("model_id", "").strip()
-    mcp_server_ids_raw = [
-        value.strip() for value in request.form.getlist("mcp_server_ids")
-    ]
-    selected_integration_keys, integration_error = _parse_node_integration_selection()
-    prompt = request.form.get("prompt", "").strip()
-    uploads = request.files.getlist("attachments")
+    is_api_request = _stage3_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+
+    def _quick_error(message: str, status_code: int = 400):
+        if is_api_request:
+            return {"error": message}, status_code
+        flash(message, "error")
+        return redirect(url_for("agents.quick_task"))
+
+    if is_api_request:
+        agent_id_raw = str(payload.get("agent_id") or "").strip()
+        model_id_raw = str(payload.get("model_id") or "").strip()
+        mcp_raw = payload.get("mcp_server_ids")
+        mcp_server_ids_raw = []
+        if isinstance(mcp_raw, list):
+            mcp_server_ids_raw = [str(value).strip() for value in mcp_raw]
+        elif mcp_raw not in (None, ""):
+            return _quick_error("mcp_server_ids must be an array.")
+        integration_raw = payload.get("integration_keys")
+        if integration_raw is None:
+            integration_raw = []
+        if not isinstance(integration_raw, list):
+            return _quick_error("integration_keys must be an array.")
+        selected_integration_keys, invalid_keys = validate_task_integration_keys(
+            [str(value).strip() for value in integration_raw]
+        )
+        integration_error = "Integration selection is invalid." if invalid_keys else None
+        prompt = str(payload.get("prompt") or "").strip()
+        uploads = []
+    else:
+        agent_id_raw = request.form.get("agent_id", "").strip()
+        model_id_raw = request.form.get("model_id", "").strip()
+        mcp_server_ids_raw = [
+            value.strip() for value in request.form.getlist("mcp_server_ids")
+        ]
+        selected_integration_keys, integration_error = _parse_node_integration_selection()
+        prompt = request.form.get("prompt", "").strip()
+        uploads = request.files.getlist("attachments")
     if not prompt:
-        flash("Prompt is required.", "error")
-        return redirect(url_for("agents.quick_task"))
+        return _quick_error("Prompt is required.")
     if integration_error:
-        flash(integration_error, "error")
-        return redirect(url_for("agents.quick_task"))
+        return _quick_error(integration_error)
 
     try:
         with session_scope() as session:
@@ -8109,8 +8280,7 @@ def create_quick_task():
                 .all()
             )
             if not models:
-                flash("Create at least one model before sending a quick node.", "error")
-                return redirect(url_for("agents.quick_task"))
+                return _quick_error("Create at least one model before sending a quick node.", 409)
             model_ids = {model.id for model in models}
             selected_model_id = _coerce_optional_int(
                 model_id_raw,
@@ -8120,11 +8290,9 @@ def create_quick_task():
             if selected_model_id is None:
                 selected_model_id = _quick_node_default_model_id(models)
             if selected_model_id is None:
-                flash("Model is required.", "error")
-                return redirect(url_for("agents.quick_task"))
+                return _quick_error("Model is required.")
             if selected_model_id not in model_ids:
-                flash("Select a valid model.", "error")
-                return redirect(url_for("agents.quick_task"))
+                return _quick_error("Select a valid model.")
             agent_id: int | None = None
             agent: Agent | None = None
             if agent_id_raw:
@@ -8134,12 +8302,10 @@ def create_quick_task():
                     minimum=1,
                 )
                 if agent_id is None:
-                    flash("Select a valid agent.", "error")
-                    return redirect(url_for("agents.quick_task"))
+                    return _quick_error("Select a valid agent.")
                 agent = session.get(Agent, agent_id)
                 if agent is None:
-                    flash("Agent not found.", "error")
-                    return redirect(url_for("agents.quick_task"))
+                    return _quick_error("Agent not found.", 404)
             selected_mcp_ids: list[int] = []
             for raw_id in mcp_server_ids_raw:
                 if not raw_id:
@@ -8150,8 +8316,7 @@ def create_quick_task():
                     minimum=1,
                 )
                 if parsed_id is None:
-                    flash("Invalid MCP server selection.", "error")
-                    return redirect(url_for("agents.quick_task"))
+                    return _quick_error("Invalid MCP server selection.")
                 if parsed_id not in selected_mcp_ids:
                     selected_mcp_ids.append(parsed_id)
             selected_mcp_servers: list[MCPServer] = []
@@ -8164,8 +8329,7 @@ def create_quick_task():
                     .all()
                 )
                 if len(selected_mcp_servers) != len(selected_mcp_ids):
-                    flash("One or more MCP servers were not found.", "error")
-                    return redirect(url_for("agents.quick_task"))
+                    return _quick_error("One or more MCP servers were not found.", 404)
                 mcp_by_id = {server.id: server for server in selected_mcp_servers}
                 selected_mcp_servers = [
                     mcp_by_id[mcp_id] for mcp_id in selected_mcp_ids
@@ -8202,12 +8366,10 @@ def create_quick_task():
             _attach_attachments(task, attachments)
             task_id = task.id
     except ValueError as exc:
-        flash(str(exc) or "Invalid quick node configuration.", "error")
-        return redirect(url_for("agents.quick_task"))
+        return _quick_error(str(exc) or "Invalid quick node configuration.")
     except OSError as exc:
         logger.exception("Failed to save quick node attachments")
-        flash(str(exc) or "Failed to save attachments.", "error")
-        return redirect(url_for("agents.quick_task"))
+        return _quick_error(str(exc) or "Failed to save attachments.")
 
     celery_task = run_agent_task.delay(task_id)
 
@@ -8216,6 +8378,8 @@ def create_quick_task():
         if task is not None:
             task.celery_task_id = celery_task.id
 
+    if is_api_request:
+        return {"ok": True, "task_id": task_id, "celery_task_id": celery_task.id}, 201
     flash(f"Quick node {task_id} queued.", "success")
     return redirect(url_for("agents.view_node", task_id=task_id))
 
@@ -8548,6 +8712,37 @@ def list_nodes():
     current_url = request.full_path
     if current_url.endswith("?"):
         current_url = current_url[:-1]
+    if _nodes_wants_json():
+        task_payload = [
+            _serialize_node_list_item(
+                task,
+                agent_name=str(agents_by_id.get(task.agent_id) or ""),
+                node_type=task_node_types.get(task.id),
+                node_name=task_node_names.get(task.id, "-"),
+            )
+            for task in tasks
+        ]
+        return {
+            "tasks": task_payload,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total_pages": total_pages,
+                "total_tasks": total_tasks,
+                "per_page_options": list(TASKS_PER_PAGE_OPTIONS),
+                "items": pagination_items,
+            },
+            "filter_options": {
+                "agent": agent_filter_options,
+                "node_type": node_type_options,
+                "status": task_status_options,
+            },
+            "filters": {
+                "agent_id": agent_filter,
+                "node_type": node_type_filter,
+                "status": status_filter,
+            },
+        }
     return render_template(
         "tasks.html",
         tasks=tasks,
@@ -8632,6 +8827,74 @@ def view_node(task_id: int):
                 for key in sorted(selected_integration_keys)
                 if key in TASK_INTEGRATION_LABELS
             ]
+    if _nodes_wants_json():
+        return {
+            "task": {
+                "id": task.id,
+                "status": task.status,
+                "kind": task.kind,
+                "agent_id": task.agent_id,
+                "task_template_id": task.task_template_id,
+                "model_id": task.model_id,
+                "run_task_id": task.run_task_id,
+                "celery_task_id": task.celery_task_id,
+                "created_at": _human_time(task.created_at),
+                "started_at": _human_time(task.started_at),
+                "finished_at": _human_time(task.finished_at),
+                "current_stage": task.current_stage or "",
+                "error": task.error or "",
+                "output": task_output,
+            },
+            "agent": (
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                }
+                if agent is not None
+                else None
+            ),
+            "template": (
+                {
+                    "id": template.id,
+                    "name": template.name,
+                }
+                if template is not None
+                else None
+            ),
+            "prompt_text": prompt_text,
+            "prompt_json": prompt_json,
+            "stage_entries": stage_entries,
+            "selected_integration_labels": selected_integration_labels,
+            "task_integrations_legacy_default": task_integrations_legacy_default,
+            "scripts": [
+                {
+                    "id": script.id,
+                    "file_name": script.file_name,
+                    "script_type": script.script_type,
+                }
+                for script in task.scripts
+            ],
+            "attachments": [
+                {
+                    "id": attachment.id,
+                    "file_name": attachment.file_name,
+                    "file_path": attachment.file_path,
+                    "content_type": attachment.content_type,
+                }
+                for attachment in task.attachments
+            ],
+            "mcp_servers": [
+                {
+                    "id": server.id,
+                    "name": server.name,
+                    "server_key": server.server_key,
+                }
+                for server in task.mcp_servers
+            ],
+            "quick_context": _quick_rag_task_context(task),
+            "is_quick_task": is_quick_task_kind(task.kind),
+            "is_quick_rag_task": is_quick_rag_task_kind(task.kind),
+        }
     return render_template(
         "task_detail.html",
         task=task,
@@ -8714,6 +8977,7 @@ def node_status(task_id: int):
 
 @bp.post("/nodes/<int:task_id>/cancel", endpoint="cancel_node")
 def cancel_node(task_id: int):
+    is_api_request = _stage3_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_nodes")
     )
@@ -8722,6 +8986,8 @@ def cancel_node(task_id: int):
         if task is None:
             abort(404)
         if task.status not in {"queued", "running"}:
+            if is_api_request:
+                return {"ok": True, "already_stopped": True}
             flash("Node is not running.", "info")
             return redirect(redirect_target)
         if task.celery_task_id and Config.CELERY_REVOKE_ON_STOP:
@@ -8731,12 +8997,15 @@ def cancel_node(task_id: int):
         task.status = "canceled"
         task.error = "Canceled by user."
         task.finished_at = utcnow()
+    if is_api_request:
+        return {"ok": True, "already_stopped": False}
     flash("Node cancel requested.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/nodes/<int:task_id>/delete", endpoint="delete_node")
 def delete_node(task_id: int):
+    is_api_request = _stage3_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_nodes")
     )
@@ -8750,6 +9019,8 @@ def delete_node(task_id: int):
                     task.celery_task_id, terminate=True, signal="SIGTERM"
                 )
         session.delete(task)
+    if is_api_request:
+        return {"ok": True}
     flash("Node deleted.", "success")
     return redirect(next_url)
 
@@ -8767,6 +9038,26 @@ def new_node():
         for option in integration_options
         if bool(option.get("connected"))
     ]
+    if _nodes_wants_json():
+        script_options = [
+            {
+                "id": script.id,
+                "file_name": script.file_name,
+                "script_type": script.script_type,
+            }
+            for script in scripts
+        ]
+        return {
+            "agents": [_serialize_agent_list_item(agent) for agent in agents],
+            "scripts": script_options,
+            "script_type_fields": SCRIPT_TYPE_FIELDS,
+            "script_type_choices": [
+                {"value": value, "label": label}
+                for value, label in SCRIPT_TYPE_WRITE_CHOICES
+            ],
+            "integration_options": integration_options,
+            "selected_integration_keys": default_selected_integration_keys,
+        }
     return render_template(
         "new_task.html",
         agents=agents,
@@ -8784,43 +9075,92 @@ def new_node():
 
 @bp.post("/nodes/new", endpoint="create_node")
 def create_node():
-    agent_id_raw = request.form.get("agent_id", "").strip()
-    prompt = request.form.get("prompt", "").strip()
-    uploads = request.files.getlist("attachments")
-    script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
-    selected_integration_keys, integration_error = _parse_node_integration_selection()
-    if not agent_id_raw:
-        flash("Select an agent.", "error")
+    is_api_request = _stage3_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+
+    def _node_error(message: str, status_code: int = 400):
+        if is_api_request:
+            return {"error": message}, status_code
+        flash(message, "error")
         return redirect(url_for("agents.new_node"))
+
+    if is_api_request:
+        agent_id_raw = str(payload.get("agent_id") or "").strip()
+        prompt = str(payload.get("prompt") or "").strip()
+        uploads = []
+        script_ids_by_type = {script_type: [] for script_type in SCRIPT_TYPE_FIELDS}
+        raw_script_map = payload.get("script_ids_by_type")
+        if raw_script_map is not None:
+            if not isinstance(raw_script_map, dict):
+                return _node_error("script_ids_by_type must be an object.")
+            for script_type in SCRIPT_TYPE_FIELDS:
+                raw_values = raw_script_map.get(script_type) or []
+                if not isinstance(raw_values, list):
+                    return _node_error("Script selection is invalid.")
+                parsed_values: list[int] = []
+                for raw_value in raw_values:
+                    try:
+                        parsed = _coerce_optional_int(raw_value, field_name="script_id", minimum=1)
+                    except ValueError:
+                        return _node_error("Script selection is invalid.")
+                    if parsed is None:
+                        continue
+                    parsed_values.append(parsed)
+                script_ids_by_type[script_type] = parsed_values
+        raw_legacy_ids = payload.get("script_ids") or []
+        if not isinstance(raw_legacy_ids, list):
+            return _node_error("script_ids must be an array.")
+        legacy_ids: list[int] = []
+        for raw_value in raw_legacy_ids:
+            try:
+                parsed = _coerce_optional_int(raw_value, field_name="script_id", minimum=1)
+            except ValueError:
+                return _node_error("Script selection is invalid.")
+            if parsed is None:
+                continue
+            legacy_ids.append(parsed)
+        script_error = None
+        raw_integrations = payload.get("integration_keys") or []
+        if not isinstance(raw_integrations, list):
+            return _node_error("integration_keys must be an array.")
+        selected_integration_keys, invalid_keys = validate_task_integration_keys(
+            [str(value).strip() for value in raw_integrations]
+        )
+        integration_error = "Integration selection is invalid." if invalid_keys else None
+    else:
+        agent_id_raw = request.form.get("agent_id", "").strip()
+        prompt = request.form.get("prompt", "").strip()
+        uploads = request.files.getlist("attachments")
+        script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
+        selected_integration_keys, integration_error = _parse_node_integration_selection()
+
+    if not agent_id_raw:
+        return _node_error("Select an agent.")
     try:
         agent_id = int(agent_id_raw)
     except ValueError:
-        flash("Select a valid agent.", "error")
-        return redirect(url_for("agents.new_node"))
+        return _node_error("Select a valid agent.")
     if not prompt:
-        flash("Prompt is required.", "error")
-        return redirect(url_for("agents.new_node"))
+        return _node_error("Prompt is required.")
     if script_error:
-        flash(script_error, "error")
-        return redirect(url_for("agents.new_node"))
+        return _node_error(script_error)
     if integration_error:
-        flash(integration_error, "error")
-        return redirect(url_for("agents.new_node"))
+        return _node_error(integration_error)
 
     try:
         with session_scope() as session:
             agent = session.get(Agent, agent_id)
             if agent is None:
-                flash("Agent not found.", "error")
-                return redirect(url_for("agents.new_node"))
+                return _node_error("Agent not found.", 404)
             script_ids_by_type, script_error = _resolve_script_selection(
                 session,
                 script_ids_by_type,
                 legacy_ids,
             )
             if script_error:
-                flash(script_error, "error")
-                return redirect(url_for("agents.new_node"))
+                return _node_error(script_error)
             task = AgentTask.create(
                 session,
                 agent_id=agent_id,
@@ -8836,8 +9176,7 @@ def create_node():
             task_id = task.id
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save task attachments")
-        flash(str(exc) or "Failed to save attachments.", "error")
-        return redirect(url_for("agents.new_node"))
+        return _node_error(str(exc) or "Failed to save attachments.")
 
     celery_task = run_agent_task.delay(task_id)
 
@@ -8846,6 +9185,8 @@ def create_node():
         if task is not None:
             task.celery_task_id = celery_task.id
 
+    if is_api_request:
+        return {"ok": True, "task_id": task_id, "celery_task_id": celery_task.id}, 201
     flash(f"Node {task_id} queued.", "success")
     return redirect(url_for("agents.list_nodes"))
 

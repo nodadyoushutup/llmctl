@@ -12,10 +12,10 @@ This folder deploys `llmctl-pgadmin` into its own namespace (`llmctl-pgadmin`) a
 ## Quick start
 
 ```bash
-cp kubernetes-pgadmin/pgadmin-secret.example.yaml /tmp/llmctl-pgadmin-secret.yaml
+cp kubernetes/pgadmin/pgadmin-secret.example.yaml /tmp/llmctl-pgadmin-secret.yaml
 # edit /tmp/llmctl-pgadmin-secret.yaml
 kubectl apply -f /tmp/llmctl-pgadmin-secret.yaml
-kubectl apply -k kubernetes-pgadmin
+kubectl apply -k kubernetes/pgadmin
 ```
 
 If migrating from the legacy bundled pgAdmin in namespace `llmctl`, remove the old resources first to avoid NodePort conflict on `30156`:
@@ -32,7 +32,7 @@ kubectl -n llmctl-pgadmin get secret llmctl-pgadmin-secrets
 
 Important:
 
-- Set `LLMCTL_POSTGRES_PASSWORD` in `kubernetes-pgadmin/pgadmin-secret.example.yaml` to the same value used by `llmctl` PostgreSQL (`llmctl-studio-secrets` in namespace `llmctl`), otherwise pgAdmin cannot connect.
+- Set `LLMCTL_POSTGRES_PASSWORD` in `kubernetes/pgadmin/pgadmin-secret.example.yaml` to the same value used by `llmctl` PostgreSQL (`llmctl-studio-secrets` in namespace `llmctl`), otherwise pgAdmin cannot connect.
 
 Port-forward pgAdmin:
 

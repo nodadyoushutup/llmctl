@@ -15,7 +15,7 @@ pip install -r app/llmctl-rag/requirements.txt
 2) Ensure Chroma is running in Kubernetes (from repo root)
 
 ```
-kubectl apply -f kubernetes/chromadb.yaml
+kubectl apply -f kubernetes/llmctl-studio/base/chromadb.yaml
 ```
 
 3) Index the repo (from repo root)

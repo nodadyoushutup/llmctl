@@ -50,14 +50,14 @@ Integrated MCP Startup Gate (Kubernetes)
 ----------------------------------------
 
 In Kubernetes deployments, Studio backend startup is guarded by init-container
-``wait-for-integrated-mcp`` in ``kubernetes/studio-deployment.yaml``.
+``wait-for-integrated-mcp`` in ``kubernetes/llmctl-studio/base/studio-deployment.yaml``.
 
 Purpose:
 
 - enforce MCP-first startup ordering during one-release cutover
 - prevent Studio migration/seed sync from racing unavailable MCP services
 
-Controls (``kubernetes/studio-configmap.yaml``):
+Controls (``kubernetes/llmctl-studio/base/studio-configmap.yaml``):
 
 - ``LLMCTL_STUDIO_MCP_WAIT_ENABLED`` (default ``true``)
 - ``LLMCTL_STUDIO_MCP_WAIT_TIMEOUT_SECONDS`` (default ``240``)

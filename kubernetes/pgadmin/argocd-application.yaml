@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/nodadyoushutup/llmctl.git
     targetRevision: main
-    path: kubernetes-pgadmin
+    path: kubernetes/pgadmin
   destination:
     server: https://kubernetes.default.svc
     namespace: llmctl-pgadmin

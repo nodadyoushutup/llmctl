@@ -15,7 +15,7 @@ spec:
         app: llmctl-mcp
     spec:
       # If your Harbor project is private, create llmctl-harbor-regcred from
-      # kubernetes/harbor-pull-secret.example.yaml and uncomment this block.
+      # kubernetes/llmctl-studio/base/harbor-pull-secret.example.yaml and uncomment this block.
       # imagePullSecrets:
       #   - name: llmctl-harbor-regcred
       containers:

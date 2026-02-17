@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/nodadyoushutup/llmctl.git
     targetRevision: main
-    path: kubernetes
+    path: kubernetes/llmctl-studio/overlays/dev
   destination:
     server: https://kubernetes.default.svc
     namespace: llmctl

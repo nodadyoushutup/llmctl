@@ -13,33 +13,13 @@ This folder deploys the full `llmctl` stack into a single `llmctl` namespace:
 
 ArgoCD tracks this as one application (`llmctl-kubernetes`) for core services. pgAdmin and Harbor are tracked as separate ArgoCD applications (`llmctl-pgadmin`, `llmctl-harbor`).
 
-## Files
+## Layout
 
-- `namespace.yaml`: `llmctl` namespace.
-- `redis.yaml`: in-cluster Redis for Celery and Socket.IO queueing.
-- `postgres.yaml`: in-cluster PostgreSQL for mandatory Studio persistence.
-- `chromadb.yaml`: in-cluster ChromaDB for RAG vector storage.
-- `mcp-configmap.yaml`: shared transport/runtime config for integrated MCP Deployments.
-- `mcp-llmctl.yaml`: Deployment + Service for `llmctl-mcp` (Harbor/your built image).
-- `mcp-github.yaml`: Deployment + Service for upstream `mcp/github` with HTTP wrapper.
-- `mcp-atlassian.yaml`: Deployment + Service for upstream `mcp/atlassian` in native streamable HTTP mode.
-- `mcp-chroma.yaml`: Deployment + Service for upstream `mcp/chroma` with HTTP wrapper.
-- `mcp-google-cloud.yaml`: Deployment + Service for Google Cloud MCP runtime with HTTP wrapper.
-- `studio-configmap.yaml`: non-secret Studio runtime settings.
-- `studio-rbac.yaml`: service accounts and RBAC for Studio to create/read/delete executor Jobs.
-- `studio-pvc.yaml`: persistent storage for `/app/data`.
-- `studio-deployment.yaml`: Studio backend Deployment (`llmctl-studio-backend`) with integrated MCP readiness init-container.
-- `celery-worker-deployment.yaml`: dedicated Celery worker Deployment (`llmctl-celery-worker`) that consumes all Studio queues.
-- `celery-beat-deployment.yaml`: dedicated Celery beat Deployment (`llmctl-celery-beat`) for scheduled task dispatch.
-- `studio-service.yaml`: backend NodePort Service (`30155`) targeting Studio API/backend port `5155`.
-- `studio-frontend-deployment.yaml`: Studio frontend Deployment (`llmctl-studio-frontend`).
-- `studio-frontend-service.yaml`: frontend NodePort Service (`30157`) targeting frontend port `8080`.
-- `studio-secret.example.yaml`: required secret template for PostgreSQL password, `FLASK_SECRET_KEY`, and optional API keys.
-- `mcp-secret.example.yaml`: optional secret template for integrated MCP provider credentials.
-- `harbor-pull-secret.example.yaml`: optional image pull secret for private Harbor projects.
-- `argocd-application.yaml`: ArgoCD Application for the core stack at `kubernetes/`.
-- `argocd-pgadmin-application.yaml`: ArgoCD Application for pgAdmin at `kubernetes-pgadmin/`.
-- `argocd-harbor-application.yaml`: ArgoCD Application that installs Harbor from the upstream Helm chart into `llmctl-harbor`.
+- `kubernetes/llmctl-studio/base/`: core llmctl manifests (namespace, redis, postgres, chromadb, integrated MCP services, Studio backend/frontend, celery worker/beat, ingress, and example secrets).
+- `kubernetes/llmctl-studio/overlays/dev/`: current deployable overlay for llmctl-studio resources.
+- `kubernetes/llmctl-studio/argocd-application.yaml`: ArgoCD Application for the core stack at `kubernetes/llmctl-studio/overlays/dev`.
+- `kubernetes/pgadmin/`: pgAdmin namespace/manifests, secret example, and pgAdmin ArgoCD application.
+- `kubernetes/argocd-harbor-application.yaml`: ArgoCD Application that installs Harbor from the upstream Helm chart into `llmctl-harbor`.
 - `kubernetes-overlays/minikube-live-code/`: local-only overlay that mounts host project code into Studio backend/frontend, `llmctl-mcp`, celery worker/beat, and Kubernetes executor Jobs for rapid iteration without rebuilding images.
 
 ## Quick start
@@ -47,8 +27,8 @@ ArgoCD tracks this as one application (`llmctl-kubernetes`) for core services. p
 Create secrets before applying manifests:
 
 ```bash
-cp kubernetes/studio-secret.example.yaml /tmp/llmctl-studio-secret.yaml
-cp kubernetes/mcp-secret.example.yaml /tmp/llmctl-mcp-secret.yaml
+cp kubernetes/llmctl-studio/base/studio-secret.example.yaml /tmp/llmctl-studio-secret.yaml
+cp kubernetes/llmctl-studio/base/mcp-secret.example.yaml /tmp/llmctl-mcp-secret.yaml
 # edit /tmp/llmctl-studio-secret.yaml
 # edit /tmp/llmctl-mcp-secret.yaml (optional but recommended)
 kubectl apply -f /tmp/llmctl-studio-secret.yaml
@@ -63,12 +43,12 @@ kubectl -n llmctl get secret llmctl-studio-secrets llmctl-mcp-secrets
 
 `llmctl-studio-secrets` is required. `llmctl-mcp-secrets` is optional for boot, but required if you want provider-authenticated GitHub/Atlassian/Google Cloud MCP behavior.
 
-If your Harbor registry is private, also create image pull secret `llmctl-harbor-regcred` from `kubernetes/harbor-pull-secret.example.yaml`, then uncomment `imagePullSecrets` in `kubernetes/mcp-llmctl.yaml`.
+If your Harbor registry is private, also create image pull secret `llmctl-harbor-regcred` from `kubernetes/llmctl-studio/base/harbor-pull-secret.example.yaml`, then uncomment `imagePullSecrets` in `kubernetes/llmctl-studio/base/mcp-llmctl.yaml`.
 
 Apply the full stack:
 
 ```bash
-kubectl apply -k kubernetes
+kubectl apply -k kubernetes/llmctl-studio/overlays/dev
 ```
 
 Port-forward Studio backend API:
@@ -193,20 +173,20 @@ Notes:
 Create the single ArgoCD application resource:
 
 ```bash
-kubectl apply -f kubernetes/argocd-application.yaml
+kubectl apply -f kubernetes/llmctl-studio/argocd-application.yaml
 ```
 
-This tracks repo path `kubernetes` on `main`, which includes namespace, redis, postgres, chromadb, integrated MCP services, and Studio backend/frontend resources together.
+This tracks repo path `kubernetes/llmctl-studio/overlays/dev` on `main`, which includes namespace, redis, postgres, chromadb, integrated MCP services, and Studio backend/frontend resources together.
 
 ## pgAdmin ArgoCD application
 
 Create the pgAdmin ArgoCD application resource:
 
 ```bash
-kubectl apply -f kubernetes/argocd-pgadmin-application.yaml
+kubectl apply -f kubernetes/pgadmin/argocd-application.yaml
 ```
 
-This tracks repo path `kubernetes-pgadmin` on `main`, which deploys pgAdmin into namespace `llmctl-pgadmin` while connecting to PostgreSQL in namespace `llmctl`.
+This tracks repo path `kubernetes/pgadmin` on `main`, which deploys pgAdmin into namespace `llmctl-pgadmin` while connecting to PostgreSQL in namespace `llmctl`.
 
 If you are migrating from older bundled pgAdmin resources in namespace `llmctl`, remove them before syncing `llmctl-pgadmin` to avoid NodePort `30156` conflicts:
 
@@ -245,18 +225,18 @@ kubectl apply -k kubernetes-overlays/harbor-images
 
 This avoids Docker/CRI HTTPS-vs-HTTP pull mismatches that can occur when using Harbor NodePort endpoints directly in image names.
 
-If ArgoCD tracks `path: kubernetes` instead of the Harbor overlay path, set Harbor image overrides on the app:
+If ArgoCD tracks `path: kubernetes/llmctl-studio/overlays/dev` instead of the Harbor overlay path, set Harbor image overrides on the app:
 
 ```bash
-scripts/configure-harbor-image-overlays.sh --argocd-app llmctl-studio
-argocd app sync llmctl-studio
+scripts/configure-harbor-image-overlays.sh --argocd-app llmctl-kubernetes
+argocd app sync llmctl-kubernetes
 ```
 
 That command updates all llmctl-managed images (`llmctl-studio-backend`, `llmctl-studio-frontend`, `llmctl-celery-worker`, `llmctl-mcp`, `llmctl-executor`) so ArgoCD does not fall back to unqualified local image names.
 
 ## Runtime knobs to edit
 
-Edit `kubernetes/studio-configmap.yaml` for these keys:
+Edit `kubernetes/llmctl-studio/base/studio-configmap.yaml` for these keys:
 
 - `LLMCTL_POSTGRES_HOST`, `LLMCTL_POSTGRES_PORT`, `LLMCTL_POSTGRES_DB`, `LLMCTL_POSTGRES_USER`
 - `CHROMA_HOST`, `CHROMA_PORT`, `CHROMA_SSL`
@@ -272,32 +252,32 @@ Edit `kubernetes/studio-configmap.yaml` for these keys:
 - `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED` (`true` mounts local repo into executor Jobs)
 - `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_HOST_PATH` (host path mounted into executor Jobs, default `/workspace/llmctl`)
 
-Celery worker sizing is configured in `kubernetes/celery-worker-deployment.yaml`:
+Celery worker sizing is configured in `kubernetes/llmctl-studio/base/celery-worker-deployment.yaml`:
 
 - `spec.replicas` controls worker pod count.
 - container `command` args control `--concurrency` and queue selection.
 - total worker slots follow `replicas x concurrency`.
 
-Beat scheduling is configured in `kubernetes/celery-beat-deployment.yaml`:
+Beat scheduling is configured in `kubernetes/llmctl-studio/base/celery-beat-deployment.yaml`:
 
 - keep `spec.replicas: 1` unless you have explicit leader-election/scheduler coordination.
 
-Edit `kubernetes/studio-secret.example.yaml` for:
+Edit `kubernetes/llmctl-studio/base/studio-secret.example.yaml` for:
 
 - `LLMCTL_POSTGRES_PASSWORD` (required)
 - optional `LLMCTL_STUDIO_DATABASE_URI` override
 
-Edit `kubernetes/mcp-secret.example.yaml` for:
+Edit `kubernetes/llmctl-studio/base/mcp-secret.example.yaml` for:
 
 - `GITHUB_PERSONAL_ACCESS_TOKEN`
 - `JIRA_*` and `CONFLUENCE_*` credentials
 - `GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON` and optional project selectors
 
-If Harbor pull auth is needed, edit `kubernetes/harbor-pull-secret.example.yaml` for:
+If Harbor pull auth is needed, edit `kubernetes/llmctl-studio/base/harbor-pull-secret.example.yaml` for:
 
 - `.dockerconfigjson` for your Harbor endpoint and project credentials
 
-Edit `kubernetes-pgadmin/pgadmin-secret.example.yaml` for:
+Edit `kubernetes/pgadmin/pgadmin-secret.example.yaml` for:
 
 - `PGADMIN_DEFAULT_EMAIL` (required)
 - `PGADMIN_DEFAULT_PASSWORD` (required)
@@ -306,6 +286,6 @@ Edit `kubernetes-pgadmin/pgadmin-secret.example.yaml` for:
 ## Optional executor smoke test
 
 ```bash
-kubectl apply -f kubernetes/executor-smoke-job.example.yaml
+kubectl apply -f kubernetes/llmctl-studio/base/executor-smoke-job.example.yaml
 kubectl -n llmctl logs job/llmctl-executor-smoke
 ```
