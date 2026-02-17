@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../../.." && pwd)
-IMAGE_NAME="llmctl-studio:latest"
+IMAGE_NAME="${IMAGE_NAME:-llmctl-studio-backend:latest}"
 DOCKER_GID="${DOCKER_GID:-}"
 
 if [ -z "${DOCKER_GID}" ] && [ -S /var/run/docker.sock ]; then

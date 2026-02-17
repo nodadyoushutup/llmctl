@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-celery-beat
+  namespace: llmctl
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: llmctl-celery-beat
+  template:
+    metadata:
+      labels:
+        app: llmctl-celery-beat
+    spec:
+      serviceAccountName: llmctl-studio-backend
+      containers:
+        - name: celery-beat
+          image: llmctl-celery-worker:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - app/llmctl-celery-worker/run.py
+            - beat
+            - --loglevel
+            - info
+          env:
+            - name: LLMCTL_STUDIO_DATA_DIR
+              value: /app/data
+          envFrom:
+            - configMapRef:
+                name: llmctl-studio-config
+            - secretRef:
+                name: llmctl-studio-secrets
+          volumeMounts:
+            - name: studio-data
+              mountPath: /app/data
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  pid="$(cat /app/data/celerybeat.pid 2>/dev/null || true)"
+                  [ -n "${pid}" ] && kill -0 "${pid}"
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  pid="$(cat /app/data/celerybeat.pid 2>/dev/null || true)"
+                  [ -n "${pid}" ] && kill -0 "${pid}"
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  pid="$(cat /app/data/celerybeat.pid 2>/dev/null || true)"
+                  [ -n "${pid}" ] && kill -0 "${pid}"
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: studio-data
+          persistentVolumeClaim:
+            claimName: llmctl-studio-data

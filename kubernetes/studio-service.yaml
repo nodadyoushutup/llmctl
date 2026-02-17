@@ -11,4 +11,3 @@ spec:
     - name: http
       port: 5155
       targetPort: http
-      nodePort: 30155

@@ -84,23 +84,60 @@ Goal: decouple Celery worker and beat execution from `llmctl-studio` by introduc
 - [x] Redis password is not currently configured in manifests/runtime; parity behavior is no-auth Redis unless a future secret-backed URL override is introduced.
 
 ## Stage 3 - `app/llmctl-celery-worker` Image + Entrypoints
-- [ ] Create `app/llmctl-celery-worker` app directory for worker-specific container wiring.
-- [ ] Reuse existing Studio Python modules/tasks; avoid task code duplication.
-- [ ] Add Dockerfile/build context for worker image.
-- [ ] Add startup commands/entrypoints for:
-- [ ] Celery worker process.
-- [ ] Celery beat process (same image, separate runtime command).
-- [ ] Ensure environment loading matches current Studio runtime expectations.
-- [ ] Acceptance criteria: worker image builds successfully and can start both worker and beat commands against existing Redis configuration.
+- [x] Create `app/llmctl-celery-worker` app directory for worker-specific container wiring.
+- [x] Reuse existing Studio Python modules/tasks; avoid task code duplication.
+- [x] Add Dockerfile/build context for worker image.
+- [x] Add startup commands/entrypoints for:
+- [x] Celery worker process.
+- [x] Celery beat process (same image, separate runtime command).
+- [x] Ensure environment loading matches current Studio runtime expectations.
+- [x] Acceptance criteria: worker image builds successfully and can start both worker and beat commands against existing Redis configuration.
+
+## Stage 3 - Implementation Notes
+- [x] Added worker app entrypoint at `app/llmctl-celery-worker/run.py` with mode-based execution:
+- [x] `worker` mode defaults to all Stage 2 queue names and supports runtime overrides via env/CLI args.
+- [x] `beat` mode uses `/app/data/celerybeat-schedule` and `/app/data/celerybeat.pid`.
+- [x] Added worker image Dockerfile at `app/llmctl-celery-worker/docker/Dockerfile` reusing `app/llmctl-studio-backend` Python modules and requirements.
+- [x] Added worker build script at `app/llmctl-celery-worker/docker/build-celery-worker.sh`.
+- [x] Updated shared build helpers:
+- [x] `scripts/build-docker.sh` now builds `llmctl-celery-worker:latest`.
+- [x] `scripts/build-minikube.sh` now builds and verifies `llmctl-celery-worker:latest`.
+- [x] Added writable ownership fix for `/app/data` in worker image to support non-root runtime writes (workspace paths and beat schedule file).
+- [x] Validation executed:
+- [x] `docker build --build-arg INSTALL_VLLM=false -f app/llmctl-celery-worker/docker/Dockerfile -t llmctl-celery-worker:stage3-check .` (success).
+- [x] `docker run --rm --entrypoint python3 llmctl-celery-worker:stage3-check -m celery --version` (success).
+- [x] Worker/beat smoke tests against disposable Redis (`redis:7.2-alpine`) on an isolated Docker network:
+- [x] Worker connected to `redis://stage3-celery-redis:6390/0` and reached `ready`.
+- [x] Beat started with broker `redis://stage3-celery-redis:6390/0` and schedule file `/app/data/celerybeat-schedule`.
 
 ## Stage 4 - Kubernetes Manifests for Worker and Beat
-- [ ] Add deployment manifest for `llmctl-celery-worker` with `replicas: 2`.
-- [ ] Configure worker container command args to set `--concurrency=2`.
-- [ ] Add deployment manifest for `llmctl-celery-beat` with `replicas: 1`.
-- [ ] Reuse existing ConfigMap/Secret wiring for Celery broker/backend settings.
-- [ ] Wire new manifests into existing kustomization/overlay structure.
-- [ ] Set resource requests/limits and health strategy appropriate for long-running Celery processes.
-- [ ] Acceptance criteria: both deployments reconcile successfully in Kubernetes, and pods are independently scalable/restartable.
+- [x] Add deployment manifest for `llmctl-celery-worker` with `replicas: 2`.
+- [x] Configure worker container command args to set `--concurrency=2`.
+- [x] Add deployment manifest for `llmctl-celery-beat` with `replicas: 1`.
+- [x] Reuse existing ConfigMap/Secret wiring for Celery broker/backend settings.
+- [x] Wire new manifests into existing kustomization/overlay structure.
+- [x] Set resource requests/limits and health strategy appropriate for long-running Celery processes.
+- [x] Acceptance criteria: both deployments reconcile successfully in Kubernetes, and pods are independently scalable/restartable.
+
+## Stage 4 - Implementation Notes
+- [x] Added `kubernetes/celery-worker-deployment.yaml`:
+- [x] Deployment name `llmctl-celery-worker`, `replicas: 2`, image `llmctl-celery-worker:latest`.
+- [x] Worker command pins `--concurrency 2` and consumes all Stage 2 queues.
+- [x] Reuses `llmctl-studio-config` + `llmctl-studio-secrets` and mounts `llmctl-studio-data` PVC at `/app/data`.
+- [x] Uses process-based startup/readiness/liveness probes and explicit resource requests/limits.
+- [x] Added `kubernetes/celery-beat-deployment.yaml`:
+- [x] Deployment name `llmctl-celery-beat`, `replicas: 1`, image `llmctl-celery-worker:latest`.
+- [x] Beat command runs from the same worker image in `beat` mode.
+- [x] Reuses `llmctl-studio-config` + `llmctl-studio-secrets` and mounts `llmctl-studio-data` PVC.
+- [x] Uses pidfile-based startup/readiness/liveness probes (`/app/data/celerybeat.pid`) and explicit resource requests/limits.
+- [x] Wired both manifests into `kubernetes/kustomization.yaml`.
+- [x] Updated Harbor overlay image mappings in:
+- [x] `kubernetes-overlays/harbor-images/kustomization.yaml`
+- [x] `kubernetes-overlays/harbor-images/kustomization.tmpl.yaml`
+- [x] Validation executed:
+- [x] `kubectl kustomize kubernetes` renders successfully with both new deployments present.
+- [x] `kubectl apply --dry-run=client -k kubernetes` succeeds and reports `deployment.apps/llmctl-celery-worker created (dry run)` and `deployment.apps/llmctl-celery-beat created (dry run)`.
+- [x] `kubectl apply --dry-run=client -k kubernetes-overlays/harbor-images` succeeds and includes both celery deployments.
 
 ## Stage 5 - Studio Runtime Decoupling
 - [ ] Remove Celery worker/beat process startup from Studio runtime scripts/config.

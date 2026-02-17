@@ -76,7 +76,7 @@ spec:
                 name: llmctl-studio-config
       containers:
         - name: studio
-          image: llmctl-studio:latest
+          image: llmctl-studio-backend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5155

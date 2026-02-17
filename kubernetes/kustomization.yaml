@@ -16,6 +16,8 @@ resources:
   - studio-pvc.yaml
   - studio-rbac.yaml
   - studio-deployment.yaml
+  - celery-worker-deployment.yaml
+  - celery-beat-deployment.yaml
   - studio-service.yaml
   - studio-frontend-deployment.yaml
   - studio-frontend-service.yaml

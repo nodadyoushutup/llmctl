@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-celery-worker
+  namespace: llmctl
+spec:
+  replicas: 2
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: llmctl-celery-worker
+  template:
+    metadata:
+      labels:
+        app: llmctl-celery-worker
+    spec:
+      serviceAccountName: llmctl-studio-backend
+      containers:
+        - name: celery-worker
+          image: llmctl-celery-worker:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - app/llmctl-celery-worker/run.py
+            - worker
+            - --concurrency
+            - "2"
+            - --queues
+            - llmctl_studio,llmctl_studio.downloads.huggingface,llmctl_studio.rag.index,llmctl_studio.rag.drive,llmctl_studio.rag.git
+            - --loglevel
+            - info
+            - --hostname
+            - llmctl-celery-worker@%h
+          env:
+            - name: LLMCTL_STUDIO_DATA_DIR
+              value: /app/data
+          envFrom:
+            - configMapRef:
+                name: llmctl-studio-config
+            - secretRef:
+                name: llmctl-studio-secrets
+          volumeMounts:
+            - name: studio-data
+              mountPath: /app/data
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - ps -o args= 1 | grep -q "celery.*worker"
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - ps -o args= 1 | grep -q "celery.*worker"
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - ps -o args= 1 | grep -q "celery.*worker"
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: studio-data
+          persistentVolumeClaim:
+            claimName: llmctl-studio-data

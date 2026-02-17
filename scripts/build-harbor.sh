@@ -13,7 +13,7 @@ Usage: scripts/build-harbor.sh [options]
 Build and push llmctl images to Harbor.
 
 Defaults:
-  - Builds and pushes all images: llmctl-studio, llmctl-studio-frontend, llmctl-mcp, llmctl-executor
+  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-executor
   - Pushes tag: latest
   - Project: llmctl
   - Harbor login user: admin
@@ -28,7 +28,7 @@ Options:
   --password <value>       Harbor password (default: Harbor12345)
   --no-login               Skip docker login before push
 
-  --studio                 Build/push llmctl-studio only
+  --studio                 Build/push llmctl-studio-backend only
   --frontend               Build/push llmctl-studio-frontend only
   --mcp                    Build/push llmctl-mcp only
   --executor               Build/push llmctl-executor only
@@ -400,7 +400,7 @@ login_harbor
 ensure_harbor_project
 
 if [ "${SELECTED_STUDIO}" = true ]; then
-  build_and_push "llmctl-studio" "${REPO_ROOT}/app/llmctl-studio-backend/docker/build-studio.sh"
+  build_and_push "llmctl-studio-backend" "${REPO_ROOT}/app/llmctl-studio-backend/docker/build-studio.sh"
 fi
 
 if [ "${SELECTED_FRONTEND}" = true ]; then
