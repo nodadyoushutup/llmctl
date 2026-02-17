@@ -4,6 +4,8 @@ This folder deploys the full `llmctl` stack into a single `llmctl` namespace:
 
 - `llmctl-studio-backend`
 - `llmctl-studio-frontend`
+- `llmctl-celery-worker`
+- `llmctl-celery-beat`
 - `llmctl-redis`
 - `llmctl-postgres`
 - `llmctl-chromadb`
@@ -27,6 +29,8 @@ ArgoCD tracks this as one application (`llmctl-kubernetes`) for core services. p
 - `studio-rbac.yaml`: service accounts and RBAC for Studio to create/read/delete executor Jobs.
 - `studio-pvc.yaml`: persistent storage for `/app/data`.
 - `studio-deployment.yaml`: Studio backend Deployment (`llmctl-studio-backend`) with integrated MCP readiness init-container.
+- `celery-worker-deployment.yaml`: dedicated Celery worker Deployment (`llmctl-celery-worker`) that consumes all Studio queues.
+- `celery-beat-deployment.yaml`: dedicated Celery beat Deployment (`llmctl-celery-beat`) for scheduled task dispatch.
 - `studio-service.yaml`: backend NodePort Service (`30155`) targeting Studio API/backend port `5155`.
 - `studio-frontend-deployment.yaml`: Studio frontend Deployment (`llmctl-studio-frontend`).
 - `studio-frontend-service.yaml`: frontend NodePort Service (`30157`) targeting frontend port `8080`.
@@ -121,6 +125,30 @@ kubectl -n llmctl get deploy \
   llmctl-mcp-google-cloud \
   llmctl-studio-backend
 ```
+
+## Celery runtime topology
+
+Celery execution is decoupled from the Studio backend runtime:
+
+- `llmctl-studio-backend` is producer/control-plane only (enqueue + revoke + status reads).
+- `llmctl-celery-worker` consumes all task queues.
+- `llmctl-celery-beat` is the only scheduler for periodic dispatch (for example `workspace_cleanup`).
+
+This avoids duplicate beat scheduling and keeps worker scale independent of API scale.
+Do not run multiple beat deployments unless you intentionally coordinate distributed scheduling.
+
+Current queue contract (from `services.celery_app`):
+
+- `llmctl_studio`
+- `llmctl_studio.downloads.huggingface`
+- `llmctl_studio.rag.index`
+- `llmctl_studio.rag.drive`
+- `llmctl_studio.rag.git`
+
+Throughput model:
+
+- worker slots = `worker replicas x --concurrency`
+- current manifest baseline: `4 replicas x concurrency 1 = 4` worker slots
 
 ## Live code mount (Minikube dev only)
 
@@ -243,6 +271,16 @@ Edit `kubernetes/studio-configmap.yaml` for these keys:
 - `LLMCTL_NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON` (JSON list, for private registries)
 - `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED` (`true` mounts local repo into executor Jobs)
 - `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_HOST_PATH` (host path mounted into executor Jobs, default `/workspace/llmctl`)
+
+Celery worker sizing is configured in `kubernetes/celery-worker-deployment.yaml`:
+
+- `spec.replicas` controls worker pod count.
+- container `command` args control `--concurrency` and queue selection.
+- total worker slots follow `replicas x concurrency`.
+
+Beat scheduling is configured in `kubernetes/celery-beat-deployment.yaml`:
+
+- keep `spec.replicas: 1` unless you have explicit leader-election/scheduler coordination.
 
 Edit `kubernetes/studio-secret.example.yaml` for:
 

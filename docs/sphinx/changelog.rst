@@ -4,6 +4,9 @@ Changelog
 2026-02-17
 ----------
 
+- Completed Celery runtime decoupling for Studio: backend now runs web/API only, while dedicated Kubernetes deployments run worker (`llmctl-celery-worker`) and beat (`llmctl-celery-beat`).
+- Documented Celery queue topology, dedicated beat scheduling model, and worker-slot scaling formula (`replicas x concurrency`) for Kubernetes operations.
+- Added automated worker runtime tests for `app/llmctl-celery-worker/run.py` and Stage 7 queue/beat smoke validation notes.
 - Migrated integrated MCP runtime architecture to Kubernetes-hosted services and removed Studio runtime dependence on bundled MCP executables.
 - Added integrated MCP endpoint contract and lifecycle documentation (startup migration sync + seed alignment) for DB-backed ``mcp_servers`` rows.
 - Added Kubernetes operator documentation for integrated MCP Deployments/Services, secret inputs, and one-release cutover gate controls.

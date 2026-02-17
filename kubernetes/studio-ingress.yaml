@@ -29,6 +29,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: llmctl-studio-backend
+                name: llmctl-studio-frontend
                 port:
                   name: http

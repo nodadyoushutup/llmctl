@@ -28,7 +28,7 @@ Set one of the following:
 Startup DB Health Check
 -----------------------
 
-Studio performs DB preflight checks before worker/web startup. The preflight verifies:
+Studio performs DB preflight checks before web/API startup. The preflight verifies:
 
 - database connectivity (``SELECT 1``)
 - schema readiness by creating/migrating tables
@@ -156,6 +156,39 @@ Multi-worker expectations:
 - Polling fallback is supported, but production proxies/load balancers should
   provide sticky sessions when polling may be used.
 - If sticky sessions are not available, prefer ``websocket``-only transport.
+
+Celery Runtime Topology (Decoupled)
+-----------------------------------
+
+Celery execution is intentionally split from Studio backend web serving.
+
+Runtime responsibilities:
+
+- ``llmctl-studio-backend``: Celery producer/control-plane only (enqueue,
+  revoke, status polling); no local Celery worker or beat subprocesses.
+- ``llmctl-celery-worker``: consumes all Studio task queues.
+- ``llmctl-celery-beat``: single scheduler deployment for periodic tasks.
+
+Active queue contract:
+
+- ``llmctl_studio``
+- ``llmctl_studio.downloads.huggingface``
+- ``llmctl_studio.rag.index``
+- ``llmctl_studio.rag.drive``
+- ``llmctl_studio.rag.git``
+
+Scaling model:
+
+- worker slots = ``replicas x concurrency``
+- current Kubernetes baseline: ``4 replicas x concurrency 1 = 4`` worker slots
+
+Operational guidance:
+
+- keep beat at one replica unless explicit scheduler coordination is introduced
+  (to avoid duplicate periodic dispatch).
+- scale worker replicas/concurrency independently from Studio backend API
+  replicas.
+- if task latency grows, increase worker slots before scaling Studio API pods.
 
 Event Contract and Frontend Model
 ---------------------------------

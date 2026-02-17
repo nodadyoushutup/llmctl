@@ -118,11 +118,17 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [x] Verified routing on one host: `http://192.168.49.2:30157/web/` returns frontend shell and `http://192.168.49.2:30157/api/health` returns `{"ok":true,"service":"llmctl-studio-backend"}`.
 
 ## Stage 9 - Full-Parity Gate and Backend GUI Decommission
+- [x] Improve bridge routing compatibility so legacy absolute-path navigation works from `/web` bridge mode.
 - [ ] Execute final parity audit against all legacy backend GUI pages/routes.
 - [ ] Remove backend template-rendered GUI routes/templates/static assets after parity is confirmed.
 - [ ] Keep backend focused on API/realtime/service responsibilities only.
 - [ ] Perform naming cleanup and dead-code removal linked to retired GUI paths.
 - [ ] Acceptance criteria: Flask backend no longer serves GUI pages, React frontend is the only user-facing UI, and parity signoff is complete.
+
+## Stage 9 - Bridge Compatibility Notes
+- [x] Updated frontend routing so `/web` lands on legacy `/overview` bridge by default and keeps migration-native pages at explicit routes (for example `/web/migration`).
+- [x] Updated frontend Nginx runtime so legacy root paths (for example `/agents`, `/settings/*`, `/runs`, `/chat`) are proxied to backend, restoring legacy in-app navigation behavior when running through frontend NodePort.
+- [x] Added frontend server-side redirects for `/` and `/web` to `/web/overview` and set `index.html` `Cache-Control: no-store` to avoid stale bootstrap bundles in browsers.
 
 ## Stage 10 - Automated Testing
 - [ ] Add/update backend tests for API prefixing, auth/session expectations, and realtime route/path behavior.
