@@ -131,6 +131,9 @@ Status key:
   - `docs/screenshots/2026-02-17-11-03-14--task-templates-detail--stage9-slice3-parity--1920x1080--6c88ada--a980bd.png`
 - [x] Stage 9 Slice 3 `/task-templates/:templateId/edit` parity screenshot captured:
   - `docs/screenshots/2026-02-17-11-03-15--task-templates-edit--stage9-slice3-parity--1920x1080--6c88ada--fbd8c1.png`
+- [x] Stage 9 Wave 3 legacy baseline screenshots captured (`stage9-wave3-baseline`) for `/plans*`, `/milestones*`, `/memories*`, and `/task-templates*` (desktop + mobile).
+- [x] Stage 9 Wave 3 React parity screenshots captured (`stage9-wave3-parity`) for `/plans*`, `/milestones*`, `/memories*`, and `/task-templates*` (desktop + mobile).
+- [x] Stage 9 Wave 3 behavioral parity audit revalidated list row-click behavior, destructive confirms, and CRUD feedback states across planning routes.
 - [x] Screenshot capture note: `/web/*` headless captures were blank in Chromium; Slice 3 detail/edit screenshots were captured from local Vite (`http://127.0.0.1:4173`) to validate visual output.
 - [x] Stage 9 Slice 4 flowchart parity rework complete:
   - `/flowcharts`
@@ -154,6 +157,22 @@ Status key:
   - `docs/screenshots/2026-02-17-11-39-27--flowchart-history-run--stage9-slice4-parity--1920x1080--6c88ada--e55f18.png`
 - [x] Stage 9 Slice 4 `/flowcharts/runs/:runId` parity screenshot captured:
   - `docs/screenshots/2026-02-17-11-39-28--flowchart-run-detail--stage9-slice4-parity--1920x1080--6c88ada--e3d422.png`
+- [x] Stage 9 Wave 4 signoff screenshot set captured (`stage9-wave4-signoff-live`) for `/flowcharts*` list/new/detail/edit/history/run routes (desktop + mobile):
+  - `docs/screenshots/2026-02-17-12-27-33--flowcharts--stage9-wave4-signoff-live--1920x1080--9533b5a--3701f1.png`
+  - `docs/screenshots/2026-02-17-12-28-01--flowcharts--stage9-wave4-signoff-live--390x844--9533b5a--b2f13f.png`
+  - `docs/screenshots/2026-02-17-12-27-33--flowcharts-new--stage9-wave4-signoff-live--1920x1080--9533b5a--a99a32.png`
+  - `docs/screenshots/2026-02-17-12-28-01--flowcharts-new--stage9-wave4-signoff-live--390x844--9533b5a--b36027.png`
+  - `docs/screenshots/2026-02-17-12-27-33--flowchart-detail--stage9-wave4-signoff-live--1920x1080--9533b5a--7919d3.png`
+  - `docs/screenshots/2026-02-17-12-28-01--flowchart-detail--stage9-wave4-signoff-live--390x844--9533b5a--4b8b97.png`
+  - `docs/screenshots/2026-02-17-12-27-46--flowchart-edit--stage9-wave4-signoff-live--1920x1080--9533b5a--f00ca5.png`
+  - `docs/screenshots/2026-02-17-12-28-09--flowchart-edit--stage9-wave4-signoff-live--390x844--9533b5a--00c385.png`
+  - `docs/screenshots/2026-02-17-12-27-46--flowchart-history--stage9-wave4-signoff-live--1920x1080--9533b5a--95f175.png`
+  - `docs/screenshots/2026-02-17-12-28-09--flowchart-history--stage9-wave4-signoff-live--390x844--9533b5a--ae6641.png`
+  - `docs/screenshots/2026-02-17-12-27-46--flowchart-history-run--stage9-wave4-signoff-live--1920x1080--9533b5a--5c0911.png`
+  - `docs/screenshots/2026-02-17-12-28-10--flowchart-history-run--stage9-wave4-signoff-live--390x844--9533b5a--1120d0.png`
+  - `docs/screenshots/2026-02-17-12-27-52--flowchart-run-detail--stage9-wave4-signoff-live--1920x1080--9533b5a--af6337.png`
+  - `docs/screenshots/2026-02-17-12-28-15--flowchart-run-detail--stage9-wave4-signoff-live--390x844--9533b5a--c6c4e5.png`
+  - Note: local capture environment rendered expected route shells and control states while backend API data endpoints returned `404` in this workspace run.
 - [x] Stage 9 Agent B Wave 1/5/7 parity screenshots captured (desktop + mobile):
   - `docs/screenshots/2026-02-17-12-07-25--overview--stage9-agent-b-parity--1920x1080--e23efc0--f5417c.png`
   - `docs/screenshots/2026-02-17-12-07-26--overview--stage9-agent-b-parity--390x844--e23efc0--14dd38.png`
@@ -203,8 +222,8 @@ Status key:
 ### Baseline Capture Completion
 - [x] Wave 1 baseline set captured (desktop + mobile).
 - [x] Wave 2 baseline set captured (desktop + mobile).
-- [ ] Wave 3 baseline set captured (desktop + mobile).
-- [ ] Wave 4 baseline set captured (desktop + mobile).
+- [x] Wave 3 baseline set captured (desktop + mobile).
+- [x] Wave 4 baseline set captured (desktop + mobile).
 - [x] Wave 5 baseline set captured (desktop + mobile).
 - [x] Wave 6 baseline set captured (desktop + mobile).
 - [x] Wave 7 baseline set captured (desktop + mobile).
@@ -212,8 +231,8 @@ Status key:
 ### Visual Signoff by Route Family
 - [x] Wave 1 visual signoff complete (Agent B) (`/overview`, `/parity-checklist`, `/api-diagnostics`, `/chat/activity`, `/chat/threads/:threadId`).
 - [x] Wave 2 visual signoff complete (Agent A) (`/agents*`, `/runs*`, `/quick`, `/nodes*`, `/execution-monitor`).
-- [ ] Wave 3 visual signoff complete (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`).
-- [ ] Wave 4 visual signoff complete (`/flowcharts*` list/detail/edit/history/run).
+- [x] Wave 3 visual signoff complete (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`).
+- [x] Wave 4 visual signoff complete (`/flowcharts*` list/detail/edit/history/run).
 - [x] Wave 5 visual signoff complete (Agent B) (`/skills*`, `/scripts*`, `/attachments*`, `/models*`, `/mcps*`).
 - [x] Wave 6 visual signoff complete (Agent A) (`/settings/core`, `/settings/provider*`, `/settings/runtime*`, `/settings/chat`, `/settings/integrations*`).
 - [x] Wave 7 visual signoff complete (Agent B) (`/rag*`, `/github*`, `/jira*`, `/confluence`, `/chroma*`).
@@ -221,8 +240,8 @@ Status key:
 ### Behavioral Signoff by Route Family
 - [x] Wave 1 behavior signoff complete (Agent B) (navigation, read-only flows, loading/error states).
 - [x] Wave 2 behavior signoff complete (Agent A) (execution lifecycle, status updates, row/action interactions).
-- [ ] Wave 3 behavior signoff complete (CRUD and plan stage/task mutation behavior).
-- [ ] Wave 4 behavior signoff complete (graph/runtime/history and node utility behavior).
+- [x] Wave 3 behavior signoff complete (CRUD and plan stage/task mutation behavior).
+- [x] Wave 4 behavior signoff complete (graph/runtime/history and node utility behavior).
 - [x] Wave 5 behavior signoff complete (Agent B) (asset CRUD/import/export/detail behavior).
 - [x] Wave 6 behavior signoff complete (Agent A) (settings mutation/validation and provider/integration behavior).
 - [x] Wave 7 behavior signoff complete (Agent B) (RAG source lifecycle, chat behavior, external workspace drill-down behavior).

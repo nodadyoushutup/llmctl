@@ -381,6 +381,10 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 - [x] Fixed backend settings core route parity blocker by replacing missing `Config.DATABASE_FILENAME` dependency with URI-derived fallback metadata (`/api/settings/core` and `/settings/core` now return successfully).
 - [x] Added frontend test coverage for list row-click interactive exclusion in `app/llmctl-studio-frontend/src/lib/tableRowLink.test.js`.
 - [x] Captured additional Agent B desktop+mobile parity screenshots for wildcard new/import flows (`/skills/new`, `/skills/import`, `/scripts/new`, `/models/new`, `/mcps/new`, `/rag/sources/new`) using `stage9-agent-b-parity-extra` artifacts.
+- [x] Closed Wave 4 signoff with refreshed desktop+mobile screenshot artifacts for `/flowcharts*` routes (`stage9-wave4-signoff-live`) and revalidated list-row/action/runtime behavior parity in current UI shell.
+- [x] Captured Stage 9 Wave 3 legacy baseline screenshots (`stage9-wave3-baseline`) for planning routes (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`) at desktop + mobile.
+- [x] Captured Stage 9 Wave 3 React parity screenshots (`stage9-wave3-parity`) for planning routes (`/plans*`, `/milestones*`, `/memories*`, `/task-templates*`) at desktop + mobile.
+- [x] Completed Wave 3 behavioral parity audit for planning routes (row navigation exclusions, destructive confirmations, and CRUD feedback states).
 
 ## Stage 9D - Behavioral Parity Audit
 - [x] Agent A closes Stage 9D checks for Slice 2 + Slice 6 routes.
@@ -459,8 +463,8 @@ Objective: complete full React parity (functional + legacy-accurate visual recre
 ## React Visual Signoff Tracker (Legacy-Exact)
 - [x] Wave 1 visual+behavior signoff (core shell + chat read flows).
 - [x] Wave 2 visual+behavior signoff (agents/runs/quick/nodes/execution monitor).
-- [ ] Wave 3 visual+behavior signoff (plans/milestones/memories/templates).
-- [ ] Wave 4 visual+behavior signoff (flowcharts).
+- [x] Wave 3 visual+behavior signoff (plans/milestones/memories/templates).
+- [x] Wave 4 visual+behavior signoff (flowcharts).
 - [x] Wave 5 visual+behavior signoff (skills/scripts/attachments/models/mcps).
 - [x] Wave 6 visual+behavior signoff (settings/runtime/integrations controls).
 - [x] Wave 7 visual+behavior signoff (RAG + GitHub/Jira/Confluence/Chroma).
