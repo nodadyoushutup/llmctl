@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
+import IntegerInput from '../components/IntegerInput'
 import { HttpError } from '../lib/httpClient'
 import {
   getSettingsRuntime,
@@ -303,15 +304,15 @@ export default function SettingsRuntimePage() {
                       onChange={(event) => setNodeExecutorForm((current) => ({ ...current, workspaceIdentityKey: event.target.value }))}
                     />
                   </label>
-                  <label className="field"><span>Dispatch timeout seconds</span><input type="number" value={nodeExecutorForm.dispatchTimeoutSeconds} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, dispatchTimeoutSeconds: event.target.value }))} /></label>
-                  <label className="field"><span>Execution timeout seconds</span><input type="number" value={nodeExecutorForm.executionTimeoutSeconds} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, executionTimeoutSeconds: event.target.value }))} /></label>
-                  <label className="field"><span>Log collection timeout seconds</span><input type="number" value={nodeExecutorForm.logCollectionTimeoutSeconds} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, logCollectionTimeoutSeconds: event.target.value }))} /></label>
-                  <label className="field"><span>Cancel grace timeout seconds</span><input type="number" value={nodeExecutorForm.cancelGraceTimeoutSeconds} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, cancelGraceTimeoutSeconds: event.target.value }))} /></label>
+                  <label className="field"><span>Dispatch timeout seconds</span><IntegerInput value={nodeExecutorForm.dispatchTimeoutSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, dispatchTimeoutSeconds: value }))} /></label>
+                  <label className="field"><span>Execution timeout seconds</span><IntegerInput value={nodeExecutorForm.executionTimeoutSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, executionTimeoutSeconds: value }))} /></label>
+                  <label className="field"><span>Log collection timeout seconds</span><IntegerInput value={nodeExecutorForm.logCollectionTimeoutSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, logCollectionTimeoutSeconds: value }))} /></label>
+                  <label className="field"><span>Cancel grace timeout seconds</span><IntegerInput value={nodeExecutorForm.cancelGraceTimeoutSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, cancelGraceTimeoutSeconds: value }))} /></label>
                   <label className="field"><span>Kubernetes namespace</span><input type="text" value={nodeExecutorForm.k8sNamespace} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sNamespace: event.target.value }))} /></label>
                   <label className="field"><span>Kubernetes image</span><input type="text" value={nodeExecutorForm.k8sImage} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sImage: event.target.value }))} /></label>
                   <label className="field"><span>Service account</span><input type="text" value={nodeExecutorForm.k8sServiceAccount} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sServiceAccount: event.target.value }))} /></label>
-                  <label className="field"><span>GPU limit</span><input type="number" value={nodeExecutorForm.k8sGpuLimit} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sGpuLimit: event.target.value }))} /></label>
-                  <label className="field"><span>Job TTL seconds</span><input type="number" value={nodeExecutorForm.k8sJobTtlSeconds} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sJobTtlSeconds: event.target.value }))} /></label>
+                  <label className="field"><span>GPU limit</span><IntegerInput value={nodeExecutorForm.k8sGpuLimit} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, k8sGpuLimit: value }))} /></label>
+                  <label className="field"><span>Job TTL seconds</span><IntegerInput value={nodeExecutorForm.k8sJobTtlSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, k8sJobTtlSeconds: value }))} /></label>
                   <label className="field field-span"><span>Image pull secrets JSON</span><textarea value={nodeExecutorForm.k8sImagePullSecretsJson} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sImagePullSecretsJson: event.target.value }))} /></label>
                   <label className="field field-span"><span>Kubeconfig (optional)</span><textarea value={nodeExecutorForm.k8sKubeconfig} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sKubeconfig: event.target.value }))} /></label>
                   <label className="checkbox-item"><input type="checkbox" checked={nodeExecutorForm.k8sKubeconfigClear} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sKubeconfigClear: event.target.checked }))} /><span>Clear stored kubeconfig</span></label>
@@ -383,13 +384,13 @@ export default function SettingsRuntimePage() {
                 <label className="field"><span>Gemini chat model</span><select value={ragForm.geminiChatModel} onChange={(event) => setRagForm((current) => ({ ...current, geminiChatModel: event.target.value }))}>{(payload?.rag_gemini_chat_model_options || []).map((item) => <option key={item.value} value={item.value}>{item.label || item.value}</option>)}</select></label>
                 <label className="field"><span>Chat temperature</span><input type="number" step="0.1" value={ragForm.chatTemperature} onChange={(event) => setRagForm((current) => ({ ...current, chatTemperature: event.target.value }))} /></label>
                 <label className="field"><span>Response style</span><select value={ragForm.chatResponseStyle} onChange={(event) => setRagForm((current) => ({ ...current, chatResponseStyle: event.target.value }))}>{(payload?.rag_chat_response_style_choices || []).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-                <label className="field"><span>Top K</span><input type="number" value={ragForm.chatTopK} onChange={(event) => setRagForm((current) => ({ ...current, chatTopK: event.target.value }))} /></label>
-                <label className="field"><span>Max history</span><input type="number" value={ragForm.chatMaxHistory} onChange={(event) => setRagForm((current) => ({ ...current, chatMaxHistory: event.target.value }))} /></label>
-                <label className="field"><span>Max context chars</span><input type="number" value={ragForm.chatMaxContextChars} onChange={(event) => setRagForm((current) => ({ ...current, chatMaxContextChars: event.target.value }))} /></label>
-                <label className="field"><span>Snippet chars</span><input type="number" value={ragForm.chatSnippetChars} onChange={(event) => setRagForm((current) => ({ ...current, chatSnippetChars: event.target.value }))} /></label>
-                <label className="field"><span>Context budget tokens</span><input type="number" value={ragForm.chatContextBudgetTokens} onChange={(event) => setRagForm((current) => ({ ...current, chatContextBudgetTokens: event.target.value }))} /></label>
-                <label className="field"><span>Index parallel workers</span><input type="number" value={ragForm.indexParallelWorkers} onChange={(event) => setRagForm((current) => ({ ...current, indexParallelWorkers: event.target.value }))} /></label>
-                <label className="field"><span>Embed parallel requests</span><input type="number" value={ragForm.embedParallelRequests} onChange={(event) => setRagForm((current) => ({ ...current, embedParallelRequests: event.target.value }))} /></label>
+                <label className="field"><span>Top K</span><IntegerInput value={ragForm.chatTopK} onValueChange={(value) => setRagForm((current) => ({ ...current, chatTopK: value }))} /></label>
+                <label className="field"><span>Max history</span><IntegerInput value={ragForm.chatMaxHistory} onValueChange={(value) => setRagForm((current) => ({ ...current, chatMaxHistory: value }))} /></label>
+                <label className="field"><span>Max context chars</span><IntegerInput value={ragForm.chatMaxContextChars} onValueChange={(value) => setRagForm((current) => ({ ...current, chatMaxContextChars: value }))} /></label>
+                <label className="field"><span>Snippet chars</span><IntegerInput value={ragForm.chatSnippetChars} onValueChange={(value) => setRagForm((current) => ({ ...current, chatSnippetChars: value }))} /></label>
+                <label className="field"><span>Context budget tokens</span><IntegerInput value={ragForm.chatContextBudgetTokens} onValueChange={(value) => setRagForm((current) => ({ ...current, chatContextBudgetTokens: value }))} /></label>
+                <label className="field"><span>Index parallel workers</span><IntegerInput value={ragForm.indexParallelWorkers} onValueChange={(value) => setRagForm((current) => ({ ...current, indexParallelWorkers: value }))} /></label>
+                <label className="field"><span>Embed parallel requests</span><IntegerInput value={ragForm.embedParallelRequests} onValueChange={(value) => setRagForm((current) => ({ ...current, embedParallelRequests: value }))} /></label>
                 <div className="form-actions">
                   <button
                     type="button"
@@ -405,15 +406,15 @@ export default function SettingsRuntimePage() {
 
             {activeSection === 'chat' ? (
               <div className="form-grid">
-                <label className="field"><span>History budget percent</span><input type="number" value={chatRuntimeForm.historyBudgetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, historyBudgetPercent: event.target.value }))} /></label>
-                <label className="field"><span>RAG budget percent</span><input type="number" value={chatRuntimeForm.ragBudgetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, ragBudgetPercent: event.target.value }))} /></label>
-                <label className="field"><span>MCP budget percent</span><input type="number" value={chatRuntimeForm.mcpBudgetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, mcpBudgetPercent: event.target.value }))} /></label>
-                <label className="field"><span>Compaction trigger percent</span><input type="number" value={chatRuntimeForm.compactionTriggerPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, compactionTriggerPercent: event.target.value }))} /></label>
-                <label className="field"><span>Compaction target percent</span><input type="number" value={chatRuntimeForm.compactionTargetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, compactionTargetPercent: event.target.value }))} /></label>
-                <label className="field"><span>Preserve recent turns</span><input type="number" value={chatRuntimeForm.preserveRecentTurns} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, preserveRecentTurns: event.target.value }))} /></label>
-                <label className="field"><span>RAG top K</span><input type="number" value={chatRuntimeForm.ragTopK} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, ragTopK: event.target.value }))} /></label>
-                <label className="field"><span>Default context window tokens</span><input type="number" value={chatRuntimeForm.defaultContextWindowTokens} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, defaultContextWindowTokens: event.target.value }))} /></label>
-                <label className="field"><span>Max compaction summary chars</span><input type="number" value={chatRuntimeForm.maxCompactionSummaryChars} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, maxCompactionSummaryChars: event.target.value }))} /></label>
+                <label className="field"><span>History budget percent</span><IntegerInput value={chatRuntimeForm.historyBudgetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, historyBudgetPercent: value }))} /></label>
+                <label className="field"><span>RAG budget percent</span><IntegerInput value={chatRuntimeForm.ragBudgetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, ragBudgetPercent: value }))} /></label>
+                <label className="field"><span>MCP budget percent</span><IntegerInput value={chatRuntimeForm.mcpBudgetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, mcpBudgetPercent: value }))} /></label>
+                <label className="field"><span>Compaction trigger percent</span><IntegerInput value={chatRuntimeForm.compactionTriggerPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, compactionTriggerPercent: value }))} /></label>
+                <label className="field"><span>Compaction target percent</span><IntegerInput value={chatRuntimeForm.compactionTargetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, compactionTargetPercent: value }))} /></label>
+                <label className="field"><span>Preserve recent turns</span><IntegerInput value={chatRuntimeForm.preserveRecentTurns} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, preserveRecentTurns: value }))} /></label>
+                <label className="field"><span>RAG top K</span><IntegerInput value={chatRuntimeForm.ragTopK} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, ragTopK: value }))} /></label>
+                <label className="field"><span>Default context window tokens</span><IntegerInput value={chatRuntimeForm.defaultContextWindowTokens} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, defaultContextWindowTokens: value }))} /></label>
+                <label className="field"><span>Max compaction summary chars</span><IntegerInput value={chatRuntimeForm.maxCompactionSummaryChars} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, maxCompactionSummaryChars: value }))} /></label>
                 <div className="form-actions">
                   <button
                     type="button"

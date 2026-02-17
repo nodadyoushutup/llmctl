@@ -22,6 +22,21 @@ spec:
           args:
             - |
               set -eu
+              cloud_credentials_file="/app/data/credentials/google-cloud-service-account.json"
+              legacy_secret_credentials_file="/var/secrets/google/service-account.json"
+              resolved_credentials_file=""
+              if [ -s "${cloud_credentials_file}" ]; then
+                resolved_credentials_file="${cloud_credentials_file}"
+              elif [ -s "${legacy_secret_credentials_file}" ]; then
+                resolved_credentials_file="${legacy_secret_credentials_file}"
+              fi
+              if [ -n "${resolved_credentials_file}" ]; then
+                export GOOGLE_APPLICATION_CREDENTIALS="${resolved_credentials_file}"
+                export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="${resolved_credentials_file}"
+              else
+                unset GOOGLE_APPLICATION_CREDENTIALS || true
+                unset CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE || true
+              fi
               if ! command -v node >/dev/null 2>&1 || [ "$(node -p "process.versions.node.split('.')[0]")" -lt 20 ]; then
                 apt-get update
                 apt-get install -y --no-install-recommends ca-certificates curl gnupg
@@ -48,12 +63,10 @@ spec:
             - secretRef:
                 name: llmctl-mcp-secrets
                 optional: true
-          env:
-            - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: /var/secrets/google/service-account.json
-            - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
-              value: /var/secrets/google/service-account.json
           volumeMounts:
+            - name: studio-data
+              mountPath: /app/data
+              readOnly: true
             - name: google-cloud-service-account
               mountPath: /var/secrets/google
               readOnly: true
@@ -78,6 +91,9 @@ spec:
               cpu: "1"
               memory: 1Gi
       volumes:
+        - name: studio-data
+          persistentVolumeClaim:
+            claimName: llmctl-studio-data
         - name: google-cloud-service-account
           secret:
             secretName: llmctl-mcp-secrets

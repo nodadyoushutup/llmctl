@@ -252,6 +252,7 @@ wait_for_rollout() {
     llmctl-mcp-atlassian
     llmctl-mcp-chroma
     llmctl-mcp-google-cloud
+    llmctl-mcp-google-workspace
     llmctl-celery-worker
     llmctl-celery-beat
     llmctl-studio-backend

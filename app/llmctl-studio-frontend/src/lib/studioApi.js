@@ -1330,14 +1330,12 @@ export function updateSettingsIntegrationsConfluence({
 export function updateSettingsIntegrationsGoogleCloud({
   serviceAccountJson = '',
   projectId = '',
-  mcpEnabled = true,
 } = {}) {
   return requestJson('/settings/integrations/google-cloud', {
     method: 'POST',
     body: {
       google_cloud_service_account_json: serviceAccountJson,
       google_cloud_project_id: projectId,
-      google_cloud_mcp_enabled: Boolean(mcpEnabled),
     },
   })
 }
@@ -1345,14 +1343,12 @@ export function updateSettingsIntegrationsGoogleCloud({
 export function updateSettingsIntegrationsGoogleWorkspace({
   serviceAccountJson = '',
   delegatedUserEmail = '',
-  mcpEnabled = false,
 } = {}) {
   return requestJson('/settings/integrations/google-workspace', {
     method: 'POST',
     body: {
       workspace_service_account_json: serviceAccountJson,
       workspace_delegated_user_email: delegatedUserEmail,
-      google_workspace_mcp_enabled: Boolean(mcpEnabled),
     },
   })
 }

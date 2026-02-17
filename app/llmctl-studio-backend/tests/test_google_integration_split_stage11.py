@@ -87,7 +87,6 @@ class GoogleIntegrationSplitStage11Tests(unittest.TestCase):
             {
                 "service_account_json": json.dumps(service_account),
                 "google_cloud_project_id": "legacy-project",
-                "google_cloud_mcp_enabled": "true",
             },
         )
 
@@ -97,7 +96,6 @@ class GoogleIntegrationSplitStage11Tests(unittest.TestCase):
         cloud = load_integration_settings(GOOGLE_CLOUD_PROVIDER)
         workspace = load_integration_settings(GOOGLE_WORKSPACE_PROVIDER)
         self.assertEqual("legacy-project", cloud.get("google_cloud_project_id"))
-        self.assertEqual("true", cloud.get("google_cloud_mcp_enabled"))
         self.assertEqual(cloud.get("service_account_json"), workspace.get("service_account_json"))
 
         with session_scope() as session:
@@ -139,4 +137,3 @@ class GoogleIntegrationSplitStage11Tests(unittest.TestCase):
             workspace.get("service_account_json"),
         )
         self.assertEqual("legacy-project", cloud.get("google_cloud_project_id"))
-

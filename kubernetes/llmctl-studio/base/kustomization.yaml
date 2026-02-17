@@ -11,6 +11,7 @@ resources:
   - mcp-atlassian.yaml
   - mcp-chroma.yaml
   - mcp-google-cloud.yaml
+  - mcp-google-workspace.yaml
   - studio-configmap.yaml
   - studio-pvc.yaml
   - studio-rbac.yaml

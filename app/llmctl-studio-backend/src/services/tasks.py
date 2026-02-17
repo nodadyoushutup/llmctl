@@ -2949,6 +2949,38 @@ def _build_integrations_payload(
         )
         integrations["confluence"] = confluence_payload
 
+    if is_task_integration_selected("google_cloud", selected_keys):
+        google_cloud_settings = load_integration_settings("google_cloud")
+        project_id = (google_cloud_settings.get("google_cloud_project_id") or "").strip()
+        service_account_json = (google_cloud_settings.get("service_account_json") or "").strip()
+        google_cloud_payload: dict[str, object] = {
+            "configured": bool(project_id or service_account_json)
+        }
+        if project_id:
+            google_cloud_payload["project_id"] = project_id
+        google_cloud_payload["note"] = (
+            "Use configured Google Cloud settings as the default project context."
+        )
+        integrations["google_cloud"] = google_cloud_payload
+
+    if is_task_integration_selected("google_workspace", selected_keys):
+        google_workspace_settings = load_integration_settings("google_workspace")
+        delegated_user = (
+            google_workspace_settings.get("workspace_delegated_user_email") or ""
+        ).strip()
+        service_account_json = (
+            google_workspace_settings.get("service_account_json") or ""
+        ).strip()
+        google_workspace_payload: dict[str, object] = {
+            "configured": bool(delegated_user or service_account_json)
+        }
+        if delegated_user:
+            google_workspace_payload["delegated_user_email"] = delegated_user
+        google_workspace_payload["note"] = (
+            "Use configured Google Workspace settings for delegated-user context."
+        )
+        integrations["google_workspace"] = google_workspace_payload
+
     if is_task_integration_selected("chroma", selected_keys):
         chroma_settings = load_integration_settings("chroma")
         host = (chroma_settings.get("host") or "").strip() or (
@@ -3720,6 +3752,11 @@ def _execute_quick_task_via_execution_router(
         execution_router = ExecutionRouter(
             runtime_settings=load_node_executor_runtime_settings()
         )
+        selected_mcp_server_keys = [
+            str(server.server_key)
+            for server in list(task.mcp_servers)
+            if str(server.server_key or "").strip()
+        ]
         execution_request = ExecutionRequest(
             node_id=int(task.id),
             node_type=EXECUTOR_NODE_TYPE_AGENT_TASK,
@@ -3738,7 +3775,7 @@ def _execute_quick_task_via_execution_router(
             execution_index=1,
             enabled_providers=set(enabled_providers),
             default_model_id=default_model_id,
-            mcp_server_keys=[],
+            mcp_server_keys=selected_mcp_server_keys,
         )
         routed_execution_request = execution_router.route_request(execution_request)
         runtime_payload = routed_execution_request.run_metadata_payload()
@@ -4352,6 +4389,12 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
 
     try:
         _set_stage("integration")
+        if mcp_configs:
+            _append_task_log(
+                "Selected MCP servers: " + ", ".join(sorted(mcp_configs)) + "."
+            )
+        else:
+            _append_task_log("No MCP servers selected for this task.")
         if unknown_scripts:
             _append_task_log(
                 f"Skipping {len(unknown_scripts)} script(s) with unknown type."

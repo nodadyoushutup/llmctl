@@ -9,7 +9,7 @@ This folder deploys the full `llmctl` stack into a single `llmctl` namespace:
 - `llmctl-redis`
 - `llmctl-postgres`
 - `llmctl-chromadb`
-- integrated MCP services (`llmctl-mcp`, `llmctl-mcp-github`, `llmctl-mcp-atlassian`, `llmctl-mcp-chroma`, `llmctl-mcp-google-cloud`)
+- integrated MCP services (`llmctl-mcp`, `llmctl-mcp-github`, `llmctl-mcp-atlassian`, `llmctl-mcp-chroma`, `llmctl-mcp-google-cloud`, `llmctl-mcp-google-workspace`)
 
 ArgoCD tracks this as one application (`llmctl-studio`) for core services. pgAdmin and Harbor are tracked as separate ArgoCD applications (`llmctl-pgadmin`, `llmctl-harbor`).
 
@@ -46,7 +46,7 @@ Guard before ArgoCD sync or `kubectl apply -k`:
 kubectl -n llmctl get secret llmctl-studio-secrets llmctl-mcp-secrets
 ```
 
-`llmctl-studio-secrets` is required. `llmctl-mcp-secrets` is optional for boot, but required if you want provider-authenticated GitHub/Atlassian/Google Cloud MCP behavior.
+`llmctl-studio-secrets` is required. `llmctl-mcp-secrets` is optional for boot. It is required for provider-authenticated GitHub/Atlassian MCP behavior, and can optionally provide fallback credentials for Google Cloud/Workspace MCP.
 
 If your Harbor registry is private, also create image pull secret `llmctl-harbor-regcred` from `kubernetes/llmctl-studio/base/harbor-pull-secret.example.yaml`, then uncomment `imagePullSecrets` in `kubernetes/llmctl-studio/base/mcp-llmctl.yaml`.
 
@@ -94,8 +94,9 @@ Service endpoint contract:
 - `http://llmctl-mcp-atlassian.llmctl.svc.cluster.local:8000/mcp`
 - `http://llmctl-mcp-chroma.llmctl.svc.cluster.local:8000/mcp`
 - `http://llmctl-mcp-google-cloud.llmctl.svc.cluster.local:8000/mcp`
+- `http://llmctl-mcp-google-workspace.llmctl.svc.cluster.local:8000/mcp`
 
-`google-workspace` remains intentionally deferred/feature-gated and is not deployed in this manifest set.
+Google Cloud and Google Workspace MCP deployments read service-account credentials from Studio integration-managed files under `/app/data/credentials` (shared PVC). `llmctl-mcp-secrets` remains supported as a fallback source.
 
 Cutover sequencing is handled in one release by `studio-deployment.yaml` init-container `wait-for-integrated-mcp`. It blocks backend startup until required MCP endpoints respond (or timeout), so DB migration/seed sync runs only after MCP services are reachable.
 
@@ -108,6 +109,7 @@ kubectl -n llmctl get deploy \
   llmctl-mcp-atlassian \
   llmctl-mcp-chroma \
   llmctl-mcp-google-cloud \
+  llmctl-mcp-google-workspace \
   llmctl-studio-backend
 ```
 
@@ -293,7 +295,8 @@ Edit `kubernetes/llmctl-studio/base/mcp-secret.example.yaml` for:
 
 - `GITHUB_PERSONAL_ACCESS_TOKEN`
 - `JIRA_*` and `CONFLUENCE_*` credentials
-- `GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON` and optional project selectors
+- optional fallback `GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON` and project selectors
+- optional fallback `GOOGLE_WORKSPACE_SERVICE_ACCOUNT_JSON` and `GOOGLE_WORKSPACE_IMPERSONATE_USER`
 
 If Harbor pull auth is needed, edit `kubernetes/llmctl-studio/base/harbor-pull-secret.example.yaml` for:
 

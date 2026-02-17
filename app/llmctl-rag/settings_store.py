@@ -16,12 +16,10 @@ GOOGLE_PROVIDER_SET = {
 GOOGLE_CLOUD_KEYS = (
     "service_account_json",
     "google_cloud_project_id",
-    "google_cloud_mcp_enabled",
 )
 GOOGLE_WORKSPACE_KEYS = (
     "service_account_json",
     "workspace_delegated_user_email",
-    "google_workspace_mcp_enabled",
 )
 
 

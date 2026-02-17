@@ -16860,18 +16860,6 @@ def update_google_cloud_settings():
         request_payload,
         "google_cloud_project_id",
     ).strip()
-    raw_google_cloud_mcp_enabled = _settings_form_value(
-        request_payload,
-        "google_cloud_mcp_enabled",
-        default=None,
-    )
-    if raw_google_cloud_mcp_enabled is None:
-        google_cloud_mcp_enabled = "true"
-    else:
-        google_cloud_mcp_enabled = (
-            "true" if _as_bool(raw_google_cloud_mcp_enabled) else "false"
-        )
-
     if google_cloud_project_id and any(char.isspace() for char in google_cloud_project_id):
         if is_api_request:
             return {"error": "Google Cloud project ID cannot contain spaces."}, 400
@@ -16892,7 +16880,8 @@ def update_google_cloud_settings():
         {
             "service_account_json": service_account_json,
             "google_cloud_project_id": google_cloud_project_id,
-            "google_cloud_mcp_enabled": google_cloud_mcp_enabled,
+            # Remove deprecated manual MCP toggle; MCP activation is credential-driven.
+            "google_cloud_mcp_enabled": "",
         },
     )
     sync_integrated_mcp_servers()
@@ -16917,18 +16906,6 @@ def update_google_workspace_settings():
         request_payload,
         "workspace_delegated_user_email",
     ).strip()
-    raw_google_workspace_mcp_enabled = _settings_form_value(
-        request_payload,
-        "google_workspace_mcp_enabled",
-        default=None,
-    )
-    if raw_google_workspace_mcp_enabled is None:
-        google_workspace_mcp_enabled = "false"
-    else:
-        google_workspace_mcp_enabled = (
-            "true" if _as_bool(raw_google_workspace_mcp_enabled) else "false"
-        )
-
     if delegated_user_email and any(char.isspace() for char in delegated_user_email):
         if is_api_request:
             return {"error": "Workspace delegated user email cannot contain spaces."}, 400
@@ -16949,7 +16926,8 @@ def update_google_workspace_settings():
         {
             "service_account_json": service_account_json,
             "workspace_delegated_user_email": delegated_user_email,
-            "google_workspace_mcp_enabled": google_workspace_mcp_enabled,
+            # Remove deprecated manual MCP toggle; MCP activation is credential-driven.
+            "google_workspace_mcp_enabled": "",
         },
     )
     sync_integrated_mcp_servers()

@@ -43,12 +43,10 @@ GOOGLE_PROVIDER_SET = {
 GOOGLE_CLOUD_KEYS = (
     "service_account_json",
     "google_cloud_project_id",
-    "google_cloud_mcp_enabled",
 )
 GOOGLE_WORKSPACE_KEYS = (
     "service_account_json",
     "workspace_delegated_user_email",
-    "google_workspace_mcp_enabled",
 )
 NODE_EXECUTOR_PROVIDER = "node_executor"
 NODE_EXECUTOR_PROVIDER_KUBERNETES = "kubernetes"
@@ -944,24 +942,12 @@ def integration_overview() -> dict[str, dict[str, object]]:
     google_cloud = load_integration_settings(GOOGLE_CLOUD_PROVIDER)
     google_workspace = load_integration_settings(GOOGLE_WORKSPACE_PROVIDER)
     chroma = load_integration_settings("chroma")
-    google_cloud_mcp_enabled_raw = (
-        google_cloud.get("google_cloud_mcp_enabled") or "true"
-    ).strip().lower()
-    google_cloud_mcp_enabled = google_cloud_mcp_enabled_raw in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    google_workspace_mcp_enabled_raw = (
-        google_workspace.get("google_workspace_mcp_enabled") or "false"
-    ).strip().lower()
-    google_workspace_mcp_enabled = google_workspace_mcp_enabled_raw in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    google_cloud_connected = bool(
+        (google_cloud.get("service_account_json") or "").strip()
+    )
+    google_workspace_connected = bool(
+        (google_workspace.get("service_account_json") or "").strip()
+    )
     google_cloud_project = (google_cloud.get("google_cloud_project_id") or "").strip()
     google_workspace_delegated_user = (
         google_workspace.get("workspace_delegated_user_email") or ""
@@ -996,15 +982,14 @@ def integration_overview() -> dict[str, dict[str, object]]:
             "spaces": confluence_spaces,
         },
         "google_cloud": {
-            "connected": bool((google_cloud.get("service_account_json") or "").strip()),
+            "connected": google_cloud_connected,
             "project_id": google_cloud_project or "not set",
-            "mcp_enabled": google_cloud_mcp_enabled,
+            "mcp_enabled": google_cloud_connected,
         },
         "google_workspace": {
-            "connected": bool((google_workspace.get("service_account_json") or "").strip()),
+            "connected": google_workspace_connected,
             "delegated_user": google_workspace_delegated_user or "not set",
-            "mcp_enabled": google_workspace_mcp_enabled,
-            "mcp_guarded": True,
+            "mcp_enabled": google_workspace_connected,
         },
         "chroma": {
             "connected": bool(chroma_host and chroma_port),

@@ -26,7 +26,7 @@ os.environ.setdefault(
 import core.db as core_db
 from core.config import Config
 from core.db import session_scope
-from core.models import AgentTask
+from core.models import AgentTask, MCPServer
 from core.prompt_envelope import build_prompt_envelope, serialize_prompt_envelope
 from core.task_kinds import QUICK_TASK_KIND, RAG_QUICK_INDEX_TASK_KIND
 from services import tasks as studio_tasks
@@ -362,7 +362,11 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
             )
         )
 
-    def _create_quick_task(self) -> int:
+    def _create_quick_task(
+        self,
+        *,
+        mcp_server_keys: list[str] | None = None,
+    ) -> int:
         with session_scope() as session:
             task = AgentTask.create(
                 session,
@@ -370,10 +374,19 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
                 kind=QUICK_TASK_KIND,
                 prompt=self._quick_prompt_payload(),
             )
+            for server_key in mcp_server_keys or []:
+                server = MCPServer.create(
+                    session,
+                    name=f"MCP {server_key}",
+                    server_key=server_key,
+                    description="",
+                    config_json={"command": "python3", "args": ["-V"]},
+                )
+                task.mcp_servers.append(server)
             return int(task.id)
 
     def test_quick_task_dispatches_via_executor_router(self) -> None:
-        task_id = self._create_quick_task()
+        task_id = self._create_quick_task(mcp_server_keys=["github"])
 
         class _StubRoutedRequest:
             def run_metadata_payload(self) -> dict[str, object]:
@@ -393,11 +406,15 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
 
         class _StubExecutionRouter:
             last_callback_name = ""
+            last_request_mcp_server_keys: list[str] = []
 
             def __init__(self, runtime_settings=None) -> None:
                 self.runtime_settings = runtime_settings or {}
 
             def route_request(self, _request):
+                _StubExecutionRouter.last_request_mcp_server_keys = list(
+                    _request.mcp_server_keys
+                )
                 return _StubRoutedRequest()
 
             def execute_routed(self, _request, execute_callback):
@@ -447,6 +464,7 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
             "_agent_task_worker_compute_disabled",
             _StubExecutionRouter.last_callback_name,
         )
+        self.assertEqual(["github"], _StubExecutionRouter.last_request_mcp_server_keys)
 
         with session_scope() as session:
             stored = session.get(AgentTask, task_id)

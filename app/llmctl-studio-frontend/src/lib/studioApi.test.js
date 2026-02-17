@@ -922,12 +922,10 @@ describe('studioApi', () => {
     updateSettingsIntegrationsGoogleCloud({
       serviceAccountJson: '{"type":"service_account"}',
       projectId: 'llmctl-prod',
-      mcpEnabled: true,
     })
     updateSettingsIntegrationsGoogleWorkspace({
       serviceAccountJson: '{"type":"service_account"}',
       delegatedUserEmail: 'workspace-admin@example.com',
-      mcpEnabled: false,
     })
     updateSettingsIntegrationsHuggingface({ token: 'hf_xxx' })
     updateSettingsIntegrationsChroma({ host: 'llmctl-chromadb', port: 8000, ssl: true })
@@ -977,7 +975,6 @@ describe('studioApi', () => {
       body: {
         google_cloud_service_account_json: '{"type":"service_account"}',
         google_cloud_project_id: 'llmctl-prod',
-        google_cloud_mcp_enabled: true,
       },
     })
     expect(requestJson).toHaveBeenNthCalledWith(9, '/settings/integrations/google-workspace', {
@@ -985,7 +982,6 @@ describe('studioApi', () => {
       body: {
         workspace_service_account_json: '{"type":"service_account"}',
         workspace_delegated_user_email: 'workspace-admin@example.com',
-        google_workspace_mcp_enabled: false,
       },
     })
     expect(requestJson).toHaveBeenNthCalledWith(10, '/settings/integrations/huggingface', {

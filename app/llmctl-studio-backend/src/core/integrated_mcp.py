@@ -32,10 +32,17 @@ INTEGRATED_MCP_SERVICE_ENDPOINTS: dict[str, tuple[str, int]] = {
     INTEGRATED_MCP_ATLASSIAN_KEY: ("llmctl-mcp-atlassian", 8000),
     INTEGRATED_MCP_CHROMA_KEY: ("llmctl-mcp-chroma", 8000),
     INTEGRATED_MCP_GOOGLE_CLOUD_KEY: ("llmctl-mcp-google-cloud", 8000),
+    INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY: ("llmctl-mcp-google-workspace", 8000),
 }
 DOCKER_CHROMA_HOST_ALIASES = {"llmctl-chromadb", "chromadb"}
 GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE = (
     Path(Config.DATA_DIR) / "credentials" / "google-cloud-service-account.json"
+)
+GOOGLE_WORKSPACE_SERVICE_ACCOUNT_FILE = (
+    Path(Config.DATA_DIR) / "credentials" / "google-workspace-service-account.json"
+)
+GOOGLE_WORKSPACE_IMPERSONATE_USER_FILE = (
+    Path(Config.DATA_DIR) / "credentials" / "google-workspace-impersonate-user.txt"
 )
 logger = logging.getLogger(__name__)
 
@@ -165,36 +172,34 @@ def _desired_integrated_server_payloads(
             "config": _chroma_config(),
         }
 
-    google_cloud_mcp_enabled = _as_bool_default(
-        google_cloud.get("google_cloud_mcp_enabled"), default=True
+    credentials_path = _write_google_cloud_service_account_file(
+        google_cloud.get("service_account_json")
     )
-    if google_cloud_mcp_enabled:
-        credentials_path = _write_google_cloud_service_account_file(
-            google_cloud.get("service_account_json")
-        )
-        if credentials_path is not None:
-            payload[INTEGRATED_MCP_GOOGLE_CLOUD_KEY] = {
-                "name": "Google Cloud MCP",
-                "description": (
-                    "System-managed Google Cloud MCP server from Google Cloud integration settings."
-                ),
-                "config": _google_cloud_config(),
-            }
-    else:
-        _remove_google_cloud_service_account_file(GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE)
+    if credentials_path is not None:
+        payload[INTEGRATED_MCP_GOOGLE_CLOUD_KEY] = {
+            "name": "Google Cloud MCP",
+            "description": (
+                "System-managed Google Cloud MCP server from Google Cloud integration settings."
+            ),
+            "config": _google_cloud_config(),
+        }
 
-    google_workspace_mcp_enabled = _as_bool_default(
-        google_workspace.get("google_workspace_mcp_enabled"),
-        default=False,
-    )
-    google_workspace_service_account_json = _clean(
+    workspace_credentials_path = _write_google_workspace_service_account_file(
         google_workspace.get("service_account_json")
     )
-    if google_workspace_mcp_enabled and google_workspace_service_account_json:
-        logger.info(
-            "Google Workspace MCP requested but runtime activation is guarded "
-            "until a supported service-account server path is finalized."
+    if workspace_credentials_path is not None:
+        _write_google_workspace_impersonate_user_file(
+            google_workspace.get("workspace_delegated_user_email")
         )
+        payload[INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY] = {
+            "name": "Google Workspace MCP",
+            "description": (
+                "System-managed Google Workspace MCP server from Google Workspace integration settings."
+            ),
+            "config": _google_workspace_config(),
+        }
+    else:
+        _remove_google_workspace_impersonate_user_file()
 
     return payload
 
@@ -216,13 +221,6 @@ def _clean(value: str | None) -> str:
 
 def _as_bool(value: str | None) -> bool:
     return _clean(value).lower() in {"1", "true", "yes", "on"}
-
-
-def _as_bool_default(value: str | None, *, default: bool) -> bool:
-    raw = _clean(value).lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "on"}
 
 
 def _parse_port(value: str | None) -> int | None:
@@ -282,6 +280,10 @@ def _google_cloud_config() -> dict[str, Any]:
     return _integrated_service_config(INTEGRATED_MCP_GOOGLE_CLOUD_KEY)
 
 
+def _google_workspace_config() -> dict[str, Any]:
+    return _integrated_service_config(INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY)
+
+
 def _integrated_service_config(server_key: str) -> dict[str, Any]:
     endpoint = INTEGRATED_MCP_SERVICE_ENDPOINTS.get(server_key)
     if endpoint is None:
@@ -302,22 +304,60 @@ def _integrated_mcp_namespace() -> str:
 
 
 def _write_google_cloud_service_account_file(raw_json: str | None) -> Path | None:
-    cleaned = _clean(raw_json)
-    target = GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE
+    return _write_google_service_account_file(
+        raw_json,
+        target=GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE,
+        provider_label="Google Cloud",
+    )
+
+
+def _write_google_workspace_service_account_file(raw_json: str | None) -> Path | None:
+    return _write_google_service_account_file(
+        raw_json,
+        target=GOOGLE_WORKSPACE_SERVICE_ACCOUNT_FILE,
+        provider_label="Google Workspace",
+    )
+
+
+def _write_google_workspace_impersonate_user_file(
+    delegated_user_email: str | None,
+) -> None:
+    cleaned = _clean(delegated_user_email)
+    target = GOOGLE_WORKSPACE_IMPERSONATE_USER_FILE
     if not cleaned:
-        _remove_google_cloud_service_account_file(target)
-        return None
+        _remove_google_workspace_impersonate_user_file()
+        return
     try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        logger.warning("Google Cloud service account JSON is invalid; skipping MCP setup.")
-        _remove_google_cloud_service_account_file(target)
-        return None
-    if not isinstance(parsed, dict):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(cleaned + "\n", encoding="utf-8")
+        target.chmod(0o600)
+    except OSError as exc:
         logger.warning(
-            "Google Cloud service account JSON must be an object; skipping MCP setup."
+            "Unable to persist Google Workspace delegated user file at %s: %s",
+            target,
+            exc,
         )
-        _remove_google_cloud_service_account_file(target)
+
+
+def _remove_google_workspace_impersonate_user_file() -> None:
+    _remove_file(
+        GOOGLE_WORKSPACE_IMPERSONATE_USER_FILE,
+        "Google Workspace delegated user file",
+    )
+
+
+def _write_google_service_account_file(
+    raw_json: str | None,
+    *,
+    target: Path,
+    provider_label: str,
+) -> Path | None:
+    parsed = _parse_google_service_account_json(
+        raw_json,
+        provider_label=provider_label,
+    )
+    if parsed is None:
+        _remove_file(target, f"{provider_label} service account file")
         return None
     normalized = json.dumps(parsed, sort_keys=True, indent=2) + "\n"
     try:
@@ -326,7 +366,8 @@ def _write_google_cloud_service_account_file(raw_json: str | None) -> Path | Non
         target.chmod(0o600)
     except OSError as exc:
         logger.warning(
-            "Unable to persist Google Cloud service account file at %s: %s",
+            "Unable to persist %s service account file at %s: %s",
+            provider_label,
             target,
             exc,
         )
@@ -334,13 +375,39 @@ def _write_google_cloud_service_account_file(raw_json: str | None) -> Path | Non
     return target
 
 
-def _remove_google_cloud_service_account_file(path: Path) -> None:
+def _parse_google_service_account_json(
+    raw_json: str | None,
+    *,
+    provider_label: str,
+) -> dict[str, Any] | None:
+    cleaned = _clean(raw_json)
+    if not cleaned:
+        return None
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        logger.warning(
+            "%s service account JSON is invalid; skipping MCP setup.",
+            provider_label,
+        )
+        return None
+    if not isinstance(parsed, dict):
+        logger.warning(
+            "%s service account JSON must be an object; skipping MCP setup.",
+            provider_label,
+        )
+        return None
+    return parsed
+
+
+def _remove_file(path: Path, file_label: str) -> None:
     try:
         if path.exists():
             path.unlink()
     except OSError as exc:
         logger.warning(
-            "Unable to remove Google Cloud service account file at %s: %s",
+            "Unable to remove %s at %s: %s",
+            file_label,
             path,
             exc,
         )

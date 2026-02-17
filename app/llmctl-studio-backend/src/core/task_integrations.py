@@ -24,6 +24,16 @@ TASK_INTEGRATION_OPTIONS = (
         "label": "ChromaDB",
         "description": "Include Chroma host/port/ssl settings in task context.",
     },
+    {
+        "key": "google_cloud",
+        "label": "Google Cloud",
+        "description": "Include Google Cloud project settings in task context.",
+    },
+    {
+        "key": "google_workspace",
+        "label": "Google Workspace",
+        "description": "Include Google Workspace delegated-user settings in task context.",
+    },
 )
 TASK_INTEGRATION_KEYS = frozenset(
     str(option["key"]).strip().lower()

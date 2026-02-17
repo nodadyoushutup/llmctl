@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
+import IntegerInput from '../components/IntegerInput'
 import { HttpError } from '../lib/httpClient'
 import {
   getSettingsIntegrations,
@@ -136,8 +137,8 @@ export default function SettingsIntegrationsPage() {
   })
   const [jiraForm, setJiraForm] = useState({ apiKey: '', email: '', site: '', projectKey: '', board: '' })
   const [confluenceForm, setConfluenceForm] = useState({ apiKey: '', email: '', site: '', space: '' })
-  const [googleCloudForm, setGoogleCloudForm] = useState({ serviceAccountJson: '', projectId: '', mcpEnabled: true })
-  const [googleWorkspaceForm, setGoogleWorkspaceForm] = useState({ serviceAccountJson: '', delegatedUserEmail: '', mcpEnabled: false })
+  const [googleCloudForm, setGoogleCloudForm] = useState({ serviceAccountJson: '', projectId: '' })
+  const [googleWorkspaceForm, setGoogleWorkspaceForm] = useState({ serviceAccountJson: '', delegatedUserEmail: '' })
   const [huggingfaceToken, setHuggingfaceToken] = useState('')
   const [chromaForm, setChromaForm] = useState({ host: '', port: '', ssl: false })
 
@@ -183,13 +184,11 @@ export default function SettingsIntegrationsPage() {
       setGoogleCloudForm({
         serviceAccountJson: String(payload?.google_cloud_settings?.service_account_json || ''),
         projectId: String(payload?.google_cloud_settings?.google_cloud_project_id || ''),
-        mcpEnabled: asBool(payload?.google_cloud_settings?.google_cloud_mcp_enabled || 'true'),
       })
 
       setGoogleWorkspaceForm({
         serviceAccountJson: String(payload?.google_workspace_settings?.service_account_json || ''),
         delegatedUserEmail: String(payload?.google_workspace_settings?.workspace_delegated_user_email || ''),
-        mcpEnabled: asBool(payload?.google_workspace_settings?.google_workspace_mcp_enabled || 'false'),
       })
 
       setHuggingfaceToken(String(payload?.vllm_local_settings?.huggingface?.token || ''))
@@ -536,7 +535,6 @@ export default function SettingsIntegrationsPage() {
           <div className="form-grid">
             <label className="field field-span"><span>Service account JSON</span><textarea value={googleCloudForm.serviceAccountJson} rows={10} onChange={(event) => setGoogleCloudForm((current) => ({ ...current, serviceAccountJson: event.target.value }))} /></label>
             <label className="field"><span>Project ID</span><input type="text" value={googleCloudForm.projectId} onChange={(event) => setGoogleCloudForm((current) => ({ ...current, projectId: event.target.value }))} /></label>
-            <label className="checkbox-item"><input type="checkbox" checked={googleCloudForm.mcpEnabled} onChange={(event) => setGoogleCloudForm((current) => ({ ...current, mcpEnabled: event.target.checked }))} /><span>Enable Google Cloud MCP server</span></label>
             <div className="form-actions">
               <button
                 type="button"
@@ -560,7 +558,6 @@ export default function SettingsIntegrationsPage() {
           <div className="form-grid">
             <label className="field field-span"><span>Service account JSON</span><textarea value={googleWorkspaceForm.serviceAccountJson} rows={10} onChange={(event) => setGoogleWorkspaceForm((current) => ({ ...current, serviceAccountJson: event.target.value }))} /></label>
             <label className="field"><span>Delegated user email</span><input type="email" value={googleWorkspaceForm.delegatedUserEmail} onChange={(event) => setGoogleWorkspaceForm((current) => ({ ...current, delegatedUserEmail: event.target.value }))} /></label>
-            <label className="checkbox-item"><input type="checkbox" checked={googleWorkspaceForm.mcpEnabled} onChange={(event) => setGoogleWorkspaceForm((current) => ({ ...current, mcpEnabled: event.target.checked }))} /><span>Enable Google Workspace MCP server</span></label>
             <div className="form-actions">
               <button
                 type="button"
@@ -605,7 +602,7 @@ export default function SettingsIntegrationsPage() {
           <h2>ChromaDB</h2>
           <div className="form-grid">
             <label className="field"><span>Host</span><input type="text" value={chromaForm.host} onChange={(event) => setChromaForm((current) => ({ ...current, host: event.target.value }))} /></label>
-            <label className="field"><span>Port</span><input type="number" value={chromaForm.port} onChange={(event) => setChromaForm((current) => ({ ...current, port: event.target.value }))} /></label>
+            <label className="field"><span>Port</span><IntegerInput value={chromaForm.port} onValueChange={(value) => setChromaForm((current) => ({ ...current, port: value }))} /></label>
             <label className="checkbox-item"><input type="checkbox" checked={chromaForm.ssl} onChange={(event) => setChromaForm((current) => ({ ...current, ssl: event.target.checked }))} /><span>Enable SSL</span></label>
             <div className="form-actions">
               <button

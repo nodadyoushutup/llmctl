@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llmctl-mcp-google-workspace
+  namespace: llmctl
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: llmctl-mcp-google-workspace
+  template:
+    metadata:
+      labels:
+        app: llmctl-mcp-google-workspace
+    spec:
+      containers:
+        - name: google-workspace-mcp
+          image: node:22-bookworm-slim
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              workspace_credentials_file="/app/data/credentials/google-workspace-service-account.json"
+              workspace_impersonate_user_file="/app/data/credentials/google-workspace-impersonate-user.txt"
+              cloud_credentials_file="/app/data/credentials/google-cloud-service-account.json"
+              legacy_secret_credentials_file="/var/secrets/google-workspace/service-account.json"
+              resolved_credentials_file=""
+              while [ -z "${resolved_credentials_file}" ]; do
+                if [ -s "${workspace_credentials_file}" ]; then
+                  resolved_credentials_file="${workspace_credentials_file}"
+                elif [ -s "${legacy_secret_credentials_file}" ]; then
+                  resolved_credentials_file="${legacy_secret_credentials_file}"
+                elif [ -s "${cloud_credentials_file}" ]; then
+                  resolved_credentials_file="${cloud_credentials_file}"
+                else
+                  echo "Google Workspace service account not found yet. Waiting for integration credentials..."
+                  sleep 10
+                fi
+              done
+              export SERVICE_ACCOUNT_PATH="${resolved_credentials_file}"
+              if [ -s "${workspace_impersonate_user_file}" ]; then
+                export GOOGLE_IMPERSONATE_USER="$(cat "${workspace_impersonate_user_file}" | tr -d '\r\n')"
+              elif [ -n "${GOOGLE_WORKSPACE_IMPERSONATE_USER:-}" ]; then
+                export GOOGLE_IMPERSONATE_USER="${GOOGLE_WORKSPACE_IMPERSONATE_USER}"
+              fi
+              npm install -g mcp-proxy@6.4.0 @starfysh/gdrive-mcp@1.2.0 >/tmp/npm-install.log 2>&1
+              exec mcp-proxy \
+                --server stream \
+                --host "${MCP_PROXY_HOST}" \
+                --port "${MCP_PROXY_PORT}" \
+                --streamEndpoint "${MCP_PROXY_STREAM_ENDPOINT}" \
+                --stateless \
+                -- gdrive-mcp
+          envFrom:
+            - configMapRef:
+                name: llmctl-mcp-config
+            - secretRef:
+                name: llmctl-mcp-secrets
+                optional: true
+          env:
+            - name: GOOGLE_WORKSPACE_IMPERSONATE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: llmctl-mcp-secrets
+                  key: GOOGLE_WORKSPACE_IMPERSONATE_USER
+                  optional: true
+          volumeMounts:
+            - name: studio-data
+              mountPath: /app/data
+              readOnly: true
+            - name: google-workspace-service-account
+              mountPath: /var/secrets/google-workspace
+              readOnly: true
+          ports:
+            - containerPort: 8000
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: studio-data
+          persistentVolumeClaim:
+            claimName: llmctl-studio-data
+        - name: google-workspace-service-account
+          secret:
+            secretName: llmctl-mcp-secrets
+            optional: true
+            items:
+              - key: GOOGLE_WORKSPACE_SERVICE_ACCOUNT_JSON
+                path: service-account.json
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llmctl-mcp-google-workspace
+  namespace: llmctl
+spec:
+  selector:
+    app: llmctl-mcp-google-workspace
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link } from 'react-router-dom'
+import IntegerInput from '../components/IntegerInput'
 import { HttpError } from '../lib/httpClient'
 import {
   getSettingsChat,
@@ -267,15 +268,15 @@ export default function SettingsChatPage() {
         <article className="card">
           <h2>Chat Runtime</h2>
           <div className="form-grid">
-            <label className="field"><span>History budget percent</span><input type="number" value={chatRuntimeForm.historyBudgetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, historyBudgetPercent: event.target.value }))} /></label>
-            <label className="field"><span>RAG budget percent</span><input type="number" value={chatRuntimeForm.ragBudgetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, ragBudgetPercent: event.target.value }))} /></label>
-            <label className="field"><span>MCP budget percent</span><input type="number" value={chatRuntimeForm.mcpBudgetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, mcpBudgetPercent: event.target.value }))} /></label>
-            <label className="field"><span>Compaction trigger percent</span><input type="number" value={chatRuntimeForm.compactionTriggerPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, compactionTriggerPercent: event.target.value }))} /></label>
-            <label className="field"><span>Compaction target percent</span><input type="number" value={chatRuntimeForm.compactionTargetPercent} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, compactionTargetPercent: event.target.value }))} /></label>
-            <label className="field"><span>Preserve recent turns</span><input type="number" value={chatRuntimeForm.preserveRecentTurns} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, preserveRecentTurns: event.target.value }))} /></label>
-            <label className="field"><span>RAG top K</span><input type="number" value={chatRuntimeForm.ragTopK} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, ragTopK: event.target.value }))} /></label>
-            <label className="field"><span>Default context window tokens</span><input type="number" value={chatRuntimeForm.defaultContextWindowTokens} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, defaultContextWindowTokens: event.target.value }))} /></label>
-            <label className="field"><span>Max compaction summary chars</span><input type="number" value={chatRuntimeForm.maxCompactionSummaryChars} onChange={(event) => setChatRuntimeForm((current) => ({ ...current, maxCompactionSummaryChars: event.target.value }))} /></label>
+            <label className="field"><span>History budget percent</span><IntegerInput value={chatRuntimeForm.historyBudgetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, historyBudgetPercent: value }))} /></label>
+            <label className="field"><span>RAG budget percent</span><IntegerInput value={chatRuntimeForm.ragBudgetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, ragBudgetPercent: value }))} /></label>
+            <label className="field"><span>MCP budget percent</span><IntegerInput value={chatRuntimeForm.mcpBudgetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, mcpBudgetPercent: value }))} /></label>
+            <label className="field"><span>Compaction trigger percent</span><IntegerInput value={chatRuntimeForm.compactionTriggerPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, compactionTriggerPercent: value }))} /></label>
+            <label className="field"><span>Compaction target percent</span><IntegerInput value={chatRuntimeForm.compactionTargetPercent} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, compactionTargetPercent: value }))} /></label>
+            <label className="field"><span>Preserve recent turns</span><IntegerInput value={chatRuntimeForm.preserveRecentTurns} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, preserveRecentTurns: value }))} /></label>
+            <label className="field"><span>RAG top K</span><IntegerInput value={chatRuntimeForm.ragTopK} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, ragTopK: value }))} /></label>
+            <label className="field"><span>Default context window tokens</span><IntegerInput value={chatRuntimeForm.defaultContextWindowTokens} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, defaultContextWindowTokens: value }))} /></label>
+            <label className="field"><span>Max compaction summary chars</span><IntegerInput value={chatRuntimeForm.maxCompactionSummaryChars} onValueChange={(value) => setChatRuntimeForm((current) => ({ ...current, maxCompactionSummaryChars: value }))} /></label>
             <div className="form-actions">
               <button
                 type="button"
