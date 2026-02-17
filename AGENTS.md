@@ -51,6 +51,7 @@
 # Kubernetes Reload Behavior
 
 - If a task changes only UI files (templates, CSS, JS, or other frontend assets), restart the impacted Kubernetes deployment so changes are visible immediately.
-- For Studio UI changes, run `kubectl -n llmctl rollout restart deploy/llmctl-studio` and `kubectl -n llmctl rollout status deploy/llmctl-studio`.
+- For Studio UI changes, run `kubectl -n llmctl rollout restart deploy/llmctl-studio-frontend` and `kubectl -n llmctl rollout status deploy/llmctl-studio-frontend`.
+- If the change touches backend-rendered APIs or Python server code used by the UI, also run `kubectl -n llmctl rollout restart deploy/llmctl-studio-backend` and `kubectl -n llmctl rollout status deploy/llmctl-studio-backend`.
 - For Python-only Studio live-code changes, use the `llmctl-studio-live-redeploy` skill workflow to restart the Kubernetes deployment.
 - For Python-only RAG changes, restart the corresponding Kubernetes deployment instead of Docker Compose.
