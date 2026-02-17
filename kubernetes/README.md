@@ -180,6 +180,12 @@ kubectl apply -f kubernetes/argocd-pgadmin-application.yaml
 
 This tracks repo path `kubernetes-pgadmin` on `main`, which deploys pgAdmin into namespace `llmctl-pgadmin` while connecting to PostgreSQL in namespace `llmctl`.
 
+If you are migrating from older bundled pgAdmin resources in namespace `llmctl`, remove them before syncing `llmctl-pgadmin` to avoid NodePort `30156` conflicts:
+
+```bash
+kubectl -n llmctl delete svc/llmctl-pgadmin deploy/llmctl-pgadmin pvc/llmctl-pgadmin-data --ignore-not-found
+```
+
 ## Harbor ArgoCD application
 
 Create the Harbor ArgoCD application resource:

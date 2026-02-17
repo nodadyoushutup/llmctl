@@ -18,6 +18,12 @@ kubectl apply -f /tmp/llmctl-pgadmin-secret.yaml
 kubectl apply -k kubernetes-pgadmin
 ```
 
+If migrating from the legacy bundled pgAdmin in namespace `llmctl`, remove the old resources first to avoid NodePort conflict on `30156`:
+
+```bash
+kubectl -n llmctl delete svc/llmctl-pgadmin deploy/llmctl-pgadmin pvc/llmctl-pgadmin-data --ignore-not-found
+```
+
 Guard before ArgoCD sync or `kubectl apply -k`:
 
 ```bash
