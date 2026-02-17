@@ -13475,6 +13475,11 @@ def list_memories():
             .scalars()
             .all()
         )
+    if _workflow_wants_json():
+        return {
+            "memories": [_serialize_memory(memory) for memory in memories],
+            "pagination": _serialize_workflow_pagination(pagination),
+        }
     return render_template(
         "memories.html",
         memories=memories,
@@ -13488,12 +13493,22 @@ def list_memories():
 
 @bp.get("/memories/new")
 def new_memory():
+    if _workflow_wants_json():
+        return {
+            "message": "Create memories by adding Memory nodes in a flowchart.",
+            "flowcharts_url": url_for("agents.list_flowcharts"),
+        }
     flash("Create memories by adding Memory nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
 
 @bp.post("/memories")
 def create_memory():
+    if _workflow_api_request():
+        return {
+            "error": "Create memories by adding Memory nodes in a flowchart.",
+            "reason_code": "FLOWCHART_MANAGED_MEMORY_CREATE",
+        }, 409
     flash("Create memories by adding Memory nodes in a flowchart.", "error")
     return redirect(url_for("agents.list_flowcharts"))
 
@@ -13504,6 +13519,8 @@ def view_memory(memory_id: int):
         memory = session.get(Memory, memory_id)
         if memory is None:
             abort(404)
+    if _workflow_wants_json():
+        return {"memory": _serialize_memory(memory)}
     return render_template(
         "memory_detail.html",
         memory=memory,
@@ -13519,6 +13536,8 @@ def edit_memory(memory_id: int):
         memory = session.get(Memory, memory_id)
         if memory is None:
             abort(404)
+    if _workflow_wants_json():
+        return {"memory": _serialize_memory(memory)}
     return render_template(
         "memory_edit.html",
         memory=memory,
@@ -13529,23 +13548,39 @@ def edit_memory(memory_id: int):
 
 @bp.post("/memories/<int:memory_id>")
 def update_memory(memory_id: int):
-    description = request.form.get("description", "").strip()
+    is_api_request = _workflow_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    description_raw = (
+        payload.get("description")
+        if is_api_request
+        else request.form.get("description", "")
+    )
+    description = str(description_raw or "").strip()
     if not description:
+        if is_api_request:
+            return {"error": "Description is required."}, 400
         flash("Description is required.", "error")
         return redirect(url_for("agents.edit_memory", memory_id=memory_id))
 
+    memory_payload: dict[str, object] | None = None
     with session_scope() as session:
         memory = session.get(Memory, memory_id)
         if memory is None:
             abort(404)
         memory.description = description
+        memory_payload = _serialize_memory(memory)
 
+    if is_api_request:
+        return {"ok": True, "memory": memory_payload}
     flash("Memory updated.", "success")
     return redirect(url_for("agents.view_memory", memory_id=memory_id))
 
 
 @bp.post("/memories/<int:memory_id>/delete")
 def delete_memory(memory_id: int):
+    is_api_request = _workflow_api_request()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_memories")
     )
@@ -13555,6 +13590,8 @@ def delete_memory(memory_id: int):
             abort(404)
         session.delete(memory)
 
+    if is_api_request:
+        return {"ok": True}
     flash("Memory deleted.", "success")
     return redirect(next_url)
 
