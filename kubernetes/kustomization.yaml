@@ -4,7 +4,6 @@ resources:
   - namespace.yaml
   - redis.yaml
   - postgres.yaml
-  - pgadmin.yaml
   - chromadb.yaml
   - mcp-configmap.yaml
   - mcp-llmctl.yaml

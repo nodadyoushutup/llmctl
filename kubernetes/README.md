@@ -6,18 +6,16 @@ This folder deploys the full `llmctl` stack into a single `llmctl` namespace:
 - `llmctl-studio-frontend`
 - `llmctl-redis`
 - `llmctl-postgres`
-- `llmctl-pgadmin`
 - `llmctl-chromadb`
 - integrated MCP services (`llmctl-mcp`, `llmctl-mcp-github`, `llmctl-mcp-atlassian`, `llmctl-mcp-chroma`, `llmctl-mcp-google-cloud`)
 
-ArgoCD tracks this as one application (`llmctl-kubernetes`) for core services. Harbor can be tracked as a separate ArgoCD application (`llmctl-harbor`).
+ArgoCD tracks this as one application (`llmctl-kubernetes`) for core services. pgAdmin and Harbor are tracked as separate ArgoCD applications (`llmctl-pgadmin`, `llmctl-harbor`).
 
 ## Files
 
 - `namespace.yaml`: `llmctl` namespace.
 - `redis.yaml`: in-cluster Redis for Celery and Socket.IO queueing.
 - `postgres.yaml`: in-cluster PostgreSQL for mandatory Studio persistence.
-- `pgadmin.yaml`: in-cluster pgAdmin UI preconfigured for `llmctl-postgres`.
 - `chromadb.yaml`: in-cluster ChromaDB for RAG vector storage.
 - `mcp-configmap.yaml`: shared transport/runtime config for integrated MCP Deployments.
 - `mcp-llmctl.yaml`: Deployment + Service for `llmctl-mcp` (Harbor/your built image).
@@ -34,11 +32,11 @@ ArgoCD tracks this as one application (`llmctl-kubernetes`) for core services. H
 - `studio-frontend-service.yaml`: frontend NodePort Service (`30157`) targeting frontend port `8080`.
 - `studio-secret.example.yaml`: required secret template for PostgreSQL password, `FLASK_SECRET_KEY`, and optional API keys.
 - `mcp-secret.example.yaml`: optional secret template for integrated MCP provider credentials.
-- `pgadmin-secret.example.yaml`: required secret template for pgAdmin web login credentials.
 - `harbor-pull-secret.example.yaml`: optional image pull secret for private Harbor projects.
-- `argocd-application.yaml`: single ArgoCD Application pointing at `kubernetes/`.
+- `argocd-application.yaml`: ArgoCD Application for the core stack at `kubernetes/`.
+- `argocd-pgadmin-application.yaml`: ArgoCD Application for pgAdmin at `kubernetes-pgadmin/`.
 - `argocd-harbor-application.yaml`: ArgoCD Application that installs Harbor from the upstream Helm chart into `llmctl-harbor`.
-- `kubernetes-overlays/minikube-live-code/`: local-only overlay that mounts host project code into `llmctl-studio-backend` for rapid iteration without rebuilding images.
+- `kubernetes-overlays/minikube-live-code/`: local-only overlay that mounts host project code into Studio backend/frontend, `llmctl-mcp`, celery worker/beat, and Kubernetes executor Jobs for rapid iteration without rebuilding images.
 
 ## Quick start
 
@@ -46,23 +44,20 @@ Create secrets before applying manifests:
 
 ```bash
 cp kubernetes/studio-secret.example.yaml /tmp/llmctl-studio-secret.yaml
-cp kubernetes/pgadmin-secret.example.yaml /tmp/llmctl-pgadmin-secret.yaml
 cp kubernetes/mcp-secret.example.yaml /tmp/llmctl-mcp-secret.yaml
 # edit /tmp/llmctl-studio-secret.yaml
-# edit /tmp/llmctl-pgadmin-secret.yaml
 # edit /tmp/llmctl-mcp-secret.yaml (optional but recommended)
 kubectl apply -f /tmp/llmctl-studio-secret.yaml
-kubectl apply -f /tmp/llmctl-pgadmin-secret.yaml
 kubectl apply -f /tmp/llmctl-mcp-secret.yaml
 ```
 
 Guard before ArgoCD sync or `kubectl apply -k`:
 
 ```bash
-kubectl -n llmctl get secret llmctl-studio-secrets llmctl-pgadmin-secrets llmctl-mcp-secrets
+kubectl -n llmctl get secret llmctl-studio-secrets llmctl-mcp-secrets
 ```
 
-`llmctl-studio-secrets` and `llmctl-pgadmin-secrets` are required. `llmctl-mcp-secrets` is optional for boot, but required if you want provider-authenticated GitHub/Atlassian/Google Cloud MCP behavior.
+`llmctl-studio-secrets` is required. `llmctl-mcp-secrets` is optional for boot, but required if you want provider-authenticated GitHub/Atlassian/Google Cloud MCP behavior.
 
 If your Harbor registry is private, also create image pull secret `llmctl-harbor-regcred` from `kubernetes/harbor-pull-secret.example.yaml`, then uncomment `imagePullSecrets` in `kubernetes/mcp-llmctl.yaml`.
 
@@ -90,13 +85,6 @@ Direct NodePort access (Minikube):
 minikube -p llmctl ip
 # open http://<minikube-ip>:30157/ (frontend)
 # backend/API is available on http://<minikube-ip>:30155/
-# open http://<minikube-ip>:30156/ (pgAdmin)
-```
-
-Port-forward pgAdmin:
-
-```bash
-kubectl -n llmctl port-forward svc/llmctl-pgadmin 5050:5050
 ```
 
 Optional GPU (Minikube + NVIDIA):
@@ -136,7 +124,7 @@ kubectl -n llmctl get deploy \
 
 ## Live code mount (Minikube dev only)
 
-Use this when you want to keep a stable base image in Minikube and mount your local repo code into the running Studio pod.
+Use this when you want to keep stable base images in Minikube and mount your local repo code into running llmctl workloads.
 
 1) Keep a Minikube mount session running in a separate terminal:
 
@@ -150,16 +138,25 @@ scripts/minikube-live-code-mount.sh
 kubectl apply -k kubernetes-overlays/minikube-live-code
 ```
 
-3) Restart Studio after code changes:
+3) Restart impacted workloads after code changes:
 
 ```bash
 kubectl -n llmctl rollout restart deploy/llmctl-studio-backend
 kubectl -n llmctl rollout status deploy/llmctl-studio-backend
+kubectl -n llmctl rollout restart deploy/llmctl-mcp
+kubectl -n llmctl rollout status deploy/llmctl-mcp
+kubectl -n llmctl rollout restart deploy/llmctl-celery-worker
+kubectl -n llmctl rollout status deploy/llmctl-celery-worker
+kubectl -n llmctl rollout restart deploy/llmctl-celery-beat
+kubectl -n llmctl rollout status deploy/llmctl-celery-beat
+kubectl -n llmctl rollout restart deploy/llmctl-studio-frontend
+kubectl -n llmctl rollout status deploy/llmctl-studio-frontend
 ```
 
 Notes:
 
-- This overlay mounts `/workspace/llmctl` from the Minikube node into `/app/app/llmctl-studio-backend/run.py`, `/app/app/llmctl-studio-backend/src`, and `/app/app/llmctl-studio-backend/seed-skills`.
+- This overlay mounts `/workspace/llmctl` from the Minikube node into `/app` for Studio backend, `llmctl-mcp`, celery worker, and celery beat; frontend still mounts `/workspace/llmctl/app/llmctl-studio-frontend/dist` to `/usr/share/nginx/html/web`.
+- Executor Jobs spawned by Studio also mount `/workspace/llmctl` into `/app` when `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED=true`.
 - Keep the `minikube mount` process running; if it stops, the pod cannot read mounted code paths.
 - This is intended for local Minikube development, not shared/remote clusters.
 
@@ -171,7 +168,17 @@ Create the single ArgoCD application resource:
 kubectl apply -f kubernetes/argocd-application.yaml
 ```
 
-This tracks repo path `kubernetes` on `main`, which includes namespace, redis, postgres, pgAdmin, chromadb, integrated MCP services, and Studio backend/frontend resources together.
+This tracks repo path `kubernetes` on `main`, which includes namespace, redis, postgres, chromadb, integrated MCP services, and Studio backend/frontend resources together.
+
+## pgAdmin ArgoCD application
+
+Create the pgAdmin ArgoCD application resource:
+
+```bash
+kubectl apply -f kubernetes/argocd-pgadmin-application.yaml
+```
+
+This tracks repo path `kubernetes-pgadmin` on `main`, which deploys pgAdmin into namespace `llmctl-pgadmin` while connecting to PostgreSQL in namespace `llmctl`.
 
 ## Harbor ArgoCD application
 
@@ -228,6 +235,8 @@ Edit `kubernetes/studio-configmap.yaml` for these keys:
 - `LLMCTL_NODE_EXECUTOR_K8S_GPU_LIMIT` (set `>0` to request NVIDIA GPU per executor Job)
 - `LLMCTL_NODE_EXECUTOR_K8S_JOB_TTL_SECONDS` (terminal pod/job retention before auto-cleanup)
 - `LLMCTL_NODE_EXECUTOR_K8S_IMAGE_PULL_SECRETS_JSON` (JSON list, for private registries)
+- `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED` (`true` mounts local repo into executor Jobs)
+- `LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_HOST_PATH` (host path mounted into executor Jobs, default `/workspace/llmctl`)
 
 Edit `kubernetes/studio-secret.example.yaml` for:
 
@@ -244,10 +253,11 @@ If Harbor pull auth is needed, edit `kubernetes/harbor-pull-secret.example.yaml`
 
 - `.dockerconfigjson` for your Harbor endpoint and project credentials
 
-Edit `kubernetes/pgadmin-secret.example.yaml` for:
+Edit `kubernetes-pgadmin/pgadmin-secret.example.yaml` for:
 
 - `PGADMIN_DEFAULT_EMAIL` (required)
 - `PGADMIN_DEFAULT_PASSWORD` (required)
+- `LLMCTL_POSTGRES_PASSWORD` (required, must match `llmctl` PostgreSQL password)
 
 ## Optional executor smoke test
 

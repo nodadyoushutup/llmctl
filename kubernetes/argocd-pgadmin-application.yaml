@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llmctl-pgadmin
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/nodadyoushutup/llmctl.git
+    targetRevision: main
+    path: kubernetes-pgadmin
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: llmctl-pgadmin
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+    syncOptions:
+      - CreateNamespace=true

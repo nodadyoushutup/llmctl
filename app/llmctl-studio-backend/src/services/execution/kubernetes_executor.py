@@ -30,6 +30,9 @@ _EXECUTOR_LABEL_VALUE = "true"
 _RESULT_PREFIX = "LLMCTL_EXECUTOR_RESULT_JSON="
 _START_MARKER_LITERAL = "LLMCTL_EXECUTOR_STARTED"
 _DEFAULT_JOB_TTL_SECONDS = 1800
+_EXECUTOR_LIVE_CODE_ENABLED_ENV = "LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_ENABLED"
+_EXECUTOR_LIVE_CODE_HOST_PATH_ENV = "LLMCTL_NODE_EXECUTOR_K8S_LIVE_CODE_HOST_PATH"
+_EXECUTOR_LIVE_CODE_HOST_PATH_DEFAULT = "/workspace/llmctl"
 
 
 def _utcnow() -> datetime:
@@ -205,6 +208,21 @@ class KubernetesExecutor:
             settings.get("cancel_force_kill_enabled"),
             default=True,
         )
+        live_code_enabled = _as_bool(
+            os.getenv(
+                _EXECUTOR_LIVE_CODE_ENABLED_ENV,
+                settings.get("k8s_live_code_enabled"),
+            ),
+            default=False,
+        )
+        live_code_host_path = str(
+            os.getenv(
+                _EXECUTOR_LIVE_CODE_HOST_PATH_ENV,
+                settings.get("k8s_live_code_host_path")
+                or _EXECUTOR_LIVE_CODE_HOST_PATH_DEFAULT,
+            )
+            or ""
+        ).strip()
 
         try:
             outcome = self._dispatch_via_kubernetes(
@@ -222,6 +240,8 @@ class KubernetesExecutor:
                 cancel_grace_timeout=cancel_grace_timeout,
                 cancel_force_kill=cancel_force_kill,
                 job_ttl_seconds=job_ttl_seconds,
+                live_code_enabled=live_code_enabled,
+                live_code_host_path=live_code_host_path,
             )
         except _KubernetesDispatchFailure as exc:
             provider_dispatch_id = (
@@ -314,6 +334,8 @@ class KubernetesExecutor:
             "workspace_identity": request.workspace_identity,
             "k8s_namespace": namespace,
             "k8s_gpu_limit": str(k8s_gpu_limit),
+            "k8s_live_code_enabled": "true" if live_code_enabled else "false",
+            "k8s_live_code_host_path": live_code_host_path if live_code_enabled else "",
             "k8s_job_name": outcome.job_name,
             "k8s_pod_name": outcome.pod_name or "",
             "startup_marker_seen": outcome.startup_marker_seen,
@@ -355,6 +377,8 @@ class KubernetesExecutor:
         cancel_grace_timeout: int,
         cancel_force_kill: bool,
         job_ttl_seconds: int,
+        live_code_enabled: bool,
+        live_code_host_path: str,
     ) -> _KubernetesDispatchOutcome:
         kubeconfig_path: str | None = None
         try:
@@ -384,6 +408,8 @@ class KubernetesExecutor:
                 k8s_gpu_limit=k8s_gpu_limit,
                 execution_timeout=execution_timeout,
                 job_ttl_seconds=job_ttl_seconds,
+                live_code_enabled=live_code_enabled,
+                live_code_host_path=live_code_host_path,
             )
             self._kubectl_apply_manifest(
                 kubectl_args,
@@ -514,6 +540,8 @@ class KubernetesExecutor:
         k8s_gpu_limit: int,
         execution_timeout: int,
         job_ttl_seconds: int,
+        live_code_enabled: bool = False,
+        live_code_host_path: str = "",
     ) -> dict[str, Any]:
         labels = self._job_labels(request)
         resources: dict[str, dict[str, str]] = {
@@ -522,23 +550,35 @@ class KubernetesExecutor:
         }
         if k8s_gpu_limit > 0:
             resources["limits"]["nvidia.com/gpu"] = str(k8s_gpu_limit)
-        template_spec: dict[str, Any] = {
-            "restartPolicy": "Never",
-            "containers": [
+        container_spec: dict[str, Any] = {
+            "name": "executor",
+            "image": image,
+            "env": [
                 {
-                    "name": "executor",
-                    "image": image,
-                    "env": [
-                        {
-                            "name": "LLMCTL_EXECUTOR_PAYLOAD_JSON",
-                            "value": payload_json,
-                        }
-                    ],
-                    "resources": resources,
+                    "name": "LLMCTL_EXECUTOR_PAYLOAD_JSON",
+                    "value": payload_json,
                 }
             ],
+            "resources": resources,
+        }
+        template_spec: dict[str, Any] = {
+            "restartPolicy": "Never",
+            "containers": [container_spec],
             "activeDeadlineSeconds": max(5, min(execution_timeout, 24 * 3600)),
         }
+        if live_code_enabled and live_code_host_path:
+            container_spec["volumeMounts"] = [
+                {"name": "project-code", "mountPath": "/app"}
+            ]
+            template_spec["volumes"] = [
+                {
+                    "name": "project-code",
+                    "hostPath": {
+                        "path": live_code_host_path,
+                        "type": "Directory",
+                    },
+                }
+            ]
         if service_account:
             template_spec["serviceAccountName"] = service_account
         if image_pull_secrets:

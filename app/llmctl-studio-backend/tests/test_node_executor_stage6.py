@@ -250,6 +250,32 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         self.assertNotIn("nvidia.com/gpu", limits)
         self.assertEqual(1800, manifest["spec"]["ttlSecondsAfterFinished"])
 
+    def test_build_job_manifest_adds_project_mount_when_live_code_enabled(self) -> None:
+        executor = KubernetesExecutor({})
+        manifest = executor._build_job_manifest(
+            request=_request(),
+            job_name="job-live-code",
+            namespace="default",
+            image="llmctl-executor:latest",
+            payload_json="{}",
+            service_account="",
+            image_pull_secrets=[],
+            k8s_gpu_limit=0,
+            execution_timeout=120,
+            job_ttl_seconds=1800,
+            live_code_enabled=True,
+            live_code_host_path="/workspace/llmctl",
+        )
+        pod_spec = manifest["spec"]["template"]["spec"]
+        self.assertEqual(
+            "/workspace/llmctl",
+            pod_spec["volumes"][0]["hostPath"]["path"],
+        )
+        self.assertEqual(
+            "/app",
+            pod_spec["containers"][0]["volumeMounts"][0]["mountPath"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

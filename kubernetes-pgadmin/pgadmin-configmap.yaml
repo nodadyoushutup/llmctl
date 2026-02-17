@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llmctl-pgadmin-config
+  namespace: llmctl-pgadmin
+data:
+  LLMCTL_POSTGRES_HOST: "llmctl-postgres.llmctl.svc.cluster.local"
+  LLMCTL_POSTGRES_PORT: "5432"
+  LLMCTL_POSTGRES_DB: "llmctl_studio"
+  LLMCTL_POSTGRES_USER: "llmctl"
