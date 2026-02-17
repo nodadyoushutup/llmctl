@@ -105,6 +105,7 @@ NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
         "AND workspace_identity NOT LIKE '%://%'",
     ),
 )
+SCHEMA_MIGRATION_ADVISORY_LOCK_KEY = 958_203_417
 
 
 def utcnow() -> datetime:
@@ -180,6 +181,7 @@ def _ensure_schema() -> None:
     if _engine is None:
         return
     with _engine.begin() as connection:
+        _acquire_schema_migration_lock(connection)
         _migrate_roles_schema(connection)
         role_columns = {
             "description": "TEXT",
@@ -503,6 +505,15 @@ def _in_list_sql(values: tuple[str, ...]) -> str:
     return ", ".join(_quote_sqlite_literal(value) for value in values)
 
 
+def _acquire_schema_migration_lock(connection) -> None:
+    if connection.dialect.name != "postgresql":
+        return
+    connection.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": SCHEMA_MIGRATION_ADVISORY_LOCK_KEY},
+    )
+
+
 def _sqlite_table_sql(connection, table: str) -> str:
     if connection.dialect.name != "sqlite":
         return ""
@@ -628,13 +639,15 @@ def _migrate_agent_task_node_executor_fields(
     connection.execute(
         text(
             "UPDATE agent_tasks SET cli_preflight_passed = NULL "
-            f"WHERE cli_fallback_used = {false_literal}"
+            "WHERE cli_preflight_passed IS NOT NULL "
+            f"AND cli_fallback_used = {false_literal}"
         )
     )
     connection.execute(
         text(
             "UPDATE agent_tasks SET fallback_reason = NULL "
-            f"WHERE fallback_attempted = {false_literal}"
+            "WHERE fallback_reason IS NOT NULL "
+            f"AND fallback_attempted = {false_literal}"
         )
     )
     connection.execute(
@@ -653,7 +666,8 @@ def _migrate_agent_task_node_executor_fields(
         text(
             "UPDATE agent_tasks "
             f"SET fallback_attempted = {false_literal}, fallback_reason = NULL "
-            f"WHERE dispatch_uncertain = {true_literal}"
+            f"WHERE dispatch_uncertain = {true_literal} "
+            f"AND (fallback_attempted = {true_literal} OR fallback_reason IS NOT NULL)"
         )
     )
     connection.execute(

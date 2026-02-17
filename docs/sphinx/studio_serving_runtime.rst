@@ -97,6 +97,8 @@ Primary Gunicorn controls are optional and read from environment variables:
   ``GUNICORN_MAX_REQUESTS_JITTER``
 - optional upstream TLS: ``GUNICORN_CERTFILE``, ``GUNICORN_KEYFILE``,
   ``GUNICORN_CA_CERTS``
+- control socket: ``GUNICORN_CONTROL_SOCKET``,
+  ``GUNICORN_CONTROL_SOCKET_MODE``, ``GUNICORN_CONTROL_SOCKET_DISABLE``
 
 All controls have sane defaults, so zero-override startup remains operational.
 

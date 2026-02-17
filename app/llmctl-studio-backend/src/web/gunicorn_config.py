@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from multiprocessing import cpu_count
 
+TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off"}
+
 
 def _as_int(name: str, default: int, *, minimum: int = 1) -> int:
     raw = os.getenv(name, "").strip()
@@ -23,6 +26,32 @@ def _as_str(name: str, default: str) -> str:
 def _as_optional_str(name: str) -> str | None:
     value = os.getenv(name, "").strip()
     return value or None
+
+
+def _as_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in TRUE_VALUES:
+        return True
+    if raw in FALSE_VALUES:
+        return False
+    return default
+
+
+def _as_mode(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+
+    for base in (8, 10):
+        try:
+            value = int(raw, base)
+        except ValueError:
+            continue
+        if 0 <= value <= 0o777:
+            return value
+    return default
 
 
 def _default_bind() -> str:
@@ -52,3 +81,6 @@ max_requests_jitter = _as_int("GUNICORN_MAX_REQUESTS_JITTER", 100, minimum=0)
 certfile = _as_optional_str("GUNICORN_CERTFILE")
 keyfile = _as_optional_str("GUNICORN_KEYFILE")
 ca_certs = _as_optional_str("GUNICORN_CA_CERTS")
+control_socket = _as_str("GUNICORN_CONTROL_SOCKET", "/tmp/gunicorn.ctl")
+control_socket_mode = _as_mode("GUNICORN_CONTROL_SOCKET_MODE", 0o660)
+control_socket_disable = _as_bool("GUNICORN_CONTROL_SOCKET_DISABLE", False)

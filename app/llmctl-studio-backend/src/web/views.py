@@ -766,6 +766,51 @@ def _build_agent_payload(agent: Agent) -> dict[str, object]:
     }
 
 
+def _serialize_agent_priority(priority: AgentPriority) -> dict[str, object]:
+    return {
+        "id": priority.id,
+        "position": int(priority.position or 0),
+        "content": str(priority.content or ""),
+    }
+
+
+def _serialize_agent_skill(skill: Skill) -> dict[str, object]:
+    latest_version = _latest_skill_version(skill)
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "display_name": skill.display_name,
+        "status": skill.status,
+        "latest_version": latest_version.version if latest_version is not None else None,
+    }
+
+
+def _serialize_role_option(role: Role) -> dict[str, object]:
+    return {
+        "id": role.id,
+        "name": role.name,
+    }
+
+
+def _serialize_agent_list_item(
+    agent: Agent,
+    *,
+    role_name: str | None = None,
+    status: str = "stopped",
+) -> dict[str, object]:
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "description": agent.description or "",
+        "is_system": bool(agent.is_system),
+        "role_id": agent.role_id,
+        "role_name": role_name or "",
+        "status": status,
+        "created_at": _human_time(agent.created_at),
+        "updated_at": _human_time(agent.updated_at),
+    }
+
+
 def _build_agent_prompt_payload(agent: Agent) -> object | None:
     agent_payload = _build_agent_payload(agent)
     role = agent.role
@@ -5711,6 +5756,22 @@ def _request_path_uses_api_prefix() -> bool:
     return path == normalized_prefix or path.startswith(f"{normalized_prefix}/")
 
 
+def _agents_wants_json() -> bool:
+    if _request_path_uses_api_prefix():
+        return True
+    if (request.args.get("format") or "").strip().lower() == "json":
+        return True
+    accepted = request.accept_mimetypes
+    return (
+        accepted["application/json"] > 0
+        and accepted["application/json"] >= accepted["text/html"]
+    )
+
+
+def _agent_api_request() -> bool:
+    return _request_path_uses_api_prefix() or request.is_json
+
+
 def _flowchart_wants_json() -> bool:
     if _request_path_uses_api_prefix():
         return True
@@ -6716,6 +6777,18 @@ def list_agents():
     agent_status_by_id = _agent_status_by_id(agent_ids)
     roles = _load_roles()
     roles_by_id = {role.id: role.name for role in roles}
+    if _agents_wants_json():
+        return {
+            "agents": [
+                _serialize_agent_list_item(
+                    agent,
+                    role_name=roles_by_id.get(agent.role_id),
+                    status=agent_status_by_id.get(agent.id, "stopped"),
+                )
+                for agent in agents
+            ],
+            "summary": summary,
+        }
     return render_template(
         "agents.html",
         agents=agents,
@@ -6731,6 +6804,8 @@ def list_agents():
 @bp.get("/agents/new")
 def new_agent():
     roles = _load_roles()
+    if _agents_wants_json():
+        return {"roles": [_serialize_role_option(role) for role in roles]}
     return render_template(
         "agent_new.html",
         roles=roles,
@@ -6741,30 +6816,46 @@ def new_agent():
 
 @bp.post("/agents")
 def create_agent():
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    role_raw = request.form.get("role_id", "").strip()
+    is_api_request = _agent_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description") if is_api_request else request.form.get("description", "")
+    )
+    role_raw = payload.get("role_id") if is_api_request else request.form.get("role_id", "")
+    name = str(name_raw or "").strip()
+    description = str(description_raw or "").strip()
 
     if not description:
+        if is_api_request:
+            return {"error": "Agent description is required."}, 400
         flash("Agent description is required.", "error")
         return redirect(url_for("agents.new_agent"))
 
     if not name:
         name = "Untitled Agent"
 
-    role_id = None
-    if role_raw:
-        try:
-            role_id = int(role_raw)
-        except ValueError:
+    try:
+        role_id = _coerce_optional_int(role_raw, field_name="role_id", minimum=1)
+    except ValueError:
+        if is_api_request:
+            return {"error": "Role must be a number."}, 400
+        role_id = None
+        if role_raw:
             flash("Role must be a number.", "error")
             return redirect(url_for("agents.new_agent"))
+    role_name: str | None = None
     with session_scope() as session:
         if role_id is not None:
             role = session.get(Role, role_id)
             if role is None:
+                if is_api_request:
+                    return {"error": "Role not found."}, 404
                 flash("Role not found.", "error")
                 return redirect(url_for("agents.new_agent"))
+            role_name = role.name
         prompt_payload = {"description": description}
         prompt_json = json.dumps(prompt_payload, indent=2, sort_keys=True)
         agent = Agent.create(
@@ -6777,14 +6868,22 @@ def create_agent():
             autonomous_prompt=None,
             is_system=False,
         )
-        agent_id = agent.id
+        payload = _serialize_agent_list_item(
+            agent,
+            role_name=role_name,
+            status="stopped",
+        )
 
+    if is_api_request:
+        return {"agent": payload}, 201
+    agent_id = int(payload["id"])
     flash(f"Agent {agent_id} created.", "success")
     return redirect(url_for("agents.view_agent", agent_id=agent_id))
 
 
 @bp.get("/agents/<int:agent_id>")
 def view_agent(agent_id: int):
+    wants_json = _agents_wants_json()
     roles = _load_roles()
     roles_by_id = {role.id: role.name for role in roles}
     with session_scope() as session:
@@ -6804,8 +6903,50 @@ def view_agent(agent_id: int):
             abort(404)
         priorities = _ordered_agent_priorities(agent)
         assigned_skills = _ordered_agent_skills(agent)
+        assigned_skill_ids = {skill.id for skill in assigned_skills}
+        available_skills: list[Skill] = []
+        if wants_json:
+            available_skills = (
+                session.execute(
+                    select(Skill)
+                    .options(selectinload(Skill.versions))
+                    .where(Skill.status != SKILL_STATUS_ARCHIVED)
+                    .order_by(Skill.display_name.asc(), Skill.name.asc(), Skill.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            available_skills = [
+                skill for skill in available_skills if skill.id not in assigned_skill_ids
+            ]
+        active_run_id = (
+            session.execute(
+                select(Run.id)
+                .where(
+                    Run.agent_id == agent_id,
+                    Run.status.in_(RUN_ACTIVE_STATUSES),
+                )
+                .order_by(Run.created_at.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
     agent_status_by_id = _agent_status_by_id([agent.id])
     agent_status = agent_status_by_id.get(agent.id, "stopped")
+    if wants_json:
+        return {
+            "agent": _serialize_agent_list_item(
+                agent,
+                role_name=roles_by_id.get(agent.role_id),
+                status=agent_status,
+            ),
+            "active_run_id": active_run_id,
+            "roles": [_serialize_role_option(role) for role in roles],
+            "priorities": [_serialize_agent_priority(priority) for priority in priorities],
+            "assigned_skills": [_serialize_agent_skill(skill) for skill in assigned_skills],
+            "available_skills": [_serialize_agent_skill(skill) for skill in available_skills],
+        }
     return render_template(
         "agent_detail.html",
         agent=agent,
@@ -6868,22 +7009,35 @@ def edit_agent(agent_id: int):
 
 @bp.post("/agents/<int:agent_id>")
 def update_agent(agent_id: int):
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
-    role_raw = request.form.get("role_id", "").strip()
+    is_api_request = _agent_api_request()
+    payload = request.get_json(silent=True) if request.is_json else {}
+    if payload is None or not isinstance(payload, dict):
+        payload = {}
+    name_raw = payload.get("name") if is_api_request else request.form.get("name", "")
+    description_raw = (
+        payload.get("description") if is_api_request else request.form.get("description", "")
+    )
+    role_raw = payload.get("role_id") if is_api_request else request.form.get("role_id", "")
+    name = str(name_raw or "").strip()
+    description = str(description_raw or "").strip()
 
     if not description:
+        if is_api_request:
+            return {"error": "Agent description is required."}, 400
         flash("Agent description is required.", "error")
         return redirect(url_for("agents.edit_agent", agent_id=agent_id))
 
-    role_id = None
-    if role_raw:
-        try:
-            role_id = int(role_raw)
-        except ValueError:
+    try:
+        role_id = _coerce_optional_int(role_raw, field_name="role_id", minimum=1)
+    except ValueError:
+        if is_api_request:
+            return {"error": "Role must be a number."}, 400
+        role_id = None
+        if role_raw:
             flash("Role must be a number.", "error")
             return redirect(url_for("agents.edit_agent", agent_id=agent_id))
 
+    role_name: str | None = None
     with session_scope() as session:
         agent = session.get(Agent, agent_id)
         if agent is None:
@@ -6891,8 +7045,11 @@ def update_agent(agent_id: int):
         if role_id is not None:
             role = session.get(Role, role_id)
             if role is None:
+                if is_api_request:
+                    return {"error": "Role not found."}, 404
                 flash("Role not found.", "error")
                 return redirect(url_for("agents.edit_agent", agent_id=agent_id))
+            role_name = role.name
         if not name:
             name = agent.name or "Untitled Agent"
         prompt_payload = {"description": description}
@@ -6903,13 +7060,21 @@ def update_agent(agent_id: int):
         agent.prompt_text = None
         agent.autonomous_prompt = None
         agent.role_id = role_id
+        payload = _serialize_agent_list_item(
+            agent,
+            role_name=role_name,
+            status=_agent_status_by_id([agent.id]).get(agent.id, "stopped"),
+        )
 
+    if is_api_request:
+        return {"agent": payload}
     flash("Agent updated.", "success")
     return redirect(url_for("agents.view_agent", agent_id=agent_id))
 
 
 @bp.post("/agents/<int:agent_id>/skills")
 def attach_agent_skill(agent_id: int):
+    is_api_request = _agent_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
     )
@@ -6918,12 +7083,17 @@ def attach_agent_skill(agent_id: int):
     try:
         skill_id = _coerce_optional_int(raw_skill_id, field_name="skill_id", minimum=1)
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(redirect_target)
     if skill_id is None:
+        if is_api_request:
+            return {"error": "skill_id is required."}, 400
         flash("skill_id is required.", "error")
         return redirect(redirect_target)
 
+    assigned = False
     with session_scope() as session:
         agent = (
             session.execute(
@@ -6936,9 +7106,13 @@ def attach_agent_skill(agent_id: int):
             abort(404)
         skill = session.get(Skill, skill_id)
         if skill is None:
+            if is_api_request:
+                return {"error": f"Skill {skill_id} was not found."}, 404
             flash(f"Skill {skill_id} was not found.", "error")
             return redirect(redirect_target)
         if (skill.status or SKILL_STATUS_ACTIVE) == SKILL_STATUS_ARCHIVED:
+            if is_api_request:
+                return {"error": f"Skill {skill_id} is archived and cannot be assigned."}, 400
             flash(f"Skill {skill_id} is archived and cannot be assigned.", "error")
             return redirect(redirect_target)
 
@@ -6946,15 +7120,23 @@ def attach_agent_skill(agent_id: int):
         if skill_id not in ordered_ids:
             ordered_ids.append(skill_id)
             _set_agent_skills(session, agent_id, ordered_ids)
+            assigned = True
+            if is_api_request:
+                return {"ok": True, "assigned": True}
             flash("Skill assigned.", "success")
         else:
+            if is_api_request:
+                return {"ok": True, "assigned": False}
             flash("Skill already assigned.", "info")
 
+    if is_api_request:
+        return {"ok": True, "assigned": assigned}
     return redirect(redirect_target)
 
 
 @bp.post("/agents/<int:agent_id>/skills/<int:skill_id>/delete")
 def detach_agent_skill(agent_id: int, skill_id: int):
+    is_api_request = _agent_api_request()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
     )
@@ -6970,17 +7152,26 @@ def detach_agent_skill(agent_id: int, skill_id: int):
             abort(404)
         ordered_ids = [item.id for item in _ordered_agent_skills(agent) if item.id != skill_id]
         _set_agent_skills(session, agent_id, ordered_ids)
+    if is_api_request:
+        return {"ok": True}
     flash("Skill removed.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/agents/<int:agent_id>/skills/<int:skill_id>/move")
 def move_agent_skill(agent_id: int, skill_id: int):
+    is_api_request = _agent_api_request()
     direction = (request.form.get("direction") or "").strip().lower()
+    if not direction and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            direction = str(payload.get("direction") or "").strip().lower()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
     )
     if direction not in {"up", "down"}:
+        if is_api_request:
+            return {"error": "Invalid skill reorder direction."}, 400
         flash("Invalid skill reorder direction.", "error")
         return redirect(redirect_target)
 
@@ -7004,16 +7195,25 @@ def move_agent_skill(agent_id: int, skill_id: int):
             ordered_ids[index + 1], ordered_ids[index] = ordered_ids[index], ordered_ids[index + 1]
         _set_agent_skills(session, agent_id, ordered_ids)
 
+    if is_api_request:
+        return {"ok": True}
     return redirect(redirect_target)
 
 
 @bp.post("/agents/<int:agent_id>/priorities")
 def create_agent_priority(agent_id: int):
+    is_api_request = _agent_api_request()
     content = request.form.get("content", "").strip()
+    if not content and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            content = str(payload.get("content") or "").strip()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
     )
     if not content:
+        if is_api_request:
+            return {"error": "Priority content is required."}, 400
         flash("Priority content is required.", "error")
         return redirect(redirect_target)
     with session_scope() as session:
@@ -7035,17 +7235,26 @@ def create_agent_priority(agent_id: int):
             position=position,
             content=content,
         )
+    if is_api_request:
+        return {"ok": True}, 201
     flash("Priority added.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/agents/<int:agent_id>/priorities/<int:priority_id>")
 def update_agent_priority(agent_id: int, priority_id: int):
+    is_api_request = _agent_api_request()
     content = request.form.get("content", "").strip()
+    if not content and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            content = str(payload.get("content") or "").strip()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
     )
     if not content:
+        if is_api_request:
+            return {"error": "Priority content is required."}, 400
         flash("Priority content is required.", "error")
         return redirect(redirect_target)
     with session_scope() as session:
@@ -7053,17 +7262,26 @@ def update_agent_priority(agent_id: int, priority_id: int):
         if priority is None or priority.agent_id != agent_id:
             abort(404)
         priority.content = content
+    if is_api_request:
+        return {"ok": True}
     flash("Priority updated.", "success")
     return redirect(redirect_target)
 
 
 @bp.post("/agents/<int:agent_id>/priorities/<int:priority_id>/move")
 def move_agent_priority(agent_id: int, priority_id: int):
+    is_api_request = _agent_api_request()
     direction = (request.form.get("direction") or "").strip().lower()
+    if not direction and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            direction = str(payload.get("direction") or "").strip().lower()
     redirect_target = _safe_redirect_target(
         request.form.get("next"), url_for("agents.edit_agent", agent_id=agent_id)
     )
     if direction not in {"up", "down"}:
+        if is_api_request:
+            return {"error": "Invalid priority reorder direction."}, 400
         flash("Invalid priority reorder direction.", "error")
         return redirect(redirect_target)
     with session_scope() as session:
@@ -7090,6 +7308,8 @@ def move_agent_priority(agent_id: int, priority_id: int):
         elif direction == "down" and index < len(priorities) - 1:
             priorities[index + 1], priorities[index] = priorities[index], priorities[index + 1]
         _reindex_agent_priorities(priorities)
+    if is_api_request:
+        return {"ok": True}
     return redirect(redirect_target)
 
 

@@ -50,6 +50,9 @@ GUNICORN_ENV_KEYS = [
     "GUNICORN_CERTFILE",
     "GUNICORN_KEYFILE",
     "GUNICORN_CA_CERTS",
+    "GUNICORN_CONTROL_SOCKET",
+    "GUNICORN_CONTROL_SOCKET_MODE",
+    "GUNICORN_CONTROL_SOCKET_DISABLE",
 ]
 
 
@@ -83,6 +86,9 @@ class GunicornConfigStage9Tests(unittest.TestCase):
         self.assertIsNone(module.certfile)
         self.assertIsNone(module.keyfile)
         self.assertIsNone(module.ca_certs)
+        self.assertEqual("/tmp/gunicorn.ctl", module.control_socket)
+        self.assertEqual(0o660, module.control_socket_mode)
+        self.assertFalse(module.control_socket_disable)
 
     def test_env_overrides_and_invalid_values_fallback(self) -> None:
         module = self._reload_module(
@@ -105,6 +111,9 @@ class GunicornConfigStage9Tests(unittest.TestCase):
                 "GUNICORN_CERTFILE": "/tls/cert.pem",
                 "GUNICORN_KEYFILE": "/tls/key.pem",
                 "GUNICORN_CA_CERTS": "/tls/ca.pem",
+                "GUNICORN_CONTROL_SOCKET": "/var/run/llmctl-studio/gunicorn.ctl",
+                "GUNICORN_CONTROL_SOCKET_MODE": "invalid",
+                "GUNICORN_CONTROL_SOCKET_DISABLE": "true",
             }
         )
         self.assertEqual("0.0.0.0:9090", module.bind)
@@ -123,6 +132,9 @@ class GunicornConfigStage9Tests(unittest.TestCase):
         self.assertEqual("/tls/cert.pem", module.certfile)
         self.assertEqual("/tls/key.pem", module.keyfile)
         self.assertEqual("/tls/ca.pem", module.ca_certs)
+        self.assertEqual("/var/run/llmctl-studio/gunicorn.ctl", module.control_socket)
+        self.assertEqual(0o660, module.control_socket_mode)
+        self.assertTrue(module.control_socket_disable)
 
 
 class ProxyFixStage9Tests(unittest.TestCase):

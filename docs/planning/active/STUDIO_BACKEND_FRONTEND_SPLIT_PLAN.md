@@ -157,3 +157,148 @@ Goal: split Studio into separate backend/frontend services for Kubernetes deploy
 - [ ] Update Sphinx/Read the Docs content to reflect frontend/backend separation and ingress paths (`/web`, `/api`).
 - [ ] Update any developer workflow docs (including Minikube live-code overlay instructions).
 - [ ] Acceptance criteria: documentation is consistent with implemented architecture and deployment workflow.
+
+---
+
+## React-Only Completion Plan (Current Active Scope)
+
+This section supersedes bridge-first execution for all remaining UI migration work.  
+Objective: complete full React parity, then remove legacy Jinja/UI paths with no bridge fallback.
+
+## Stage 0 - Requirements Gathering (React-Only Addendum)
+- [x] Confirm cutover strategy: parity-first cutover, then hard switch.
+- [x] Confirm legacy policy after parity: remove all backend Jinja/UI routes and templates immediately.
+- [x] Confirm migration order: core ops first.
+- [x] Confirm parity bar: functional parity with selective redesign allowed.
+- [x] Confirm execution approval to proceed with planning before implementation.
+
+## Stage 0 - Interview Notes (React-Only Addendum)
+- [x] User selected parity-first cutover (no big-bang cut now).
+- [x] User selected hard removal of legacy UI after parity is complete.
+- [x] User selected migration order: Core ops first.
+- [x] User selected parity bar: functional parity + selective redesign.
+- [x] User requested plan update first so implementation progress can be tracked cleanly.
+
+## Stage 1 - Code Planning (React-Only Execution Design)
+- [x] Define execution stages for remaining React migration.
+- [x] Define route/domain tracker to mark what is built and verified.
+- [x] Define cutover gate criteria before deleting legacy UI.
+- [x] Ensure final two stages are `Automated Testing` then `Docs Updates`.
+
+## Stage 1 - Execution Order (React-Only)
+- [ ] Stage 2: Agents migration (full list/detail/create/edit/delete + role/priority/skill bindings).
+- [ ] Stage 3: Runs, quick tasks, and node execution surfaces.
+- [ ] Stage 4: Task templates, plans, milestones, and memories.
+- [ ] Stage 5: Flowcharts (editor, runtime, history, run detail, node operations).
+- [ ] Stage 6: Settings, provider/runtime/chat config, and integrations.
+- [ ] Stage 7: Skills, scripts, attachments, models, MCP servers.
+- [ ] Stage 8: RAG pages and external tools surfaces (GitHub/Jira/Confluence/Chroma).
+- [ ] Stage 9: React-only routing hardening and bridge decommission prep.
+- [ ] Stage 10: Legacy backend GUI removal and backend API-only cleanup.
+- [ ] Stage 11: Automated Testing.
+- [ ] Stage 12: Docs Updates.
+
+## React Baseline Already Implemented
+- [x] Migration hub shell route (`/migration`).
+- [x] Parity checklist route (`/parity-checklist`).
+- [x] Chat activity route (`/chat/activity`).
+- [x] Chat thread route (`/chat/threads/:threadId`).
+- [x] Execution monitor route (`/execution-monitor`).
+- [x] Backend/frontend split runtime (`/web` + `/api`) is already in place.
+
+## Stage 2 - Agents Migration
+- [ ] Add/verify API contracts for agent list/detail/create/update/delete and related bindings.
+- [ ] Implement React routes/pages for agents list/detail/new/edit.
+- [ ] Implement React mutations for create/update/delete and relation updates.
+- [ ] Preserve list behavior requirements (clickable rows, interactive element exclusions, icon-only actions).
+- [ ] Mark Agents parity complete in tracker.
+
+## Stage 3 - Runs, Quick Tasks, Nodes
+- [ ] Migrate `/runs` list/detail/new/edit to fully native React.
+- [ ] Migrate quick task and node status/task lifecycle flows.
+- [ ] Ensure long-running status and realtime feedback parity.
+- [ ] Mark Runs/Quick/Nodes parity complete in tracker.
+
+## Stage 4 - Templates, Plans, Milestones, Memories
+- [ ] Migrate task templates list/detail/new/edit/delete.
+- [ ] Migrate plans and milestones CRUD/detail flows.
+- [ ] Migrate memories list/detail/new/edit/delete.
+- [ ] Mark domain parity complete in tracker.
+
+## Stage 5 - Flowcharts
+- [ ] Migrate flowchart list/detail/new/edit.
+- [ ] Migrate node graph editing operations and connector behavior.
+- [ ] Migrate flowchart run/history/detail surfaces and actions.
+- [ ] Mark Flowcharts parity complete in tracker.
+
+## Stage 6 - Settings and Integrations
+- [ ] Migrate settings core/provider/runtime/chat pages to React.
+- [ ] Migrate integrations settings and validation UX.
+- [ ] Preserve functional behavior for provider-specific controls and runtime flags.
+- [ ] Mark Settings/Integrations parity complete in tracker.
+
+## Stage 7 - Skills/Scripts/Attachments/Models/MCP
+- [ ] Migrate skills management flows.
+- [ ] Migrate scripts and attachments CRUD/detail flows.
+- [ ] Migrate model and MCP server management pages.
+- [ ] Mark these domains parity complete in tracker.
+
+## Stage 8 - RAG and External Tools
+- [ ] Migrate RAG chat and source management pages.
+- [ ] Migrate GitHub/Jira/Confluence/Chroma surfaces to React.
+- [ ] Preserve connectivity validation and error handling parity.
+- [ ] Mark RAG/External parity complete in tracker.
+
+## Stage 9 - React-Only Routing Hardening
+- [ ] Remove React iframe bridge route usage from app router.
+- [ ] Remove bridge-focused frontend navigation/runtime notes.
+- [ ] Ensure unknown routes use React 404 handling.
+- [ ] Verify all previously bridged routes are now native React routes.
+
+## Stage 10 - Legacy Backend GUI Removal
+- [ ] Delete backend template-rendered GUI route handlers.
+- [ ] Delete backend Jinja templates and legacy static UI assets.
+- [ ] Remove frontend nginx legacy route proxy fallback behavior.
+- [ ] Keep backend focused on API/realtime/service responsibilities only.
+- [ ] Validate no user-facing GUI route is served from Flask templates.
+
+## Stage 10 - Hard Cutover Gate
+- [ ] Every legacy page/flow has a native React equivalent.
+- [ ] Every legacy mutation flow has React parity coverage.
+- [ ] Realtime and long-running feedback parity is verified.
+- [ ] Bridge/iframe fallback is removed from runtime behavior.
+- [ ] Backend GUI template surface is removed.
+
+## Stage 11 - Automated Testing
+- [ ] Add/update backend API tests for all newly migrated domains.
+- [ ] Add/update frontend route/component/API integration tests across migrated domains.
+- [ ] Add/update split deployment integration tests for React-only runtime.
+- [ ] Run automated suite and resolve regressions.
+- [ ] Acceptance criteria: backend, frontend, and split integration suites pass.
+
+## Stage 12 - Docs Updates
+- [ ] Update docs to declare React as the only Studio UI.
+- [ ] Remove bridge/legacy UI documentation and migration-temporary guidance.
+- [ ] Update Sphinx/Read the Docs architecture and route documentation.
+- [ ] Update developer workflows for React-only Studio operations.
+- [ ] Acceptance criteria: docs match final React-only architecture and runtime.
+
+## React Domain Tracker
+- [ ] Agents
+- [ ] Runs
+- [ ] Quick Tasks / Nodes
+- [ ] Task Templates
+- [ ] Plans
+- [ ] Milestones
+- [ ] Memories
+- [ ] Flowcharts
+- [ ] Settings Core/Provider
+- [ ] Settings Runtime/Chat
+- [ ] Integrations
+- [ ] Skills
+- [ ] Scripts
+- [ ] Attachments
+- [ ] Models
+- [ ] MCP Servers
+- [ ] RAG Chat/Sources
+- [ ] External Tools (GitHub/Jira/Confluence/Chroma)
