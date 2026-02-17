@@ -759,3 +759,275 @@ export function reorderFlowchartNodeSkills(flowchartId, nodeId, { skillIds = [] 
     body: { skill_ids: skillIds },
   })
 }
+
+const SETTINGS_PROVIDER_IDS = ['codex', 'gemini', 'claude', 'vllm_local', 'vllm_remote']
+
+function normalizeProviderSection(section) {
+  const normalized = String(section || '').trim().toLowerCase()
+  if (!normalized || normalized === 'controls') {
+    return 'controls'
+  }
+  if (normalized === 'vllm-local') {
+    return 'vllm_local'
+  }
+  return normalized
+}
+
+function providerSectionPath(section) {
+  const normalized = normalizeProviderSection(section)
+  if (normalized === 'controls') {
+    return '/settings/provider'
+  }
+  if (normalized === 'vllm_local') {
+    return '/settings/provider/vllm-local'
+  }
+  return `/settings/provider/${normalized}`
+}
+
+function normalizeRuntimeSection(section) {
+  const normalized = String(section || '').trim().toLowerCase()
+  if (!normalized || normalized === 'node') {
+    return 'node'
+  }
+  if (normalized === 'rag' || normalized === 'chat') {
+    return normalized
+  }
+  return 'node'
+}
+
+function runtimeSectionPath(section) {
+  const normalized = normalizeRuntimeSection(section)
+  if (normalized === 'node') {
+    return '/settings/runtime'
+  }
+  return `/settings/runtime/${normalized}`
+}
+
+export function getSettingsCore() {
+  return requestJson('/settings/core')
+}
+
+export function getSettingsProvider({ section = 'controls' } = {}) {
+  return requestJson(providerSectionPath(section))
+}
+
+export function updateSettingsProviderControls({
+  defaultProvider = '',
+  enabledProviders = [],
+} = {}) {
+  const enabled = new Set(
+    Array.isArray(enabledProviders)
+      ? enabledProviders.map((item) => String(item || '').trim().toLowerCase())
+      : [],
+  )
+  const body = { default_provider: defaultProvider }
+  SETTINGS_PROVIDER_IDS.forEach((provider) => {
+    body[`provider_enabled_${provider}`] = enabled.has(provider)
+  })
+  return requestJson('/settings/provider', {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateSettingsProviderCodex({ apiKey = '' } = {}) {
+  return requestJson('/settings/provider/codex', {
+    method: 'POST',
+    body: { codex_api_key: apiKey },
+  })
+}
+
+export function updateSettingsProviderGemini({ apiKey = '' } = {}) {
+  return requestJson('/settings/provider/gemini', {
+    method: 'POST',
+    body: { gemini_api_key: apiKey },
+  })
+}
+
+export function updateSettingsProviderClaude({ apiKey = '' } = {}) {
+  return requestJson('/settings/provider/claude', {
+    method: 'POST',
+    body: { claude_api_key: apiKey },
+  })
+}
+
+export function updateSettingsProviderVllmLocal({
+  model = '',
+  huggingfaceToken,
+} = {}) {
+  const body = { vllm_local_model: model }
+  if (huggingfaceToken !== undefined) {
+    body.vllm_local_hf_token = huggingfaceToken
+  }
+  return requestJson('/settings/provider/vllm-local', {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateSettingsProviderVllmRemote({
+  baseUrl = '',
+  apiKey = '',
+  model = '',
+  models = '',
+} = {}) {
+  return requestJson('/settings/provider/vllm-remote', {
+    method: 'POST',
+    body: {
+      vllm_remote_base_url: baseUrl,
+      vllm_remote_api_key: apiKey,
+      vllm_remote_model: model,
+      vllm_remote_models: models,
+    },
+  })
+}
+
+export function getSettingsRuntime({ section = 'node' } = {}) {
+  return requestJson(runtimeSectionPath(section))
+}
+
+export function updateSettingsRuntimeInstructions(flags = {}) {
+  return requestJson('/settings/runtime/instructions', {
+    method: 'POST',
+    body: flags,
+  })
+}
+
+export function updateSettingsRuntimeNodeSkillBinding({ mode = '' } = {}) {
+  return requestJson('/settings/runtime/node-skill-binding', {
+    method: 'POST',
+    body: { node_skill_binding_mode: mode },
+  })
+}
+
+export function updateSettingsRuntimeNodeExecutor({
+  provider = 'kubernetes',
+  workspaceIdentityKey = '',
+  dispatchTimeoutSeconds = '',
+  executionTimeoutSeconds = '',
+  logCollectionTimeoutSeconds = '',
+  cancelGraceTimeoutSeconds = '',
+  cancelForceKillEnabled = false,
+  k8sKubeconfig = '',
+  k8sKubeconfigClear = false,
+  k8sNamespace = '',
+  k8sImage = '',
+  k8sServiceAccount = '',
+  k8sGpuLimit = '',
+  k8sJobTtlSeconds = '',
+  k8sImagePullSecretsJson = '',
+  k8sInCluster = false,
+} = {}) {
+  return requestJson('/settings/runtime/node-executor', {
+    method: 'POST',
+    body: {
+      provider,
+      workspace_identity_key: workspaceIdentityKey,
+      dispatch_timeout_seconds: dispatchTimeoutSeconds,
+      execution_timeout_seconds: executionTimeoutSeconds,
+      log_collection_timeout_seconds: logCollectionTimeoutSeconds,
+      cancel_grace_timeout_seconds: cancelGraceTimeoutSeconds,
+      cancel_force_kill_enabled: cancelForceKillEnabled,
+      k8s_kubeconfig: k8sKubeconfig,
+      k8s_kubeconfig_clear: k8sKubeconfigClear,
+      k8s_namespace: k8sNamespace,
+      k8s_image: k8sImage,
+      k8s_service_account: k8sServiceAccount,
+      k8s_gpu_limit: k8sGpuLimit,
+      k8s_job_ttl_seconds: k8sJobTtlSeconds,
+      k8s_image_pull_secrets_json: k8sImagePullSecretsJson,
+      k8s_in_cluster: k8sInCluster,
+    },
+  })
+}
+
+export function updateSettingsRuntimeRag({
+  dbProvider = '',
+  embedProvider = '',
+  chatProvider = '',
+  openaiEmbedModel = '',
+  geminiEmbedModel = '',
+  openaiChatModel = '',
+  geminiChatModel = '',
+  chatTemperature = '',
+  chatResponseStyle = '',
+  chatTopK = '',
+  chatMaxHistory = '',
+  chatMaxContextChars = '',
+  chatSnippetChars = '',
+  chatContextBudgetTokens = '',
+  indexParallelWorkers = '',
+  embedParallelRequests = '',
+} = {}) {
+  return requestJson('/settings/runtime/rag', {
+    method: 'POST',
+    body: {
+      rag_db_provider: dbProvider,
+      rag_embed_provider: embedProvider,
+      rag_chat_provider: chatProvider,
+      rag_openai_embed_model: openaiEmbedModel,
+      rag_gemini_embed_model: geminiEmbedModel,
+      rag_openai_chat_model: openaiChatModel,
+      rag_gemini_chat_model: geminiChatModel,
+      rag_chat_temperature: chatTemperature,
+      rag_chat_response_style: chatResponseStyle,
+      rag_chat_top_k: chatTopK,
+      rag_chat_max_history: chatMaxHistory,
+      rag_chat_max_context_chars: chatMaxContextChars,
+      rag_chat_snippet_chars: chatSnippetChars,
+      rag_chat_context_budget_tokens: chatContextBudgetTokens,
+      rag_index_parallel_workers: indexParallelWorkers,
+      rag_embed_parallel_requests: embedParallelRequests,
+    },
+  })
+}
+
+export function updateSettingsRuntimeChat({
+  historyBudgetPercent = '',
+  ragBudgetPercent = '',
+  mcpBudgetPercent = '',
+  compactionTriggerPercent = '',
+  compactionTargetPercent = '',
+  preserveRecentTurns = '',
+  ragTopK = '',
+  defaultContextWindowTokens = '',
+  maxCompactionSummaryChars = '',
+  returnTo = '',
+} = {}) {
+  return requestJson('/settings/runtime/chat', {
+    method: 'POST',
+    body: {
+      history_budget_percent: historyBudgetPercent,
+      rag_budget_percent: ragBudgetPercent,
+      mcp_budget_percent: mcpBudgetPercent,
+      compaction_trigger_percent: compactionTriggerPercent,
+      compaction_target_percent: compactionTargetPercent,
+      preserve_recent_turns: preserveRecentTurns,
+      rag_top_k: ragTopK,
+      default_context_window_tokens: defaultContextWindowTokens,
+      max_compaction_summary_chars: maxCompactionSummaryChars,
+      return_to: returnTo,
+    },
+  })
+}
+
+export function getSettingsChat() {
+  return requestJson('/settings/chat')
+}
+
+export function updateSettingsChatDefaults({
+  defaultModelId = null,
+  defaultResponseComplexity = '',
+  defaultMcpServerIds = [],
+  defaultRagCollections = [],
+} = {}) {
+  return requestJson('/settings/chat/defaults', {
+    method: 'POST',
+    body: {
+      default_model_id: defaultModelId,
+      default_response_complexity: defaultResponseComplexity,
+      default_mcp_server_ids: defaultMcpServerIds,
+      default_rag_collections: defaultRagCollections,
+    },
+  })
+}

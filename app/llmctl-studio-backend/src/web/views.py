@@ -3689,18 +3689,31 @@ def _render_settings_integrations_page(
     section_meta = INTEGRATION_SETTINGS_SECTIONS.get(section)
     if section_meta is None:
         abort(404)
+    context = _settings_integrations_context(
+        integration_section=section,
+        gitconfig_content=gitconfig_content,
+        github_repo_options=github_repo_options,
+        jira_project_options=jira_project_options,
+        jira_board_options=jira_board_options,
+        confluence_space_options=confluence_space_options,
+    )
+    if _workflow_wants_json():
+        return {
+            "integration_section": section,
+            "integration_sections": [
+                {
+                    "id": key,
+                    "label": value["label"],
+                }
+                for key, value in INTEGRATION_SETTINGS_SECTIONS.items()
+            ],
+            **context,
+        }
     return render_template(
         "settings_integrations.html",
         integration_section=section,
         page_title=f"Settings - Integrations - {section_meta['label']}",
-        **_settings_integrations_context(
-            integration_section=section,
-            gitconfig_content=gitconfig_content,
-            github_repo_options=github_repo_options,
-            jira_project_options=jira_project_options,
-            jira_board_options=jira_board_options,
-            confluence_space_options=confluence_space_options,
-        ),
+        **context,
     )
 
 
@@ -5802,6 +5815,39 @@ def _workflow_wants_json() -> bool:
 
 def _workflow_api_request() -> bool:
     return _request_path_uses_api_prefix() or request.is_json
+
+
+def _settings_request_payload() -> dict[str, object]:
+    payload = request.get_json(silent=True)
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
+def _settings_form_value(
+    payload: dict[str, object],
+    key: str,
+    default: str = "",
+) -> str:
+    if key in payload:
+        value = payload.get(key)
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+    return request.form.get(key, default)
+
+
+def _settings_form_list(payload: dict[str, object], key: str) -> list[str]:
+    if key in payload:
+        raw = payload.get(key)
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            return [str(item) for item in raw if item is not None]
+        return [str(raw)]
+    return request.form.getlist(key)
 
 
 def _flowchart_wants_json() -> bool:
@@ -14742,6 +14788,11 @@ def settings_core():
         "VLLM_REMOTE_BASE_URL": Config.VLLM_REMOTE_BASE_URL or "not set",
         "VLLM_LOCAL_CUSTOM_MODELS_DIR": Config.VLLM_LOCAL_CUSTOM_MODELS_DIR,
     }
+    if _workflow_wants_json():
+        return {
+            "core_config": core_config,
+            "summary": summary,
+        }
     return render_template(
         "settings_core.html",
         core_config=core_config,
@@ -14828,11 +14879,24 @@ def _render_settings_provider_page(section: str):
     section_meta = PROVIDER_SETTINGS_SECTIONS.get(section)
     if section_meta is None:
         abort(404)
+    context = _settings_provider_context()
+    if _workflow_wants_json():
+        return {
+            "provider_section": section,
+            "provider_sections": [
+                {
+                    "id": key,
+                    "label": value["label"],
+                }
+                for key, value in PROVIDER_SETTINGS_SECTIONS.items()
+            ],
+            **context,
+        }
     return render_template(
         "settings_provider.html",
         provider_section=section,
         page_title=f"Settings - Providers - {section_meta['label']}",
-        **_settings_provider_context(),
+        **context,
     )
 
 
@@ -14863,13 +14927,19 @@ def settings_provider_vllm_remote():
 
 @bp.post("/settings/provider")
 def update_provider_settings():
-    default_provider = (request.form.get("default_provider") or "").strip().lower()
+    payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    default_provider = (
+        _settings_form_value(payload, "default_provider") or ""
+    ).strip().lower()
     if default_provider and default_provider not in LLM_PROVIDERS:
+        if is_api_request:
+            return {"error": "Unknown provider selection."}, 400
         flash("Unknown provider selection.", "error")
         return redirect(url_for("agents.settings_provider"))
     enabled: set[str] = set()
     for provider in LLM_PROVIDERS:
-        if _as_bool(request.form.get(f"provider_enabled_{provider}")):
+        if _as_bool(_settings_form_value(payload, f"provider_enabled_{provider}")):
             enabled.add(provider)
     if default_provider:
         enabled.add(default_provider)
@@ -14879,6 +14949,13 @@ def update_provider_settings():
     }
     payload["provider"] = default_provider if default_provider in enabled else ""
     _save_integration_settings("llm", payload)
+    selected_provider = payload["provider"]
+    if is_api_request:
+        return {
+            "ok": True,
+            "provider": selected_provider,
+            "enabled_providers": sorted(enabled),
+        }
     if not enabled:
         flash("No providers enabled. Agents require a default model or provider.", "info")
     flash("Provider settings updated.", "success")
@@ -14887,43 +14964,61 @@ def update_provider_settings():
 
 @bp.post("/settings/provider/codex")
 def update_codex_settings():
-    api_key = request.form.get("codex_api_key", "")
+    payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    api_key = _settings_form_value(payload, "codex_api_key")
     payload = {
         "codex_api_key": api_key,
     }
     _save_integration_settings("llm", payload)
+    if is_api_request:
+        return {"ok": True}
     flash("Codex auth settings updated.", "success")
     return redirect(url_for("agents.settings_provider_codex"))
 
 
 @bp.post("/settings/provider/gemini")
 def update_gemini_settings():
-    api_key = request.form.get("gemini_api_key", "")
+    payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    api_key = _settings_form_value(payload, "gemini_api_key")
     payload = {
         "gemini_api_key": api_key,
     }
     _save_integration_settings("llm", payload)
+    if is_api_request:
+        return {"ok": True}
     flash("Gemini auth settings updated.", "success")
     return redirect(url_for("agents.settings_provider_gemini"))
 
 
 @bp.post("/settings/provider/claude")
 def update_claude_settings():
-    api_key = request.form.get("claude_api_key", "")
+    payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    api_key = _settings_form_value(payload, "claude_api_key")
     payload = {
         "claude_api_key": api_key,
     }
     _save_integration_settings("llm", payload)
+    if is_api_request:
+        return {"ok": True}
     flash("Claude auth settings updated.", "success")
     return redirect(url_for("agents.settings_provider_claude"))
 
 
 @bp.post("/settings/provider/vllm-local")
 def update_vllm_local_settings():
-    local_model = request.form.get("vllm_local_model", "")
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    local_model = _settings_form_value(request_payload, "vllm_local_model")
     discovered_local_values = {item["value"] for item in discover_vllm_local_models()}
     local_model_clean = local_model.strip()
     if local_model_clean and local_model_clean not in discovered_local_values:
+        if is_api_request:
+            return {
+                "error": "vLLM local model must be selected from discovered local models."
+            }, 400
         flash("vLLM local model must be selected from discovered local models.", "error")
         return redirect(url_for("agents.settings_provider_vllm_local"))
     payload = {
@@ -14932,9 +15027,16 @@ def update_vllm_local_settings():
         "vllm_local_base_url": "",
         "vllm_local_api_key": "",
     }
-    if "vllm_local_hf_token" in request.form:
-        payload["vllm_local_hf_token"] = request.form.get("vllm_local_hf_token", "")
+    if (
+        "vllm_local_hf_token" in request.form
+        or "vllm_local_hf_token" in request_payload
+    ):
+        payload["vllm_local_hf_token"] = _settings_form_value(
+            request_payload, "vllm_local_hf_token"
+        )
     _save_integration_settings("llm", payload)
+    if is_api_request:
+        return {"ok": True}
     flash("vLLM Local settings updated.", "success")
     return redirect(url_for("agents.settings_provider_vllm_local"))
 
@@ -15173,10 +15275,12 @@ def delete_vllm_local_huggingface_model():
 
 @bp.post("/settings/provider/vllm-remote")
 def update_vllm_remote_settings():
-    remote_base_url = request.form.get("vllm_remote_base_url", "")
-    remote_api_key = request.form.get("vllm_remote_api_key", "")
-    remote_model = request.form.get("vllm_remote_model", "")
-    remote_models = request.form.get("vllm_remote_models", "")
+    payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    remote_base_url = _settings_form_value(payload, "vllm_remote_base_url")
+    remote_api_key = _settings_form_value(payload, "vllm_remote_api_key")
+    remote_model = _settings_form_value(payload, "vllm_remote_model")
+    remote_models = _settings_form_value(payload, "vllm_remote_models")
     payload = {
         "vllm_remote_base_url": remote_base_url,
         "vllm_remote_api_key": remote_api_key,
@@ -15184,6 +15288,8 @@ def update_vllm_remote_settings():
         "vllm_remote_models": remote_models,
     }
     _save_integration_settings("llm", payload)
+    if is_api_request:
+        return {"ok": True}
     flash("vLLM Remote settings updated.", "success")
     return redirect(url_for("agents.settings_provider_vllm_remote"))
 
@@ -15316,11 +15422,24 @@ def _render_settings_runtime_page(section: str):
     section_meta = RUNTIME_SETTINGS_SECTIONS.get(section)
     if section_meta is None:
         abort(404)
+    context = _settings_runtime_context()
+    if _workflow_wants_json():
+        return {
+            "runtime_section": section,
+            "runtime_sections": [
+                {
+                    "id": key,
+                    "label": value["label"],
+                }
+                for key, value in RUNTIME_SETTINGS_SECTIONS.items()
+            ],
+            **context,
+        }
     return render_template(
         "settings_runtime.html",
         runtime_section=section,
         page_title=f"Settings - Runtime - {section_meta['label']}",
-        **_settings_runtime_context(),
+        **context,
     )
 
 
@@ -15345,6 +15464,41 @@ def settings_chat():
         mcp_servers=mcp_servers,
         rag_collections=rag_collections,
     )
+    if _workflow_wants_json():
+        return {
+            "models": [
+                {
+                    "id": model.id,
+                    "name": model.name,
+                    "description": model.description,
+                    "provider": model.provider,
+                    "provider_label": LLM_PROVIDER_LABELS.get(
+                        model.provider, model.provider
+                    ),
+                    "model_name": _model_display_name(model),
+                    "created_at": _human_time(model.created_at),
+                    "updated_at": _human_time(model.updated_at),
+                }
+                for model in models
+            ],
+            "mcp_servers": [
+                {
+                    "id": server.id,
+                    "name": server.name,
+                    "description": server.description,
+                    "server_key": server.server_key,
+                    "server_type": server.server_type,
+                    "created_at": _human_time(server.created_at),
+                    "updated_at": _human_time(server.updated_at),
+                }
+                for server in mcp_servers
+            ],
+            "rag_health": rag_health,
+            "rag_collections": rag_collections,
+            "chat_default_settings": chat_default_settings,
+            "chat_runtime_settings": load_chat_runtime_settings_payload(),
+            "summary": summary,
+        }
     return render_template(
         "settings_chat.html",
         models=models,
@@ -15361,23 +15515,29 @@ def settings_chat():
 
 @bp.post("/settings/chat/defaults")
 def update_chat_default_settings_route():
+    payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
     models = _load_llm_models()
     mcp_servers = _load_mcp_servers()
     model_ids = {model.id for model in models}
     mcp_ids = {server.id for server in mcp_servers}
     selected_model_id = _coerce_optional_int(
-        request.form.get("default_model_id"),
+        _settings_form_value(payload, "default_model_id"),
         field_name="default_model_id",
         minimum=1,
     )
     if selected_model_id is not None and selected_model_id not in model_ids:
+        if is_api_request:
+            return {"error": "Default model selection is invalid."}, 400
         flash("Default model selection is invalid.", "error")
         return redirect(url_for("agents.settings_chat"))
     selected_mcp_server_ids = _coerce_chat_id_list(
-        request.form.getlist("default_mcp_server_ids"),
+        _settings_form_list(payload, "default_mcp_server_ids"),
         field_name="default_mcp_server_id",
     )
     if any(server_id not in mcp_ids for server_id in selected_mcp_server_ids):
+        if is_api_request:
+            return {"error": "Default MCP server selection is invalid."}, 400
         flash("Default MCP server selection is invalid.", "error")
         return redirect(url_for("agents.settings_chat"))
     rag_health, rag_collections = _chat_rag_health_payload()
@@ -15387,18 +15547,22 @@ def update_chat_default_settings_route():
         if str(item.get("id") or "").strip()
     }
     selected_rag_collections = _coerce_chat_collection_list(
-        request.form.getlist("default_rag_collections")
+        _settings_form_list(payload, "default_rag_collections")
     )
     if selected_rag_collections and (
         rag_health.get("state") != "configured_healthy" or not available_rag_ids
     ):
+        if is_api_request:
+            return {"error": "RAG defaults are unavailable until RAG is healthy."}, 400
         flash("RAG defaults are unavailable until RAG is healthy.", "error")
         return redirect(url_for("agents.settings_chat"))
     if any(collection_id not in available_rag_ids for collection_id in selected_rag_collections):
+        if is_api_request:
+            return {"error": "Default RAG collection selection is invalid."}, 400
         flash("Default RAG collection selection is invalid.", "error")
         return redirect(url_for("agents.settings_chat"))
     selected_default_response_complexity = normalize_chat_response_complexity(
-        request.form.get("default_response_complexity"),
+        _settings_form_value(payload, "default_response_complexity"),
         default=CHAT_RESPONSE_COMPLEXITY_DEFAULT,
     )
     save_chat_default_settings(
@@ -15411,61 +15575,107 @@ def update_chat_default_settings_route():
             "default_rag_collections": selected_rag_collections,
         }
     )
+    if is_api_request:
+        return {
+            "ok": True,
+            "chat_default_settings": _resolved_chat_default_settings(
+                models=models,
+                mcp_servers=mcp_servers,
+                rag_collections=rag_collections,
+            ),
+        }
     flash("Chat default settings updated.", "success")
     return redirect(url_for("agents.settings_chat"))
 
 
 @bp.post("/settings/runtime/chat")
 def update_chat_runtime_settings_route():
+    settings_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
     payload = {
-        "history_budget_percent": request.form.get("history_budget_percent", ""),
-        "rag_budget_percent": request.form.get("rag_budget_percent", ""),
-        "mcp_budget_percent": request.form.get("mcp_budget_percent", ""),
-        "compaction_trigger_percent": request.form.get("compaction_trigger_percent", ""),
-        "compaction_target_percent": request.form.get("compaction_target_percent", ""),
-        "preserve_recent_turns": request.form.get("preserve_recent_turns", ""),
-        "rag_top_k": request.form.get("rag_top_k", ""),
-        "default_context_window_tokens": request.form.get(
-            "default_context_window_tokens",
-            "",
+        "history_budget_percent": _settings_form_value(
+            settings_payload, "history_budget_percent"
         ),
-        "max_compaction_summary_chars": request.form.get(
+        "rag_budget_percent": _settings_form_value(settings_payload, "rag_budget_percent"),
+        "mcp_budget_percent": _settings_form_value(settings_payload, "mcp_budget_percent"),
+        "compaction_trigger_percent": _settings_form_value(
+            settings_payload, "compaction_trigger_percent"
+        ),
+        "compaction_target_percent": _settings_form_value(
+            settings_payload, "compaction_target_percent"
+        ),
+        "preserve_recent_turns": _settings_form_value(
+            settings_payload, "preserve_recent_turns"
+        ),
+        "rag_top_k": _settings_form_value(settings_payload, "rag_top_k"),
+        "default_context_window_tokens": _settings_form_value(
+            settings_payload,
+            "default_context_window_tokens",
+        ),
+        "max_compaction_summary_chars": _settings_form_value(
+            settings_payload,
             "max_compaction_summary_chars",
-            "",
         ),
     }
     save_chat_runtime_settings(payload)
+    if is_api_request:
+        return {
+            "ok": True,
+            "chat_runtime_settings": load_chat_runtime_settings_payload(),
+        }
     flash("Chat runtime settings updated.", "success")
-    if (request.form.get("return_to") or "").strip().lower() == "runtime":
+    if _settings_form_value(settings_payload, "return_to").strip().lower() == "runtime":
         return redirect(url_for("agents.settings_runtime_chat"))
     return redirect(url_for("agents.settings_chat"))
 
 
 @bp.post("/settings/runtime/instructions")
 def update_instruction_runtime_settings_route():
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
     payload: dict[str, str] = {}
     for provider in LLM_PROVIDERS:
         native_key = f"instruction_native_enabled_{provider}"
         fallback_key = f"instruction_fallback_enabled_{provider}"
-        payload[native_key] = "true" if _as_bool(request.form.get(native_key)) else ""
+        payload[native_key] = (
+            "true" if _as_bool(_settings_form_value(request_payload, native_key)) else ""
+        )
         payload[fallback_key] = (
-            "true" if _as_bool(request.form.get(fallback_key)) else ""
+            "true"
+            if _as_bool(_settings_form_value(request_payload, fallback_key))
+            else ""
         )
     _save_integration_settings("llm", payload)
+    if is_api_request:
+        return {
+            "ok": True,
+            "instruction_runtime_flags": _instruction_runtime_flags(
+                _load_integration_settings("llm")
+            ),
+        }
     flash("Instruction runtime adapter flags updated.", "success")
     return redirect(url_for("agents.settings_runtime"))
 
 
 @bp.post("/settings/runtime/node-skill-binding")
 def update_node_skill_binding_mode_route():
-    raw_mode = (request.form.get("node_skill_binding_mode") or "").strip().lower()
+    payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
+    raw_mode = _settings_form_value(payload, "node_skill_binding_mode").strip().lower()
     if raw_mode and raw_mode not in NODE_SKILL_BINDING_MODE_CHOICES:
+        if is_api_request:
+            return {"error": "Node skill compatibility mode is invalid."}, 400
         flash("Node skill compatibility mode is invalid.", "error")
         return redirect(url_for("agents.settings_runtime"))
     selected_mode = normalize_node_skill_binding_mode(raw_mode)
     _save_integration_settings(
         "llm", {"node_skill_binding_mode": selected_mode}
     )
+    if is_api_request:
+        return {
+            "ok": True,
+            "node_skill_binding_mode": selected_mode,
+        }
     flash(
         f"Node skill compatibility mode set to {selected_mode}.",
         "success",
@@ -15475,38 +15685,58 @@ def update_node_skill_binding_mode_route():
 
 @bp.post("/settings/runtime/node-executor")
 def update_node_executor_runtime_settings_route():
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
     # Auth is not available yet. Once RBAC ships, limit this endpoint to admins.
-    requested_provider = (request.form.get("provider") or "").strip().lower()
+    requested_provider = _settings_form_value(request_payload, "provider").strip().lower()
     if requested_provider and requested_provider != "kubernetes":
+        if is_api_request:
+            return {"error": "Node executor provider must be kubernetes."}, 400
         flash("Node executor provider must be kubernetes.", "error")
         return redirect(url_for("agents.settings_runtime"))
-    kubeconfig_value = request.form.get("k8s_kubeconfig", "")
-    kubeconfig_clear = _as_bool(request.form.get("k8s_kubeconfig_clear"))
+    kubeconfig_value = _settings_form_value(request_payload, "k8s_kubeconfig")
+    kubeconfig_clear = _as_bool(
+        _settings_form_value(request_payload, "k8s_kubeconfig_clear")
+    )
     payload = {
         "provider": "kubernetes",
-        "dispatch_timeout_seconds": request.form.get("dispatch_timeout_seconds", ""),
-        "execution_timeout_seconds": request.form.get("execution_timeout_seconds", ""),
-        "log_collection_timeout_seconds": request.form.get(
-            "log_collection_timeout_seconds",
-            "",
+        "dispatch_timeout_seconds": _settings_form_value(
+            request_payload, "dispatch_timeout_seconds"
         ),
-        "cancel_grace_timeout_seconds": request.form.get(
+        "execution_timeout_seconds": _settings_form_value(
+            request_payload, "execution_timeout_seconds"
+        ),
+        "log_collection_timeout_seconds": _settings_form_value(
+            request_payload,
+            "log_collection_timeout_seconds",
+        ),
+        "cancel_grace_timeout_seconds": _settings_form_value(
+            request_payload,
             "cancel_grace_timeout_seconds",
-            "",
         ),
         "cancel_force_kill_enabled": (
-            "true" if _as_bool(request.form.get("cancel_force_kill_enabled")) else "false"
+            "true"
+            if _as_bool(_settings_form_value(request_payload, "cancel_force_kill_enabled"))
+            else "false"
         ),
-        "workspace_identity_key": request.form.get("workspace_identity_key", ""),
-        "k8s_namespace": request.form.get("k8s_namespace", ""),
-        "k8s_image": request.form.get("k8s_image", ""),
-        "k8s_in_cluster": "true" if _as_bool(request.form.get("k8s_in_cluster")) else "false",
-        "k8s_service_account": request.form.get("k8s_service_account", ""),
-        "k8s_gpu_limit": request.form.get("k8s_gpu_limit", ""),
-        "k8s_job_ttl_seconds": request.form.get("k8s_job_ttl_seconds", ""),
-        "k8s_image_pull_secrets_json": request.form.get(
+        "workspace_identity_key": _settings_form_value(
+            request_payload, "workspace_identity_key"
+        ),
+        "k8s_namespace": _settings_form_value(request_payload, "k8s_namespace"),
+        "k8s_image": _settings_form_value(request_payload, "k8s_image"),
+        "k8s_in_cluster": (
+            "true" if _as_bool(_settings_form_value(request_payload, "k8s_in_cluster")) else "false"
+        ),
+        "k8s_service_account": _settings_form_value(
+            request_payload, "k8s_service_account"
+        ),
+        "k8s_gpu_limit": _settings_form_value(request_payload, "k8s_gpu_limit"),
+        "k8s_job_ttl_seconds": _settings_form_value(
+            request_payload, "k8s_job_ttl_seconds"
+        ),
+        "k8s_image_pull_secrets_json": _settings_form_value(
+            request_payload,
             "k8s_image_pull_secrets_json",
-            "",
         ),
     }
     if kubeconfig_clear:
@@ -15516,8 +15746,15 @@ def update_node_executor_runtime_settings_route():
     try:
         save_node_executor_settings(payload)
     except ValueError as exc:
+        if is_api_request:
+            return {"error": str(exc)}, 400
         flash(str(exc), "error")
         return redirect(url_for("agents.settings_runtime"))
+    if is_api_request:
+        return {
+            "ok": True,
+            "node_executor_settings": load_node_executor_settings(),
+        }
     flash("Node executor runtime settings updated.", "success")
     return redirect(url_for("agents.settings_runtime"))
 
@@ -15817,36 +16054,44 @@ def update_chroma_settings():
 @bp.post("/settings/runtime/rag")
 @bp.post("/settings/integrations/rag")
 def update_rag_settings():
+    request_payload = _settings_request_payload()
+    is_api_request = _workflow_api_request()
     defaults = _rag_default_settings()
-    db_provider = _normalize_rag_db_provider(request.form.get("rag_db_provider"))
-    embed_provider = _normalize_rag_model_provider(request.form.get("rag_embed_provider"))
-    chat_provider = _normalize_rag_model_provider(request.form.get("rag_chat_provider"))
+    db_provider = _normalize_rag_db_provider(
+        _settings_form_value(request_payload, "rag_db_provider")
+    )
+    embed_provider = _normalize_rag_model_provider(
+        _settings_form_value(request_payload, "rag_embed_provider")
+    )
+    chat_provider = _normalize_rag_model_provider(
+        _settings_form_value(request_payload, "rag_chat_provider")
+    )
     chat_response_style = _normalize_rag_chat_response_style(
-        request.form.get("rag_chat_response_style")
+        _settings_form_value(request_payload, "rag_chat_response_style")
     )
     chat_temperature = _coerce_rag_float_str(
-        request.form.get("rag_chat_temperature"),
+        _settings_form_value(request_payload, "rag_chat_temperature"),
         float(defaults.get("chat_temperature") or 0.2),
         minimum=0.0,
         maximum=2.0,
     )
     openai_embed_model = _coerce_rag_model_choice(
-        request.form.get("rag_openai_embed_model"),
+        _settings_form_value(request_payload, "rag_openai_embed_model"),
         default=defaults["openai_embed_model"],
         choices=RAG_OPENAI_EMBED_MODEL_OPTIONS,
     )
     gemini_embed_model = _coerce_rag_model_choice(
-        request.form.get("rag_gemini_embed_model"),
+        _settings_form_value(request_payload, "rag_gemini_embed_model"),
         default=defaults["gemini_embed_model"],
         choices=RAG_GEMINI_EMBED_MODEL_OPTIONS,
     )
     openai_chat_model = _coerce_rag_model_choice(
-        request.form.get("rag_openai_chat_model"),
+        _settings_form_value(request_payload, "rag_openai_chat_model"),
         default=defaults["openai_chat_model"],
         choices=RAG_OPENAI_CHAT_MODEL_OPTIONS,
     )
     gemini_chat_model = _coerce_rag_model_choice(
-        request.form.get("rag_gemini_chat_model"),
+        _settings_form_value(request_payload, "rag_gemini_chat_model"),
         default=defaults["gemini_chat_model"],
         choices=RAG_GEMINI_CHAT_MODEL_OPTIONS,
     )
@@ -15865,43 +16110,43 @@ def update_rag_settings():
         "openai_chat_temperature": chat_temperature,
         "chat_response_style": chat_response_style,
         "chat_top_k": _coerce_rag_int_str(
-            request.form.get("rag_chat_top_k"),
+            _settings_form_value(request_payload, "rag_chat_top_k"),
             int(defaults.get("chat_top_k") or 5),
             minimum=1,
             maximum=20,
         ),
         "chat_max_history": _coerce_rag_int_str(
-            request.form.get("rag_chat_max_history"),
+            _settings_form_value(request_payload, "rag_chat_max_history"),
             int(defaults.get("chat_max_history") or 8),
             minimum=1,
             maximum=50,
         ),
         "chat_max_context_chars": _coerce_rag_int_str(
-            request.form.get("rag_chat_max_context_chars"),
+            _settings_form_value(request_payload, "rag_chat_max_context_chars"),
             int(defaults.get("chat_max_context_chars") or 12000),
             minimum=1000,
             maximum=1000000,
         ),
         "chat_snippet_chars": _coerce_rag_int_str(
-            request.form.get("rag_chat_snippet_chars"),
+            _settings_form_value(request_payload, "rag_chat_snippet_chars"),
             int(defaults.get("chat_snippet_chars") or 600),
             minimum=100,
             maximum=10000,
         ),
         "chat_context_budget_tokens": _coerce_rag_int_str(
-            request.form.get("rag_chat_context_budget_tokens"),
+            _settings_form_value(request_payload, "rag_chat_context_budget_tokens"),
             int(defaults.get("chat_context_budget_tokens") or 8000),
             minimum=256,
             maximum=100000,
         ),
         "index_parallel_workers": _coerce_rag_int_str(
-            request.form.get("rag_index_parallel_workers"),
+            _settings_form_value(request_payload, "rag_index_parallel_workers"),
             int(defaults.get("index_parallel_workers") or 1),
             minimum=1,
             maximum=64,
         ),
         "embed_parallel_requests": _coerce_rag_int_str(
-            request.form.get("rag_embed_parallel_requests"),
+            _settings_form_value(request_payload, "rag_embed_parallel_requests"),
             int(defaults.get("embed_parallel_requests") or 1),
             minimum=1,
             maximum=64,
@@ -15910,6 +16155,16 @@ def update_rag_settings():
     _save_rag_settings("rag", payload)
 
     chroma_ready = _chroma_connected(_resolved_chroma_settings())
+    if is_api_request:
+        return {
+            "ok": True,
+            "warning": (
+                "RAG settings saved. Configure ChromaDB host and port before indexing or chat."
+                if db_provider == "chroma" and not chroma_ready
+                else ""
+            ),
+            "rag_settings": _effective_rag_settings(),
+        }
     if db_provider == "chroma" and not chroma_ready:
         flash(
             "RAG settings saved. Configure ChromaDB host and port before indexing or chat.",

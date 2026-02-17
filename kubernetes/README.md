@@ -237,7 +237,8 @@ scripts/configure-harbor-image-overlays.sh --argocd-app llmctl-studio
 argocd app sync llmctl-studio
 ```
 
-That command updates all llmctl-managed images (`llmctl-studio-backend`, `llmctl-studio-frontend`, `llmctl-celery-worker`, `llmctl-mcp`, `llmctl-executor`) so ArgoCD does not fall back to unqualified local image names.
+That command updates Harbor image names for all llmctl-managed images so ArgoCD does not fall back to unqualified local names.
+`llmctl-celery-worker` is intentionally fixed to `:latest` in this workflow; the `--tag` value applies to `llmctl-studio-backend`, `llmctl-studio-frontend`, `llmctl-mcp`, and `llmctl-executor`.
 
 ## Runtime knobs to edit
 

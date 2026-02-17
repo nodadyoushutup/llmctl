@@ -17,7 +17,7 @@ images:
     newTag: __HARBOR_TAG__
   - name: llmctl-celery-worker
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-celery-worker
-    newTag: __HARBOR_TAG__
+    newTag: latest
 patches:
   - target:
       kind: ConfigMap
