@@ -44,6 +44,7 @@ from chat.settings import (
     load_chat_default_settings_payload,
     load_chat_runtime_settings,
 )
+from core.config import Config
 from core.db import session_scope, utcnow
 from core.mcp_config import parse_mcp_config
 from core.models import (
@@ -718,12 +719,89 @@ class TurnResult:
     selected_collections: list[str] = field(default_factory=list)
 
 
+def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
+    selected_keys = {
+        str(key or "").strip().lower()
+        for key in selected_mcp_server_keys
+        if str(key or "").strip()
+    }
+    if not selected_keys:
+        return []
+
+    lines: list[str] = []
+    if "github" in selected_keys:
+        github = load_integration_settings("github")
+        repo = (github.get("repo") or "").strip()
+        if repo:
+            lines.append(f"GitHub default repository: {repo}.")
+
+    if {"atlassian", "jira"} & selected_keys:
+        jira = load_integration_settings("jira")
+        jira_parts: list[str] = []
+        jira_site = (jira.get("site") or "").strip()
+        jira_project_key = (jira.get("project_key") or "").strip()
+        jira_board = (jira.get("board") or "").strip()
+        jira_board_label = (jira.get("board_label") or "").strip()
+        jira_board_display = jira_board_label or jira_board
+        if jira_site:
+            jira_parts.append(f"site {jira_site}")
+        if jira_project_key:
+            jira_parts.append(f"project key {jira_project_key}")
+        if jira_board_display:
+            jira_parts.append(f"board {jira_board_display}")
+        if jira_parts:
+            lines.append("Jira defaults: " + "; ".join(jira_parts) + ".")
+
+        confluence = load_integration_settings("confluence")
+        confluence_parts: list[str] = []
+        confluence_site = (confluence.get("site") or "").strip()
+        confluence_space = (confluence.get("space") or "").strip()
+        if confluence_site:
+            confluence_parts.append(f"site {confluence_site}")
+        if confluence_space:
+            confluence_parts.append(f"space {confluence_space}")
+        if confluence_parts:
+            lines.append("Confluence defaults: " + "; ".join(confluence_parts) + ".")
+
+    if "google-cloud" in selected_keys:
+        google_cloud = load_integration_settings("google_cloud")
+        project_id = (google_cloud.get("google_cloud_project_id") or "").strip()
+        if project_id:
+            lines.append(f"Google Cloud default project_id: {project_id}.")
+
+    if "google-workspace" in selected_keys:
+        google_workspace = load_integration_settings("google_workspace")
+        delegated_user = (
+            google_workspace.get("workspace_delegated_user_email") or ""
+        ).strip()
+        if delegated_user:
+            lines.append(f"Google Workspace delegated user: {delegated_user}.")
+
+    if "chroma" in selected_keys:
+        chroma = load_integration_settings("chroma")
+        chroma_parts: list[str] = []
+        host = (chroma.get("host") or "").strip() or (Config.CHROMA_HOST or "").strip()
+        port = (chroma.get("port") or "").strip() or str(Config.CHROMA_PORT or "").strip()
+        ssl = (chroma.get("ssl") or "").strip() or str(Config.CHROMA_SSL or "").strip()
+        if host:
+            chroma_parts.append(f"host {host}")
+        if port:
+            chroma_parts.append(f"port {port}")
+        if ssl:
+            chroma_parts.append(f"ssl {ssl}")
+        if chroma_parts:
+            lines.append("ChromaDB defaults: " + "; ".join(chroma_parts) + ".")
+
+    return lines
+
+
 def _build_prompt(
     *,
     history_block: str,
     retrieval_context: list[str],
     selected_rag_collections: list[str],
     selected_mcp_server_keys: list[str],
+    mcp_integration_context: list[str],
     response_complexity: str,
     user_message: str,
 ) -> str:
@@ -776,6 +854,12 @@ def _build_prompt(
             "Enabled MCP servers for this session: "
             + ", ".join(selected_mcp_server_keys)
             + "."
+        )
+    if mcp_integration_context:
+        sections.append(
+            "Integration defaults for enabled MCP servers. Use these defaults when "
+            "the user does not provide a more specific scope:\n"
+            + "\n".join(f"- {line}" for line in mcp_integration_context)
         )
     sections.append(f"Latest user message:\n{user_message}")
     return "\n\n".join(sections).strip()
@@ -1178,6 +1262,7 @@ def execute_turn(
             retrieval_context=retrieval_context,
             selected_rag_collections=selected_rag_collections,
             selected_mcp_server_keys=selected_mcp_keys,
+            mcp_integration_context=_mcp_integration_context(selected_mcp_keys),
             response_complexity=selected_response_complexity,
             user_message=cleaned_message,
         )

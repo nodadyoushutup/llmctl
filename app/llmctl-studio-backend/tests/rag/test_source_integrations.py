@@ -19,6 +19,7 @@ if str(STUDIO_APP_ROOT) not in sys.path:
     sys.path.insert(0, str(STUDIO_APP_ROOT))
 
 from core.config import Config
+import rag.engine.config as rag_config
 from rag.engine.config import build_source_config
 from rag.integrations.git_sync import (
     KNOWN_HOSTS_PATH,
@@ -144,6 +145,19 @@ class SourceRepositoryIntegrationTests(StudioDbTestCase):
 
 
 class SourceConfigAndGitSyncTests(unittest.TestCase):
+    def test_find_repo_root_ignores_git_stat_oserror(self):
+        expected_root = Path(rag_config.__file__).resolve().parents[2]
+
+        def _raise_on_git(path: Path) -> bool:
+            if path.name == ".git":
+                raise OSError(5, "Input/output error")
+            return False
+
+        with patch.object(rag_config.Path, "exists", autospec=True, side_effect=_raise_on_git):
+            discovered = rag_config._find_repo_root()
+
+        self.assertEqual(expected_root, discovered)
+
     def test_build_source_config_local_and_drive_use_local_roots(self):
         base = test_config(Path("/tmp/base"))
 

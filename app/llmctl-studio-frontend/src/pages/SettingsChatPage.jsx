@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
+import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -24,9 +24,10 @@ function errorMessage(error, fallback) {
 }
 
 export default function SettingsChatPage() {
+  const flash = useFlash()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
-  const [actionInfo, setActionInfo] = useFlashState('success')
+  const [, setActionError] = useFlashState('error')
+  const [, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
 
   const [defaultsForm, setDefaultsForm] = useState({
@@ -84,13 +85,15 @@ export default function SettingsChatPage() {
         maxCompactionSummaryChars: String(chatRuntime.max_compaction_summary_chars || ''),
       })
     } catch (error) {
+      const message = errorMessage(error, 'Failed to load chat settings.')
+      flash.error(message)
       setState((current) => ({
         loading: false,
         payload: silent ? current.payload : null,
-        error: errorMessage(error, 'Failed to load chat settings.'),
+        error: silent ? current.error : message,
       }))
     }
-  }, [])
+  }, [flash])
 
   useEffect(() => {
     refresh()
@@ -159,9 +162,6 @@ export default function SettingsChatPage() {
           </div>
         </div>
         {state.loading ? <p>Loading chat settings...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
         {!state.loading && !state.error ? (
           <p className="toolbar-meta">
             Runtime controls (compaction, context budget, retrieval) are managed in Runtime Chat.

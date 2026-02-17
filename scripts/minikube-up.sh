@@ -129,7 +129,8 @@ resolve_live_mount_script() {
 }
 
 mount_target_is_healthy() {
-  minikube -p "${PROFILE}" ssh -- "test -d '${MOUNT_TARGET}'" >/dev/null 2>&1
+  minikube -p "${PROFILE}" ssh -- "mount | grep -E '[[:space:]]${MOUNT_TARGET}[[:space:]]' >/dev/null" >/dev/null 2>&1 \
+    && minikube -p "${PROFILE}" ssh -- "test -f '${MOUNT_TARGET}/app/llmctl-studio-frontend/package.json' && test -f '${MOUNT_TARGET}/kubernetes/README.md'" >/dev/null 2>&1
 }
 
 stop_mount_process() {

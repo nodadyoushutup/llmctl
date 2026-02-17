@@ -909,6 +909,7 @@ describe('studioApi', () => {
       site: 'https://example.atlassian.net',
       projectKey: 'OPS',
       board: '42',
+      boardLabel: 'Platform Board',
       action: 'refresh',
     })
     updateSettingsIntegrationsConfluence({
@@ -957,6 +958,7 @@ describe('studioApi', () => {
         jira_site: 'https://example.atlassian.net',
         jira_project_key: 'OPS',
         jira_board: '42',
+        jira_board_label: 'Platform Board',
         action: 'refresh',
       },
     })
@@ -1000,6 +1002,33 @@ describe('studioApi', () => {
         chroma_ssl: true,
       },
     })
+  })
+
+  test('stage 6 github settings uses multipart payload when ssh key file is provided', () => {
+    const sshKey = new File(['-----BEGIN PRIVATE KEY-----'], 'github.pem', {
+      type: 'application/x-pem-file',
+    })
+
+    updateSettingsIntegrationsGithub({
+      pat: 'ghp_xxx',
+      repo: 'org/repo',
+      clearSshKey: false,
+      sshKeyFile: sshKey,
+      action: 'refresh',
+    })
+
+    expect(requestJson).toHaveBeenCalledTimes(1)
+    expect(requestJson).toHaveBeenNthCalledWith(1, '/settings/integrations/github', {
+      method: 'POST',
+      body: expect.any(FormData),
+    })
+
+    const formData = requestJson.mock.calls[0][1].body
+    expect(formData.get('github_pat')).toBe('ghp_xxx')
+    expect(formData.get('github_repo')).toBe('org/repo')
+    expect(formData.get('github_ssh_key_clear')).toBe('false')
+    expect(formData.get('action')).toBe('refresh')
+    expect(formData.get('github_ssh_key')).toBe(sshKey)
   })
 
   test('stage 7 skills endpoints map to expected api paths', () => {

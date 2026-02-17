@@ -126,12 +126,17 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
             )
             return model
 
-    def _create_mcp_server(self, *, name: str = "MCP Test") -> MCPServer:
+    def _create_mcp_server(
+        self,
+        *,
+        name: str = "MCP Test",
+        server_key: str = "mcp-test",
+    ) -> MCPServer:
         with session_scope() as session:
             return MCPServer.create(
                 session,
                 name=name,
-                server_key="mcp-test",
+                server_key=server_key,
                 description="test",
                 config_json=json.dumps({"command": "python3", "args": ["-V"]}),
                 server_type="custom",
@@ -439,6 +444,93 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
 
         self.assertFalse(result.ok)
         self.assertEqual(CHAT_REASON_MCP_FAILED, result.reason_code)
+
+    def test_execute_turn_includes_atlassian_defaults_for_selected_mcp(self) -> None:
+        model = self._create_model(name="Atlassian Prompt Model")
+        server = self._create_mcp_server(name="Atlassian MCP", server_key="atlassian")
+        save_integration_settings(
+            "jira",
+            {
+                "site": "https://example.atlassian.net",
+                "project_key": "OPS",
+                "board": "42",
+                "board_label": "Platform Board",
+            },
+        )
+        save_integration_settings(
+            "confluence",
+            {
+                "site": "https://example.atlassian.net/wiki",
+                "space": "ENG",
+            },
+        )
+        thread = create_thread(
+            title="Atlassian Context",
+            model_id=model.id,
+            mcp_server_ids=[server.id],
+        )
+        thread_id = int(thread["id"])
+
+        captured_prompt: list[str] = []
+
+        def _fake_llm(*args, **kwargs):
+            captured_prompt.append(
+                str(args[1] if len(args) > 1 else kwargs.get("prompt", ""))
+            )
+            return subprocess.CompletedProcess(["stub"], 0, "assistant reply", "")
+
+        with patch("chat.runtime._run_llm", side_effect=_fake_llm):
+            result = execute_turn(thread_id=thread_id, message="show jira updates")
+
+        self.assertTrue(result.ok)
+        self.assertTrue(captured_prompt)
+        prompt = captured_prompt[0]
+        self.assertIn("Integration defaults for enabled MCP servers", prompt)
+        self.assertIn("Jira defaults:", prompt)
+        self.assertIn("project key OPS", prompt)
+        self.assertIn("board Platform Board", prompt)
+        self.assertIn("Confluence defaults:", prompt)
+        self.assertIn("space ENG", prompt)
+
+    def test_execute_turn_includes_github_and_chroma_defaults_for_selected_mcp(self) -> None:
+        model = self._create_model(name="GitHub Chroma Prompt Model")
+        github_server = self._create_mcp_server(name="GitHub MCP", server_key="github")
+        chroma_server = self._create_mcp_server(name="Chroma MCP", server_key="chroma")
+        save_integration_settings("github", {"repo": "acme/platform"})
+        save_integration_settings(
+            "chroma",
+            {"host": "chroma.internal", "port": "8443", "ssl": "true"},
+        )
+        thread = create_thread(
+            title="GitHub + Chroma Context",
+            model_id=model.id,
+            mcp_server_ids=[github_server.id, chroma_server.id],
+        )
+        thread_id = int(thread["id"])
+
+        captured_prompt: list[str] = []
+
+        def _fake_llm(*args, **kwargs):
+            captured_prompt.append(
+                str(args[1] if len(args) > 1 else kwargs.get("prompt", ""))
+            )
+            return subprocess.CompletedProcess(["stub"], 0, "assistant reply", "")
+
+        with patch("chat.runtime._run_llm", side_effect=_fake_llm):
+            result = execute_turn(
+                thread_id=thread_id,
+                message="summarize repo and vector settings",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertTrue(captured_prompt)
+        prompt = captured_prompt[0]
+        self.assertIn("Integration defaults for enabled MCP servers", prompt)
+        self.assertIn("GitHub default repository: acme/platform.", prompt)
+        self.assertIn("ChromaDB defaults:", prompt)
+        self.assertIn("host chroma.internal", prompt)
+        self.assertIn("port 8443", prompt)
+        self.assertIn("ssl true", prompt)
 
     def test_context_auto_compaction_persists_summary_and_activity(self) -> None:
         model = self._create_model(name="Compaction Model", context_window_tokens=60)

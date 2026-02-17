@@ -9,6 +9,9 @@ function errorMessage(error, fallback) {
     if (error.isAuthError) {
       return `${error.message} Sign in to Studio if authentication is enabled.`
     }
+    if (error.status === 0) {
+      return 'Unable to reach the Studio API. Check connectivity and try again.'
+    }
     return error.message
   }
   if (error instanceof Error && error.message) {

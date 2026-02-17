@@ -16,11 +16,22 @@ spec:
           args:
             - |
               set -eu
-              lock_hash="$(sha256sum package-lock.json | awk '{print $1}')"
               hash_file="node_modules/.llmctl-lock-hash"
-              if [ ! -f "$hash_file" ] || [ "$lock_hash" != "$(cat "$hash_file")" ]; then
-                npm ci --no-audit --no-fund
-                printf '%s' "$lock_hash" > "$hash_file"
+              install_mode_file="node_modules/.llmctl-install-mode"
+              if [ -f package-lock.json ]; then
+                lock_hash="$(sha256sum package-lock.json | awk '{print $1}')"
+                if [ ! -f "$hash_file" ] || [ "$lock_hash" != "$(cat "$hash_file")" ] || [ ! -f "$install_mode_file" ] || [ "$(cat "$install_mode_file")" != "ci" ]; then
+                  npm ci --no-audit --no-fund
+                  printf '%s' "$lock_hash" > "$hash_file"
+                  printf 'ci' > "$install_mode_file"
+                fi
+              else
+                pkg_hash="$(sha256sum package.json | awk '{print $1}')"
+                if [ ! -f "$hash_file" ] || [ "$pkg_hash" != "$(cat "$hash_file")" ] || [ ! -f "$install_mode_file" ] || [ "$(cat "$install_mode_file")" != "install" ]; then
+                  npm install --no-audit --no-fund
+                  printf '%s' "$pkg_hash" > "$hash_file"
+                  printf 'install' > "$install_mode_file"
+                fi
               fi
               exec npm run dev -- --host 0.0.0.0 --port 8080 --strictPort
           env:

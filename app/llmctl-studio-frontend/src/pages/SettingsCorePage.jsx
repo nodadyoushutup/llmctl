@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useFlash } from '../lib/flashMessages'
 import { HttpError } from '../lib/httpClient'
 import { getSettingsCore } from '../lib/studioApi'
 
@@ -17,6 +18,7 @@ function errorMessage(error, fallback) {
 }
 
 export default function SettingsCorePage() {
+  const flash = useFlash()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
 
   useEffect(() => {
@@ -28,14 +30,16 @@ export default function SettingsCorePage() {
         }
       })
       .catch((error) => {
+        const message = errorMessage(error, 'Failed to load core settings.')
+        flash.error(message)
         if (!cancelled) {
-          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load core settings.') })
+          setState({ loading: false, payload: null, error: message })
         }
       })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [flash])
 
   const coreConfig = state.payload?.core_config && typeof state.payload.core_config === 'object'
     ? state.payload.core_config
@@ -57,7 +61,6 @@ export default function SettingsCorePage() {
           </div>
         </div>
         {state.loading ? <p>Loading core settings...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (
           <div className="stack">
             {Object.entries(coreConfig).map(([key, value]) => (

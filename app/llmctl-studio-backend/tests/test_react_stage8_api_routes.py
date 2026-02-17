@@ -192,6 +192,37 @@ class Stage8ApiRouteTests(unittest.TestCase):
             confluence_payload = confluence_listing.get_json() or {}
             self.assertEqual("ENG", confluence_payload.get("space_key"))
 
+    def test_confluence_refresh_api_persists_space_options(self) -> None:
+        with (
+            patch("web.views.sync_integrated_mcp_servers"),
+            patch(
+                "web.views._fetch_confluence_spaces",
+                return_value=[{"value": "LLMCTL", "label": "LLMCTL - LLMCTL"}],
+            ),
+        ):
+            refresh = self.client.post(
+                "/api/settings/integrations/confluence",
+                json={
+                    "action": "refresh",
+                    "confluence_api_key": "owner@example.com:token",
+                    "confluence_site": "https://example.atlassian.net/wiki",
+                },
+            )
+            self.assertEqual(200, refresh.status_code)
+            refresh_payload = refresh.get_json() or {}
+            self.assertEqual(
+                [{"value": "LLMCTL", "label": "LLMCTL - LLMCTL"}],
+                refresh_payload.get("confluence_space_options"),
+            )
+
+            listing = self.client.get("/api/settings/integrations/confluence")
+            self.assertEqual(200, listing.status_code)
+            listing_payload = listing.get_json() or {}
+            self.assertEqual(
+                [{"value": "LLMCTL", "label": "LLMCTL - LLMCTL"}],
+                listing_payload.get("confluence_space_options"),
+            )
+
     def test_chroma_collections_json(self) -> None:
         with (
             patch("web.views._resolved_chroma_settings", return_value={"host": "llmctl-chromadb", "port": "8000", "ssl": "false"}),

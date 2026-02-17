@@ -3306,6 +3306,30 @@ def _confluence_space_options(settings: dict[str, str]) -> list[dict[str, str]]:
     )
 
 
+def _jira_project_options(settings: dict[str, str]) -> list[dict[str, str]]:
+    return _merge_selected_option(
+        _parse_option_entries(settings.get("project_options")),
+        settings.get("project_key"),
+    )
+
+
+def _jira_board_options(settings: dict[str, str]) -> list[dict[str, str]]:
+    options = _parse_option_entries(settings.get("board_options"))
+    selected_board = (settings.get("board") or "").strip()
+    selected_label = (settings.get("board_label") or "").strip()
+    if selected_board and all(
+        option.get("value") != selected_board for option in options
+    ):
+        options.insert(
+            0,
+            {
+                "value": selected_board,
+                "label": selected_label or selected_board,
+            },
+        )
+    return options
+
+
 def _normalize_rag_db_provider(value: str | None) -> str:
     candidate = (value or "").strip().lower()
     if candidate in RAG_DB_PROVIDER_CHOICES:
@@ -3528,18 +3552,10 @@ def _settings_integrations_context(
             github_repo_options = [selected_repo]
 
     if jira_project_options is None:
-        jira_project_options = []
-        selected_project = jira_settings.get("project_key")
-        if selected_project:
-            jira_project_options = [
-                {"value": selected_project, "label": selected_project}
-            ]
+        jira_project_options = _jira_project_options(jira_settings)
 
     if jira_board_options is None:
-        jira_board_options = []
-        selected_board = jira_settings.get("board")
-        if selected_board:
-            jira_board_options = [{"value": selected_board, "label": selected_board}]
+        jira_board_options = _jira_board_options(jira_settings)
 
     if confluence_space_options is None:
         confluence_space_options = _confluence_space_options(confluence_settings)
@@ -3807,13 +3823,30 @@ def _fetch_jira_boards(
                     for item in values:
                         if not isinstance(item, dict):
                             continue
-                        name = item.get("name")
-                        if not isinstance(name, str):
+                        name_raw = item.get("name")
+                        if not isinstance(name_raw, str):
                             continue
-                        value = name.strip()
+                        name = name_raw.strip()
+                        if not name:
+                            continue
+                        board_id = item.get("id")
+                        if isinstance(board_id, int):
+                            value = str(board_id)
+                        elif isinstance(board_id, str):
+                            value = board_id.strip()
+                        else:
+                            value = name
                         if not value or value in seen:
                             continue
-                        boards.append({"value": value, "label": value})
+                        label = name
+                        location = item.get("location")
+                        if isinstance(location, dict):
+                            location_project = location.get("projectKey")
+                            if isinstance(location_project, str):
+                                cleaned_project = location_project.strip()
+                                if cleaned_project:
+                                    label = f"{label} ({cleaned_project})"
+                        boards.append({"value": value, "label": label})
                         seen.add(value)
                 is_last = payload.get("isLast")
                 if isinstance(is_last, bool) and is_last:
@@ -4026,6 +4059,43 @@ def _fetch_jira_board_by_name(
             logger.warning("Jira board lookup: network error url=%s", url)
             raise ValueError("Unable to reach Jira API.") from exc
     return fallback_match
+
+
+def _fetch_jira_board_by_id(
+    api_key: str,
+    site: str,
+    board_id: int,
+) -> dict[str, object] | None:
+    if not api_key or not site or board_id < 1:
+        return None
+    base = _normalize_atlassian_site(site)
+    if not base:
+        return None
+    headers = _build_atlassian_headers(api_key)
+    url = f"{base}/rest/agile/1.0/board/{board_id}"
+    request = Request(url, headers=headers)
+    try:
+        with urlopen(request, timeout=15) as response:
+            payload = json.load(response)
+    except HTTPError as exc:
+        body_snippet = _error_body_snippet(exc)
+        logger.warning(
+            "Jira board lookup by id: HTTP error code=%s url=%s body=%s",
+            exc.code,
+            url,
+            body_snippet,
+        )
+        if exc.code in {401, 403}:
+            raise ValueError("Jira API key is invalid or lacks board access.") from exc
+        if exc.code == 404:
+            return None
+        raise ValueError("Jira API error while fetching board.") from exc
+    except URLError as exc:
+        logger.warning("Jira board lookup by id: network error url=%s", url)
+        raise ValueError("Unable to reach Jira API.") from exc
+    if isinstance(payload, dict):
+        return payload
+    return None
 
 
 def _fetch_jira_board_configuration(
@@ -14825,7 +14895,9 @@ def github_pull_request_code_review(pr_number: int):
 def jira_workspace():
     is_api_request = _workflow_api_request()
     settings = _load_integration_settings("jira")
-    board = settings.get("board") or "No board selected"
+    selected_board = (settings.get("board") or "").strip()
+    selected_board_label = (settings.get("board_label") or "").strip()
+    board = selected_board_label or selected_board or "No board selected"
     site = settings.get("site") or "No site configured"
     api_key = settings.get("api_key") or ""
     email = settings.get("email") or ""
@@ -14836,7 +14908,7 @@ def jira_workspace():
     board_type: str | None = None
     board_url: str | None = None
     board_column_count = 0
-    if api_key and settings.get("board") and settings.get("site"):
+    if api_key and selected_board and settings.get("site"):
         auth_key = _combine_atlassian_key(api_key, email)
         if ":" not in auth_key:
             board_error = (
@@ -14844,14 +14916,23 @@ def jira_workspace():
             )
         else:
             try:
-                board_info = _fetch_jira_board_by_name(
-                    auth_key, settings.get("site") or "", settings.get("board") or ""
-                )
+                board_info: dict[str, object] | None = None
+                if selected_board.isdigit():
+                    board_info = _fetch_jira_board_by_id(
+                        auth_key, settings.get("site") or "", int(selected_board)
+                    )
+                else:
+                    board_info = _fetch_jira_board_by_name(
+                        auth_key, settings.get("site") or "", selected_board
+                    )
                 if not board_info:
                     board_error = (
                         "Selected Jira board not found. Refresh boards in settings."
                     )
                 else:
+                    board_name = board_info.get("name")
+                    if isinstance(board_name, str) and board_name.strip():
+                        board = board_name.strip()
                     board_id = board_info.get("id")
                     if isinstance(board_id, str) and board_id.isdigit():
                         board_id = int(board_id)
@@ -14894,7 +14975,7 @@ def jira_workspace():
             "workspace": "jira",
             "board": board,
             "site": site,
-            "board_selected": bool(settings.get("board")),
+            "board_selected": bool(selected_board),
             "connected": bool(settings.get("api_key")),
             "board_columns": board_columns,
             "board_unmapped": board_unmapped,
@@ -14908,7 +14989,7 @@ def jira_workspace():
         "jira.html",
         jira_board=board,
         jira_site=site,
-        jira_board_selected=bool(settings.get("board")),
+        jira_board_selected=bool(selected_board),
         jira_connected=bool(settings.get("api_key")),
         jira_board_columns=board_columns,
         jira_board_unmapped=board_unmapped,
@@ -14926,7 +15007,11 @@ def jira_workspace():
 def jira_issue_detail(issue_key: str):
     is_api_request = _workflow_api_request()
     settings = _load_integration_settings("jira")
-    board = settings.get("board") or "No board selected"
+    board = (
+        (settings.get("board_label") or "").strip()
+        or (settings.get("board") or "").strip()
+        or "No board selected"
+    )
     site = settings.get("site") or "No site configured"
     api_key = settings.get("api_key") or ""
     email = settings.get("email") or ""
@@ -17064,11 +17149,44 @@ def update_rag_settings():
 def update_jira_settings():
     request_payload = _settings_request_payload()
     is_api_request = _workflow_api_request()
+    existing_settings = _load_integration_settings("jira")
     action = _settings_form_value(request_payload, "action").strip()
-    api_key = _settings_form_value(request_payload, "jira_api_key").strip()
-    email = _settings_form_value(request_payload, "jira_email").strip()
-    site = _settings_form_value(request_payload, "jira_site").strip()
-    project_key = _settings_form_value(request_payload, "jira_project_key").strip()
+    api_key = (
+        _settings_form_value(request_payload, "jira_api_key").strip()
+        if "jira_api_key" in request.form or "jira_api_key" in request_payload
+        else (existing_settings.get("api_key") or "").strip()
+    )
+    email = (
+        _settings_form_value(request_payload, "jira_email").strip()
+        if "jira_email" in request.form or "jira_email" in request_payload
+        else (existing_settings.get("email") or "").strip()
+    )
+    site = (
+        _settings_form_value(request_payload, "jira_site").strip()
+        if "jira_site" in request.form or "jira_site" in request_payload
+        else (existing_settings.get("site") or "").strip()
+    )
+    project_key = (
+        _settings_form_value(request_payload, "jira_project_key").strip()
+        if "jira_project_key" in request.form or "jira_project_key" in request_payload
+        else (existing_settings.get("project_key") or "").strip()
+    )
+    has_board = "jira_board" in request.form or "jira_board" in request_payload
+    board = (
+        _settings_form_value(request_payload, "jira_board").strip()
+        if has_board
+        else (existing_settings.get("board") or "").strip()
+    )
+    has_board_label = (
+        "jira_board_label" in request.form or "jira_board_label" in request_payload
+    )
+    board_label = (
+        _settings_form_value(request_payload, "jira_board_label").strip()
+        if has_board_label
+        else (existing_settings.get("board_label") or "").strip()
+    )
+    if not board:
+        board_label = ""
     logger.info(
         "Jira settings update action=%s key_len=%s key_has_colon=%s email_domain=%s site_host=%s has_board=%s",
         action or "save",
@@ -17076,21 +17194,23 @@ def update_jira_settings():
         ":" in api_key,
         _safe_email_domain(email),
         _safe_site_label(site),
-        "jira_board" in request.form or "jira_board" in request_payload,
+        has_board,
     )
     payload = {
         "api_key": api_key,
         "email": email,
         "site": site,
         "project_key": project_key,
+        "board": board,
+        "board_label": board_label,
     }
-    if "jira_board" in request.form or "jira_board" in request_payload:
-        payload["board"] = _settings_form_value(request_payload, "jira_board").strip()
     _save_integration_settings("jira", payload)
     sync_integrated_mcp_servers()
     if action == "refresh":
-        board_options: list[dict[str, str]] = []
-        project_options: list[dict[str, str]] = []
+        refreshed_settings = _load_integration_settings("jira")
+        board_options: list[dict[str, str]] = _jira_board_options(refreshed_settings)
+        project_options: list[dict[str, str]] = _jira_project_options(refreshed_settings)
+        cache_updates: dict[str, str] = {}
         if api_key and site:
             try:
                 auth_key = _combine_atlassian_key(api_key, email)
@@ -17123,17 +17243,10 @@ def update_jira_settings():
                     logger.info("Jira refresh: skipped due to email validation")
                 else:
                     project_options = _fetch_jira_projects(auth_key, site)
-                    if is_api_request:
-                        if project_key:
-                            board_options = _fetch_jira_boards(
-                                auth_key, site, project_key
-                            )
-                        return {
-                            "ok": True,
-                            "jira_project_options": project_options,
-                            "jira_board_options": board_options,
-                            "jira_settings": _load_integration_settings("jira"),
-                        }
+                    if project_options:
+                        cache_updates["project_options"] = _serialize_option_entries(
+                            project_options
+                        )
                     if project_options:
                         logger.info(
                             "Jira refresh: loaded %s projects", len(project_options)
@@ -17146,6 +17259,10 @@ def update_jira_settings():
                         board_options = _fetch_jira_boards(
                             auth_key, site, project_key
                         )
+                        if board_options:
+                            cache_updates["board_options"] = _serialize_option_entries(
+                                board_options
+                            )
                         if board_options:
                             logger.info(
                                 "Jira refresh: loaded %s boards", len(board_options)
@@ -17180,18 +17297,76 @@ def update_jira_settings():
                 "Jira API key and site URL are required to refresh projects and boards.",
                 "error",
             )
+        selected_board_option: dict[str, str] | None = None
         if project_key and all(
             option.get("value") != project_key for option in project_options
         ):
             project_options.insert(
                 0, {"value": project_key, "label": project_key}
             )
+        if board and board_options:
+            for option in board_options:
+                if option.get("value") == board:
+                    selected_board_option = option
+                    break
+            if selected_board_option is None:
+                for option in board_options:
+                    label = (option.get("label") or "").strip()
+                    if label == board or label.startswith(f"{board} ("):
+                        candidate_value = (option.get("value") or "").strip()
+                        if candidate_value:
+                            board = candidate_value
+                            selected_board_option = option
+                            cache_updates["board"] = board
+                        break
+        if selected_board_option is not None:
+            selected_board_label = (
+                (selected_board_option.get("label") or "").strip()
+                or (selected_board_option.get("value") or "").strip()
+            )
+            if selected_board_label and selected_board_label != board_label:
+                board_label = selected_board_label
+                cache_updates["board_label"] = selected_board_label
+        elif board:
+            fallback_label = board_label or board
+            if all(option.get("value") != board for option in board_options):
+                board_options.insert(
+                    0,
+                    {
+                        "value": board,
+                        "label": fallback_label,
+                    },
+                )
+        if cache_updates:
+            _save_integration_settings("jira", cache_updates)
+        refreshed_settings = _load_integration_settings("jira")
+        if not project_options:
+            project_options = _jira_project_options(refreshed_settings)
+        else:
+            project_options = _merge_selected_option(
+                project_options, refreshed_settings.get("project_key")
+            )
+        if not board_options:
+            board_options = _jira_board_options(refreshed_settings)
+        else:
+            selected_board = (refreshed_settings.get("board") or "").strip()
+            selected_label = (
+                (refreshed_settings.get("board_label") or "").strip()
+                or selected_board
+            )
+            if selected_board and all(
+                option.get("value") != selected_board for option in board_options
+            ):
+                board_options.insert(
+                    0,
+                    {"value": selected_board, "label": selected_label},
+                )
         if is_api_request:
             return {
                 "ok": True,
                 "jira_project_options": project_options,
                 "jira_board_options": board_options,
-                "jira_settings": _load_integration_settings("jira"),
+                "jira_settings": refreshed_settings,
             }
         return _render_settings_integrations_page(
             "jira",
@@ -17289,14 +17464,6 @@ def update_confluence_settings():
                 else:
                     space_options = _fetch_confluence_spaces(auth_key, site)
                     cache_payload = _serialize_option_entries(space_options)
-                    if is_api_request:
-                        return {
-                            "ok": True,
-                            "confluence_space_options": space_options,
-                            "confluence_settings": _load_integration_settings(
-                                "confluence"
-                            ),
-                        }
                     if space_options:
                         logger.info(
                             "Confluence refresh: loaded %s spaces", len(space_options)

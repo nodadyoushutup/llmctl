@@ -1247,8 +1247,24 @@ export function updateSettingsIntegrationsGithub({
   pat = '',
   repo = '',
   clearSshKey = false,
+  sshKeyFile = null,
   action = '',
 } = {}) {
+  if (sshKeyFile instanceof File) {
+    const formData = new FormData()
+    formData.append('github_pat', String(pat ?? ''))
+    formData.append('github_repo', String(repo ?? ''))
+    formData.append('github_ssh_key_clear', clearSshKey ? 'true' : 'false')
+    formData.append('github_ssh_key', sshKeyFile)
+    if (action) {
+      formData.append('action', action)
+    }
+    return requestJson('/settings/integrations/github', {
+      method: 'POST',
+      body: formData,
+    })
+  }
+
   const body = {
     github_pat: pat,
     github_repo: repo,
@@ -1269,6 +1285,7 @@ export function updateSettingsIntegrationsJira({
   site = '',
   projectKey = '',
   board = '',
+  boardLabel = '',
   action = '',
 } = {}) {
   const body = {
@@ -1277,6 +1294,7 @@ export function updateSettingsIntegrationsJira({
     jira_site: site,
     jira_project_key: projectKey,
     jira_board: board,
+    jira_board_label: boardLabel,
   }
   if (action) {
     body.action = action

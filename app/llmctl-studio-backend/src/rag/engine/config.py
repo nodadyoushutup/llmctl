@@ -106,10 +106,16 @@ def _split_map_int(value: str | None) -> dict[str, int]:
 
 
 def _find_repo_root() -> Path:
-    here = Path(__file__).resolve()
+    try:
+        here = Path(__file__).resolve()
+    except OSError:
+        here = Path(__file__).absolute()
     for parent in [here.parent] + list(here.parents):
-        if (parent / ".git").exists():
-            return parent
+        try:
+            if (parent / ".git").exists():
+                return parent
+        except OSError:
+            continue
     # Fallback to repo root estimate from app/llmctl-studio-backend/src/rag/engine.
     return here.parents[2]
 

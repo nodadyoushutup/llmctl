@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
+import { useFlash, useFlashState } from '../lib/flashMessages'
 import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
@@ -125,9 +125,10 @@ function ProviderSectionCard({
 export default function SettingsProviderPage() {
   const { section } = useParams()
   const activeSection = useMemo(() => normalizeSection(section), [section])
+  const flash = useFlash()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
-  const [actionInfo, setActionInfo] = useFlashState('success')
+  const [, setActionError] = useFlashState('error')
+  const [, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
 
   const [controlsForm, setControlsForm] = useState({
@@ -182,13 +183,15 @@ export default function SettingsProviderPage() {
           : '',
       })
     } catch (error) {
+      const message = errorMessage(error, 'Failed to load provider settings.')
+      flash.error(message)
       setState((current) => ({
         loading: false,
         payload: silent ? current.payload : null,
-        error: errorMessage(error, 'Failed to load provider settings.'),
+        error: silent ? current.error : message,
       }))
     }
-  }, [activeSection])
+  }, [activeSection, flash])
 
   useEffect(() => {
     refresh()
@@ -226,8 +229,6 @@ export default function SettingsProviderPage() {
       icon: sectionIcon(itemId),
     }
   })
-  const hasStatus = state.loading || state.error || actionError || actionInfo
-
   function toggleEnabled(providerId) {
     setControlsForm((current) => ({
       ...current,
@@ -263,12 +264,9 @@ export default function SettingsProviderPage() {
         items={providerSidebarItems}
         activeId={activeSection}
       >
-        {hasStatus ? (
+        {state.loading ? (
           <article className="card">
             {state.loading ? <p>Loading provider settings...</p> : null}
-            {state.error ? <p className="error-text">{state.error}</p> : null}
-            {actionError ? <p className="error-text">{actionError}</p> : null}
-            {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
           </article>
         ) : null}
 

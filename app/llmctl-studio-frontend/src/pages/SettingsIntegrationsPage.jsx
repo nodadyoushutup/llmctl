@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
+import { useFlash, useFlashState } from '../lib/flashMessages'
 import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
 import { HttpError } from '../lib/httpClient'
@@ -106,6 +106,9 @@ function errorMessage(error, fallback) {
     if (error.isAuthError) {
       return `${error.message} Sign in to Studio if authentication is enabled.`
     }
+    if (error.status === 0) {
+      return 'Unable to reach the Studio API. Check connectivity and try again.'
+    }
     return error.message
   }
   if (error instanceof Error && error.message) {
@@ -118,13 +121,19 @@ export default function SettingsIntegrationsPage() {
   const { section } = useParams()
   const activeSection = useMemo(() => normalizeSection(section), [section])
 
+  const flash = useFlash()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
-  const [actionInfo, setActionInfo] = useFlashState('success')
+  const [, setActionError] = useFlashState('error')
+  const [, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
 
   const [gitForm, setGitForm] = useState({ gitconfigContent: '' })
-  const [githubForm, setGithubForm] = useState({ pat: '', repo: '', clearSshKey: false })
+  const [githubForm, setGithubForm] = useState({
+    pat: '',
+    repo: '',
+    clearSshKey: false,
+    sshKeyFile: null,
+  })
   const [jiraForm, setJiraForm] = useState({ apiKey: '', email: '', site: '', projectKey: '', board: '' })
   const [confluenceForm, setConfluenceForm] = useState({ apiKey: '', email: '', site: '', space: '' })
   const [googleCloudForm, setGoogleCloudForm] = useState({ serviceAccountJson: '', projectId: '', mcpEnabled: true })
@@ -153,6 +162,7 @@ export default function SettingsIntegrationsPage() {
         pat: String(payload?.github_settings?.pat || ''),
         repo: String(payload?.github_settings?.repo || ''),
         clearSshKey: false,
+        sshKeyFile: null,
       })
 
       setJiraForm({
@@ -195,13 +205,15 @@ export default function SettingsIntegrationsPage() {
       setJiraBoardOptions(Array.isArray(payload?.jira_board_options) ? payload.jira_board_options : [])
       setConfluenceSpaceOptions(Array.isArray(payload?.confluence_space_options) ? payload.confluence_space_options : [])
     } catch (error) {
+      const message = errorMessage(error, 'Failed to load integration settings.')
+      flash.error(message)
       setState((current) => ({
         loading: false,
         payload: silent ? current.payload : null,
-        error: errorMessage(error, 'Failed to load integration settings.'),
+        error: silent ? current.error : message,
       }))
     }
-  }, [activeSection])
+  }, [activeSection, flash])
 
   useEffect(() => {
     refresh()
@@ -239,6 +251,7 @@ export default function SettingsIntegrationsPage() {
   }
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
+  const githubSshKeyConfigured = String(payload?.github_settings?.ssh_key_path || '').trim().length > 0
   const integrationSections = Array.isArray(payload?.integration_sections) && payload.integration_sections.length > 0
     ? payload.integration_sections
     : SECTION_IDS.map((id) => ({ id, label: sectionLabel(id) }))
@@ -251,6 +264,16 @@ export default function SettingsIntegrationsPage() {
       icon: sectionIcon(itemId),
     }
   })
+  const selectedJiraBoardLabel = useMemo(() => {
+    const selectedValue = String(jiraForm.board || '').trim()
+    if (!selectedValue) {
+      return ''
+    }
+    const match = jiraBoardOptions.find(
+      (item) => String(item?.value || '').trim() === selectedValue,
+    )
+    return String(match?.label || match?.value || '').trim()
+  }, [jiraBoardOptions, jiraForm.board])
 
   return (
     <section className="stack" aria-label="Settings integrations">
@@ -261,9 +284,6 @@ export default function SettingsIntegrationsPage() {
         activeId={activeSection}
       >
         {state.loading ? <p>Loading integration settings...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
         {!state.loading && !state.error && activeSection === 'git' ? (
         <article className="card">
           <h2>Git</h2>
@@ -317,11 +337,34 @@ export default function SettingsIntegrationsPage() {
                 ))}
               </select>
             </label>
+            <label className="field field-span">
+              <span>SSH private key (PEM)</span>
+              <input
+                type="file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null
+                  setGithubForm((current) => ({
+                    ...current,
+                    sshKeyFile: file,
+                    clearSshKey: file ? false : current.clearSshKey,
+                  }))
+                }}
+              />
+              <span>
+                {githubSshKeyConfigured
+                  ? 'Saved SSH key is configured.'
+                  : 'No SSH key uploaded yet.'}
+              </span>
+            </label>
             <label className="checkbox-item">
               <input
                 type="checkbox"
                 checked={githubForm.clearSshKey}
-                onChange={(event) => setGithubForm((current) => ({ ...current, clearSshKey: event.target.checked }))}
+                onChange={(event) => setGithubForm((current) => ({
+                  ...current,
+                  clearSshKey: event.target.checked,
+                  sshKeyFile: event.target.checked ? null : current.sshKeyFile,
+                }))}
               />
               <span>Remove saved SSH key</span>
             </label>
@@ -335,6 +378,7 @@ export default function SettingsIntegrationsPage() {
                     pat: githubForm.pat,
                     repo: githubForm.repo,
                     clearSshKey: githubForm.clearSshKey,
+                    sshKeyFile: githubForm.sshKeyFile,
                     action: 'refresh',
                   }),
                   'GitHub repositories refreshed.',
@@ -351,6 +395,7 @@ export default function SettingsIntegrationsPage() {
                     pat: githubForm.pat,
                     repo: githubForm.repo,
                     clearSshKey: githubForm.clearSshKey,
+                    sshKeyFile: githubForm.sshKeyFile,
                   }),
                   'GitHub settings updated.',
                 )}
@@ -399,6 +444,7 @@ export default function SettingsIntegrationsPage() {
                     site: jiraForm.site,
                     projectKey: jiraForm.projectKey,
                     board: jiraForm.board,
+                    boardLabel: selectedJiraBoardLabel,
                     action: 'refresh',
                   }),
                   'Jira projects and boards refreshed.',
@@ -417,6 +463,7 @@ export default function SettingsIntegrationsPage() {
                     site: jiraForm.site,
                     projectKey: jiraForm.projectKey,
                     board: jiraForm.board,
+                    boardLabel: selectedJiraBoardLabel,
                   }),
                   'Jira settings updated.',
                 )}
