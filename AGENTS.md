@@ -102,3 +102,9 @@
 - If the change touches backend-rendered APIs or Python server code used by the UI, also run `kubectl -n llmctl rollout restart deploy/llmctl-studio-backend` and `kubectl -n llmctl rollout status deploy/llmctl-studio-backend`.
 - For Python-only Studio live-code changes, use the `llmctl-studio-live-redeploy` skill workflow to restart the Kubernetes deployment.
 - For Python-only RAG changes, restart the corresponding Kubernetes deployment instead of Docker Compose.
+
+# Image Build Command Policy
+
+- When giving image build/push instructions, always provide `scripts/build/harbor.sh` commands first.
+- Do not suggest app-level image build scripts (for example under `app/*/build-*.sh`) unless explicitly asked for those scripts.
+- Include the exact Harbor-oriented command(s) with explicit flags (such as `--executor`, `--executor-base`, `--tag`, `--registry`) when applicable.

@@ -1,0 +1,15 @@
+coloredlogs>=15.0.1
+Flask>=3.0.0
+Flask-Seeder>=1.2.0
+SQLAlchemy>=2.0.0
+psycopg[binary]>=3.2.0,<4
+celery>=5.3.6
+redis>=5.0.1
+gunicorn>=23.0.0
+Flask-SocketIO>=5.3.6
+simple-websocket>=1.0.0
+setuptools>=69.0.0,<81
+chromadb>=0.5.0
+google-api-python-client>=2.0.0
+google-auth>=2.0.0
+google-auth-httplib2>=0.2.0

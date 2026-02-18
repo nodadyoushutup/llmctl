@@ -189,6 +189,16 @@ PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
 PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
 MEMORY_NODE_ACTION_ADD = "add"
 MEMORY_NODE_ACTION_RETRIEVE = "retrieve"
+MEMORY_NODE_ACTION_PROMPT_TEMPLATES: dict[str, str] = {
+    MEMORY_NODE_ACTION_ADD: (
+        "Memory action: Add memory. Persist concise, durable facts from the current run "
+        "context into memory."
+    ),
+    MEMORY_NODE_ACTION_RETRIEVE: (
+        "Memory action: Retrieve memory. Use the current run context to fetch the most "
+        "relevant memory entries."
+    ),
+}
 DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS = 3600
 DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT = 25
 
@@ -5351,7 +5361,7 @@ def _normalize_milestone_node_action(value: Any) -> str:
         return MILESTONE_NODE_ACTION_CREATE_OR_UPDATE
     if cleaned in {"complete", "mark_complete", "mark milestone complete"}:
         return MILESTONE_NODE_ACTION_MARK_COMPLETE
-    return MILESTONE_NODE_ACTION_CREATE_OR_UPDATE
+    return ""
 
 
 def _normalize_plan_node_action(value: Any) -> str:
@@ -5375,7 +5385,7 @@ def _normalize_plan_node_action(value: Any) -> str:
         "mark_task_complete",
     }:
         return PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM
-    return PLAN_NODE_ACTION_CREATE_OR_UPDATE
+    return ""
 
 
 def _normalize_plan_item_key(value: Any) -> str:
@@ -5518,8 +5528,21 @@ def _infer_memory_node_prompt(
             return "\n\n".join(combined)[:4000]
 
     if action == MEMORY_NODE_ACTION_RETRIEVE:
-        return "latest"
+        return ""
     return ""
+
+
+def _build_memory_internal_action_prompt(
+    *,
+    action: str,
+    effective_prompt: str,
+) -> tuple[str, str]:
+    template = MEMORY_NODE_ACTION_PROMPT_TEMPLATES.get(action, "").strip()
+    prompt = template
+    instructions = str(effective_prompt or "").strip()
+    if instructions:
+        prompt = f"{template}\n\nAdditional instructions:\n{instructions}"
+    return template, prompt
 
 
 def _normalize_node_artifact_retention_mode(value: Any) -> str:
@@ -5770,6 +5793,8 @@ def _persist_memory_node_artifact(
 
     artifact_payload = {
         "action": output_state.get("action"),
+        "action_prompt_template": output_state.get("action_prompt_template") or "",
+        "internal_action_prompt": output_state.get("internal_action_prompt") or "",
         "action_results": output_state.get("action_results") or [],
         "additive_prompt": output_state.get("additive_prompt") or "",
         "inferred_prompt": output_state.get("inferred_prompt") or "",
@@ -7816,6 +7841,10 @@ def _execute_flowchart_plan_node(
             raise ValueError(f"Plan {node_ref_id} was not found.")
 
         action = _normalize_plan_node_action(node_config.get("action"))
+        if not action:
+            raise ValueError(
+                "Plan node action is required: create_or_update_plan or complete_plan_item."
+            )
         additive_prompt = str(node_config.get("additive_prompt") or "").strip()
         now = _utcnow()
         action_results: list[str] = []
@@ -8024,6 +8053,10 @@ def _execute_flowchart_milestone_node(
             raise ValueError(f"Milestone {node_ref_id} was not found.")
 
         action = _normalize_milestone_node_action(node_config.get("action"))
+        if not action:
+            raise ValueError(
+                "Milestone node action is required: create_or_update or mark_complete."
+            )
         additive_prompt = str(node_config.get("additive_prompt") or "").strip()
         action_results: list[str] = []
         before_milestone = _serialize_milestone_for_node(milestone)
@@ -8176,9 +8209,7 @@ def _execute_flowchart_memory_node(
     action_value = node_config.get("action")
     action = _normalize_memory_node_action(action_value)
     if not action:
-        if str(action_value or "").strip():
-            raise ValueError("Memory node action is required: add or retrieve.")
-        action = MEMORY_NODE_ACTION_ADD
+        raise ValueError("Memory node action is required: add or retrieve.")
     limit = _parse_optional_int(node_config.get("limit"), default=10, minimum=1)
     retrieved: list[dict[str, Any]] = []
     stored_memory: dict[str, Any] | None = None
@@ -8189,6 +8220,10 @@ def _execute_flowchart_memory_node(
     if not additive_prompt:
         inferred_prompt = _infer_memory_node_prompt(action=action, input_context=input_context)
     effective_prompt = additive_prompt or inferred_prompt
+    action_prompt_template, internal_action_prompt = _build_memory_internal_action_prompt(
+        action=action,
+        effective_prompt=effective_prompt,
+    )
 
     with session_scope() as session:
         node = (
@@ -8278,6 +8313,8 @@ def _execute_flowchart_memory_node(
     output_state = {
         "node_type": FLOWCHART_NODE_TYPE_MEMORY,
         "action": action,
+        "action_prompt_template": action_prompt_template,
+        "internal_action_prompt": internal_action_prompt,
         "action_results": action_results,
         "additive_prompt": additive_prompt,
         "inferred_prompt": inferred_prompt,

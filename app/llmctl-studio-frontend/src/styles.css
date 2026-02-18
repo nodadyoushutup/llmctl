@@ -617,6 +617,10 @@ select[size]:not([size='1']) {
   color: var(--muted);
 }
 
+.mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .stat-card {
   border-radius: 16px;
   border: 1px solid var(--line);
@@ -884,6 +888,27 @@ select[size]:not([size='1']) {
   white-space: nowrap;
 }
 
+.source-kind-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.source-kind-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(24, 33, 43, 0.65);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.source-kind-icon i {
+  font-size: 14px;
+}
+
 .table-actions {
   display: inline-flex;
   align-items: center;
@@ -1080,6 +1105,11 @@ select[size]:not([size='1']) {
   width: 1rem;
   height: 1rem;
   fill: currentColor;
+}
+
+.icon-button i {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .icon-button-danger {

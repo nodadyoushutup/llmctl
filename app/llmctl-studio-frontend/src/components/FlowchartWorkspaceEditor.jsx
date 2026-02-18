@@ -1463,9 +1463,13 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       }
       const nextNode = typeof updater === 'function' ? updater(node) : { ...node, ...updater }
       const normalizedType = normalizeNodeType(nextNode.node_type)
+      const normalizedModelId = NODE_TYPES_WITH_MODEL.has(normalizedType)
+        ? parseOptionalInt(nextNode.model_id)
+        : null
       return {
         ...nextNode,
         node_type: normalizedType,
+        model_id: normalizedModelId,
         config: normalizeNodeConfig(
           nextNode.config && typeof nextNode.config === 'object'
             ? nextNode.config

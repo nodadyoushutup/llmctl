@@ -28,7 +28,7 @@ export default function MilestoneDetailPage() {
   const { milestoneId } = useParams()
   const parsedMilestoneId = useMemo(() => parseId(milestoneId), [milestoneId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
+  const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -110,8 +110,6 @@ export default function MilestoneDetailPage() {
         {(invalidId || state.error) ? (
           <p className="error-text">{invalidId ? 'Invalid milestone id.' : state.error}</p>
         ) : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-
         {milestone ? (
           <>
             <div className="card-header">

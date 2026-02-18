@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 IMAGE_NAME="${IMAGE_NAME:-llmctl-executor:latest}"
 INSTALL_VLLM="${INSTALL_VLLM:-false}"
+INSTALL_STUDIO_BACKEND_DEPS="${INSTALL_STUDIO_BACKEND_DEPS:-true}"
 VLLM_VERSION="${VLLM_VERSION:-0.9.0}"
 TRANSFORMERS_VERSION="${TRANSFORMERS_VERSION:-4.53.3}"
 VERSION_TAG="${1:-}"
@@ -32,6 +33,7 @@ cd "${REPO_ROOT}"
 
 docker build \
   --build-arg INSTALL_VLLM="${INSTALL_VLLM}" \
+  --build-arg INSTALL_STUDIO_BACKEND_DEPS="${INSTALL_STUDIO_BACKEND_DEPS}" \
   --build-arg VLLM_VERSION="${VLLM_VERSION}" \
   --build-arg TRANSFORMERS_VERSION="${TRANSFORMERS_VERSION}" \
   -f app/llmctl-executor/Dockerfile \

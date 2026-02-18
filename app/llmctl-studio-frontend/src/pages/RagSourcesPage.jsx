@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import {
   deleteRagSource,
@@ -24,11 +25,25 @@ function errorMessage(error, fallback) {
   return fallback
 }
 
+function sourceKindMeta(kind) {
+  const normalized = String(kind || '').toLowerCase()
+  if (normalized === 'github') {
+    return { iconClass: 'fa-brands fa-github', label: 'GitHub source' }
+  }
+  if (normalized === 'google_drive') {
+    return { iconClass: 'fa-brands fa-google-drive', label: 'Google Drive source' }
+  }
+  if (normalized === 'local') {
+    return { iconClass: 'fa-solid fa-folder-open', label: 'Local folder source' }
+  }
+  return { iconClass: 'fa-solid fa-database', label: 'Source kind' }
+}
+
 export default function RagSourcesPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
-  const [actionInfo, setActionInfo] = useFlashState('success')
+  const [, setActionError] = useFlashState('error')
+  const [, setActionInfo] = useFlashState('success')
   const [busyById, setBusyById] = useState({})
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
@@ -128,33 +143,29 @@ export default function RagSourcesPage() {
 
   return (
     <section className="stack" aria-label="RAG sources">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>RAG Sources</h2>
-            <p>Configure retrieval sources and run quick index operations.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/rag/sources/new" className="btn-link">New Source</Link>
-          </div>
-        </div>
-        {state.loading ? <p>Loading RAG sources...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
-      </article>
-
-      {!state.loading && !state.error ? (
-        <article className="card">
-          <h2>Sources</h2>
-          {sources.length === 0 ? <p>No sources found.</p> : null}
-          {sources.length > 0 ? (
+      <article className="card panel-card">
+        <PanelHeader
+          title="RAG Sources"
+          actions={(
+            <Link to="/rag/sources/new" className="icon-button" aria-label="New source" title="New source">
+              <ActionIcon name="plus" />
+            </Link>
+          )}
+        />
+        <div className="panel-card-body">
+          <p className="panel-header-copy">
+            Configure retrieval sources and run quick index operations.
+          </p>
+          {state.loading ? <p>Loading RAG sources...</p> : null}
+          {state.error ? <p className="error-text">{state.error}</p> : null}
+          {!state.loading && !state.error && sources.length === 0 ? <p>No sources found.</p> : null}
+          {!state.loading && !state.error && sources.length > 0 ? (
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Name</th>
                     <th>Kind</th>
+                    <th>Name</th>
                     <th>Location</th>
                     <th>Schedule</th>
                     <th>Last indexed</th>
@@ -170,10 +181,15 @@ export default function RagSourcesPage() {
                     const sourceId = Number.parseInt(String(source.id ?? ''), 10)
                     const href = `/rag/sources/${sourceId}`
                     const busy = Boolean(busyById[sourceId])
+                    const kindMeta = sourceKindMeta(source.kind)
                     return (
                       <tr key={sourceId} className="table-row-link" data-href={href} onClick={(event) => handleRowClick(event, href)}>
+                        <td className="source-kind-cell">
+                          <span className="source-kind-icon" role="img" aria-label={kindMeta.label} title={kindMeta.label}>
+                            <i className={kindMeta.iconClass} aria-hidden="true" />
+                          </span>
+                        </td>
                         <td><Link to={href}>{source.name || `Source ${sourceId}`}</Link></td>
-                        <td>{source.kind || '-'}</td>
                         <td className="mono">{source.location || source.local_path || source.git_repo || source.drive_folder_id || '-'}</td>
                         <td>{source.schedule_text || '-'}</td>
                         <td>{source.last_indexed_at || '-'}</td>
@@ -185,7 +201,7 @@ export default function RagSourcesPage() {
                         </td>
                         <td className="table-actions-cell">
                           <button type="button" className="icon-button" title="Quick delta index" aria-label="Quick delta index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'delta')}>
-                            <i className="fa-solid fa-rotate-right" />
+                            <i className="fa-solid fa-code-branch" aria-hidden="true" />
                           </button>
                         </td>
                         <td className="table-actions-cell">
@@ -195,7 +211,7 @@ export default function RagSourcesPage() {
                         </td>
                         <td className="table-actions-cell">
                           <button type="button" className="icon-button icon-button-danger" title="Delete source" aria-label="Delete source" disabled={busy} onClick={() => handleDelete(sourceId)}>
-                            <ActionIcon name="trash" />
+                            <i className="fa-regular fa-trash-can" aria-hidden="true" />
                           </button>
                         </td>
                       </tr>
@@ -205,8 +221,8 @@ export default function RagSourcesPage() {
               </table>
             </div>
           ) : null}
-        </article>
-      ) : null}
+        </div>
+      </article>
     </section>
   )
 }

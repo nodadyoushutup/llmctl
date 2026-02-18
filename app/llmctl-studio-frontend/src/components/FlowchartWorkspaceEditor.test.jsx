@@ -368,6 +368,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     const actionField = screen.getByText('action').closest('label')
     const actionSelect = actionField?.querySelector('select')
     expect(actionSelect).toBeTruthy()
+    expect(actionSelect).toHaveAttribute('required')
     fireEvent.change(actionSelect, { target: { value: 'mark_complete' } })
 
     const additivePromptField = screen.getByText('optional additive prompt').closest('label')
@@ -417,6 +418,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     const actionField = screen.getByText('action').closest('label')
     const actionSelect = actionField?.querySelector('select')
     expect(actionSelect).toBeTruthy()
+    expect(actionSelect).toHaveAttribute('required')
     fireEvent.change(actionSelect, { target: { value: 'complete_plan_item' } })
     expect(screen.getByText('Complete plan item requires plan item id, stage+task keys, or completion source path.')).toBeTruthy()
 

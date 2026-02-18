@@ -81,8 +81,8 @@ export default function FlowchartDetailPage() {
   const parsedFlowchartId = useMemo(() => parseId(flowchartId), [flowchartId])
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
-  const [actionInfo, setActionInfo] = useFlashState('success')
+  const [, setActionError] = useFlashState('error')
+  const [, setActionInfo] = useFlashState('success')
   const [busyAction, setBusyAction] = useState('')
   const [editorGraph, setEditorGraph] = useState({ nodes: [], edges: [] })
   const [editorRevision, setEditorRevision] = useState(0)
@@ -353,13 +353,6 @@ export default function FlowchartDetailPage() {
   const validationLabel = activeValidation?.valid
     ? 'valid'
     : `${validationIssueCount} issue${validationIssueCount === 1 ? '' : 's'}`
-  const validationFlashMessage = !activeValidation?.valid && validationErrors.length > 0
-    ? `Validation: ${validationErrors.join(' ')}`
-    : ''
-  const combinedActionError = [actionError, validationFlashMessage]
-    .filter((item) => typeof item === 'string' && item.trim())
-    .join(' ')
-
   const handleWorkspaceNotice = useCallback((message) => {
     const text = String(message || '').trim()
     if (!text) {
@@ -396,8 +389,6 @@ export default function FlowchartDetailPage() {
                 </Link>
               ) : null}
             </div>
-            {combinedActionError ? <p className="flowchart-fixed-toolbar-error">{combinedActionError}</p> : null}
-
             {areToolbarToolsExpanded ? (
               <div className="flowchart-fixed-toolbar-tools" id="flowchart-toolbar-tools">
                 <div className="table-actions flowchart-fixed-primary-actions">
@@ -587,7 +578,6 @@ export default function FlowchartDetailPage() {
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
           {catalogWarning ? <p className="toolbar-meta">{catalogWarning}</p> : null}
-          {actionInfo ? <p className="toolbar-meta">{actionInfo}</p> : null}
         </header>
 
         <div className="flowchart-fixed-workspace">

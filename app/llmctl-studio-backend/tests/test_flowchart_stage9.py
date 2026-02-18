@@ -796,6 +796,62 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 str(updated_memory.description or ""),
             )
 
+    def test_memory_node_requires_explicit_action(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="memory-action-required")
+            memory_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=0.0,
+                y=0.0,
+            )
+            memory_node_id = memory_node.id
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Memory node action is required: add or retrieve",
+        ):
+            studio_tasks._execute_flowchart_memory_node(
+                node_id=memory_node_id,
+                node_ref_id=None,
+                node_config={},
+                input_context={},
+                mcp_server_keys=["llmctl-mcp"],
+            )
+
+    def test_memory_node_exposes_internal_action_prompt_template(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="memory-internal-prompt")
+            memory_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=0.0,
+                y=0.0,
+            )
+            memory_node_id = memory_node.id
+
+        output_state, _routing_state = studio_tasks._execute_flowchart_memory_node(
+            node_id=memory_node_id,
+            node_ref_id=None,
+            node_config={
+                "action": "retrieve",
+                "additive_prompt": "focus on deployment readiness",
+            },
+            input_context={},
+            mcp_server_keys=["llmctl-mcp"],
+        )
+        self.assertEqual("retrieve", output_state.get("action"))
+        self.assertIn(
+            "Memory action: Retrieve memory",
+            str(output_state.get("action_prompt_template") or ""),
+        )
+        self.assertIn(
+            "focus on deployment readiness",
+            str(output_state.get("internal_action_prompt") or ""),
+        )
+
     def test_script_stage_split_preserves_order(self) -> None:
         scripts = [
             Script(id=1, file_name="a.sh", content="", script_type=SCRIPT_TYPE_INIT),
@@ -2241,6 +2297,65 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             self.assertIsNotNone(persisted_task_a.completed_at)
             self.assertIsNone(persisted_task_b.completed_at)
 
+    def test_plan_node_requires_explicit_action(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="plan-action-required")
+            plan = Plan.create(session, name="plan-action-required")
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            node_id = node.id
+            plan_id = plan.id
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Plan node action is required: create_or_update_plan or complete_plan_item",
+        ):
+            studio_tasks._execute_flowchart_plan_node(
+                node_id=node_id,
+                node_ref_id=plan_id,
+                node_config={},
+                input_context={},
+                enabled_providers=set(),
+                default_model_id=None,
+                mcp_server_keys=["llmctl-mcp"],
+            )
+
+    def test_milestone_node_requires_explicit_action(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="milestone-action-required")
+            milestone = Milestone.create(session, name="milestone-action-required")
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                ref_id=milestone.id,
+                x=0.0,
+                y=0.0,
+            )
+            node_id = node.id
+            milestone_id = milestone.id
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Milestone node action is required: create_or_update or mark_complete",
+        ):
+            studio_tasks._execute_flowchart_milestone_node(
+                node_id=node_id,
+                node_ref_id=milestone_id,
+                node_config={},
+                input_context={},
+                execution_index=1,
+                enabled_providers=set(),
+                default_model_id=None,
+                mcp_server_keys=["llmctl-mcp"],
+            )
+
     def test_plan_node_artifact_persistence_payload_includes_touched_references(self) -> None:
         with session_scope() as session:
             flowchart = Flowchart.create(session, name="plan-artifact-persistence")
@@ -2914,6 +3029,36 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         )
         self.assertEqual(200, delete_response.status_code)
         self.assertTrue((delete_response.get_json() or {}).get("deleted"))
+
+    def test_delete_flowchart_removes_tasks_linked_to_flowchart_nodes(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Delete Linked Tasks")
+        graph_response = self.client.get(f"/flowcharts/{flowchart_id}/graph")
+        self.assertEqual(200, graph_response.status_code)
+        graph_payload = graph_response.get_json() or {}
+        nodes = graph_payload.get("nodes") or []
+        self.assertTrue(nodes)
+        start_node_id = int(nodes[0]["id"])
+
+        with session_scope() as session:
+            task = AgentTask.create(
+                session,
+                flowchart_id=flowchart_id,
+                flowchart_node_id=start_node_id,
+                status="queued",
+                kind="flowchart",
+            )
+            task_id = task.id
+
+        delete_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/delete",
+            json={},
+        )
+        self.assertEqual(200, delete_response.status_code)
+        self.assertTrue((delete_response.get_json() or {}).get("deleted"))
+
+        with session_scope() as session:
+            self.assertIsNone(session.get(Flowchart, flowchart_id))
+            self.assertIsNone(session.get(AgentTask, task_id))
 
     def test_graph_requires_edge_mode_in_edge_payload(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Edge Mode Required")
@@ -4220,6 +4365,135 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(
             "add",
             (memory_artifact_history[0].get("payload") or {}).get("action"),
+        )
+
+    def test_flowchart_graph_rejects_memory_node_without_required_action(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+            memory = Memory.create(session, description="requires-action-memory")
+            memory_id = memory.id
+
+        flowchart_id = self._create_flowchart("Memory Action Required")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "memory",
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "ref_id": memory_id,
+                        "x": 250,
+                        "y": 0,
+                        "config": {},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "memory",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, graph_response.status_code)
+        payload = graph_response.get_json() or {}
+        self.assertIn(
+            "config.action is required and must be add or retrieve.",
+            str(payload.get("error") or ""),
+        )
+
+    def test_flowchart_graph_rejects_plan_node_without_required_action(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="requires-plan-action")
+            plan_id = plan.id
+
+        flowchart_id = self._create_flowchart("Plan Action Required")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "plan",
+                        "node_type": FLOWCHART_NODE_TYPE_PLAN,
+                        "ref_id": plan_id,
+                        "x": 250,
+                        "y": 0,
+                        "config": {},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "plan",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, graph_response.status_code)
+        payload = graph_response.get_json() or {}
+        self.assertIn(
+            "nodes[1].config.action is required for plan nodes.",
+            str(payload.get("error") or ""),
+        )
+
+    def test_flowchart_graph_rejects_milestone_node_without_required_action(self) -> None:
+        with session_scope() as session:
+            milestone = Milestone.create(session, name="requires-milestone-action")
+            milestone_id = milestone.id
+
+        flowchart_id = self._create_flowchart("Milestone Action Required")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "milestone",
+                        "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
+                        "ref_id": milestone_id,
+                        "x": 250,
+                        "y": 0,
+                        "config": {},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "milestone",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, graph_response.status_code)
+        payload = graph_response.get_json() or {}
+        self.assertIn(
+            "nodes[1].config.action is required for milestone nodes.",
+            str(payload.get("error") or ""),
         )
 
     def test_plan_artifact_endpoints_expose_queryable_payloads(self) -> None:

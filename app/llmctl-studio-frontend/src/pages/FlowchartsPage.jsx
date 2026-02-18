@@ -23,7 +23,7 @@ function errorMessage(error, fallback) {
 export default function FlowchartsPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
+  const [, setActionError] = useFlashState('error')
   const [busyById, setBusyById] = useState({})
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
@@ -96,12 +96,8 @@ export default function FlowchartsPage() {
           )}
         />
         <div className="panel-card-body">
-          <p className="panel-header-copy">
-            Build and run node-based workflows with loops, routing, and guardrails.
-          </p>
           {state.loading ? <p>Loading flowcharts...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
-          {actionError ? <p className="error-text">{actionError}</p> : null}
           {!state.loading && !state.error && flowcharts.length === 0 ? (
             <p className="muted">No flowcharts yet.</p>
           ) : null}

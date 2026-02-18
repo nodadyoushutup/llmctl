@@ -53,7 +53,7 @@ export default function PlanDetailPage() {
   const parsedPlanId = useMemo(() => parseId(planId), [planId])
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
+  const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [openPanels, setOpenPanels] = useState({})
   const [newStage, setNewStage] = useState({ name: '', description: '', completedAt: '' })
@@ -315,7 +315,6 @@ export default function PlanDetailPage() {
 
         {state.loading ? <p>Loading plan...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
 
         {plan ? (
           <>
@@ -373,7 +372,6 @@ export default function PlanDetailPage() {
         </p>
 
         {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
-        {actionError ? <p className="error-text" style={{ marginTop: '12px' }}>{actionError}</p> : null}
 
         {stages.length > 0 ? (
           <div className="stack" style={{ marginTop: '20px' }}>

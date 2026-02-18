@@ -7249,13 +7249,9 @@ def _normalize_memory_node_action(value: object) -> str:
 def _sanitize_memory_node_config(config_payload: dict[str, object]) -> dict[str, object]:
     sanitized = dict(config_payload)
     action_value = config_payload.get("action")
-    if action_value is None:
-        action_value = config_payload.get("memory_action")
     action = _normalize_memory_node_action(action_value)
     if not action:
-        if str(action_value or "").strip():
-            raise ValueError("config.action is required and must be add or retrieve.")
-        action = MEMORY_NODE_ACTION_ADD
+        raise ValueError("config.action is required and must be add or retrieve.")
     sanitized["action"] = action
     sanitized["additive_prompt"] = str(config_payload.get("additive_prompt") or "").strip()
 
@@ -12355,11 +12351,6 @@ def delete_flowchart(flowchart_id: int):
                 )
             )
 
-        session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
-        if node_ids:
-            session.execute(delete(FlowchartNode).where(FlowchartNode.id.in_(node_ids)))
-        if run_ids:
-            session.execute(delete(FlowchartRun).where(FlowchartRun.id.in_(run_ids)))
         if task_ids:
             tasks = (
                 session.execute(select(AgentTask).where(AgentTask.id.in_(task_ids)))
@@ -12368,6 +12359,11 @@ def delete_flowchart(flowchart_id: int):
             )
             for task in tasks:
                 session.delete(task)
+        session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
+        if node_ids:
+            session.execute(delete(FlowchartNode).where(FlowchartNode.id.in_(node_ids)))
+        if run_ids:
+            session.execute(delete(FlowchartRun).where(FlowchartRun.id.in_(run_ids)))
 
         session.delete(flowchart)
     if is_api_request:

@@ -75,7 +75,7 @@ describe('App routing', () => {
 
   test('flowcharts route is native react', async () => {
     renderAt('/flowcharts')
-    expect(await screen.findByText('Build and run node-based workflows with loops, routing, and guardrails.')).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'New flowchart' })).toBeInTheDocument()
   })
 
   test('skills route is native react', async () => {

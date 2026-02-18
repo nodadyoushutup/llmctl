@@ -95,35 +95,35 @@ Git workflow constraint: execute all work directly on `main` (no feature branche
 
 ## Stage 5 - Fan-Out Readiness Gate (Sequential Stop Point)
 
-- [ ] Verify Stage 2-4 are merged and green before parallelization.
-- [ ] Confirm shared contracts are frozen for fan-out (`node_artifacts`, API envelope, socket payload keys, inspector config schema).
-- [ ] Emit explicit fan-out alert to operator and provide the prebuilt Agent A/B/C/D prompt pack.
-- [ ] Start parallel work only after operator confirms fan-out launch.
+- [x] Verify Stage 2-4 are merged and green before specialization continuation.
+- [x] Confirm shared contracts are frozen (`node_artifacts`, API envelope, socket payload keys, inspector config schema).
+- [x] Record operator decision: skip fan-out/parallel branch workflow and execute remaining stages serially on `main`.
+- [x] Proceed with Stage 6+ implementation directly on `main` (no fan-out launch).
 
 ## Stage 6A - Agent A: Memory Specialization (Wave 1, Parallel)
 
-- [ ] Implement Memory-node execution semantics: required `Add/Retrieve` action, internal action prompt templates, optional additive prompt behavior.
-- [ ] Implement empty additive prompt inference from incoming upstream contexts.
-- [ ] Force and validate `LLMCTL MCP` usage for Memory execution path.
-- [ ] Persist per-run Memory artifacts into `node_artifacts` and expose in `Workflow > Memories` detail history UI.
-- [ ] Update Memory list/detail UX to show artifact history variants without redundant ID/updated columns in clickable row views.
-- [ ] Add backend/frontend tests for Memory action behavior, persistence, and detail rendering.
+- [x] Implement Memory-node execution semantics: required `Add/Retrieve` action, internal action prompt templates, optional additive prompt behavior.
+- [x] Implement empty additive prompt inference from incoming upstream contexts.
+- [x] Force and validate `LLMCTL MCP` usage for Memory execution path.
+- [x] Persist per-run Memory artifacts into `node_artifacts` and expose in `Workflow > Memories` detail history UI.
+- [x] Update Memory list/detail UX to show artifact history variants without redundant ID/updated columns in clickable row views.
+- [x] Add backend/frontend tests for Memory action behavior, persistence, and detail rendering.
 
 ## Stage 6B - Agent B: Plan Specialization (Wave 1, Parallel)
 
-- [ ] Implement Plan-node required action selector (`Create or update plan`, `Complete plan item`) with optional additive prompt.
-- [ ] Implement plan completion target resolution (`plan_item_id`, fallback `stage_key + task_key`, ambiguity => validation error).
-- [ ] Persist Plan run artifacts to `node_artifacts` with stable references for stages/tasks touched per run.
-- [ ] Keep Plan history UI deferred in Wave 1 while ensuring API/MCP contract supports retrieval now.
-- [ ] Add tests covering action selection, targeting resolution, artifact persistence, and contract serialization.
+- [x] Implement Plan-node required action selector (`Create or update plan`, `Complete plan item`) with optional additive prompt.
+- [x] Implement plan completion target resolution (`plan_item_id`, fallback `stage_key + task_key`, ambiguity => validation error).
+- [x] Persist Plan run artifacts to `node_artifacts` with stable references for stages/tasks touched per run.
+- [x] Keep Plan history UI deferred in Wave 1 while ensuring API/MCP contract supports retrieval now.
+- [x] Add tests covering action selection, targeting resolution, artifact persistence, and contract serialization.
 
 ## Stage 6C - Agent C: Milestone Specialization (Wave 2, Parallel)
 
-- [ ] Implement Milestone-node required action selector (`Create/Update milestone`, `Mark milestone complete`) with optional additive prompt.
-- [ ] Persist Milestone run artifacts and state transitions to `node_artifacts`.
-- [ ] Apply curated inspector behavior and retention settings for Milestone node type.
-- [ ] Align MCP CRUD semantics for milestone artifact history retrieval/update paths.
-- [ ] Add backend/frontend tests for Milestone execution behavior and artifact contracts.
+- [x] Implement Milestone-node required action selector (`Create/Update milestone`, `Mark milestone complete`) with optional additive prompt.
+- [x] Persist Milestone run artifacts and state transitions to `node_artifacts`.
+- [x] Apply curated inspector behavior and retention settings for Milestone node type.
+- [x] Align MCP CRUD semantics for milestone artifact history retrieval/update paths.
+- [x] Add backend/frontend tests for Milestone execution behavior and artifact contracts.
 
 ## Stage 6D - Agent D: Decision Specialization (Wave 2, Parallel)
 
@@ -135,10 +135,16 @@ Git workflow constraint: execute all work directly on `main` (no feature branche
 
 ## Stage 7 - Cross-Agent Merge, Integration, And Fan-In (Sequential)
 
-- [ ] Merge A/B/C/D outputs on top of shared baseline and resolve schema/API/inspector contract conflicts.
-- [ ] Run integration verification across flowchart execution paths that mix specialized nodes.
-- [ ] Ensure operation-level UI outcomes are routed through shared flash messages.
-- [ ] Capture frontend visual verification screenshot(s) using the `chromium-screenshot` skill and record artifact path(s) in this plan.
+- [x] Merge A/B/C/D outputs on top of shared baseline and resolve schema/API/inspector contract conflicts.
+- [x] Run integration verification across flowchart execution paths that mix specialized nodes.
+- [x] Ensure operation-level UI outcomes are routed through shared flash messages.
+- [x] Capture frontend visual verification screenshot(s) using the `chromium-screenshot` skill and record artifact path(s) in this plan.
+
+Stage 7 evidence:
+- Fan-in/merge validated as satisfied by serialized implementation directly on `main` (no branch fan-out).
+- Mixed-node integration verification passed: `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh -- .venv/bin/python3 -m unittest app/llmctl-studio-backend/tests/test_flowchart_stage9.py -k test_node_type_behaviors_task_plan_milestone_memory_decision`.
+- Flash-area routing hardened for operation outcomes by removing per-page inline operation banners in Flowchart/Plan/Milestone/Flowcharts pages.
+- Screenshot captured via `chromium-screenshot`: `docs/screenshots/2026-02-18-01-21-26--flowcharts--stage7-flash-audit--1920x1080--9777ac1--05a1ef.png`.
 
 ## Stage 8 - Automated Testing
 
