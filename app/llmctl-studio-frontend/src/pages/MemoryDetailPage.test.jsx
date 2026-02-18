@@ -2,12 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import MemoryDetailPage from './MemoryDetailPage'
-import { getMemory, getMemoryHistory, deleteMemory } from '../lib/studioApi'
+import { getMemory, getMemoryHistory, deleteMemory, deleteMemoryArtifact } from '../lib/studioApi'
 
 vi.mock('../lib/studioApi', () => ({
   getMemory: vi.fn(),
   getMemoryHistory: vi.fn(),
   deleteMemory: vi.fn(),
+  deleteMemoryArtifact: vi.fn(),
 }))
 
 function renderPage(initialEntry = '/memories/7') {
@@ -48,6 +49,7 @@ describe('MemoryDetailPage', () => {
       ],
     })
     deleteMemory.mockResolvedValue({ ok: true })
+    deleteMemoryArtifact.mockResolvedValue({ ok: true })
   })
 
   test('renders artifact history and navigates via row-link', async () => {
@@ -66,5 +68,35 @@ describe('MemoryDetailPage', () => {
 
     fireEvent.click(historyRow)
     expect(await screen.findByText('Artifact detail')).toBeInTheDocument()
+  })
+
+  test('deletes a selected artifact history item only', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { container } = renderPage()
+
+    await waitFor(() => {
+      expect(getMemory).toHaveBeenCalledWith(7)
+      expect(getMemoryHistory).toHaveBeenCalledWith(7)
+    })
+
+    const deleteButton = await screen.findByRole('button', { name: 'Delete artifact 55' })
+    fireEvent.click(deleteButton)
+
+    await waitFor(() => {
+      expect(deleteMemoryArtifact).toHaveBeenCalledWith(7, 55)
+    })
+    expect(confirmSpy).toHaveBeenCalledWith('Delete this artifact history item?')
+    expect(container.querySelector('tr.table-row-link')).toBeFalsy()
+    confirmSpy.mockRestore()
+  })
+
+  test('applies flowchart-node history filter from query string', async () => {
+    renderPage('/memories/7?flowchart_node_id=9')
+
+    await waitFor(() => {
+      expect(getMemory).toHaveBeenCalledWith(7)
+      expect(getMemoryHistory).toHaveBeenCalledWith(7, { flowchartNodeId: 9 })
+    })
+    expect(await screen.findByText('artifact history (node 9)')).toBeInTheDocument()
   })
 })

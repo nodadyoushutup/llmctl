@@ -150,7 +150,7 @@ export default function MemoriesPage() {
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {!state.loading && !state.error && memories.length === 0 ? (
             <p className="muted">
-              No memories found yet. Add a Memory node in a flowchart to create one.
+              No memory nodes found yet. Add a Memory node in a flowchart to create one.
             </p>
           ) : null}
           {!state.loading && !state.error && memories.length > 0 ? (
@@ -159,22 +159,34 @@ export default function MemoriesPage() {
                 <thead>
                   <tr>
                     <th>Description</th>
+                    <th>Flowchart</th>
                     <th>Created</th>
                     <th className="table-actions-cell">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
                   {memories.map((memory) => {
-                    const href = `/memories/${memory.id}`
+                    const memoryId = parsePositiveInt(memory?.id, 0)
+                    if (memoryId < 1) {
+                      return null
+                    }
+                    const flowchartNodeId = parsePositiveInt(memory?.flowchart_node_id, 0)
+                    const href = flowchartNodeId > 0
+                      ? `/memories/${memoryId}?flowchart_node_id=${flowchartNodeId}`
+                      : `/memories/${memoryId}`
+                    const rowKey = flowchartNodeId > 0 ? `${memoryId}-${flowchartNodeId}` : String(memoryId)
                     return (
                       <tr
-                        key={memory.id}
+                        key={rowKey}
                         className="table-row-link"
                         data-href={href}
                         onClick={(event) => handleRowClick(event, href)}
                       >
                         <td>
                           <p>{truncateText(memory.description)}</p>
+                        </td>
+                        <td>
+                          <p>{memory.flowchart_name || '-'}</p>
                         </td>
                         <td>
                           <p className="muted" style={{ fontSize: '12px' }}>{memory.created_at || '-'}</p>
@@ -185,7 +197,7 @@ export default function MemoriesPage() {
                             className="icon-button"
                             aria-label="Edit memory"
                             title="Edit memory"
-                            onClick={() => navigate(`/memories/${memory.id}/edit`)}
+                            onClick={() => navigate(`/memories/${memoryId}/edit`)}
                           >
                             <ActionIcon name="edit" />
                           </button>

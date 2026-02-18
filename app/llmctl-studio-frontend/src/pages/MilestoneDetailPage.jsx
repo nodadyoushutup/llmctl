@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
+import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
 import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
-import { deleteMilestone, getMilestone, getMilestoneArtifacts } from '../lib/studioApi'
+import { deleteMilestone, deleteMilestoneArtifact, getMilestone, getMilestoneArtifacts } from '../lib/studioApi'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -26,11 +26,13 @@ function errorMessage(error, fallback) {
 
 export default function MilestoneDetailPage() {
   const navigate = useNavigate()
+  const flash = useFlash()
   const { milestoneId } = useParams()
   const parsedMilestoneId = useMemo(() => parseId(milestoneId), [milestoneId])
   const [state, setState] = useState({ loading: true, payload: null, artifactsPayload: null, error: '' })
   const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
+  const [deletingArtifactId, setDeletingArtifactId] = useState(null)
 
   useEffect(() => {
     if (!parsedMilestoneId) {
@@ -91,6 +93,40 @@ export default function MilestoneDetailPage() {
     } catch (error) {
       setBusy(false)
       setActionError(errorMessage(error, 'Failed to delete milestone.'))
+    }
+  }
+
+  async function handleDeleteArtifact(artifact) {
+    if (!milestone) {
+      return
+    }
+    const artifactId = parseId(artifact?.id)
+    if (artifactId == null) {
+      return
+    }
+    setDeletingArtifactId(artifactId)
+    try {
+      await deleteMilestoneArtifact(milestone.id, artifactId)
+      setState((current) => {
+        const currentArtifactsPayload = current.artifactsPayload && typeof current.artifactsPayload === 'object'
+          ? current.artifactsPayload
+          : {}
+        const currentItems = Array.isArray(currentArtifactsPayload.items)
+          ? currentArtifactsPayload.items
+          : []
+        return {
+          ...current,
+          artifactsPayload: {
+            ...currentArtifactsPayload,
+            items: currentItems.filter((item) => parseId(item?.id) !== artifactId),
+          },
+        }
+      })
+      flash.success(`Artifact ${artifactId} deleted.`)
+    } catch (error) {
+      flash.error(errorMessage(error, 'Failed to delete artifact history item.'))
+    } finally {
+      setDeletingArtifactId(null)
     }
   }
 
@@ -205,6 +241,8 @@ export default function MilestoneDetailPage() {
                 artifacts={artifacts}
                 emptyMessage="No artifact history yet for this milestone."
                 hrefForArtifact={(artifact) => `/milestones/${milestone.id}/artifacts/${artifact.id}`}
+                onDeleteArtifact={handleDeleteArtifact}
+                deletingArtifactId={deletingArtifactId}
               />
             </div>
           </>

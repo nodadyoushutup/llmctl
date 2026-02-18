@@ -4097,6 +4097,150 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         )
         self.assertEqual(child_flowchart_id, int(flowchart_node.get("ref_id") or 0))
 
+    def test_graph_auto_assigns_specialized_node_refs_when_missing(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Specialized Auto Ref Flowchart")
+
+        create_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "plan",
+                        "node_type": FLOWCHART_NODE_TYPE_PLAN,
+                        "x": 180,
+                        "y": 0,
+                        "config": {"action": "create_or_update_plan"},
+                    },
+                    {
+                        "client_id": "milestone",
+                        "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
+                        "x": 360,
+                        "y": 0,
+                        "config": {"action": "create_or_update"},
+                    },
+                    {
+                        "client_id": "memory",
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "x": 540,
+                        "y": 0,
+                        "config": {"action": "add", "additive_prompt": "seed memory"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "plan",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "plan",
+                        "target_node_id": "milestone",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "milestone",
+                        "target_node_id": "memory",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(200, create_response.status_code)
+        create_payload = create_response.get_json() or {}
+        self.assertTrue((create_payload.get("validation") or {}).get("valid"))
+        created_nodes = create_payload.get("nodes") or []
+        node_by_type = {str(node.get("node_type")): node for node in created_nodes}
+
+        plan_node = node_by_type.get(FLOWCHART_NODE_TYPE_PLAN) or {}
+        milestone_node = node_by_type.get(FLOWCHART_NODE_TYPE_MILESTONE) or {}
+        memory_node = node_by_type.get(FLOWCHART_NODE_TYPE_MEMORY) or {}
+        self.assertGreater(int(plan_node.get("ref_id") or 0), 0)
+        self.assertGreater(int(milestone_node.get("ref_id") or 0), 0)
+        self.assertGreater(int(memory_node.get("ref_id") or 0), 0)
+
+        update_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "id": node_by_type[FLOWCHART_NODE_TYPE_START]["id"],
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "id": plan_node["id"],
+                        "node_type": FLOWCHART_NODE_TYPE_PLAN,
+                        "x": 180,
+                        "y": 0,
+                        "config": {"action": "create_or_update_plan"},
+                    },
+                    {
+                        "id": milestone_node["id"],
+                        "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
+                        "x": 360,
+                        "y": 0,
+                        "config": {"action": "create_or_update"},
+                    },
+                    {
+                        "id": memory_node["id"],
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "x": 540,
+                        "y": 0,
+                        "config": {"action": "add", "additive_prompt": "seed memory"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": node_by_type[FLOWCHART_NODE_TYPE_START]["id"],
+                        "target_node_id": plan_node["id"],
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": plan_node["id"],
+                        "target_node_id": milestone_node["id"],
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": milestone_node["id"],
+                        "target_node_id": memory_node["id"],
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(200, update_response.status_code)
+        update_payload = update_response.get_json() or {}
+        self.assertTrue((update_payload.get("validation") or {}).get("valid"))
+        updated_node_by_type = {
+            str(node.get("node_type")): node for node in (update_payload.get("nodes") or [])
+        }
+        self.assertEqual(
+            int(plan_node.get("ref_id") or 0),
+            int((updated_node_by_type.get(FLOWCHART_NODE_TYPE_PLAN) or {}).get("ref_id") or 0),
+        )
+        self.assertEqual(
+            int(milestone_node.get("ref_id") or 0),
+            int((updated_node_by_type.get(FLOWCHART_NODE_TYPE_MILESTONE) or {}).get("ref_id") or 0),
+        )
+        self.assertEqual(
+            int(memory_node.get("ref_id") or 0),
+            int((updated_node_by_type.get(FLOWCHART_NODE_TYPE_MEMORY) or {}).get("ref_id") or 0),
+        )
+
+        with session_scope() as session:
+            self.assertIsNotNone(session.get(Plan, int(plan_node.get("ref_id") or 0)))
+            self.assertIsNotNone(
+                session.get(Milestone, int(milestone_node.get("ref_id") or 0))
+            )
+            self.assertIsNotNone(session.get(Memory, int(memory_node.get("ref_id") or 0)))
+
     def test_node_bound_utilities_do_not_inherit_template_bindings(self) -> None:
         with session_scope() as session:
             node_model = LLMModel.create(
@@ -4683,6 +4827,63 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual("stage_api", completion_target.get("stage_key"))
         self.assertEqual("task_api", completion_target.get("task_key"))
 
+    def test_plan_artifact_delete_endpoint_removes_only_artifact(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="plan-artifacts-delete")
+            flowchart = Flowchart.create(session, name="plan-artifacts-delete-flowchart")
+            plan_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=plan_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_PLAN}),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=plan_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+                ref_id=plan.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps({"action": "create_or_update_plan"}, sort_keys=True),
+            )
+            plan_id = plan.id
+            flowchart_node_id = plan_node.id
+            artifact_id = artifact.id
+
+        delete_response = self.client.delete(
+            f"/plans/{plan_id}/artifacts/{artifact_id}",
+            headers={
+                "X-Request-ID": "req-plan-delete-1",
+                "X-Correlation-ID": "corr-plan-delete-1",
+            },
+        )
+        self.assertEqual(200, delete_response.status_code)
+        delete_payload = delete_response.get_json() or {}
+        self.assertTrue(delete_payload.get("ok"))
+        self.assertTrue(delete_payload.get("deleted"))
+        self.assertEqual("req-plan-delete-1", delete_payload.get("request_id"))
+        self.assertEqual("corr-plan-delete-1", delete_payload.get("correlation_id"))
+
+        with session_scope() as session:
+            self.assertIsNone(session.get(NodeArtifact, artifact_id))
+            self.assertIsNotNone(session.get(FlowchartNode, flowchart_node_id))
+
     def test_memory_artifact_endpoints_expose_queryable_payloads(self) -> None:
         with session_scope() as session:
             memory = Memory.create(session, description="memory-artifacts-api")
@@ -4764,6 +4965,63 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(artifact_id, item.get("id"))
         self.assertEqual("remember this", (item.get("payload") or {}).get("effective_prompt"))
 
+    def test_memory_artifact_delete_endpoint_removes_only_artifact(self) -> None:
+        with session_scope() as session:
+            memory = Memory.create(session, description="memory-artifacts-delete")
+            flowchart = Flowchart.create(session, name="memory-artifacts-delete-flowchart")
+            memory_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=memory_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_MEMORY}),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=memory_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+                ref_id=memory.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps({"action": "add"}, sort_keys=True),
+            )
+            memory_id = memory.id
+            flowchart_node_id = memory_node.id
+            artifact_id = artifact.id
+
+        delete_response = self.client.delete(
+            f"/memories/{memory_id}/artifacts/{artifact_id}",
+            headers={
+                "X-Request-ID": "req-memory-delete-1",
+                "X-Correlation-ID": "corr-memory-delete-1",
+            },
+        )
+        self.assertEqual(200, delete_response.status_code)
+        delete_payload = delete_response.get_json() or {}
+        self.assertTrue(delete_payload.get("ok"))
+        self.assertTrue(delete_payload.get("deleted"))
+        self.assertEqual("req-memory-delete-1", delete_payload.get("request_id"))
+        self.assertEqual("corr-memory-delete-1", delete_payload.get("correlation_id"))
+
+        with session_scope() as session:
+            self.assertIsNone(session.get(NodeArtifact, artifact_id))
+            self.assertIsNotNone(session.get(FlowchartNode, flowchart_node_id))
+
     def test_milestone_artifact_endpoints_expose_queryable_payloads(self) -> None:
         with session_scope() as session:
             milestone = Milestone.create(session, name="milestone-artifacts-api")
@@ -4844,6 +5102,63 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         item = detail_payload.get("item") or {}
         self.assertEqual(artifact_id, item.get("id"))
         self.assertEqual("done", ((item.get("payload") or {}).get("milestone") or {}).get("status"))
+
+    def test_milestone_artifact_delete_endpoint_removes_only_artifact(self) -> None:
+        with session_scope() as session:
+            milestone = Milestone.create(session, name="milestone-artifacts-delete")
+            flowchart = Flowchart.create(session, name="milestone-artifacts-delete-flowchart")
+            milestone_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                ref_id=milestone.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=milestone_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_MILESTONE}),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=milestone_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                artifact_type=NODE_ARTIFACT_TYPE_MILESTONE,
+                ref_id=milestone.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps({"action": "mark_complete"}, sort_keys=True),
+            )
+            milestone_id = milestone.id
+            flowchart_node_id = milestone_node.id
+            artifact_id = artifact.id
+
+        delete_response = self.client.delete(
+            f"/milestones/{milestone_id}/artifacts/{artifact_id}",
+            headers={
+                "X-Request-ID": "req-milestone-delete-1",
+                "X-Correlation-ID": "corr-milestone-delete-1",
+            },
+        )
+        self.assertEqual(200, delete_response.status_code)
+        delete_payload = delete_response.get_json() or {}
+        self.assertTrue(delete_payload.get("ok"))
+        self.assertTrue(delete_payload.get("deleted"))
+        self.assertEqual("req-milestone-delete-1", delete_payload.get("request_id"))
+        self.assertEqual("corr-milestone-delete-1", delete_payload.get("correlation_id"))
+
+        with session_scope() as session:
+            self.assertIsNone(session.get(NodeArtifact, artifact_id))
+            self.assertIsNotNone(session.get(FlowchartNode, flowchart_node_id))
 
     def test_decision_artifact_endpoints_expose_routing_payload_contract(self) -> None:
         with session_scope() as session:

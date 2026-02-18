@@ -43,6 +43,7 @@
         <thead>
           <tr>
             <th>Description</th>
+            <th>Flowchart</th>
             <th>Created</th>
             <th class="table-actions-cell">Edit</th>
           </tr>
@@ -51,14 +52,17 @@
           {% for memory in memories %}
             <tr
               class="table-row-link"
-              data-href="{{ url_for('agents.view_memory', memory_id=memory.id) }}"
+              data-href="{{ url_for('agents.view_memory', memory_id=memory.id) }}{% if memory.flowchart_node_id %}?flowchart_node_id={{ memory.flowchart_node_id }}{% endif %}"
             >
               <td>
                 <p>{{ memory.description | truncate(180, True, "...") }}</p>
               </td>
               <td>
+                <p>{{ memory.flowchart_name or "-" }}</p>
+              </td>
+              <td>
                 <p class="muted" style="font-size: 12px;">
-                  {{ human_time(memory.created_at) }}
+                  {{ memory.created_at or "-" }}
                 </p>
               </td>
               <td class="table-actions-cell">

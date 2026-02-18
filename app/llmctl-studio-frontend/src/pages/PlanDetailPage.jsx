@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
+import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
@@ -9,6 +9,7 @@ import {
   createPlanStage,
   createPlanTask,
   deletePlan,
+  deletePlanArtifact,
   deletePlanStage,
   deletePlanTask,
   getPlan,
@@ -51,12 +52,14 @@ function stopSummaryAction(event) {
 
 export default function PlanDetailPage() {
   const navigate = useNavigate()
+  const flash = useFlash()
   const { planId } = useParams()
   const parsedPlanId = useMemo(() => parseId(planId), [planId])
 
   const [state, setState] = useState({ loading: true, payload: null, artifactsPayload: null, error: '' })
   const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
+  const [deletingArtifactId, setDeletingArtifactId] = useState(null)
   const [openPanels, setOpenPanels] = useState({})
   const [newStage, setNewStage] = useState({ name: '', description: '', completedAt: '' })
   const [stageEditById, setStageEditById] = useState({})
@@ -294,6 +297,40 @@ export default function PlanDetailPage() {
     }
   }
 
+  async function handleDeleteArtifact(artifact) {
+    if (!plan) {
+      return
+    }
+    const artifactId = parseId(artifact?.id)
+    if (artifactId == null) {
+      return
+    }
+    setDeletingArtifactId(artifactId)
+    try {
+      await deletePlanArtifact(plan.id, artifactId)
+      setState((current) => {
+        const currentArtifactsPayload = current.artifactsPayload && typeof current.artifactsPayload === 'object'
+          ? current.artifactsPayload
+          : {}
+        const currentItems = Array.isArray(currentArtifactsPayload.items)
+          ? currentArtifactsPayload.items
+          : []
+        return {
+          ...current,
+          artifactsPayload: {
+            ...currentArtifactsPayload,
+            items: currentItems.filter((item) => parseId(item?.id) !== artifactId),
+          },
+        }
+      })
+      flash.success(`Artifact ${artifactId} deleted.`)
+    } catch (error) {
+      flash.error(errorMessage(error, 'Failed to delete artifact history item.'))
+    } finally {
+      setDeletingArtifactId(null)
+    }
+  }
+
   return (
     <section className="stack" aria-label="Plan detail">
       <article className="card">
@@ -370,6 +407,8 @@ export default function PlanDetailPage() {
                 artifacts={artifacts}
                 emptyMessage="No artifact history yet for this plan."
                 hrefForArtifact={(artifact) => `/plans/${plan.id}/artifacts/${artifact.id}`}
+                onDeleteArtifact={handleDeleteArtifact}
+                deletingArtifactId={deletingArtifactId}
               />
             </div>
           </>

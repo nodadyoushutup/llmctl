@@ -55,7 +55,7 @@ describe('App routing', () => {
 
   test('nodes route is native react', async () => {
     renderAt('/nodes')
-    expect(await screen.findByText('Queued, running, and completed node execution records.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Nodes' })).length).toBeGreaterThan(0)
   })
 
   test('plans route is native react', async () => {

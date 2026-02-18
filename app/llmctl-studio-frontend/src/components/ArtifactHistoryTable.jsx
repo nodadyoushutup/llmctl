@@ -6,15 +6,37 @@ function parseId(value) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
-export default function ArtifactHistoryTable({ artifacts, emptyMessage, hrefForArtifact }) {
+export default function ArtifactHistoryTable({
+  artifacts,
+  emptyMessage,
+  hrefForArtifact,
+  onDeleteArtifact,
+  deletingArtifactId,
+}) {
   const navigate = useNavigate()
   const rows = Array.isArray(artifacts) ? artifacts : []
+  const deleteHandler = typeof onDeleteArtifact === 'function' ? onDeleteArtifact : null
+  const activeDeletingArtifactId = parseId(deletingArtifactId)
 
   function handleRowClick(event, href) {
     if (!href || shouldIgnoreRowClick(event.target)) {
       return
     }
     navigate(href)
+  }
+
+  async function handleDeleteClick(artifact) {
+    if (!artifact || !deleteHandler) {
+      return
+    }
+    const artifactId = parseId(artifact.id)
+    if (artifactId == null) {
+      return
+    }
+    if (!window.confirm('Delete this artifact history item?')) {
+      return
+    }
+    await deleteHandler(artifact)
   }
 
   if (rows.length === 0) {
@@ -44,6 +66,7 @@ export default function ArtifactHistoryTable({ artifacts, emptyMessage, hrefForA
               ? String(hrefForArtifact(artifact) || '').trim()
               : ''
             const payloadAction = String(artifact?.payload?.action || '').trim()
+            const deleteBusy = activeDeletingArtifactId != null && activeDeletingArtifactId === artifactId
             return (
               <tr
                 key={artifactId || `${artifact?.created_at || 'artifact'}-${artifact?.variant_key || 'row'}`}
@@ -69,6 +92,18 @@ export default function ArtifactHistoryTable({ artifacts, emptyMessage, hrefForA
                     >
                       <i className="fa-solid fa-up-right-from-square" />
                     </Link>
+                  ) : null}
+                  {deleteHandler ? (
+                    <button
+                      type="button"
+                      className="icon-button icon-button-danger"
+                      aria-label={`Delete artifact ${artifactId || ''}`}
+                      title={`Delete artifact ${artifactId || ''}`}
+                      disabled={deleteBusy}
+                      onClick={() => { void handleDeleteClick(artifact) }}
+                    >
+                      <i className="fa-solid fa-trash" />
+                    </button>
                   ) : null}
                 </td>
               </tr>

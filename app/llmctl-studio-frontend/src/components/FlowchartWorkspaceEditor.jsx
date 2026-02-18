@@ -1,9 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import PanelHeader from './PanelHeader'
+import PersistedDetails from './PersistedDetails'
 
 const DEFAULT_NODE_TYPES = ['start', 'end', 'flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag']
 const NODE_TYPE_WITH_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
-const NODE_TYPE_REQUIRES_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
+const NODE_TYPE_WITH_EDITABLE_REF = new Set(['flowchart'])
+const NODE_TYPE_REQUIRES_REF = new Set(['flowchart'])
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left']
 const EDGE_MODE_OPTIONS = ['solid', 'dotted']
 const MILESTONE_ACTION_OPTIONS = [
@@ -38,7 +40,6 @@ const TYPE_TO_REF_CATALOG_KEY = {
 }
 const NODE_TYPES_WITH_MODEL = new Set(['task', 'rag'])
 const SPECIALIZED_NODE_TYPES = new Set(['milestone', 'memory', 'plan'])
-const CURATED_NODE_TYPES = new Set(['decision', 'milestone', 'memory', 'plan'])
 
 const WORLD_WIDTH = 16000
 const WORLD_HEIGHT = 12000
@@ -170,6 +171,51 @@ function normalizeZoom(value) {
 function normalizeNodeType(value) {
   const type = String(value || '').trim().toLowerCase()
   return DEFAULT_NODE_TYPES.includes(type) ? type : 'task'
+}
+
+function nodeSupportsRuntimeBindings(nodeType) {
+  const normalized = normalizeNodeType(nodeType)
+  return normalized !== 'start' && normalized !== 'end'
+}
+
+function normalizeMcpServerIds(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const seen = new Set()
+  const normalized = []
+  for (const item of value) {
+    const serverId = parsePositiveInt(item)
+    if (serverId == null || seen.has(serverId)) {
+      continue
+    }
+    seen.add(serverId)
+    normalized.push(serverId)
+  }
+  return normalized
+}
+
+function withRequiredMcpServer(value, requiredServerId) {
+  const normalized = normalizeMcpServerIds(value)
+  const requiredId = parsePositiveInt(requiredServerId)
+  if (requiredId == null || normalized.includes(requiredId)) {
+    return normalized
+  }
+  return [...normalized, requiredId]
+}
+
+function normalizeNodeMcpServerIds(nodeType, value, llmctlMcpServerId = null) {
+  if (!nodeSupportsRuntimeBindings(nodeType)) {
+    return []
+  }
+  return withRequiredMcpServer(value, llmctlMcpServerId)
+}
+
+function numberListEqual(left, right) {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((value, index) => value === right[index])
 }
 
 function titleForType(type) {
@@ -625,7 +671,7 @@ const SPECIALIZED_NODE_CONTROL_REGISTRY = {
   memory: {
     actionOptions: MEMORY_ACTION_OPTIONS,
     normalizeAction: normalizeMemoryAction,
-    lockLlmctlMcp: true,
+    lockLlmctlMcp: false,
     showPlanCompletionTargetFields: false,
   },
   plan: {
@@ -678,8 +724,6 @@ function normalizeNodeConfig(config, nodeType = '') {
     nextConfig.stage_key = String(nextConfig.stage_key || '').trim()
     nextConfig.task_key = String(nextConfig.task_key || '').trim()
     nextConfig.completion_source_path = String(nextConfig.completion_source_path || '').trim()
-    delete nextConfig.agent_id
-    return nextConfig
   }
   if (normalizedType === 'milestone') {
     nextConfig.action = normalizeMilestoneAction(nextConfig.action)
@@ -687,8 +731,6 @@ function normalizeNodeConfig(config, nodeType = '') {
     nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
     nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
     nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
-    delete nextConfig.agent_id
-    return nextConfig
   }
   if (normalizedType === 'memory') {
     nextConfig.action = normalizeMemoryAction(nextConfig.action)
@@ -696,6 +738,8 @@ function normalizeNodeConfig(config, nodeType = '') {
     nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
     nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
     nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
+  }
+  if (!nodeSupportsRuntimeBindings(normalizedType)) {
     delete nextConfig.agent_id
     return nextConfig
   }
@@ -856,9 +900,7 @@ function normalizeEdgeMode(value) {
 
 function buildNodePayload(node, llmctlMcpServerId = null) {
   const nodeType = normalizeNodeType(node.node_type)
-  const mcpServerIds = nodeType === 'memory' && llmctlMcpServerId != null
-    ? [llmctlMcpServerId]
-    : (Array.isArray(node.mcp_server_ids) ? node.mcp_server_ids : [])
+  const mcpServerIds = normalizeNodeMcpServerIds(nodeType, node.mcp_server_ids, llmctlMcpServerId)
   const payload = {
     id: node.persistedId || null,
     node_type: nodeType,
@@ -929,7 +971,9 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
         nodeType,
       ),
       model_id: parseOptionalInt(raw?.model_id),
-      mcp_server_ids: Array.isArray(raw?.mcp_server_ids) ? raw.mcp_server_ids.filter((value) => parsePositiveInt(value) != null) : [],
+      mcp_server_ids: nodeSupportsRuntimeBindings(nodeType)
+        ? normalizeMcpServerIds(raw?.mcp_server_ids)
+        : [],
       script_ids: Array.isArray(raw?.script_ids) ? raw.script_ids.filter((value) => parsePositiveInt(value) != null) : [],
       attachment_ids: Array.isArray(raw?.attachment_ids) ? raw.attachment_ids.filter((value) => parsePositiveInt(value) != null) : [],
     }
@@ -1246,7 +1290,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setNodes(synchronized.nodes)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEdges(synchronized.edges)
     if (selectedEdgeId && !synchronized.edges.some((edge) => edge.localId === selectedEdgeId)) {
       setSelectedEdgeId('')
@@ -1257,18 +1300,17 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     if (llmctlMcpServerId == null) {
       return
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNodes((current) => {
       let changed = false
       const next = current.map((node) => {
-        if (normalizeNodeType(node.node_type) !== 'memory') {
-          return node
-        }
-        const existing = Array.isArray(node.mcp_server_ids) ? node.mcp_server_ids : []
-        if (existing.length === 1 && parsePositiveInt(existing[0]) === llmctlMcpServerId) {
+        const existing = normalizeMcpServerIds(node.mcp_server_ids)
+        const required = normalizeNodeMcpServerIds(node.node_type, existing, llmctlMcpServerId)
+        if (numberListEqual(existing, required)) {
           return node
         }
         changed = true
-        return { ...node, mcp_server_ids: [llmctlMcpServerId] }
+        return { ...node, mcp_server_ids: required }
       })
       return changed ? next : current
     })
@@ -1466,10 +1508,16 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       const normalizedModelId = NODE_TYPES_WITH_MODEL.has(normalizedType)
         ? parseOptionalInt(nextNode.model_id)
         : null
+      const nextMcpServerIds = normalizeNodeMcpServerIds(
+        normalizedType,
+        nextNode.mcp_server_ids,
+        llmctlMcpServerId,
+      )
       return {
         ...nextNode,
         node_type: normalizedType,
         model_id: normalizedModelId,
+        mcp_server_ids: nextMcpServerIds,
         config: normalizeNodeConfig(
           nextNode.config && typeof nextNode.config === 'object'
             ? nextNode.config
@@ -1513,7 +1561,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       y: nextPosition.y,
       config: normalizeNodeConfig(defaultConfigForType(normalizedType), normalizedType),
       model_id: null,
-      mcp_server_ids: normalizedType === 'memory' && llmctlMcpServerId != null ? [llmctlMcpServerId] : [],
+      mcp_server_ids: normalizeNodeMcpServerIds(normalizedType, [], llmctlMcpServerId),
       script_ids: [],
       attachment_ids: [],
     }
@@ -1869,16 +1917,29 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       return {
         ...current,
         node_type: normalizedType,
-        ref_id: NODE_TYPE_WITH_REF.has(normalizedType) ? current.ref_id : null,
+        ref_id: (() => {
+          const currentType = normalizeNodeType(current.node_type)
+          if (!NODE_TYPE_WITH_REF.has(normalizedType)) {
+            return null
+          }
+          if (normalizedType === 'flowchart') {
+            return current.ref_id
+          }
+          return currentType === normalizedType ? current.ref_id : null
+        })(),
         config: nextConfig,
-        mcp_server_ids: normalizedType === 'memory' && llmctlMcpServerId != null
-          ? [llmctlMcpServerId]
-          : current.mcp_server_ids,
+        mcp_server_ids: normalizeNodeMcpServerIds(
+          normalizedType,
+          current.mcp_server_ids,
+          llmctlMcpServerId,
+        ),
       }
     })
   }
 
-  const selectedNodeRefCatalogKey = TYPE_TO_REF_CATALOG_KEY[selectedNodeType]
+  const selectedNodeRefCatalogKey = NODE_TYPE_WITH_EDITABLE_REF.has(selectedNodeType)
+    ? TYPE_TO_REF_CATALOG_KEY[selectedNodeType]
+    : null
   const selectedNodeRefRows = selectedNodeRefCatalogKey && catalog && typeof catalog === 'object'
     ? catalog[selectedNodeRefCatalogKey]
     : []
@@ -1888,6 +1949,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     : []
   const agentOptions = catalog && typeof catalog === 'object' && Array.isArray(catalog.agents)
     ? catalog.agents
+    : []
+  const mcpServerOptions = catalog && typeof catalog === 'object' && Array.isArray(catalog.mcp_servers)
+    ? catalog.mcp_servers
     : []
 
   function setZoomKeepingCenter(nextZoomValue) {
@@ -2238,9 +2302,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     <span className="flow-ws-node-shape" />
                     <span className="flow-ws-node-content">
                       <span className="flow-ws-node-title">{node.title || titleForType(node.node_type)}</span>
-                      {NODE_TYPE_WITH_REF.has(normalizeNodeType(node.node_type)) && node.ref_id
-                        ? <span className="flow-ws-node-meta">ref {node.ref_id}</span>
-                        : null}
                     </span>
                     {connectorLayout.map((connector) => {
                       const handleId = connector.id
@@ -2328,7 +2389,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 ))}
               </select>
             </label>
-            {NODE_TYPE_WITH_REF.has(selectedNodeType) ? (
+            {NODE_TYPE_WITH_EDITABLE_REF.has(selectedNodeType) ? (
               <label className="field">
                 <span>ref</span>
                 {selectedNodeRefOptions.length > 0 ? (
@@ -2604,8 +2665,8 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 </select>
               </label>
             ) : null}
-            {!CURATED_NODE_TYPES.has(selectedNodeType) ? (
-              <label className="field">
+            {nodeSupportsRuntimeBindings(selectedNodeType) ? (
+              <label className="chat-control flow-ws-binding-control">
                 <span>agent</span>
                 <select
                   value={selectedNode.config?.agent_id ?? ''}
@@ -2632,6 +2693,76 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   ))}
                 </select>
               </label>
+            ) : null}
+            {nodeSupportsRuntimeBindings(selectedNodeType) ? (
+              <PersistedDetails
+                className="chat-picker chat-picker-group flow-ws-mcp-picker"
+                storageKey="flow-ws:inspector:mcp-servers"
+                defaultOpen
+              >
+                <summary>
+                  <span className="chat-picker-summary">
+                    <i className="fa-solid fa-plug" />
+                    <span>MCP servers</span>
+                  </span>
+                </summary>
+                {mcpServerOptions.length > 0 ? (
+                  <div className="chat-checklist flow-ws-mcp-checklist">
+                    {mcpServerOptions.map((server) => {
+                      const serverId = parsePositiveInt(server?.id)
+                      if (serverId == null) {
+                        return null
+                      }
+                      const required = llmctlMcpServerId === serverId
+                      const selectedNodeMcpServerIds = normalizeMcpServerIds(selectedNode.mcp_server_ids)
+                      const checked = required || selectedNodeMcpServerIds.includes(serverId)
+                      const serverName = String(server.name || `MCP ${server.id}`).trim()
+                      const serverKey = String(server.server_key || '').trim()
+                      return (
+                        <label key={serverId} className={`flow-ws-mcp-option${required ? ' is-required' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={required}
+                            onChange={(event) => {
+                              const nextChecked = Boolean(event.target.checked)
+                              updateNode(selectedNode.token, (current) => {
+                                const currentNodeType = normalizeNodeType(current.node_type)
+                                const currentServerIds = normalizeMcpServerIds(current.mcp_server_ids)
+                                let nextServerIds = nextChecked
+                                  ? [...currentServerIds, serverId]
+                                  : currentServerIds.filter((id) => id !== serverId)
+                                nextServerIds = normalizeNodeMcpServerIds(
+                                  currentNodeType,
+                                  nextServerIds,
+                                  llmctlMcpServerId,
+                                )
+                                return {
+                                  ...current,
+                                  mcp_server_ids: nextServerIds,
+                                }
+                              })
+                            }}
+                          />
+                          <span className="flow-ws-mcp-option-content">
+                            <span className="flow-ws-mcp-option-title">{serverName}</span>
+                            {serverKey ? (
+                              <span className="muted flow-ws-mcp-option-meta">
+                                {serverKey}
+                                {required ? ' (required)' : ''}
+                              </span>
+                            ) : (
+                              required ? <span className="muted flow-ws-mcp-option-meta">required</span> : null
+                            )}
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="toolbar-meta">No MCP servers available.</p>
+                )}
+              </PersistedDetails>
             ) : null}
             <div className="flow-ws-position-grid">
               <label className="field">

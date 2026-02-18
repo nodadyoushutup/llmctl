@@ -166,6 +166,7 @@ CHAT_SOURCE_HINT_PROBE_PATTERN = re.compile(
     r"\bdelta-probe-[a-z0-9-]+\b",
     re.IGNORECASE,
 )
+CHAT_SOURCE_HINT_NORMALIZE_PATTERN = re.compile(r"[^a-z0-9]+")
 
 
 @dataclass
@@ -857,11 +858,47 @@ def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
     return lines
 
 
-def _extract_source_hints(message: str) -> list[str]:
+def _normalize_source_hint_text(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    return CHAT_SOURCE_HINT_NORMALIZE_PATTERN.sub(" ", text).strip()
+
+
+def _extract_collection_hints(message: str, selected_rag_collections: list[str]) -> list[str]:
     text = str(message or "")
+    lowered_text = text.lower()
+    normalized_text = _normalize_source_hint_text(text)
+    matches: list[str] = []
+    for collection in selected_rag_collections:
+        cleaned = str(collection or "").strip()
+        if not cleaned:
+            continue
+        lowered_collection = cleaned.lower()
+        normalized_collection = _normalize_source_hint_text(lowered_collection)
+        if lowered_collection in lowered_text or (
+            normalized_collection and normalized_collection in normalized_text
+        ):
+            matches.append(cleaned)
+    return _unique_ordered(matches)
+
+
+def _extract_source_hints(message: str, selected_rag_collections: list[str] | None = None) -> list[str]:
+    text = str(message or "")
+    lowered_text = text.lower()
+    normalized_text = _normalize_source_hint_text(text)
     tokens: list[str] = []
     tokens.extend(CHAT_SOURCE_HINT_FILE_PATTERN.findall(text))
     tokens.extend(CHAT_SOURCE_HINT_PROBE_PATTERN.findall(text))
+    for collection in selected_rag_collections or []:
+        cleaned = str(collection or "").strip().lower()
+        if not cleaned:
+            continue
+        normalized_collection = _normalize_source_hint_text(cleaned)
+        if cleaned in lowered_text or (
+            normalized_collection and normalized_collection in normalized_text
+        ):
+            tokens.append(cleaned)
     lowered = [token.strip().lower() for token in tokens if token.strip()]
     return _unique_ordered(lowered)
 
@@ -869,10 +906,14 @@ def _extract_source_hints(message: str) -> list[str]:
 def _narrow_retrieval_context(
     *,
     message: str,
+    selected_rag_collections: list[str],
     retrieval_context: list[str],
     citation_records: list[dict[str, Any]],
 ) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
-    hints = _extract_source_hints(message)
+    hints = _extract_source_hints(
+        message,
+        selected_rag_collections=selected_rag_collections,
+    )
     if not hints:
         return retrieval_context, citation_records, {
             "source_hint_tokens": [],
@@ -1237,11 +1278,15 @@ def execute_turn(
             "matched_ranks": [],
         }
         if selected_rag_collections:
+            retrieval_collections = (
+                _extract_collection_hints(cleaned_message, selected_rag_collections)
+                or selected_rag_collections
+            )
             try:
                 retrieval = client.retrieve(
                     RAGRetrievalRequest(
                         question=cleaned_message,
-                        collections=selected_rag_collections,
+                        collections=retrieval_collections,
                         top_k=settings.rag_top_k,
                         model_id=str(model.id),
                         request_id=request_id,
@@ -1255,6 +1300,7 @@ def execute_turn(
                     {
                         "metadata": exc.metadata,
                         "selected_collections": selected_rag_collections,
+                        "retrieval_collections": retrieval_collections,
                     }
                 )
                 _record_activity(
@@ -1298,6 +1344,7 @@ def execute_turn(
                     message=turn.error_message,
                     metadata={
                         "selected_collections": selected_rag_collections,
+                        "retrieval_collections": retrieval_collections,
                         "exception_type": type(exc).__name__,
                     },
                 )
@@ -1317,6 +1364,7 @@ def execute_turn(
             retrieval_stats = retrieval.retrieval_stats
             retrieval_context, citation_records, retrieval_scope_metadata = _narrow_retrieval_context(
                 message=cleaned_message,
+                selected_rag_collections=selected_rag_collections,
                 retrieval_context=retrieval_context,
                 citation_records=citation_records,
             )
@@ -1334,7 +1382,8 @@ def execute_turn(
                 event_type=CHAT_EVENT_TYPE_RETRIEVAL_USED,
                 metadata={
                     "provider": rag_health.provider,
-                    "collections": selected_rag_collections,
+                    "collections": retrieval_collections,
+                    "selected_collections": selected_rag_collections,
                     "retrieval_stats": retrieval_stats,
                     "citation_count": len(citation_records),
                 },
@@ -1345,6 +1394,7 @@ def execute_turn(
                 turn.runtime_metadata_json = _safe_json_dump(
                     {
                         "selected_collections": selected_rag_collections,
+                        "retrieval_collections": retrieval_collections,
                         "retrieval_stats": retrieval_stats,
                     }
                 )
@@ -1358,6 +1408,7 @@ def execute_turn(
                     message=turn.error_message,
                     metadata={
                         "selected_collections": selected_rag_collections,
+                        "retrieval_collections": retrieval_collections,
                         "retrieval_stats": retrieval_stats,
                     },
                 )

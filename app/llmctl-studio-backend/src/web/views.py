@@ -475,6 +475,11 @@ FLOWCHART_NODE_TYPE_REQUIRES_REF = {
     FLOWCHART_NODE_TYPE_PLAN,
     FLOWCHART_NODE_TYPE_MILESTONE,
 }
+FLOWCHART_NODE_TYPE_AUTO_REF = {
+    FLOWCHART_NODE_TYPE_PLAN,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_MEMORY,
+}
 FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
     FLOWCHART_NODE_TYPE_START: {
         "model": False,
@@ -6662,6 +6667,26 @@ def _serialize_memory(memory: Memory) -> dict[str, object]:
     }
 
 
+def _serialize_memory_node_row(
+    memory: Memory,
+    flowchart_node: FlowchartNode,
+    *,
+    flowchart_name: str | None = None,
+) -> dict[str, object]:
+    payload = _serialize_memory(memory)
+    payload.update(
+        {
+            "flowchart_id": flowchart_node.flowchart_id,
+            "flowchart_name": flowchart_name or f"Flowchart {flowchart_node.flowchart_id}",
+            "flowchart_node_id": flowchart_node.id,
+            "flowchart_node_title": flowchart_node.title or "",
+            "node_created_at": _human_time(flowchart_node.created_at),
+            "node_updated_at": _human_time(flowchart_node.updated_at),
+        }
+    )
+    return payload
+
+
 def _serialize_model(
     model: LLMModel,
     *,
@@ -7178,6 +7203,48 @@ def _flowchart_ref_exists(
     if node_type == FLOWCHART_NODE_TYPE_MEMORY:
         return session.get(Memory, ref_id) is not None
     return True
+
+
+def _ensure_flowchart_auto_ref(
+    session,
+    *,
+    flowchart_node: FlowchartNode,
+) -> None:
+    node_type = str(flowchart_node.node_type or "").strip().lower()
+    current_ref_id = (
+        int(flowchart_node.ref_id)
+        if isinstance(flowchart_node.ref_id, int) and flowchart_node.ref_id > 0
+        else None
+    )
+    node_label = str(flowchart_node.title or "").strip() or (
+        f"Flowchart {flowchart_node.flowchart_id} node {flowchart_node.id}"
+    )
+
+    if node_type == FLOWCHART_NODE_TYPE_PLAN:
+        if current_ref_id is not None and session.get(Plan, current_ref_id) is not None:
+            return
+        plan = Plan.create(session, name=f"{node_label} plan")
+        flowchart_node.ref_id = int(plan.id)
+        return
+
+    if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+        if (
+            current_ref_id is not None
+            and session.get(Milestone, current_ref_id) is not None
+        ):
+            return
+        milestone = Milestone.create(session, name=f"{node_label} milestone")
+        flowchart_node.ref_id = int(milestone.id)
+        return
+
+    if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+        if current_ref_id is not None and session.get(Memory, current_ref_id) is not None:
+            return
+        memory = Memory.create(
+            session,
+            description=f"Auto memory for {node_label}.",
+        )
+        flowchart_node.ref_id = int(memory.id)
 
 
 def _task_node_has_prompt(config: object) -> bool:
@@ -10842,6 +10909,51 @@ def view_plan_artifact(plan_id: int, artifact_id: int):
     return payload
 
 
+@bp.delete("/plans/<int:plan_id>/artifacts/<int:artifact_id>")
+def delete_plan_artifact(plan_id: int, artifact_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    with session_scope() as session:
+        if session.get(Plan, plan_id) is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Plan {plan_id} was not found.",
+                details={"plan_id": plan_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        artifact = (
+            session.execute(
+                select(NodeArtifact).where(
+                    NodeArtifact.id == artifact_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+                    NodeArtifact.ref_id == plan_id,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if artifact is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Plan artifact {artifact_id} was not found for plan {plan_id}.",
+                details={"plan_id": plan_id, "artifact_id": artifact_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        session.delete(artifact)
+    payload: dict[str, object] = {
+        "ok": True,
+        "deleted": True,
+        "plan_id": plan_id,
+        "artifact_id": artifact_id,
+        "request_id": request_id,
+    }
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    return payload
+
+
 @bp.get("/memories/<int:memory_id>/artifacts")
 def list_memory_artifacts(memory_id: int):
     request_id = _workflow_request_id()
@@ -10937,6 +11049,51 @@ def view_memory_artifact(memory_id: int, artifact_id: int):
         "ok": True,
         "memory_id": memory_id,
         "item": _serialize_node_artifact(artifact),
+        "request_id": request_id,
+    }
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    return payload
+
+
+@bp.delete("/memories/<int:memory_id>/artifacts/<int:artifact_id>")
+def delete_memory_artifact(memory_id: int, artifact_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    with session_scope() as session:
+        if session.get(Memory, memory_id) is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Memory {memory_id} was not found.",
+                details={"memory_id": memory_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        artifact = (
+            session.execute(
+                select(NodeArtifact).where(
+                    NodeArtifact.id == artifact_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
+                    NodeArtifact.ref_id == memory_id,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if artifact is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Memory artifact {artifact_id} was not found for memory {memory_id}.",
+                details={"memory_id": memory_id, "artifact_id": artifact_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        session.delete(artifact)
+    payload: dict[str, object] = {
+        "ok": True,
+        "deleted": True,
+        "memory_id": memory_id,
+        "artifact_id": artifact_id,
         "request_id": request_id,
     }
     if correlation_id:
@@ -11041,6 +11198,53 @@ def view_milestone_artifact(milestone_id: int, artifact_id: int):
         "ok": True,
         "milestone_id": milestone_id,
         "item": _serialize_node_artifact(artifact),
+        "request_id": request_id,
+    }
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    return payload
+
+
+@bp.delete("/milestones/<int:milestone_id>/artifacts/<int:artifact_id>")
+def delete_milestone_artifact(milestone_id: int, artifact_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    with session_scope() as session:
+        if session.get(Milestone, milestone_id) is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Milestone {milestone_id} was not found.",
+                details={"milestone_id": milestone_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        artifact = (
+            session.execute(
+                select(NodeArtifact).where(
+                    NodeArtifact.id == artifact_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MILESTONE,
+                    NodeArtifact.ref_id == milestone_id,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if artifact is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=(
+                    f"Milestone artifact {artifact_id} was not found for milestone {milestone_id}."
+                ),
+                details={"milestone_id": milestone_id, "artifact_id": artifact_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        session.delete(artifact)
+    payload: dict[str, object] = {
+        "ok": True,
+        "deleted": True,
+        "milestone_id": milestone_id,
+        "artifact_id": artifact_id,
         "request_id": request_id,
     }
     if correlation_id:
@@ -12588,18 +12792,22 @@ def upsert_flowchart_graph(flowchart_id: int):
                 flowchart_node = (
                     existing_nodes_by_id.get(node_id) if node_id is not None else None
                 )
+                existing_node_type = flowchart_node.node_type if flowchart_node is not None else None
+                existing_ref_id = flowchart_node.ref_id if flowchart_node is not None else None
                 if (
                     flowchart_node is None
                     and node_type == FLOWCHART_NODE_TYPE_START
                     and existing_start_node is not None
                 ):
                     flowchart_node = existing_start_node
+                    existing_node_type = flowchart_node.node_type
+                    existing_ref_id = flowchart_node.ref_id
                 if flowchart_node is None:
                     flowchart_node = FlowchartNode.create(
                         session,
                         flowchart_id=flowchart_id,
                         node_type=node_type,
-                        ref_id=ref_id,
+                        ref_id=ref_id if node_type not in FLOWCHART_NODE_TYPE_AUTO_REF else None,
                         title=title,
                         x=x,
                         y=y,
@@ -12607,11 +12815,19 @@ def upsert_flowchart_graph(flowchart_id: int):
                     )
                 else:
                     flowchart_node.node_type = node_type
-                    flowchart_node.ref_id = ref_id
+                    if node_type in FLOWCHART_NODE_TYPE_AUTO_REF:
+                        if existing_node_type == node_type:
+                            flowchart_node.ref_id = existing_ref_id
+                        else:
+                            flowchart_node.ref_id = None
+                    else:
+                        flowchart_node.ref_id = ref_id
                     flowchart_node.title = title
                     flowchart_node.x = x
                     flowchart_node.y = y
                     flowchart_node.config_json = json.dumps(config_payload, sort_keys=True)
+                if node_type in FLOWCHART_NODE_TYPE_AUTO_REF:
+                    _ensure_flowchart_auto_ref(session, flowchart_node=flowchart_node)
                 if model_field_present:
                     if model_id is not None and session.get(LLMModel, model_id) is None:
                         raise ValueError(f"nodes[{index}].model_id {model_id} was not found.")
@@ -15599,22 +15815,40 @@ def list_memories():
     page = _parse_page(request.args.get("page"))
     per_page = WORKFLOW_LIST_PER_PAGE
     with session_scope() as session:
-        total_count = session.execute(select(func.count(Memory.id))).scalar_one()
+        memory_node_filters = (
+            FlowchartNode.node_type == FLOWCHART_NODE_TYPE_MEMORY,
+            FlowchartNode.ref_id.is_not(None),
+        )
+        total_count = (
+            session.execute(
+                select(func.count(FlowchartNode.id))
+                .select_from(FlowchartNode)
+                .join(Memory, Memory.id == FlowchartNode.ref_id)
+                .where(*memory_node_filters)
+            )
+            .scalar_one()
+        )
         pagination = _build_pagination(request.path, page, per_page, total_count)
         offset = (pagination["page"] - 1) * per_page
-        memories = (
-            session.execute(
-                select(Memory)
-                .order_by(Memory.created_at.desc())
-                .limit(per_page)
-                .offset(offset)
+        rows = session.execute(
+            select(FlowchartNode, Flowchart.name, Memory)
+            .join(Flowchart, Flowchart.id == FlowchartNode.flowchart_id)
+            .join(Memory, Memory.id == FlowchartNode.ref_id)
+            .where(*memory_node_filters)
+            .order_by(
+                FlowchartNode.updated_at.desc(),
+                FlowchartNode.id.desc(),
             )
-            .scalars()
-            .all()
-        )
+            .limit(per_page)
+            .offset(offset)
+        ).all()
+        memories = [
+            _serialize_memory_node_row(memory, flowchart_node, flowchart_name=flowchart_name)
+            for flowchart_node, flowchart_name, memory in rows
+        ]
     if _workflow_wants_json():
         return {
-            "memories": [_serialize_memory(memory) for memory in memories],
+            "memories": memories,
             "pagination": _serialize_workflow_pagination(pagination),
         }
     return render_template(
@@ -15671,18 +15905,24 @@ def view_memory(memory_id: int):
 def view_memory_history(memory_id: int):
     page = _parse_page(request.args.get("page"))
     per_page = WORKFLOW_LIST_PER_PAGE
+    flowchart_node_id = _parse_positive_int(request.args.get("flowchart_node_id"), 0)
+    if flowchart_node_id < 1:
+        flowchart_node_id = None
     request_id = f"memory-history-{memory_id}-{uuid.uuid4().hex}"
     correlation_id = f"memory-{memory_id}"
     with session_scope() as session:
         memory = session.get(Memory, memory_id)
         if memory is None:
             abort(404)
+        artifact_filters = [
+            NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
+            NodeArtifact.ref_id == memory_id,
+        ]
+        if flowchart_node_id is not None:
+            artifact_filters.append(NodeArtifact.flowchart_node_id == flowchart_node_id)
         artifact_count = (
             session.execute(
-                select(func.count(NodeArtifact.id)).where(
-                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
-                    NodeArtifact.ref_id == memory_id,
-                )
+                select(func.count(NodeArtifact.id)).where(*artifact_filters)
             )
             .scalar_one()
         )
@@ -15691,10 +15931,7 @@ def view_memory_history(memory_id: int):
         artifacts = (
             session.execute(
                 select(NodeArtifact)
-                .where(
-                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
-                    NodeArtifact.ref_id == memory_id,
-                )
+                .where(*artifact_filters)
                 .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
                 .limit(per_page)
                 .offset(offset)
@@ -15704,6 +15941,7 @@ def view_memory_history(memory_id: int):
         )
     return {
         "memory": _serialize_memory(memory),
+        "flowchart_node_id": flowchart_node_id,
         "artifacts": [_serialize_node_artifact(item) for item in artifacts],
         "pagination": _serialize_workflow_pagination(pagination),
         "request_id": request_id,

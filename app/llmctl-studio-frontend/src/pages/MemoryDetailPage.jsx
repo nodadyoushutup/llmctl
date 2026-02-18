@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import ActionIcon from '../components/ActionIcon'
 import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
 import { useFlash, useFlashState } from '../lib/flashMessages'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
-import { deleteMemory, getMemory, getMemoryHistory } from '../lib/studioApi'
+import { deleteMemory, deleteMemoryArtifact, getMemory, getMemoryHistory } from '../lib/studioApi'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -28,17 +28,26 @@ export default function MemoryDetailPage() {
   const navigate = useNavigate()
   const flash = useFlash()
   const { memoryId } = useParams()
+  const [searchParams] = useSearchParams()
   const parsedMemoryId = useMemo(() => parseId(memoryId), [memoryId])
+  const selectedFlowchartNodeId = useMemo(
+    () => parseId(searchParams.get('flowchart_node_id')),
+    [searchParams],
+  )
   const [state, setState] = useState({ loading: true, memoryPayload: null, historyPayload: null, error: '' })
   const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
+  const [deletingArtifactId, setDeletingArtifactId] = useState(null)
 
   useEffect(() => {
     if (!parsedMemoryId) {
       return
     }
     let cancelled = false
-    Promise.all([getMemory(parsedMemoryId), getMemoryHistory(parsedMemoryId)])
+    const historyPromise = selectedFlowchartNodeId
+      ? getMemoryHistory(parsedMemoryId, { flowchartNodeId: selectedFlowchartNodeId })
+      : getMemoryHistory(parsedMemoryId)
+    Promise.all([getMemory(parsedMemoryId), historyPromise])
       .then(([memoryPayload, historyPayload]) => {
         if (!cancelled) {
           setState({ loading: false, memoryPayload, historyPayload, error: '' })
@@ -57,7 +66,7 @@ export default function MemoryDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [parsedMemoryId])
+  }, [parsedMemoryId, selectedFlowchartNodeId])
 
   const invalidId = parsedMemoryId == null
   const payload = state.memoryPayload && typeof state.memoryPayload === 'object' ? state.memoryPayload : null
@@ -80,6 +89,40 @@ export default function MemoryDetailPage() {
     } catch (error) {
       setBusy(false)
       setActionError(errorMessage(error, 'Failed to delete memory.'))
+    }
+  }
+
+  async function handleDeleteArtifact(artifact) {
+    if (!memory) {
+      return
+    }
+    const artifactId = parseId(artifact?.id)
+    if (artifactId == null) {
+      return
+    }
+    setDeletingArtifactId(artifactId)
+    try {
+      await deleteMemoryArtifact(memory.id, artifactId)
+      setState((current) => {
+        const currentHistory = current.historyPayload && typeof current.historyPayload === 'object'
+          ? current.historyPayload
+          : null
+        const currentArtifacts = currentHistory && Array.isArray(currentHistory.artifacts)
+          ? currentHistory.artifacts
+          : []
+        return {
+          ...current,
+          historyPayload: {
+            ...(currentHistory || {}),
+            artifacts: currentArtifacts.filter((item) => parseId(item?.id) !== artifactId),
+          },
+        }
+      })
+      flash.success(`Artifact ${artifactId} deleted.`)
+    } catch (error) {
+      flash.error(errorMessage(error, 'Failed to delete artifact history item.'))
+    } finally {
+      setDeletingArtifactId(null)
     }
   }
 
@@ -146,11 +189,15 @@ export default function MemoryDetailPage() {
               </div>
             </div>
             <div className="subcard" style={{ marginTop: '20px' }}>
-              <p className="eyebrow">artifact history</p>
+              <p className="eyebrow">
+                {selectedFlowchartNodeId ? `artifact history (node ${selectedFlowchartNodeId})` : 'artifact history'}
+              </p>
               <ArtifactHistoryTable
                 artifacts={artifacts}
                 emptyMessage="No artifact history yet for this memory."
                 hrefForArtifact={(artifact) => `/memories/${memory.id}/artifacts/${artifact.id}`}
+                onDeleteArtifact={handleDeleteArtifact}
+                deletingArtifactId={deletingArtifactId}
               />
             </div>
           </>

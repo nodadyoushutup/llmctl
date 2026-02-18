@@ -626,6 +626,14 @@ export function getPlanArtifact(planId, artifactId) {
   return requestJson(`/plans/${parsedPlanId}/artifacts/${parsedArtifactId}`)
 }
 
+export function deletePlanArtifact(planId, artifactId) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
+  return requestJson(`/plans/${parsedPlanId}/artifacts/${parsedArtifactId}`, {
+    method: 'DELETE',
+  })
+}
+
 export function updatePlan(planId, { name = '', description = '', completedAt = '' } = {}) {
   const parsedPlanId = parsePositiveId(planId, 'planId')
   return requestJson(`/plans/${parsedPlanId}`, {
@@ -793,6 +801,14 @@ export function getMilestoneArtifact(milestoneId, artifactId) {
   return requestJson(`/milestones/${parsedMilestoneId}/artifacts/${parsedArtifactId}`)
 }
 
+export function deleteMilestoneArtifact(milestoneId, artifactId) {
+  const parsedMilestoneId = parsePositiveId(milestoneId, 'milestoneId')
+  const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
+  return requestJson(`/milestones/${parsedMilestoneId}/artifacts/${parsedArtifactId}`, {
+    method: 'DELETE',
+  })
+}
+
 export function updateMilestone(
   milestoneId,
   {
@@ -855,13 +871,17 @@ export function getMemory(memoryId) {
   return requestJson(`/memories/${parsedMemoryId}`)
 }
 
-export function getMemoryHistory(memoryId, { page = 1, perPage = 20 } = {}) {
+export function getMemoryHistory(memoryId, { page = 1, perPage = 20, flowchartNodeId = null } = {}) {
   const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  const params = {
+    page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+    per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
+  }
+  if (flowchartNodeId != null && String(flowchartNodeId).trim() !== '') {
+    params.flowchart_node_id = parsePositiveId(flowchartNodeId, 'flowchartNodeId')
+  }
   return requestJson(
-    appendQuery(`/memories/${parsedMemoryId}/history`, {
-      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
-      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
-    }),
+    appendQuery(`/memories/${parsedMemoryId}/history`, params),
   )
 }
 
@@ -908,6 +928,14 @@ export function getMemoryArtifact(memoryId, artifactId) {
   const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
   const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
   return requestJson(`/memories/${parsedMemoryId}/artifacts/${parsedArtifactId}`)
+}
+
+export function deleteMemoryArtifact(memoryId, artifactId) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
+  return requestJson(`/memories/${parsedMemoryId}/artifacts/${parsedArtifactId}`, {
+    method: 'DELETE',
+  })
 }
 
 export function getMemoryEdit(memoryId) {

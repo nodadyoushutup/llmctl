@@ -259,9 +259,6 @@ export default function NodesPage() {
           )}
         />
         <div className="panel-card-body workflow-fixed-panel-body">
-          <p className="muted">
-            Queued, running, and completed node execution records.
-          </p>
           <div className="toolbar toolbar-wrap">
             <div className="toolbar-group">
               <label htmlFor="filter-agent">Agent</label>

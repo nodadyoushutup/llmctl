@@ -463,6 +463,55 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
         self.assertIsNotNone(request_payload)
         self.assertFalse(getattr(request_payload, "synthesize_answer"))
 
+    def test_rag_retrieval_request_scopes_to_mentioned_collection(self) -> None:
+        model = self._create_model(name="RAG Retrieval Scope Model")
+        thread = create_thread(
+            title="RAG Retrieval Scope",
+            model_id=model.id,
+            rag_collections=["drive_2", "example_1"],
+        )
+        thread_id = int(thread["id"])
+        captured_payload: dict[str, object] = {}
+
+        class _CaptureRagClient:
+            def health(self):
+                return type(
+                    "Health",
+                    (),
+                    {
+                        "state": RAG_HEALTH_CONFIGURED_HEALTHY,
+                        "provider": "chroma",
+                        "error": None,
+                    },
+                )()
+
+            def retrieve(self, payload):
+                captured_payload["request"] = payload
+                return type(
+                    "RetrievalResponse",
+                    (),
+                    {
+                        "retrieval_context": ["retrieved context"],
+                        "citation_records": [{"collection": "example_1", "retrieval_rank": 1}],
+                        "retrieval_stats": {"provider": "chroma", "retrieved_count": 1},
+                    },
+                )()
+
+        with patch(
+            "chat.runtime._run_llm",
+            return_value=subprocess.CompletedProcess(["stub"], 0, "assistant reply", ""),
+        ):
+            result = execute_turn(
+                thread_id=thread_id,
+                message="tell me about files in example_1",
+                rag_client=_CaptureRagClient(),
+            )
+
+        self.assertTrue(result.ok)
+        request_payload = captured_payload.get("request")
+        self.assertIsNotNone(request_payload)
+        self.assertEqual(["example_1"], list(getattr(request_payload, "collections", [])))
+
     def test_rag_retrieval_unexpected_error_returns_failure_result(self) -> None:
         model = self._create_model(name="RAG Unexpected Error Model")
         thread = create_thread(
@@ -589,6 +638,102 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
         self.assertNotIn("Context from an unrelated document.", prompt)
         self.assertIn("sample_delta_index_probe_20260218_062251Z.pdf", prompt)
         self.assertNotIn("sample_ocr_vector_points_demo.pdf", prompt)
+
+    def test_collection_name_hint_scopes_retrieval_context(self) -> None:
+        model = self._create_model(name="Collection Hint Scope Model")
+        thread = create_thread(
+            title="Collection Hint Scope",
+            model_id=model.id,
+            rag_collections=["drive_2", "example_1"],
+        )
+        thread_id = int(thread["id"])
+
+        rag_client = StubRAGContractClient()
+        rag_client.health_result.state = RAG_HEALTH_CONFIGURED_HEALTHY
+        rag_client.retrieval_response.retrieval_context = [
+            "Drive collection context.",
+            "Example collection context.",
+        ]
+        rag_client.retrieval_response.citation_records = [
+            {
+                "collection": "drive_2",
+                "path": "drive_notes.md",
+                "retrieval_rank": 1,
+            },
+            {
+                "collection": "example_1",
+                "path": "example_notes.md",
+                "retrieval_rank": 2,
+            },
+        ]
+
+        captured_prompt: list[str] = []
+
+        def _fake_llm(*args, **kwargs):
+            captured_prompt.append(str(args[1] if len(args) > 1 else kwargs.get("prompt", "")))
+            return subprocess.CompletedProcess(["stub"], 0, "answer", "")
+
+        with patch("chat.runtime._run_llm", side_effect=_fake_llm):
+            result = execute_turn(
+                thread_id=thread_id,
+                message="Tell me generally about files in example_1.",
+                rag_client=rag_client,
+            )
+
+        self.assertTrue(result.ok)
+        prompt = captured_prompt[0]
+        self.assertIn("Example collection context.", prompt)
+        self.assertNotIn("Drive collection context.", prompt)
+        self.assertIn("collection=example_1", prompt)
+        self.assertNotIn("collection=drive_2", prompt)
+
+    def test_collection_name_hint_scopes_for_nonword_collection_name(self) -> None:
+        model = self._create_model(name="Collection Hint Nonword Scope Model")
+        thread = create_thread(
+            title="Collection Hint Nonword Scope",
+            model_id=model.id,
+            rag_collections=["TeSt / Collection (Prod)", "drive_2"],
+        )
+        thread_id = int(thread["id"])
+
+        rag_client = StubRAGContractClient()
+        rag_client.health_result.state = RAG_HEALTH_CONFIGURED_HEALTHY
+        rag_client.retrieval_response.retrieval_context = [
+            "Nonword collection context.",
+            "Drive collection context.",
+        ]
+        rag_client.retrieval_response.citation_records = [
+            {
+                "collection": "TeSt / Collection (Prod)",
+                "path": "prod_notes.md",
+                "retrieval_rank": 1,
+            },
+            {
+                "collection": "drive_2",
+                "path": "drive_notes.md",
+                "retrieval_rank": 2,
+            },
+        ]
+
+        captured_prompt: list[str] = []
+
+        def _fake_llm(*args, **kwargs):
+            captured_prompt.append(str(args[1] if len(args) > 1 else kwargs.get("prompt", "")))
+            return subprocess.CompletedProcess(["stub"], 0, "answer", "")
+
+        with patch("chat.runtime._run_llm", side_effect=_fake_llm):
+            result = execute_turn(
+                thread_id=thread_id,
+                message="Can you summarize test collection prod?",
+                rag_client=rag_client,
+            )
+
+        self.assertTrue(result.ok)
+        prompt = captured_prompt[0]
+        self.assertIn("Nonword collection context.", prompt)
+        self.assertNotIn("Drive collection context.", prompt)
+        self.assertIn("collection=TeSt / Collection (Prod)", prompt)
+        self.assertNotIn("collection=drive_2", prompt)
 
     def test_mcp_failure_propagates_turn_failure(self) -> None:
         model = self._create_model(name="MCP Model")

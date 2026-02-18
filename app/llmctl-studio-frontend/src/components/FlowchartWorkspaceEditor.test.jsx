@@ -182,6 +182,9 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
             { id: 3, name: 'Agent Three' },
             { id: 7, name: 'Agent Seven' },
           ],
+          mcp_servers: [
+            { id: 11, name: 'LLMCTL MCP', server_key: 'llmctl-mcp' },
+          ],
         }}
         onGraphChange={onGraphChange}
       />,
@@ -197,12 +200,16 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(agentField).toBeTruthy()
     const agentSelect = agentField.querySelector('select')
     expect(agentSelect).toBeTruthy()
+    const llmctlMcpCheckbox = screen.getByLabelText(/LLMCTL MCP/)
+    expect(llmctlMcpCheckbox).toBeChecked()
+    expect(llmctlMcpCheckbox).toBeDisabled()
 
     fireEvent.change(agentSelect, { target: { value: '7' } })
     await waitFor(() => {
       const payload = lastGraphPayload(onGraphChange)
       const taskNode = payload?.nodes?.find((node) => node.id === 2)
       expect(taskNode?.config?.agent_id).toBe(7)
+      expect(taskNode?.mcp_server_ids).toEqual([11])
     })
 
     fireEvent.change(agentSelect, { target: { value: '' } })
@@ -210,6 +217,65 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
       const payload = lastGraphPayload(onGraphChange)
       const taskNode = payload?.nodes?.find((node) => node.id === 2)
       expect(taskNode?.config?.agent_id).toBeUndefined()
+      expect(taskNode?.mcp_server_ids).toEqual([11])
+    })
+  })
+
+  test('shows runtime binding controls for decision nodes and hides them for start/end', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'decision', x: 500, y: 220, config: {} },
+          { id: 3, node_type: 'end', x: 840, y: 220 },
+        ]}
+        initialEdges={[]}
+        catalog={{
+          agents: [
+            { id: 4, name: 'Agent Four' },
+            { id: 9, name: 'Agent Nine' },
+          ],
+          mcp_servers: [
+            { id: 11, name: 'LLMCTL MCP', server_key: 'llmctl-mcp' },
+            { id: 15, name: 'Diagnostics MCP', server_key: 'diag-mcp' },
+          ],
+        }}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:1"]'))
+    expect(screen.queryByText('agent')).toBeFalsy()
+    expect(screen.queryByText('MCP servers')).toBeFalsy()
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:3"]'))
+    expect(screen.queryByText('agent')).toBeFalsy()
+    expect(screen.queryByText('MCP servers')).toBeFalsy()
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    expect(screen.getByText('agent')).toBeTruthy()
+    expect(screen.getByText('MCP servers')).toBeTruthy()
+    const llmctlMcpCheckbox = screen.getByLabelText(/LLMCTL MCP/)
+    expect(llmctlMcpCheckbox).toBeChecked()
+    expect(llmctlMcpCheckbox).toBeDisabled()
+
+    const agentField = screen.getByText('agent').closest('label')
+    const agentSelect = agentField?.querySelector('select')
+    expect(agentSelect).toBeTruthy()
+    fireEvent.change(agentSelect, { target: { value: '9' } })
+
+    fireEvent.click(screen.getByLabelText(/Diagnostics MCP/))
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const decisionNode = payload?.nodes?.find((node) => node.id === 2)
+      expect(decisionNode?.config?.agent_id).toBe(9)
+      expect(decisionNode?.mcp_server_ids).toEqual([11, 15])
     })
   })
 
@@ -362,8 +428,9 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('Create/Update milestone')).toBeTruthy()
     expect(screen.getByText('Mark milestone complete')).toBeTruthy()
     expect(screen.getByText('optional additive prompt')).toBeTruthy()
+    expect(screen.queryByText(/^ref$/i)).toBeFalsy()
     expect(screen.queryByText('model')).toBeFalsy()
-    expect(screen.queryByText('agent')).toBeFalsy()
+    expect(screen.getByText('agent')).toBeTruthy()
 
     const actionField = screen.getByText('action').closest('label')
     const actionSelect = actionField?.querySelector('select')
@@ -412,8 +479,9 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('Create or update plan')).toBeTruthy()
     expect(screen.getByText('Complete plan item')).toBeTruthy()
     expect(screen.getByText('optional additive prompt')).toBeTruthy()
+    expect(screen.queryByText(/^ref$/i)).toBeFalsy()
     expect(screen.queryByText('model')).toBeFalsy()
-    expect(screen.queryByText('agent')).toBeFalsy()
+    expect(screen.getByText('agent')).toBeTruthy()
 
     const actionField = screen.getByText('action').closest('label')
     const actionSelect = actionField?.querySelector('select')
@@ -448,7 +516,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
-  test('renders memory specialized controls, locks llmctl mcp, and emits memory config', async () => {
+  test('renders memory specialized controls, auto-locks llmctl mcp, and emits memory config', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(
       <FlowchartWorkspaceEditor
@@ -458,6 +526,9 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
         ]}
         initialEdges={[{ source_node_id: 1, target_node_id: 2 }]}
         catalog={{
+          agents: [
+            { id: 5, name: 'Agent Five' },
+          ],
           mcp_servers: [
             { id: 3, name: 'Custom MCP', server_key: 'custom-mcp' },
             { id: 11, name: 'LLMCTL MCP', server_key: 'llmctl-mcp' },
@@ -475,11 +546,13 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('Add memory')).toBeTruthy()
     expect(screen.getByText('Retrieve memory')).toBeTruthy()
     expect(screen.getByText('optional additive prompt')).toBeTruthy()
+    expect(screen.queryByText(/^ref$/i)).toBeFalsy()
     expect(screen.getByText('artifact retention')).toBeTruthy()
-    expect(screen.getByLabelText('LLMCTL MCP (required)')).toBeChecked()
-    expect(screen.getByLabelText('LLMCTL MCP (required)')).toBeDisabled()
+    expect(screen.getByLabelText(/LLMCTL MCP/)).toBeChecked()
+    expect(screen.getByLabelText(/LLMCTL MCP/)).toBeDisabled()
     expect(screen.queryByText('model')).toBeFalsy()
-    expect(screen.queryByText('agent')).toBeFalsy()
+    expect(screen.getByText('agent')).toBeTruthy()
+    expect(screen.getByText('MCP servers')).toBeTruthy()
 
     const actionField = screen.getByText('action').closest('label')
     const actionSelect = actionField?.querySelector('select')
@@ -497,6 +570,13 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(retentionSelect).toBeTruthy()
     fireEvent.change(retentionSelect, { target: { value: 'max_count' } })
 
+    const agentField = screen.getByText('agent').closest('label')
+    const agentSelect = agentField?.querySelector('select')
+    expect(agentSelect).toBeTruthy()
+    fireEvent.change(agentSelect, { target: { value: '5' } })
+
+    fireEvent.click(screen.getByLabelText(/Custom MCP/))
+
     await waitFor(() => {
       const payload = lastGraphPayload(onGraphChange)
       const memoryNode = payload?.nodes?.find((node) => node.node_type === 'memory')
@@ -504,7 +584,8 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
       expect(memoryNode?.config?.action).toBe('retrieve')
       expect(memoryNode?.config?.additive_prompt).toBe('find deployment readiness notes')
       expect(memoryNode?.config?.retention_mode).toBe('max_count')
-      expect(memoryNode?.mcp_server_ids).toEqual([11])
+      expect(memoryNode?.config?.agent_id).toBe(5)
+      expect(memoryNode?.mcp_server_ids).toEqual([11, 3])
     })
   })
 })
