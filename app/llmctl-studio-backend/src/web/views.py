@@ -98,6 +98,7 @@ from core.models import (
     AgentTask,
     Attachment,
     FLOWCHART_EDGE_MODE_CHOICES,
+    FLOWCHART_EDGE_MODE_SOLID,
     FLOWCHART_NODE_TYPE_CHOICES,
     FLOWCHART_NODE_TYPE_DECISION,
     FLOWCHART_NODE_TYPE_END,
@@ -126,6 +127,15 @@ from core.models import (
     MILESTONE_STATUS_CHOICES,
     MILESTONE_STATUS_DONE,
     MILESTONE_STATUS_PLANNED,
+    NodeArtifact,
+    NODE_ARTIFACT_RETENTION_CHOICES,
+    NODE_ARTIFACT_RETENTION_FOREVER,
+    NODE_ARTIFACT_RETENTION_MAX_COUNT,
+    NODE_ARTIFACT_RETENTION_TTL,
+    NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    NODE_ARTIFACT_TYPE_MEMORY,
+    NODE_ARTIFACT_TYPE_MILESTONE,
+    NODE_ARTIFACT_TYPE_PLAN,
     Plan,
     PlanStage,
     PlanTask,
@@ -157,7 +167,7 @@ from core.models import (
     SYSTEM_MANAGED_MCP_SERVER_KEYS,
 )
 from core.mcp_config import format_mcp_config, validate_server_key
-from core.integrated_mcp import sync_integrated_mcp_servers
+from core.integrated_mcp import INTEGRATED_MCP_LLMCTL_KEY, sync_integrated_mcp_servers
 from core.prompt_envelope import (
     build_prompt_envelope,
     parse_prompt_input,
@@ -516,9 +526,9 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
     },
     FLOWCHART_NODE_TYPE_DECISION: {
         "model": False,
-        "mcp": True,
-        "scripts": True,
-        "skills": True,
+        "mcp": False,
+        "scripts": False,
+        "skills": False,
         "attachments": False,
     },
     FLOWCHART_NODE_TYPE_RAG: {
@@ -532,6 +542,26 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
 FLOWCHART_END_MAX_OUTGOING_EDGES = 0
 FLOWCHART_DEFAULT_START_X = 280.0
 FLOWCHART_DEFAULT_START_Y = 170.0
+MILESTONE_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update"
+MILESTONE_NODE_ACTION_MARK_COMPLETE = "mark_complete"
+MILESTONE_NODE_ACTION_CHOICES = (
+    MILESTONE_NODE_ACTION_CREATE_OR_UPDATE,
+    MILESTONE_NODE_ACTION_MARK_COMPLETE,
+)
+MEMORY_NODE_ACTION_ADD = "add"
+MEMORY_NODE_ACTION_RETRIEVE = "retrieve"
+MEMORY_NODE_ACTION_CHOICES = (
+    MEMORY_NODE_ACTION_ADD,
+    MEMORY_NODE_ACTION_RETRIEVE,
+)
+PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
+PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
+PLAN_NODE_ACTION_CHOICES = (
+    PLAN_NODE_ACTION_CREATE_OR_UPDATE,
+    PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM,
+)
+DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS = 3600
+DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT = 25
 
 
 def _parse_agent_payload(raw_json: str) -> tuple[str, str | None, str | None]:
@@ -6157,6 +6187,29 @@ def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
     )
 
 
+def _normalized_decision_conditions(
+    value: object,
+) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    seen_connector_ids: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        connector_id = str(item.get("connector_id") or "").strip()
+        if not connector_id or connector_id in seen_connector_ids:
+            continue
+        seen_connector_ids.add(connector_id)
+        normalized.append(
+            {
+                "connector_id": connector_id,
+                "condition_text": str(item.get("condition_text") or "").strip(),
+            }
+        )
+    return normalized
+
+
 def _validate_flowchart_utility_compatibility(
     node_type: str,
     *,
@@ -6817,6 +6870,7 @@ def _flowchart_run_node_context_trace(
 def _serialize_flowchart_run_node(
     node_run: FlowchartRunNode,
     task: AgentTask | None = None,
+    artifact_history: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     input_context = _parse_json_dict(node_run.input_context_json)
     trigger_sources, pulled_dotted_sources = _flowchart_run_node_context_trace(
@@ -6865,6 +6919,7 @@ def _serialize_flowchart_run_node(
         "pulled_dotted_source_count": len(pulled_dotted_sources),
         "output_state": _parse_json_dict(node_run.output_state_json),
         "routing_state": routing_state,
+        "artifact_history": artifact_history or [],
         "error": node_run.error,
         "created_at": _human_time(node_run.created_at),
         "started_at": _human_time(node_run.started_at),
@@ -7181,6 +7236,353 @@ def _sanitize_rag_node_config(
     return sanitized
 
 
+def _normalize_memory_node_action(value: object) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"add", "store", "append", "upsert", "create", "create_or_update"}:
+        return MEMORY_NODE_ACTION_ADD
+    if cleaned in {"retrieve", "fetch", "read", "query", "search", "list"}:
+        return MEMORY_NODE_ACTION_RETRIEVE
+    return ""
+
+
+def _sanitize_memory_node_config(config_payload: dict[str, object]) -> dict[str, object]:
+    sanitized = dict(config_payload)
+    action = _normalize_memory_node_action(
+        config_payload.get("action") or config_payload.get("memory_action")
+    )
+    if not action:
+        raise ValueError("config.action is required and must be add or retrieve.")
+    sanitized["action"] = action
+    sanitized["additive_prompt"] = str(config_payload.get("additive_prompt") or "").strip()
+
+    retention_mode = str(
+        config_payload.get("retention_mode") or NODE_ARTIFACT_RETENTION_TTL
+    ).strip().lower()
+    if retention_mode not in NODE_ARTIFACT_RETENTION_CHOICES:
+        raise ValueError(
+            "config.retention_mode must be one of: "
+            + ", ".join(NODE_ARTIFACT_RETENTION_CHOICES)
+            + "."
+        )
+    sanitized["retention_mode"] = retention_mode
+
+    ttl_seconds = _coerce_optional_int(
+        config_payload.get("retention_ttl_seconds"),
+        field_name="config.retention_ttl_seconds",
+        minimum=1,
+    )
+    max_count = _coerce_optional_int(
+        config_payload.get("retention_max_count"),
+        field_name="config.retention_max_count",
+        minimum=1,
+    )
+    if ttl_seconds is None:
+        ttl_seconds = DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS
+    if max_count is None:
+        max_count = DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT
+    sanitized["retention_ttl_seconds"] = ttl_seconds
+    sanitized["retention_max_count"] = max_count
+    return sanitized
+
+
+def _sanitize_flowchart_node_agent_config(
+    *,
+    session,
+    config_payload: dict[str, object],
+    field_name: str,
+) -> None:
+    if "agent_id" not in config_payload:
+        return
+    agent_id = _coerce_optional_int(
+        config_payload.get("agent_id"),
+        field_name=field_name,
+        minimum=0,
+    )
+    if agent_id is None or agent_id <= 0:
+        config_payload.pop("agent_id", None)
+        return
+    if session.get(Agent, agent_id) is None:
+        raise ValueError(f"{field_name} {agent_id} was not found.")
+    config_payload["agent_id"] = agent_id
+
+
+def _normalize_milestone_node_action(
+    value: object,
+    *,
+    field_name: str,
+) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"update", "checkpoint", "read", "create", "create_or_update", "create/update"}:
+        return MILESTONE_NODE_ACTION_CREATE_OR_UPDATE
+    if cleaned in {"complete", "mark_complete", "mark milestone complete"}:
+        return MILESTONE_NODE_ACTION_MARK_COMPLETE
+    raise ValueError(
+        f"{field_name} must be one of: "
+        f"{MILESTONE_NODE_ACTION_CREATE_OR_UPDATE}, {MILESTONE_NODE_ACTION_MARK_COMPLETE}."
+    )
+
+
+def _normalize_node_artifact_retention_mode(
+    value: object,
+    *,
+    field_name: str,
+) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"forever", "none", "disabled"}:
+        return NODE_ARTIFACT_RETENTION_FOREVER
+    if cleaned in {"max", "max_count"}:
+        return NODE_ARTIFACT_RETENTION_MAX_COUNT
+    if cleaned in {"ttl_max", "ttl+max", "ttl_max_count"}:
+        return NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT
+    if cleaned in {"ttl", ""}:
+        return NODE_ARTIFACT_RETENTION_TTL
+    raise ValueError(
+        f"{field_name} must be one of: "
+        f"{NODE_ARTIFACT_RETENTION_FOREVER}, {NODE_ARTIFACT_RETENTION_TTL}, "
+        f"{NODE_ARTIFACT_RETENTION_MAX_COUNT}, {NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT}."
+    )
+
+
+def _sanitize_milestone_node_config(
+    config_payload: dict[str, object],
+    *,
+    field_prefix: str,
+) -> dict[str, object]:
+    if "action" not in config_payload:
+        raise ValueError(
+            f"{field_prefix}.action is required for milestone nodes."
+        )
+    action = _normalize_milestone_node_action(
+        config_payload.get("action"),
+        field_name=f"{field_prefix}.action",
+    )
+    retention_mode = _normalize_node_artifact_retention_mode(
+        config_payload.get("retention_mode"),
+        field_name=f"{field_prefix}.retention_mode",
+    )
+    retention_ttl_seconds = _coerce_optional_int(
+        config_payload.get("retention_ttl_seconds"),
+        field_name=f"{field_prefix}.retention_ttl_seconds",
+        minimum=1,
+    )
+    retention_max_count = _coerce_optional_int(
+        config_payload.get("retention_max_count"),
+        field_name=f"{field_prefix}.retention_max_count",
+        minimum=1,
+    )
+    sanitized: dict[str, object] = {
+        "action": action,
+        "additive_prompt": str(config_payload.get("additive_prompt") or "").strip(),
+        "retention_mode": retention_mode,
+        "retention_ttl_seconds": (
+            retention_ttl_seconds
+            if retention_ttl_seconds is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS
+        ),
+        "retention_max_count": (
+            retention_max_count
+            if retention_max_count is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT
+        ),
+    }
+    patch = config_payload.get("patch")
+    if isinstance(patch, dict):
+        sanitized["patch"] = patch
+    completion_source_path = str(config_payload.get("completion_source_path") or "").strip()
+    if completion_source_path:
+        sanitized["completion_source_path"] = completion_source_path
+    for key in ("route_key", "route_key_on_terminate"):
+        value = str(config_payload.get(key) or "").strip()
+        if value:
+            sanitized[key] = value
+    for key in ("terminate_on_complete", "terminate_on_checkpoint", "terminate_always"):
+        if key in config_payload:
+            sanitized[key] = _flowchart_as_bool(config_payload.get(key))
+    for key in ("loop_checkpoint_every", "loop_exit_after_runs"):
+        if key in config_payload:
+            coerced = _coerce_optional_int(
+                config_payload.get(key),
+                field_name=f"{field_prefix}.{key}",
+                minimum=0,
+            )
+            if coerced is not None:
+                sanitized[key] = coerced
+    return sanitized
+
+
+def _normalize_plan_node_action(
+    value: object,
+    *,
+    field_name: str,
+) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {
+        "create",
+        "update",
+        "read",
+        "create_or_update",
+        "create_or_update_plan",
+        "create/update",
+        "create or update plan",
+        "update_completion",
+        "complete",
+    }:
+        return PLAN_NODE_ACTION_CREATE_OR_UPDATE
+    if cleaned in {
+        "complete_plan_item",
+        "complete plan item",
+        "mark_plan_item_complete",
+        "mark_task_complete",
+    }:
+        return PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM
+    raise ValueError(
+        f"{field_name} must be one of: "
+        f"{PLAN_NODE_ACTION_CREATE_OR_UPDATE}, {PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM}."
+    )
+
+
+def _sanitize_plan_node_config(
+    config_payload: dict[str, object],
+    *,
+    field_prefix: str,
+) -> dict[str, object]:
+    if "action" not in config_payload:
+        raise ValueError(
+            f"{field_prefix}.action is required for plan nodes."
+        )
+    action = _normalize_plan_node_action(
+        config_payload.get("action"),
+        field_name=f"{field_prefix}.action",
+    )
+    retention_mode = _normalize_node_artifact_retention_mode(
+        config_payload.get("retention_mode"),
+        field_name=f"{field_prefix}.retention_mode",
+    )
+    retention_ttl_seconds = _coerce_optional_int(
+        config_payload.get("retention_ttl_seconds"),
+        field_name=f"{field_prefix}.retention_ttl_seconds",
+        minimum=1,
+    )
+    retention_max_count = _coerce_optional_int(
+        config_payload.get("retention_max_count"),
+        field_name=f"{field_prefix}.retention_max_count",
+        minimum=1,
+    )
+    sanitized: dict[str, object] = {
+        "action": action,
+        "additive_prompt": str(config_payload.get("additive_prompt") or "").strip(),
+        "retention_mode": retention_mode,
+        "retention_ttl_seconds": (
+            retention_ttl_seconds
+            if retention_ttl_seconds is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS
+        ),
+        "retention_max_count": (
+            retention_max_count
+            if retention_max_count is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT
+        ),
+    }
+    completion_source_path = str(config_payload.get("completion_source_path") or "").strip()
+    if completion_source_path:
+        sanitized["completion_source_path"] = completion_source_path
+    if action == PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM:
+        plan_item_id = _coerce_optional_int(
+            config_payload.get("plan_item_id"),
+            field_name=f"{field_prefix}.plan_item_id",
+            minimum=1,
+        )
+        stage_key = str(config_payload.get("stage_key") or "").strip()
+        task_key = str(config_payload.get("task_key") or "").strip()
+        if plan_item_id is not None:
+            sanitized["plan_item_id"] = plan_item_id
+        if stage_key:
+            sanitized["stage_key"] = stage_key
+        if task_key:
+            sanitized["task_key"] = task_key
+        if plan_item_id is None and not (stage_key and task_key) and not completion_source_path:
+            raise ValueError(
+                f"{field_prefix} requires plan_item_id, or stage_key + task_key, "
+                "or completion_source_path when action is complete_plan_item."
+            )
+    else:
+        patch = config_payload.get("patch")
+        if isinstance(patch, dict):
+            sanitized["patch"] = patch
+    for key in ("route_key", "route_key_on_complete"):
+        value = str(config_payload.get(key) or "").strip()
+        if value:
+            sanitized[key] = value
+    return sanitized
+
+
+def _serialize_node_artifact(node_artifact: NodeArtifact) -> dict[str, object]:
+    payload = _parse_json_dict(node_artifact.payload_json)
+    return {
+        "id": node_artifact.id,
+        "flowchart_id": node_artifact.flowchart_id,
+        "flowchart_node_id": node_artifact.flowchart_node_id,
+        "flowchart_run_id": node_artifact.flowchart_run_id,
+        "flowchart_run_node_id": node_artifact.flowchart_run_node_id,
+        "node_type": node_artifact.node_type,
+        "artifact_type": node_artifact.artifact_type,
+        "ref_id": node_artifact.ref_id,
+        "execution_index": node_artifact.execution_index,
+        "variant_key": node_artifact.variant_key,
+        "retention_mode": node_artifact.retention_mode,
+        "expires_at": _human_time(node_artifact.expires_at),
+        "request_id": node_artifact.request_id,
+        "correlation_id": node_artifact.correlation_id,
+        "payload": payload,
+        "created_at": _human_time(node_artifact.created_at),
+        "updated_at": _human_time(node_artifact.updated_at),
+    }
+
+
+def _workflow_request_id() -> str:
+    request_id = str(
+        request.headers.get("X-Request-ID")
+        or request.headers.get("X-Request-Id")
+        or request.args.get("request_id")
+        or ""
+    ).strip()
+    if request_id:
+        return request_id
+    return uuid.uuid4().hex
+
+
+def _workflow_correlation_id() -> str | None:
+    correlation_id = str(
+        request.headers.get("X-Correlation-ID")
+        or request.headers.get("X-Correlation-Id")
+        or request.args.get("correlation_id")
+        or ""
+    ).strip()
+    return correlation_id or None
+
+
+def _workflow_error_envelope(
+    *,
+    code: str,
+    message: str,
+    details: dict[str, object] | None,
+    request_id: str,
+    correlation_id: str | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "ok": False,
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details or {},
+            "request_id": request_id,
+        },
+    }
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    return payload
+
+
 def _validate_flowchart_graph_snapshot(
     nodes: list[dict[str, object]],
     edges: list[dict[str, object]],
@@ -7216,6 +7618,27 @@ def _validate_flowchart_graph_snapshot(
                 _sanitize_rag_node_config(config_payload)
             except ValueError as exc:
                 errors.append(f"Node {node_id} ({node_type}) {exc}")
+        if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+            try:
+                _sanitize_milestone_node_config(
+                    config_payload,
+                    field_prefix=f"nodes[{node_id}].config",
+                )
+            except ValueError as exc:
+                errors.append(f"Node {node_id} ({node_type}) {exc}")
+        if node_type == FLOWCHART_NODE_TYPE_PLAN:
+            try:
+                _sanitize_plan_node_config(
+                    config_payload,
+                    field_prefix=f"nodes[{node_id}].config",
+                )
+            except ValueError as exc:
+                errors.append(f"Node {node_id} ({node_type}) {exc}")
+        if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+            try:
+                _sanitize_memory_node_config(config_payload)
+            except ValueError as exc:
+                errors.append(f"Node {node_id} ({node_type}) {exc}")
         if node_type == FLOWCHART_NODE_TYPE_TASK and "integration_keys" in config_payload:
             raw_integration_keys = config_payload.get("integration_keys")
             if raw_integration_keys is not None and not isinstance(
@@ -7239,6 +7662,10 @@ def _validate_flowchart_graph_snapshot(
         if node.get("model_id") is not None and not compatibility["model"]:
             errors.append(f"Node {node_id} ({node_type}) does not support models.")
         mcp_server_ids = node.get("mcp_server_ids") or []
+        if node_type == FLOWCHART_NODE_TYPE_MEMORY and not mcp_server_ids:
+            errors.append(
+                f"Node {node_id} ({node_type}) requires the system-managed LLMCTL MCP server."
+            )
         if mcp_server_ids and not compatibility["mcp"]:
             errors.append(f"Node {node_id} ({node_type}) does not support MCP servers.")
         script_ids = node.get("script_ids") or []
@@ -10223,6 +10650,128 @@ def edit_plan(plan_id: int):
     )
 
 
+@bp.get("/plans/<int:plan_id>/artifacts")
+def list_plan_artifacts(plan_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    try:
+        limit = _coerce_optional_int(request.args.get("limit"), field_name="limit", minimum=1)
+        offset = _coerce_optional_int(request.args.get("offset"), field_name="offset", minimum=0)
+        flowchart_id = _coerce_optional_int(
+            request.args.get("flowchart_id"),
+            field_name="flowchart_id",
+            minimum=1,
+        )
+        flowchart_node_id = _coerce_optional_int(
+            request.args.get("flowchart_node_id"),
+            field_name="flowchart_node_id",
+            minimum=1,
+        )
+        flowchart_run_id = _coerce_optional_int(
+            request.args.get("flowchart_run_id"),
+            field_name="flowchart_run_id",
+            minimum=1,
+        )
+    except ValueError as exc:
+        return _workflow_error_envelope(
+            code="invalid_request",
+            message=str(exc),
+            details={},
+            request_id=request_id,
+            correlation_id=correlation_id,
+        ), 400
+
+    resolved_limit = min(limit if limit is not None else 50, 200)
+    resolved_offset = offset if offset is not None else 0
+    descending = str(request.args.get("order") or "desc").strip().lower() != "asc"
+
+    with session_scope() as session:
+        if session.get(Plan, plan_id) is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Plan {plan_id} was not found.",
+                details={"plan_id": plan_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        stmt = select(NodeArtifact).where(
+            NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+            NodeArtifact.ref_id == plan_id,
+        )
+        if flowchart_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_id == flowchart_id)
+        if flowchart_node_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_node_id == flowchart_node_id)
+        if flowchart_run_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_run_id == flowchart_run_id)
+        if descending:
+            stmt = stmt.order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+        else:
+            stmt = stmt.order_by(NodeArtifact.created_at.asc(), NodeArtifact.id.asc())
+        artifacts = (
+            session.execute(
+                stmt.limit(resolved_limit).offset(resolved_offset)
+            )
+            .scalars()
+            .all()
+        )
+    payload: dict[str, object] = {
+        "ok": True,
+        "plan_id": plan_id,
+        "count": len(artifacts),
+        "limit": resolved_limit,
+        "offset": resolved_offset,
+        "items": [_serialize_node_artifact(item) for item in artifacts],
+        "request_id": request_id,
+    }
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    return payload
+
+
+@bp.get("/plans/<int:plan_id>/artifacts/<int:artifact_id>")
+def view_plan_artifact(plan_id: int, artifact_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    with session_scope() as session:
+        if session.get(Plan, plan_id) is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Plan {plan_id} was not found.",
+                details={"plan_id": plan_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+        artifact = (
+            session.execute(
+                select(NodeArtifact).where(
+                    NodeArtifact.id == artifact_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+                    NodeArtifact.ref_id == plan_id,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if artifact is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Plan artifact {artifact_id} was not found for plan {plan_id}.",
+                details={"plan_id": plan_id, "artifact_id": artifact_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 404
+    payload: dict[str, object] = {
+        "ok": True,
+        "plan_id": plan_id,
+        "item": _serialize_node_artifact(artifact),
+        "request_id": request_id,
+    }
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    return payload
+
+
 @bp.post("/plans/<int:plan_id>")
 def update_plan(plan_id: int):
     is_api_request = _workflow_api_request()
@@ -10292,6 +10841,12 @@ def delete_plan(plan_id: int):
                 delete(PlanTask).where(PlanTask.plan_stage_id.in_(stage_ids))
             )
         session.execute(delete(PlanStage).where(PlanStage.plan_id == plan_id))
+        session.execute(
+            delete(NodeArtifact).where(
+                NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+                NodeArtifact.ref_id == plan_id,
+            )
+        )
         session.delete(plan)
     if is_api_request:
         return {"ok": True}
@@ -11163,6 +11718,23 @@ def view_flowchart_history_run(flowchart_id: int, run_id: int):
             )
             .all()
         )
+        artifact_history_by_node_run: dict[int, list[dict[str, object]]] = {}
+        artifacts = (
+            session.execute(
+                select(NodeArtifact)
+                .where(NodeArtifact.flowchart_run_id == run_id)
+                .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+            )
+            .scalars()
+            .all()
+        )
+        for artifact in artifacts:
+            node_run_id = int(artifact.flowchart_run_node_id or 0)
+            if node_run_id <= 0:
+                continue
+            artifact_history_by_node_run.setdefault(node_run_id, []).append(
+                _serialize_node_artifact(artifact)
+            )
         node_task_ids = sorted(
             {
                 int(node_run.agent_task_id)
@@ -11196,6 +11768,7 @@ def view_flowchart_history_run(flowchart_id: int, run_id: int):
                 **_serialize_flowchart_run_node(
                     node_run,
                     node_task_map.get(int(node_run.agent_task_id or 0)),
+                    artifact_history=artifact_history_by_node_run.get(node_run.id, []),
                 ),
                 "node_title": node.title or f"{node.node_type} node",
                 "node_type": node.node_type,
@@ -11499,8 +12072,23 @@ def upsert_flowchart_graph(flowchart_id: int):
                 ),
                 None,
             )
+            llmctl_mcp_server = (
+                session.execute(
+                    select(MCPServer).where(
+                        MCPServer.server_key == INTEGRATED_MCP_LLMCTL_KEY
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if llmctl_mcp_server is None:
+                raise ValueError(
+                    "System-managed LLMCTL MCP server is missing. Sync integrations and retry."
+                )
             keep_node_ids: set[int] = set()
             token_to_node_id: dict[str, int] = {}
+            node_type_by_id: dict[int, str] = {}
+            flowchart_nodes_by_id: dict[int, FlowchartNode] = {}
 
             for index, raw_node in enumerate(raw_nodes):
                 if not isinstance(raw_node, dict):
@@ -11529,6 +12117,11 @@ def upsert_flowchart_graph(flowchart_id: int):
                     config_payload = config
                 else:
                     raise ValueError(f"nodes[{index}].config must be an object.")
+                _sanitize_flowchart_node_agent_config(
+                    session=session,
+                    config_payload=config_payload,
+                    field_name=f"nodes[{index}].config.agent_id",
+                )
                 if node_type == FLOWCHART_NODE_TYPE_TASK:
                     raw_integration_keys = config_payload.get("integration_keys")
                     if raw_integration_keys is not None:
@@ -11561,6 +12154,18 @@ def upsert_flowchart_graph(flowchart_id: int):
                         config_payload,
                         model_provider=selected_model_provider,
                     )
+                if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+                    config_payload = _sanitize_milestone_node_config(
+                        config_payload,
+                        field_prefix=f"nodes[{index}].config",
+                    )
+                if node_type == FLOWCHART_NODE_TYPE_PLAN:
+                    config_payload = _sanitize_plan_node_config(
+                        config_payload,
+                        field_prefix=f"nodes[{index}].config",
+                    )
+                if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+                    config_payload = _sanitize_memory_node_config(config_payload)
 
                 compatibility_errors = _validate_flowchart_utility_compatibility(
                     node_type,
@@ -11601,7 +12206,9 @@ def upsert_flowchart_graph(flowchart_id: int):
                         raise ValueError(f"nodes[{index}].model_id {model_id} was not found.")
                     flowchart_node.model_id = model_id
 
-                if "mcp_server_ids" in raw_node:
+                if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+                    flowchart_node.mcp_servers = [llmctl_mcp_server]
+                elif "mcp_server_ids" in raw_node:
                     mcp_server_ids_raw = raw_node.get("mcp_server_ids")
                     if not isinstance(mcp_server_ids_raw, list):
                         raise ValueError(f"nodes[{index}].mcp_server_ids must be an array.")
@@ -11715,8 +12322,26 @@ def upsert_flowchart_graph(flowchart_id: int):
                 if raw_node.get("client_id") is not None:
                     token_to_node_id[str(raw_node["client_id"])] = flowchart_node.id
                 token_to_node_id[str(flowchart_node.id)] = flowchart_node.id
+                node_type_by_id[flowchart_node.id] = flowchart_node.node_type
+                flowchart_nodes_by_id[flowchart_node.id] = flowchart_node
 
             session.execute(delete(FlowchartEdge).where(FlowchartEdge.flowchart_id == flowchart_id))
+
+            decision_connector_ids_by_node: dict[int, list[str]] = {}
+            decision_used_connector_ids_by_node: dict[int, set[str]] = {}
+            decision_next_connector_index: dict[int, int] = {}
+
+            def _next_decision_connector_id(source_node_id: int) -> str:
+                used_ids = decision_used_connector_ids_by_node.setdefault(source_node_id, set())
+                next_index = decision_next_connector_index.get(source_node_id, 1)
+                while True:
+                    candidate = f"connector_{next_index}"
+                    next_index += 1
+                    if candidate in used_ids:
+                        continue
+                    used_ids.add(candidate)
+                    decision_next_connector_index[source_node_id] = next_index
+                    return candidate
 
             for index, raw_edge in enumerate(raw_edges):
                 if not isinstance(raw_edge, dict):
@@ -11748,6 +12373,21 @@ def upsert_flowchart_graph(flowchart_id: int):
                     field_name=f"edges[{index}].edge_mode",
                 )
                 condition_key = str(raw_edge.get("condition_key") or "").strip() or None
+                source_node_type = node_type_by_id.get(source_node_id, "")
+                if (
+                    source_node_type == FLOWCHART_NODE_TYPE_DECISION
+                    and edge_mode == FLOWCHART_EDGE_MODE_SOLID
+                ):
+                    used_ids = decision_used_connector_ids_by_node.setdefault(
+                        source_node_id, set()
+                    )
+                    if condition_key is None or condition_key in used_ids:
+                        condition_key = _next_decision_connector_id(source_node_id)
+                    else:
+                        used_ids.add(condition_key)
+                    decision_connector_ids_by_node.setdefault(source_node_id, []).append(
+                        condition_key
+                    )
                 label = str(raw_edge.get("label") or "").strip() or None
                 FlowchartEdge.create(
                     session,
@@ -11760,6 +12400,27 @@ def upsert_flowchart_graph(flowchart_id: int):
                     condition_key=condition_key,
                     label=label,
                 )
+
+            for node_id, flowchart_node in flowchart_nodes_by_id.items():
+                if flowchart_node.node_type != FLOWCHART_NODE_TYPE_DECISION:
+                    continue
+                config_payload = _parse_json_dict(flowchart_node.config_json)
+                existing_entries = _normalized_decision_conditions(
+                    config_payload.get("decision_conditions")
+                )
+                existing_text_by_connector = {
+                    entry["connector_id"]: entry["condition_text"]
+                    for entry in existing_entries
+                }
+                connector_ids = decision_connector_ids_by_node.get(node_id, [])
+                config_payload["decision_conditions"] = [
+                    {
+                        "connector_id": connector_id,
+                        "condition_text": existing_text_by_connector.get(connector_id, ""),
+                    }
+                    for connector_id in connector_ids
+                ]
+                flowchart_node.config_json = json.dumps(config_payload, sort_keys=True)
 
             removed_node_ids = set(existing_nodes_by_id).difference(keep_node_ids)
             if removed_node_ids:
@@ -11899,6 +12560,7 @@ def run_flowchart_route(flowchart_id: int):
 
 @bp.get("/flowcharts/runs/<int:run_id>")
 def view_flowchart_run(run_id: int):
+    artifact_history_by_node_run: dict[int, list[dict[str, object]]] = {}
     with session_scope() as session:
         flowchart_run = session.get(FlowchartRun, run_id)
         if flowchart_run is None:
@@ -11917,10 +12579,32 @@ def view_flowchart_run(run_id: int):
             .scalars()
             .all()
         )
+        artifacts = (
+            session.execute(
+                select(NodeArtifact)
+                .where(NodeArtifact.flowchart_run_id == run_id)
+                .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+            )
+            .scalars()
+            .all()
+        )
+        for artifact in artifacts:
+            node_run_id = artifact.flowchart_run_node_id
+            if node_run_id is None:
+                continue
+            artifact_history_by_node_run.setdefault(node_run_id, []).append(
+                _serialize_node_artifact(artifact)
+            )
     return {
         "flowchart_run": _serialize_flowchart_run(flowchart_run),
         "flowchart": _serialize_flowchart(flowchart) if flowchart is not None else None,
-        "node_runs": [_serialize_flowchart_run_node(node_run) for node_run in node_runs],
+        "node_runs": [
+            _serialize_flowchart_run_node(
+                node_run,
+                artifact_history=artifact_history_by_node_run.get(node_run.id, []),
+            )
+            for node_run in node_runs
+        ],
     }
 
 
@@ -14558,6 +15242,50 @@ def view_memory(memory_id: int):
         page_title="Memory",
         active_page="memories",
     )
+
+
+@bp.get("/memories/<int:memory_id>/history")
+def view_memory_history(memory_id: int):
+    page = _parse_page(request.args.get("page"))
+    per_page = WORKFLOW_LIST_PER_PAGE
+    request_id = f"memory-history-{memory_id}-{uuid.uuid4().hex}"
+    correlation_id = f"memory-{memory_id}"
+    with session_scope() as session:
+        memory = session.get(Memory, memory_id)
+        if memory is None:
+            abort(404)
+        artifact_count = (
+            session.execute(
+                select(func.count(NodeArtifact.id)).where(
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
+                    NodeArtifact.ref_id == memory_id,
+                )
+            )
+            .scalar_one()
+        )
+        pagination = _build_pagination(request.path, page, per_page, artifact_count)
+        offset = (pagination["page"] - 1) * per_page
+        artifacts = (
+            session.execute(
+                select(NodeArtifact)
+                .where(
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
+                    NodeArtifact.ref_id == memory_id,
+                )
+                .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                .limit(per_page)
+                .offset(offset)
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "memory": _serialize_memory(memory),
+        "artifacts": [_serialize_node_artifact(item) for item in artifacts],
+        "pagination": _serialize_workflow_pagination(pagination),
+        "request_id": request_id,
+        "correlation_id": correlation_id,
+    }
 
 
 @bp.get("/memories/<int:memory_id>/edit")

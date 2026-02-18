@@ -43,6 +43,13 @@ from core.models import (
     MILESTONE_STATUS_CHOICES,
     MILESTONE_STATUS_DONE,
     MILESTONE_STATUS_PLANNED,
+    NodeArtifact,
+    NODE_ARTIFACT_RETENTION_FOREVER,
+    NODE_ARTIFACT_RETENTION_MAX_COUNT,
+    NODE_ARTIFACT_RETENTION_TTL,
+    NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    NODE_ARTIFACT_TYPE_MILESTONE,
+    NODE_ARTIFACT_TYPE_PLAN,
     Plan,
     PlanStage,
     PlanTask,
@@ -163,6 +170,12 @@ FLOWCHART_NODE_TYPE_REQUIRES_REF = {
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_MEMORY,
 }
+MILESTONE_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update"
+MILESTONE_NODE_ACTION_MARK_COMPLETE = "mark_complete"
+PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
+PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
+DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS = 3600
+DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT = 25
 
 FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
     FLOWCHART_NODE_TYPE_START: {"model": False, "mcp": False, "scripts": False, "skills": False},
@@ -170,7 +183,7 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
     FLOWCHART_NODE_TYPE_PLAN: {"model": True, "mcp": True, "scripts": True, "skills": True},
     FLOWCHART_NODE_TYPE_MILESTONE: {"model": True, "mcp": True, "scripts": True, "skills": True},
     FLOWCHART_NODE_TYPE_MEMORY: {"model": True, "mcp": True, "scripts": True, "skills": True},
-    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": True, "scripts": True, "skills": True},
+    FLOWCHART_NODE_TYPE_DECISION: {"model": False, "mcp": False, "scripts": False, "skills": False},
 }
 FLOWCHART_DEFAULT_MAX_OUTGOING_EDGES = 1
 FLOWCHART_DECISION_MAX_OUTGOING_EDGES = 3
@@ -231,6 +244,240 @@ def _parse_json_dict(raw: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _normalize_milestone_node_action(value: Any, *, field_name: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"update", "checkpoint", "read", "create", "create_or_update", "create/update"}:
+        return MILESTONE_NODE_ACTION_CREATE_OR_UPDATE
+    if cleaned in {"complete", "mark_complete", "mark milestone complete"}:
+        return MILESTONE_NODE_ACTION_MARK_COMPLETE
+    raise ValueError(
+        f"{field_name} must be one of: "
+        f"{MILESTONE_NODE_ACTION_CREATE_OR_UPDATE}, {MILESTONE_NODE_ACTION_MARK_COMPLETE}."
+    )
+
+
+def _normalize_node_artifact_retention_mode(value: Any, *, field_name: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"forever", "none", "disabled"}:
+        return NODE_ARTIFACT_RETENTION_FOREVER
+    if cleaned in {"max", "max_count"}:
+        return NODE_ARTIFACT_RETENTION_MAX_COUNT
+    if cleaned in {"ttl_max", "ttl+max", "ttl_max_count"}:
+        return NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT
+    if cleaned in {"ttl", ""}:
+        return NODE_ARTIFACT_RETENTION_TTL
+    raise ValueError(
+        f"{field_name} must be one of: "
+        f"{NODE_ARTIFACT_RETENTION_FOREVER}, {NODE_ARTIFACT_RETENTION_TTL}, "
+        f"{NODE_ARTIFACT_RETENTION_MAX_COUNT}, {NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT}."
+    )
+
+
+def _sanitize_milestone_node_config(
+    config_payload: Any,
+    *,
+    field_prefix: str,
+) -> dict[str, Any]:
+    if not isinstance(config_payload, dict):
+        raise ValueError(f"{field_prefix} must be an object.")
+    if "action" not in config_payload:
+        raise ValueError(f"{field_prefix}.action is required for milestone nodes.")
+    action = _normalize_milestone_node_action(
+        config_payload.get("action"),
+        field_name=f"{field_prefix}.action",
+    )
+    retention_mode = _normalize_node_artifact_retention_mode(
+        config_payload.get("retention_mode"),
+        field_name=f"{field_prefix}.retention_mode",
+    )
+    retention_ttl_seconds = _coerce_optional_int(
+        config_payload.get("retention_ttl_seconds"),
+        field_name=f"{field_prefix}.retention_ttl_seconds",
+        minimum=1,
+    )
+    retention_max_count = _coerce_optional_int(
+        config_payload.get("retention_max_count"),
+        field_name=f"{field_prefix}.retention_max_count",
+        minimum=1,
+    )
+    sanitized: dict[str, Any] = {
+        "action": action,
+        "additive_prompt": str(config_payload.get("additive_prompt") or "").strip(),
+        "retention_mode": retention_mode,
+        "retention_ttl_seconds": (
+            retention_ttl_seconds
+            if retention_ttl_seconds is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS
+        ),
+        "retention_max_count": (
+            retention_max_count
+            if retention_max_count is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT
+        ),
+    }
+    patch = config_payload.get("patch")
+    if isinstance(patch, dict):
+        sanitized["patch"] = patch
+    completion_source_path = str(config_payload.get("completion_source_path") or "").strip()
+    if completion_source_path:
+        sanitized["completion_source_path"] = completion_source_path
+    for key in ("route_key", "route_key_on_terminate"):
+        value = str(config_payload.get(key) or "").strip()
+        if value:
+            sanitized[key] = value
+    for key in ("terminate_on_complete", "terminate_on_checkpoint", "terminate_always"):
+        if key in config_payload:
+            sanitized[key] = _coerce_bool(config_payload.get(key))
+    for key in ("loop_checkpoint_every", "loop_exit_after_runs"):
+        if key in config_payload:
+            coerced = _coerce_optional_int(
+                config_payload.get(key),
+                field_name=f"{field_prefix}.{key}",
+                minimum=0,
+            )
+            if coerced is not None:
+                sanitized[key] = coerced
+    return sanitized
+
+
+def _normalize_plan_node_action(value: Any, *, field_name: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {
+        "create",
+        "update",
+        "read",
+        "create_or_update",
+        "create_or_update_plan",
+        "create/update",
+        "create or update plan",
+        "update_completion",
+        "complete",
+    }:
+        return PLAN_NODE_ACTION_CREATE_OR_UPDATE
+    if cleaned in {
+        "complete_plan_item",
+        "complete plan item",
+        "mark_plan_item_complete",
+        "mark_task_complete",
+    }:
+        return PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM
+    raise ValueError(
+        f"{field_name} must be one of: "
+        f"{PLAN_NODE_ACTION_CREATE_OR_UPDATE}, {PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM}."
+    )
+
+
+def _sanitize_plan_node_config(
+    config_payload: Any,
+    *,
+    field_prefix: str,
+) -> dict[str, Any]:
+    if not isinstance(config_payload, dict):
+        raise ValueError(f"{field_prefix} must be an object.")
+    if "action" not in config_payload:
+        raise ValueError(f"{field_prefix}.action is required for plan nodes.")
+    action = _normalize_plan_node_action(
+        config_payload.get("action"),
+        field_name=f"{field_prefix}.action",
+    )
+    retention_mode = _normalize_node_artifact_retention_mode(
+        config_payload.get("retention_mode"),
+        field_name=f"{field_prefix}.retention_mode",
+    )
+    retention_ttl_seconds = _coerce_optional_int(
+        config_payload.get("retention_ttl_seconds"),
+        field_name=f"{field_prefix}.retention_ttl_seconds",
+        minimum=1,
+    )
+    retention_max_count = _coerce_optional_int(
+        config_payload.get("retention_max_count"),
+        field_name=f"{field_prefix}.retention_max_count",
+        minimum=1,
+    )
+    sanitized: dict[str, Any] = {
+        "action": action,
+        "additive_prompt": str(config_payload.get("additive_prompt") or "").strip(),
+        "retention_mode": retention_mode,
+        "retention_ttl_seconds": (
+            retention_ttl_seconds
+            if retention_ttl_seconds is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS
+        ),
+        "retention_max_count": (
+            retention_max_count
+            if retention_max_count is not None
+            else DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT
+        ),
+    }
+    completion_source_path = str(config_payload.get("completion_source_path") or "").strip()
+    if completion_source_path:
+        sanitized["completion_source_path"] = completion_source_path
+    if action == PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM:
+        plan_item_id = _coerce_optional_int(
+            config_payload.get("plan_item_id"),
+            field_name=f"{field_prefix}.plan_item_id",
+            minimum=1,
+        )
+        stage_key = str(config_payload.get("stage_key") or "").strip()
+        task_key = str(config_payload.get("task_key") or "").strip()
+        if plan_item_id is not None:
+            sanitized["plan_item_id"] = plan_item_id
+        if stage_key:
+            sanitized["stage_key"] = stage_key
+        if task_key:
+            sanitized["task_key"] = task_key
+        if plan_item_id is None and not (stage_key and task_key) and not completion_source_path:
+            raise ValueError(
+                f"{field_prefix} requires plan_item_id, or stage_key + task_key, "
+                "or completion_source_path when action is complete_plan_item."
+            )
+    else:
+        patch = config_payload.get("patch")
+        if isinstance(patch, dict):
+            sanitized["patch"] = patch
+    for key in ("route_key", "route_key_on_complete"):
+        value = str(config_payload.get(key) or "").strip()
+        if value:
+            sanitized[key] = value
+    return sanitized
+
+
+def _serialize_node_artifact_item(item: NodeArtifact) -> dict[str, Any]:
+    payload = _serialize_model(item, include_relationships=False)
+    payload["payload"] = _parse_json_dict(item.payload_json)
+    return payload
+
+
+def _node_artifact_history_for_run_nodes(
+    session,
+    *,
+    flowchart_run_id: int | None = None,
+    node_run_ids: list[int] | None = None,
+) -> dict[int, list[dict[str, Any]]]:
+    stmt = select(NodeArtifact)
+    if flowchart_run_id is not None:
+        stmt = stmt.where(NodeArtifact.flowchart_run_id == flowchart_run_id)
+    if node_run_ids is not None:
+        cleaned = [node_run_id for node_run_id in node_run_ids if node_run_id > 0]
+        if not cleaned:
+            return {}
+        stmt = stmt.where(NodeArtifact.flowchart_run_node_id.in_(cleaned))
+    rows = (
+        session.execute(
+            stmt.order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+    by_node_run: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        node_run_id = int(row.flowchart_run_node_id or 0)
+        if node_run_id <= 0:
+            continue
+        by_node_run.setdefault(node_run_id, []).append(_serialize_node_artifact_item(row))
+    return by_node_run
 
 
 def _flowchart_node_compatibility(node_type: str) -> dict[str, bool]:
@@ -330,11 +577,16 @@ def _serialize_flowchart_run_item(run: FlowchartRun) -> dict[str, Any]:
     return _serialize_model(run, include_relationships=False)
 
 
-def _serialize_flowchart_run_node_item(node_run: FlowchartRunNode) -> dict[str, Any]:
+def _serialize_flowchart_run_node_item(
+    node_run: FlowchartRunNode,
+    *,
+    artifact_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     payload = _serialize_model(node_run, include_relationships=False)
     payload["input_context"] = _parse_json_dict(node_run.input_context_json)
     payload["output_state"] = _parse_json_dict(node_run.output_state_json)
     payload["routing_state"] = _parse_json_dict(node_run.routing_state_json)
+    payload["artifact_history"] = artifact_history or []
     return payload
 
 
@@ -427,6 +679,22 @@ def _validate_flowchart_graph_snapshot(
             errors.append(
                 f"Node {node_id} ({node_type}) requires config.task_prompt."
             )
+        if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+            try:
+                _sanitize_milestone_node_config(
+                    node.get("config") or {},
+                    field_prefix=f"nodes[{node_id}].config",
+                )
+            except ValueError as exc:
+                errors.append(f"Node {node_id} ({node_type}) {exc}")
+        if node_type == FLOWCHART_NODE_TYPE_PLAN:
+            try:
+                _sanitize_plan_node_config(
+                    node.get("config") or {},
+                    field_prefix=f"nodes[{node_id}].config",
+                )
+            except ValueError as exc:
+                errors.append(f"Node {node_id} ({node_type}) {exc}")
 
         compatibility = _flowchart_node_compatibility(node_type)
         if node.get("model_id") is not None and not compatibility["model"]:
@@ -1113,6 +1381,16 @@ def register(mcp: FastMCP) -> None:
                         raise ValueError(
                             f"nodes[{index}] task node requires config.task_prompt."
                         )
+                    if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+                        config_payload = _sanitize_milestone_node_config(
+                            config_payload,
+                            field_prefix=f"nodes[{index}].config",
+                        )
+                    if node_type == FLOWCHART_NODE_TYPE_PLAN:
+                        config_payload = _sanitize_plan_node_config(
+                            config_payload,
+                            field_prefix=f"nodes[{index}].config",
+                        )
                     compatibility_errors = _validate_flowchart_utility_compatibility(
                         node_type,
                         model_id=model_id if model_field_present else None,
@@ -1509,8 +1787,16 @@ def register(mcp: FastMCP) -> None:
                     .scalars()
                     .all()
                 )
+                artifact_history_by_node_run = _node_artifact_history_for_run_nodes(
+                    session,
+                    flowchart_run_id=run_id,
+                )
                 payload["node_runs"] = [
-                    _serialize_flowchart_run_node_item(node_run) for node_run in node_runs
+                    _serialize_flowchart_run_node_item(
+                        node_run,
+                        artifact_history=artifact_history_by_node_run.get(node_run.id, []),
+                    )
+                    for node_run in node_runs
                 ]
             return payload
 
@@ -1531,7 +1817,17 @@ def register(mcp: FastMCP) -> None:
                 item = session.get(FlowchartRunNode, node_run_id)
                 if item is None:
                     return {"ok": False, "error": f"Node run {node_run_id} not found."}
-                return {"ok": True, "item": _serialize_flowchart_run_node_item(item)}
+                artifact_history_by_node_run = _node_artifact_history_for_run_nodes(
+                    session,
+                    node_run_ids=[item.id],
+                )
+                return {
+                    "ok": True,
+                    "item": _serialize_flowchart_run_node_item(
+                        item,
+                        artifact_history=artifact_history_by_node_run.get(item.id, []),
+                    ),
+                }
 
         columns = _column_map(FlowchartRunNode)
         stmt = select(FlowchartRunNode)
@@ -1553,7 +1849,68 @@ def register(mcp: FastMCP) -> None:
             stmt = stmt.offset(max(0, int(offset)))
         with session_scope() as session:
             items = session.execute(stmt).scalars().all()
-            payload = [_serialize_flowchart_run_node_item(item) for item in items]
+            artifact_history_by_node_run = _node_artifact_history_for_run_nodes(
+                session,
+                node_run_ids=[int(item.id) for item in items],
+            )
+            payload = [
+                _serialize_flowchart_run_node_item(
+                    item,
+                    artifact_history=artifact_history_by_node_run.get(item.id, []),
+                )
+                for item in items
+            ]
+            return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
+    def llmctl_get_node_artifact(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        artifact_id: int | None = None,
+        flowchart_id: int | None = None,
+        flowchart_node_id: int | None = None,
+        flowchart_run_id: int | None = None,
+        flowchart_run_node_id: int | None = None,
+        artifact_type: str | None = None,
+        ref_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Read/list node artifacts (node_artifacts)."""
+        if artifact_id is not None:
+            with session_scope() as session:
+                item = session.get(NodeArtifact, artifact_id)
+                if item is None:
+                    return {"ok": False, "error": f"Node artifact {artifact_id} not found."}
+                return {"ok": True, "item": _serialize_node_artifact_item(item)}
+
+        columns = _column_map(NodeArtifact)
+        stmt = select(NodeArtifact)
+        if flowchart_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_id == flowchart_id)
+        if flowchart_node_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_node_id == flowchart_node_id)
+        if flowchart_run_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_run_id == flowchart_run_id)
+        if flowchart_run_node_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_run_node_id == flowchart_run_node_id)
+        if artifact_type:
+            stmt = stmt.where(NodeArtifact.artifact_type == str(artifact_type).strip())
+        if ref_id is not None:
+            stmt = stmt.where(NodeArtifact.ref_id == ref_id)
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            items = session.execute(stmt).scalars().all()
+            payload = [_serialize_node_artifact_item(item) for item in items]
             return {"ok": True, "count": len(payload), "items": payload}
 
     @mcp.tool()
@@ -2126,14 +2483,39 @@ def register(mcp: FastMCP) -> None:
         order_by: str | None = "id",
         descending: bool = False,
         milestone_id: int | None = None,
+        include_artifacts: bool = True,
+        artifact_limit: int | None = 50,
     ) -> dict[str, Any]:
         """Read/list LLMCTL Studio milestones."""
+        resolved_artifact_limit = _clamp_limit(
+            DEFAULT_LIMIT if artifact_limit is None else artifact_limit,
+            MAX_LIMIT,
+        )
         if milestone_id is not None:
             with session_scope() as session:
                 item = session.get(Milestone, milestone_id)
                 if item is None:
                     return {"ok": False, "error": f"Milestone {milestone_id} not found."}
-                return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+                payload = _serialize_model(item, include_relationships=False)
+                artifact_history: list[dict[str, Any]] = []
+                if include_artifacts:
+                    artifact_rows = (
+                        session.execute(
+                            select(NodeArtifact)
+                            .where(
+                                NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MILESTONE,
+                                NodeArtifact.ref_id == milestone_id,
+                            )
+                            .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                            .limit(resolved_artifact_limit)
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    artifact_history = [
+                        _serialize_node_artifact_item(row) for row in artifact_rows
+                    ]
+                return {"ok": True, "item": payload, "artifact_history": artifact_history}
         columns = _column_map(Milestone)
         stmt = select(Milestone)
         if order_by:
@@ -2149,7 +2531,40 @@ def register(mcp: FastMCP) -> None:
         with session_scope() as session:
             items = session.execute(stmt).scalars().all()
             payload = [_serialize_model(item, include_relationships=False) for item in items]
-            return {"ok": True, "count": len(payload), "items": payload}
+            response: dict[str, Any] = {"ok": True, "count": len(payload), "items": payload}
+            if include_artifacts and payload:
+                milestone_ids = [
+                    int(item.get("id") or 0)
+                    for item in payload
+                    if isinstance(item, dict) and int(item.get("id") or 0) > 0
+                ]
+                if milestone_ids:
+                    artifact_rows = (
+                        session.execute(
+                            select(NodeArtifact)
+                            .where(
+                                NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MILESTONE,
+                                NodeArtifact.ref_id.in_(milestone_ids),
+                            )
+                            .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    by_ref_id: dict[int, list[dict[str, Any]]] = {}
+                    for row in artifact_rows:
+                        ref_id = int(row.ref_id or 0)
+                        if ref_id <= 0:
+                            continue
+                        bucket = by_ref_id.setdefault(ref_id, [])
+                        if resolved_artifact_limit is not None and len(bucket) >= resolved_artifact_limit:
+                            continue
+                        bucket.append(_serialize_node_artifact_item(row))
+                    response["artifact_history"] = {
+                        str(ref_id): items
+                        for ref_id, items in by_ref_id.items()
+                    }
+            return response
 
     @mcp.tool()
     def llmctl_create_milestone(

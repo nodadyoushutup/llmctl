@@ -48,6 +48,10 @@ from core.models import (
     MCPServer,
     Milestone,
     Memory,
+    NodeArtifact,
+    NODE_ARTIFACT_TYPE_MEMORY,
+    NODE_ARTIFACT_TYPE_MILESTONE,
+    NODE_ARTIFACT_TYPE_PLAN,
     Plan,
     PlanStage,
     PlanTask,
@@ -237,30 +241,53 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             ):
                 studio_tasks.run_flowchart.run(flowchart_id, run_id)
 
-    def test_decision_route_resolution_from_structured_output(self) -> None:
+    def test_decision_route_resolution_supports_multi_match(self) -> None:
         input_context = {
             "latest_upstream": {
-                "output_state": {"structured_output": {"route_key": "approve"}},
+                "output_state": {
+                    "structured_output": {
+                        "route_key": "approve",
+                        "message": "Start node executed. urgent approval",
+                    }
+                },
                 "routing_state": {},
             }
         }
         output_state, routing_state = studio_tasks._execute_flowchart_decision_node(
-            node_config={},
+            node_config={
+                "decision_conditions": [
+                    {
+                        "connector_id": "approve_path",
+                        "condition_text": "latest_upstream.output_state.structured_output.route_key == approve",
+                    },
+                    {
+                        "connector_id": "urgent_path",
+                        "condition_text": "latest_upstream.output_state.structured_output.message contains urgent",
+                    },
+                    {
+                        "connector_id": "reject_path",
+                        "condition_text": "latest_upstream.output_state.structured_output.route_key == reject",
+                    },
+                ]
+            },
             input_context=input_context,
             mcp_server_keys=["llmctl-mcp"],
         )
-        self.assertEqual("approve", routing_state["route_key"])
-        self.assertEqual("approve", output_state["resolved_route_key"])
+        self.assertEqual(
+            ["approve_path", "urgent_path"], routing_state.get("matched_connector_ids")
+        )
+        self.assertFalse(output_state.get("no_match"))
         selected = studio_tasks._resolve_flowchart_outgoing_edges(
             node_type=FLOWCHART_NODE_TYPE_DECISION,
             node_config={},
             outgoing_edges=[
-                {"id": 1, "edge_mode": "solid", "condition_key": "reject"},
-                {"id": 2, "edge_mode": "solid", "condition_key": "approve"},
+                {"id": 1, "edge_mode": "solid", "condition_key": "reject_path"},
+                {"id": 2, "edge_mode": "solid", "condition_key": "approve_path"},
+                {"id": 3, "edge_mode": "solid", "condition_key": "urgent_path"},
             ],
             routing_state=routing_state,
         )
-        self.assertEqual([2], [edge["id"] for edge in selected])
+        self.assertEqual([2, 3], [edge["id"] for edge in selected])
 
     def test_decision_route_resolution_ignores_dotted_edges(self) -> None:
         selected = studio_tasks._resolve_flowchart_outgoing_edges(
@@ -270,9 +297,21 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 {"id": 1, "edge_mode": "dotted", "condition_key": "approve"},
                 {"id": 2, "edge_mode": "solid", "condition_key": "approve"},
             ],
-            routing_state={"route_key": "approve"},
+            routing_state={"matched_connector_ids": ["approve"], "no_match": False},
         )
         self.assertEqual([2], [edge["id"] for edge in selected])
+
+    def test_decision_route_resolution_allows_no_match_terminal(self) -> None:
+        selected = studio_tasks._resolve_flowchart_outgoing_edges(
+            node_type=FLOWCHART_NODE_TYPE_DECISION,
+            node_config={},
+            outgoing_edges=[
+                {"id": 11, "edge_mode": "solid", "condition_key": "approve"},
+                {"id": 12, "edge_mode": "solid", "condition_key": "reject"},
+            ],
+            routing_state={"matched_connector_ids": [], "no_match": True},
+        )
+        self.assertEqual([], selected)
 
     def test_non_decision_route_resolution_emits_only_solid_edges(self) -> None:
         selected = studio_tasks._resolve_flowchart_outgoing_edges(
@@ -285,6 +324,213 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             routing_state={},
         )
         self.assertEqual([1], [edge["id"] for edge in selected])
+
+    def test_runtime_decision_multi_route_launches_all_matches(self) -> None:
+        decision_config = {
+            "decision_conditions": [
+                {
+                    "connector_id": "left_connector",
+                    "condition_text": "Start node executed.",
+                },
+                {
+                    "connector_id": "right_connector",
+                    "condition_text": "Start node executed.",
+                },
+            ]
+        }
+        with session_scope() as session:
+            flowchart = Flowchart.create(
+                session, name="Stage 9 Decision Multi Route", max_parallel_nodes=2
+            )
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            decision_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                x=160.0,
+                y=0.0,
+                config_json=json.dumps(decision_config, sort_keys=True),
+            )
+            left_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_END,
+                x=320.0,
+                y=-70.0,
+            )
+            right_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_END,
+                x=320.0,
+                y=70.0,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=decision_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=decision_node.id,
+                target_node_id=left_node.id,
+                edge_mode="solid",
+                condition_key="left_connector",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=decision_node.id,
+                target_node_id=right_node.id,
+                edge_mode="solid",
+                condition_key="right_connector",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+            start_node_id = start_node.id
+            decision_node_id = decision_node.id
+            left_node_id = left_node.id
+            right_node_id = right_node.id
+
+        self._invoke_flowchart_run(flowchart_id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            node_runs = (
+                session.query(FlowchartRunNode)
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .order_by(FlowchartRunNode.id.asc())
+                .all()
+            )
+            self.assertEqual(
+                [start_node_id, decision_node_id, left_node_id, right_node_id],
+                [item.flowchart_node_id for item in node_runs],
+            )
+            decision_run = next(
+                item for item in node_runs if item.flowchart_node_id == decision_node_id
+            )
+            decision_routing = json.loads(decision_run.routing_state_json or "{}")
+            self.assertEqual(
+                ["left_connector", "right_connector"],
+                decision_routing.get("matched_connector_ids"),
+            )
+            self.assertFalse(decision_routing.get("no_match"))
+
+    def test_runtime_decision_no_match_stops_naturally(self) -> None:
+        decision_config = {
+            "decision_conditions": [
+                {
+                    "connector_id": "left_connector",
+                    "condition_text": "no-such-signal",
+                },
+                {
+                    "connector_id": "right_connector",
+                    "condition_text": "still-no-signal",
+                },
+            ]
+        }
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="Stage 9 Decision No Match")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            decision_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                x=160.0,
+                y=0.0,
+                config_json=json.dumps(decision_config, sort_keys=True),
+            )
+            left_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_END,
+                x=320.0,
+                y=-70.0,
+            )
+            right_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_END,
+                x=320.0,
+                y=70.0,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=decision_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=decision_node.id,
+                target_node_id=left_node.id,
+                edge_mode="solid",
+                condition_key="left_connector",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=decision_node.id,
+                target_node_id=right_node.id,
+                edge_mode="solid",
+                condition_key="right_connector",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+            start_node_id = start_node.id
+            decision_node_id = decision_node.id
+
+        self._invoke_flowchart_run(flowchart_id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            node_runs = (
+                session.query(FlowchartRunNode)
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .order_by(FlowchartRunNode.id.asc())
+                .all()
+            )
+            self.assertEqual(
+                [start_node_id, decision_node_id],
+                [item.flowchart_node_id for item in node_runs],
+            )
+            decision_run = next(
+                item for item in node_runs if item.flowchart_node_id == decision_node_id
+            )
+            decision_routing = json.loads(decision_run.routing_state_json or "{}")
+            self.assertEqual([], decision_routing.get("matched_connector_ids"))
+            self.assertTrue(decision_routing.get("no_match"))
 
     def test_input_context_includes_trigger_and_pulled_source_metadata(self) -> None:
         context = studio_tasks._build_flowchart_input_context(
@@ -1624,6 +1870,246 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             self.assertEqual("target-run-job-1", runs[0].celery_task_id)
             self.assertEqual("target-run-job-2", runs[1].celery_task_id)
 
+    def test_plan_completion_target_resolution_prefers_plan_item_id(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="target-resolution")
+            stage_alpha = PlanStage.create(
+                session,
+                plan_id=plan.id,
+                name="Stage Alpha",
+                position=1,
+            )
+            task_alpha = PlanTask.create(
+                session,
+                plan_stage_id=stage_alpha.id,
+                name="Task Alpha",
+                position=1,
+            )
+            stage_beta = PlanStage.create(
+                session,
+                plan_id=plan.id,
+                name="Stage Beta",
+                position=2,
+            )
+            task_beta = PlanTask.create(
+                session,
+                plan_stage_id=stage_beta.id,
+                name="Task Beta",
+                position=1,
+            )
+            persisted_plan = session.get(Plan, plan.id)
+            assert persisted_plan is not None
+            resolved = studio_tasks._resolve_plan_completion_target(
+                plan=persisted_plan,
+                plan_item_id=task_alpha.id,
+                stage_key="stage_beta",
+                task_key="task_beta",
+            )
+            stage, task, resolution, stage_key, task_key = resolved
+            self.assertEqual(stage_alpha.id, stage.id)
+            self.assertEqual(task_alpha.id, task.id)
+            self.assertEqual("plan_item_id", resolution)
+            self.assertEqual("stage_alpha", stage_key)
+            self.assertEqual("task_alpha", task_key)
+            self.assertNotEqual(task_beta.id, task.id)
+
+    def test_plan_completion_target_resolution_fallback_normalizes_keys(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="target-resolution-fallback")
+            stage = PlanStage.create(
+                session,
+                plan_id=plan.id,
+                name="Stage 1: Release Prep",
+                position=1,
+            )
+            task = PlanTask.create(
+                session,
+                plan_stage_id=stage.id,
+                name="Run Smoke Test!",
+                position=1,
+            )
+            persisted_plan = session.get(Plan, plan.id)
+            assert persisted_plan is not None
+            resolved = studio_tasks._resolve_plan_completion_target(
+                plan=persisted_plan,
+                plan_item_id=None,
+                stage_key="Stage 1 Release Prep",
+                task_key="run-smoke test",
+            )
+            resolved_stage, resolved_task, resolution, stage_key, task_key = resolved
+            self.assertEqual(stage.id, resolved_stage.id)
+            self.assertEqual(task.id, resolved_task.id)
+            self.assertEqual("stage_task_key", resolution)
+            self.assertEqual("stage_1_release_prep", stage_key)
+            self.assertEqual("run_smoke_test", task_key)
+
+    def test_plan_completion_target_resolution_rejects_ambiguous_fallback(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="target-resolution-ambiguous")
+            stage_a = PlanStage.create(
+                session,
+                plan_id=plan.id,
+                name="Duplicate Stage",
+                position=1,
+            )
+            stage_b = PlanStage.create(
+                session,
+                plan_id=plan.id,
+                name="Duplicate Stage",
+                position=2,
+            )
+            PlanTask.create(
+                session,
+                plan_stage_id=stage_a.id,
+                name="Repeat Task",
+                position=1,
+            )
+            PlanTask.create(
+                session,
+                plan_stage_id=stage_b.id,
+                name="Repeat Task",
+                position=1,
+            )
+            persisted_plan = session.get(Plan, plan.id)
+            assert persisted_plan is not None
+            with self.assertRaisesRegex(ValueError, "Ambiguous complete_plan_item target"):
+                studio_tasks._resolve_plan_completion_target(
+                    plan=persisted_plan,
+                    plan_item_id=None,
+                    stage_key="duplicate stage",
+                    task_key="repeat task",
+                )
+
+    def test_plan_node_complete_action_prefers_plan_item_id(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="plan-complete-node")
+            plan = Plan.create(session, name="plan-complete")
+            stage_a = PlanStage.create(session, plan_id=plan.id, name="Stage A", position=1)
+            stage_b = PlanStage.create(session, plan_id=plan.id, name="Stage B", position=2)
+            task_a = PlanTask.create(session, plan_stage_id=stage_a.id, name="Task A", position=1)
+            task_b = PlanTask.create(session, plan_stage_id=stage_b.id, name="Task B", position=1)
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            node_id = node.id
+            plan_id = plan.id
+            task_a_id = task_a.id
+            task_b_id = task_b.id
+
+        output_state, _routing_state = studio_tasks._execute_flowchart_plan_node(
+            node_id=node_id,
+            node_ref_id=plan_id,
+            node_config={
+                "action": "complete_plan_item",
+                "plan_item_id": task_a_id,
+                "stage_key": "stage_b",
+                "task_key": "task_b",
+            },
+            input_context={},
+            enabled_providers=set(),
+            default_model_id=None,
+            mcp_server_keys=["llmctl-mcp"],
+        )
+        completion_target = output_state.get("completion_target") or {}
+        self.assertEqual("plan_item_id", completion_target.get("resolution"))
+        self.assertEqual(task_a_id, completion_target.get("plan_item_id"))
+        touched = output_state.get("touched") or {}
+        self.assertIn(task_a_id, touched.get("task_ids") or [])
+        self.assertNotIn(task_b_id, touched.get("task_ids") or [])
+
+        with session_scope() as session:
+            persisted_task_a = session.get(PlanTask, task_a_id)
+            persisted_task_b = session.get(PlanTask, task_b_id)
+            assert persisted_task_a is not None
+            assert persisted_task_b is not None
+            self.assertIsNotNone(persisted_task_a.completed_at)
+            self.assertIsNone(persisted_task_b.completed_at)
+
+    def test_plan_node_artifact_persistence_payload_includes_touched_references(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="plan-artifact-persistence")
+            plan = Plan.create(session, name="artifact-plan")
+            stage = PlanStage.create(session, plan_id=plan.id, name="Stage Artifact", position=1)
+            task = PlanTask.create(session, plan_stage_id=stage.id, name="Task Artifact", position=1)
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=node.id,
+                execution_index=2,
+                status="succeeded",
+                input_context_json=json.dumps(
+                    {"request_id": "req-plan-1", "correlation_id": "corr-plan-1"},
+                    sort_keys=True,
+                ),
+                output_state_json="{}",
+            )
+            artifact_summary = studio_tasks._persist_plan_node_artifact(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_config={
+                    "retention_mode": "ttl",
+                    "retention_ttl_seconds": 3600,
+                    "retention_max_count": 25,
+                },
+                input_context={
+                    "request_id": "req-plan-1",
+                    "correlation_id": "corr-plan-1",
+                    "node": {"execution_index": 2},
+                },
+                output_state={
+                    "action": "complete_plan_item",
+                    "additive_prompt": "mark done",
+                    "completion_target": {
+                        "resolution": "plan_item_id",
+                        "plan_item_id": task.id,
+                        "stage_id": stage.id,
+                        "stage_key": "stage_artifact",
+                        "task_key": "task_artifact",
+                    },
+                    "touched": {
+                        "stage_ids": [stage.id],
+                        "task_ids": [task.id],
+                        "stages": [{"id": stage.id, "name": stage.name}],
+                        "tasks": [{"id": task.id, "name": task.name}],
+                    },
+                    "plan": studio_tasks._serialize_plan_for_node(plan),
+                },
+                routing_state={"route_key": "next"},
+            )
+            self.assertEqual("plan", artifact_summary.get("artifact_type"))
+            self.assertEqual("req-plan-1", artifact_summary.get("request_id"))
+            self.assertEqual("corr-plan-1", artifact_summary.get("correlation_id"))
+            payload = artifact_summary.get("payload") or {}
+            self.assertEqual("complete_plan_item", payload.get("action"))
+            self.assertEqual([stage.id], (payload.get("touched") or {}).get("stage_ids"))
+            self.assertEqual([task.id], (payload.get("touched") or {}).get("task_ids"))
+            self.assertEqual(task.id, (payload.get("completion_target") or {}).get("plan_item_id"))
+            persisted_artifact = session.get(NodeArtifact, artifact_summary.get("id"))
+            assert persisted_artifact is not None
+            self.assertEqual(NODE_ARTIFACT_TYPE_PLAN, persisted_artifact.artifact_type)
+            self.assertEqual(plan.id, persisted_artifact.ref_id)
+
     def test_run_llm_codex_always_includes_skip_git_repo_check(self) -> None:
         failed = subprocess.CompletedProcess(
             args=["codex", "exec"],
@@ -1821,6 +2307,96 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         )
         self.assertEqual(200, delete_response.status_code)
         self.assertTrue((delete_response.get_json() or {}).get("deleted"))
+
+    def test_graph_syncs_decision_conditions_from_solid_connectors(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+        flowchart_id = self._create_flowchart("Stage 9 Decision Condition Sync")
+        response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-decision",
+                        "node_type": FLOWCHART_NODE_TYPE_DECISION,
+                        "x": 180,
+                        "y": 0,
+                        "config": {
+                            "decision_conditions": [
+                                {
+                                    "connector_id": "stale_connector",
+                                    "condition_text": "stale",
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "client_id": "n-task-a",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 360,
+                        "y": -60,
+                        "config": {"task_prompt": "Task A"},
+                    },
+                    {
+                        "client_id": "n-task-b",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 360,
+                        "y": 60,
+                        "config": {"task_prompt": "Task B"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-decision",
+                        "edge_mode": "solid",
+                    },
+                    {
+                        "source_node_id": "n-decision",
+                        "target_node_id": "n-task-a",
+                        "edge_mode": "solid",
+                        "condition_key": "left_connector",
+                    },
+                    {
+                        "source_node_id": "n-decision",
+                        "target_node_id": "n-task-b",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        nodes = payload.get("nodes") or []
+        decision_node = next(
+            node for node in nodes if node.get("node_type") == FLOWCHART_NODE_TYPE_DECISION
+        )
+        synced_conditions = (decision_node.get("config") or {}).get("decision_conditions") or []
+        self.assertEqual(
+            [
+                {"connector_id": "left_connector", "condition_text": ""},
+                {"connector_id": "connector_1", "condition_text": ""},
+            ],
+            synced_conditions,
+        )
+        decision_edges = [
+            edge
+            for edge in (payload.get("edges") or [])
+            if edge.get("source_node_id") == decision_node.get("id")
+            and edge.get("edge_mode") == "solid"
+        ]
+        self.assertEqual(["left_connector", "connector_1"], [edge.get("condition_key") for edge in decision_edges])
 
     def test_graph_persists_attachment_ids_and_rejects_unsupported_node_types(self) -> None:
         with session_scope() as session:
@@ -2567,6 +3143,93 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         )
         self.assertIsNone(task_node.get("ref_id"))
 
+    def test_graph_persists_task_agent_binding_from_config(self) -> None:
+        with session_scope() as session:
+            agent = Agent.create(
+                session,
+                name="Stage 9 Task Agent",
+                prompt_json=json.dumps({"instruction": "Use this agent."}),
+            )
+            agent_id = agent.id
+
+        flowchart_id = self._create_flowchart("Stage 9 Task Agent Binding")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 160,
+                        "y": 0,
+                        "config": {
+                            "task_prompt": "Do something useful",
+                            "agent_id": agent_id,
+                        },
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "solid",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, graph_response.status_code)
+        payload = graph_response.get_json() or {}
+        task_node = next(
+            node
+            for node in (payload.get("nodes") or [])
+            if node["node_type"] == FLOWCHART_NODE_TYPE_TASK
+        )
+        self.assertEqual(agent_id, (task_node.get("config") or {}).get("agent_id"))
+
+    def test_graph_rejects_unknown_task_agent_binding(self) -> None:
+        flowchart_id = self._create_flowchart("Stage 9 Invalid Task Agent Binding")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 160,
+                        "y": 0,
+                        "config": {
+                            "task_prompt": "Do something useful",
+                            "agent_id": 999999,
+                        },
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "solid",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(400, graph_response.status_code)
+        self.assertIn(
+            "nodes[1].config.agent_id 999999 was not found",
+            str((graph_response.get_json() or {}).get("error") or ""),
+        )
+
     def test_history_run_view_backfills_node_activity_tasks(self) -> None:
         with session_scope() as session:
             flowchart = Flowchart.create(session, name="Stage 9 History Backfill")
@@ -2899,6 +3562,18 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
 
     def test_node_type_behaviors_task_plan_milestone_memory_decision(self) -> None:
         with session_scope() as session:
+            llmctl_mcp = MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+            custom_mcp = MCPServer.create(
+                session,
+                name="custom-mcp",
+                server_key="custom-mcp",
+                config_json='{"command":"echo"}',
+            )
             model = LLMModel.create(
                 session,
                 name="integration-model",
@@ -2929,6 +3604,8 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             milestone_id = milestone.id
             memory_id = memory.id
             model_id = model.id
+            llmctl_mcp_id = llmctl_mcp.id
+            custom_mcp_id = custom_mcp.id
 
         flowchart_id = self._create_flowchart("Stage 9 Node Behaviors")
         graph_response = self.client.post(
@@ -2950,16 +3627,10 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                         "y": 0,
                     },
                     {
-                        "client_id": "decision",
-                        "node_type": FLOWCHART_NODE_TYPE_DECISION,
-                        "x": 200,
-                        "y": 0,
-                    },
-                    {
                         "client_id": "plan",
                         "node_type": FLOWCHART_NODE_TYPE_PLAN,
                         "ref_id": plan_id,
-                        "x": 300,
+                        "x": 200,
                         "y": 0,
                         "config": {
                             "action": "update_completion",
@@ -2974,20 +3645,22 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                         "client_id": "milestone",
                         "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
                         "ref_id": milestone_id,
-                        "x": 400,
+                        "x": 300,
                         "y": 0,
                         "config": {
-                            "action": "update",
-                            "patch": {"latest_update": "milestone-updated"},
-                            "mark_complete": True,
+                            "action": "mark_complete",
+                            "additive_prompt": "milestone-updated",
+                            "retention_mode": "ttl",
+                            "retention_ttl_seconds": 3600,
                         },
                     },
                     {
                         "client_id": "memory",
                         "node_type": FLOWCHART_NODE_TYPE_MEMORY,
                         "ref_id": memory_id,
-                        "x": 500,
+                        "x": 400,
                         "y": 0,
+                        "mcp_server_ids": [custom_mcp_id],
                         "config": {
                             "action": "store",
                             "text_source_path": "latest_upstream.output_state.milestone.latest_update",
@@ -3002,14 +3675,8 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                     },
                     {
                         "source_node_id": "task",
-                        "target_node_id": "decision",
-                        "edge_mode": "solid",
-                    },
-                    {
-                        "source_node_id": "decision",
                         "target_node_id": "plan",
                         "edge_mode": "solid",
-                        "condition_key": "continue",
                     },
                     {
                         "source_node_id": "plan",
@@ -3025,7 +3692,15 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             },
         )
         self.assertEqual(200, graph_response.status_code)
-        self.assertTrue((graph_response.get_json() or {}).get("validation", {}).get("valid"))
+        graph_payload = graph_response.get_json() or {}
+        self.assertTrue(graph_payload.get("validation", {}).get("valid"))
+        memory_graph_node = next(
+            node
+            for node in (graph_payload.get("nodes") or [])
+            if node.get("node_type") == FLOWCHART_NODE_TYPE_MEMORY
+        )
+        self.assertEqual([llmctl_mcp_id], memory_graph_node.get("mcp_server_ids") or [])
+        self.assertEqual("add", (memory_graph_node.get("config") or {}).get("action"))
 
         with patch.object(
             studio_views.run_flowchart, "delay", return_value=SimpleNamespace(id="job-node-types")
@@ -3068,7 +3743,6 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 {
                     FLOWCHART_NODE_TYPE_START,
                     FLOWCHART_NODE_TYPE_TASK,
-                    FLOWCHART_NODE_TYPE_DECISION,
                     FLOWCHART_NODE_TYPE_PLAN,
                     FLOWCHART_NODE_TYPE_MILESTONE,
                     FLOWCHART_NODE_TYPE_MEMORY,
@@ -3089,7 +3763,179 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             self.assertEqual("done", milestone.status)
             self.assertEqual(100, milestone.progress_percent)
             self.assertEqual("milestone-updated", milestone.latest_update)
-            self.assertEqual("milestone-updated", memory.description)
+            self.assertIn("milestone-updated", memory.description or "")
+            milestone_artifacts = (
+                session.query(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_run_id == run_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MILESTONE,
+                )
+                .order_by(NodeArtifact.id.asc())
+                .all()
+            )
+            self.assertEqual(1, len(milestone_artifacts))
+            artifact_payload = json.loads(milestone_artifacts[0].payload_json or "{}")
+            self.assertEqual("mark_complete", artifact_payload.get("action"))
+            self.assertEqual(
+                "milestone-updated",
+                artifact_payload.get("milestone", {}).get("latest_update"),
+            )
+            memory_artifacts = (
+                session.query(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_run_id == run_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
+                )
+                .order_by(NodeArtifact.id.asc())
+                .all()
+            )
+            self.assertEqual(1, len(memory_artifacts))
+            memory_artifact_payload = json.loads(memory_artifacts[0].payload_json or "{}")
+            self.assertEqual("add", memory_artifact_payload.get("action"))
+            self.assertEqual(
+                ["llmctl-mcp"],
+                memory_artifact_payload.get("mcp_server_keys") or [],
+            )
+
+        run_detail = self.client.get(f"/flowcharts/runs/{run_id}")
+        self.assertEqual(200, run_detail.status_code)
+        run_payload = run_detail.get_json() or {}
+        milestone_node_run = next(
+            node_run
+            for node_run in (run_payload.get("node_runs") or [])
+            if (node_run.get("output_state") or {}).get("node_type")
+            == FLOWCHART_NODE_TYPE_MILESTONE
+        )
+        artifact_history = milestone_node_run.get("artifact_history") or []
+        self.assertEqual(1, len(artifact_history))
+        self.assertEqual("milestone", artifact_history[0].get("artifact_type"))
+        self.assertEqual(
+            "mark_complete",
+            (artifact_history[0].get("payload") or {}).get("action"),
+        )
+        memory_node_run = next(
+            node_run
+            for node_run in (run_payload.get("node_runs") or [])
+            if (node_run.get("output_state") or {}).get("node_type")
+            == FLOWCHART_NODE_TYPE_MEMORY
+        )
+        memory_artifact_history = memory_node_run.get("artifact_history") or []
+        self.assertEqual(1, len(memory_artifact_history))
+        self.assertEqual("memory", memory_artifact_history[0].get("artifact_type"))
+        self.assertEqual(
+            "add",
+            (memory_artifact_history[0].get("payload") or {}).get("action"),
+        )
+
+    def test_plan_artifact_endpoints_expose_queryable_payloads(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="plan-artifacts-api")
+            stage = PlanStage.create(session, plan_id=plan.id, name="Stage API", position=1)
+            task = PlanTask.create(session, plan_stage_id=stage.id, name="Task API", position=1)
+            flowchart = Flowchart.create(session, name="plan-artifacts-api-flowchart")
+            plan_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=plan_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_PLAN}),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=plan_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+                ref_id=plan.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{run_node.id}",
+                retention_mode="ttl",
+                request_id="req-plan-artifact-api",
+                correlation_id="corr-plan-artifact-api",
+                payload_json=json.dumps(
+                    {
+                        "action": "complete_plan_item",
+                        "completion_target": {"plan_item_id": task.id},
+                        "touched": {"stage_ids": [stage.id], "task_ids": [task.id]},
+                    },
+                    sort_keys=True,
+                ),
+            )
+            plan_id = plan.id
+            artifact_id = artifact.id
+            flowchart_node_id = plan_node.id
+            flowchart_run_id = run.id
+            task_id = task.id
+
+        headers = {
+            "X-Request-ID": "req-plan-list-1",
+            "X-Correlation-ID": "corr-plan-list-1",
+        }
+        list_response = self.client.get(
+            (
+                f"/plans/{plan_id}/artifacts?limit=5&offset=0"
+                f"&flowchart_node_id={flowchart_node_id}&flowchart_run_id={flowchart_run_id}"
+            ),
+            headers=headers,
+        )
+        self.assertEqual(200, list_response.status_code)
+        list_payload = list_response.get_json() or {}
+        self.assertTrue(list_payload.get("ok"))
+        self.assertEqual("req-plan-list-1", list_payload.get("request_id"))
+        self.assertEqual("corr-plan-list-1", list_payload.get("correlation_id"))
+        self.assertEqual(1, list_payload.get("count"))
+        items = list_payload.get("items") or []
+        self.assertEqual(1, len(items))
+        self.assertEqual(NODE_ARTIFACT_TYPE_PLAN, items[0].get("artifact_type"))
+        self.assertEqual([task_id], ((items[0].get("payload") or {}).get("touched") or {}).get("task_ids"))
+
+        detail_response = self.client.get(
+            f"/plans/{plan_id}/artifacts/{artifact_id}",
+            headers={
+                "X-Request-ID": "req-plan-detail-1",
+                "X-Correlation-ID": "corr-plan-detail-1",
+            },
+        )
+        self.assertEqual(200, detail_response.status_code)
+        detail_payload = detail_response.get_json() or {}
+        self.assertTrue(detail_payload.get("ok"))
+        self.assertEqual("req-plan-detail-1", detail_payload.get("request_id"))
+        self.assertEqual("corr-plan-detail-1", detail_payload.get("correlation_id"))
+        item = detail_payload.get("item") or {}
+        self.assertEqual(artifact_id, item.get("id"))
+        self.assertEqual(task_id, ((item.get("payload") or {}).get("completion_target") or {}).get("plan_item_id"))
+
+    def test_plan_artifact_list_invalid_limit_uses_error_envelope(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="plan-artifacts-errors")
+            plan_id = plan.id
+
+        response = self.client.get(
+            f"/plans/{plan_id}/artifacts?limit=0",
+            headers={
+                "X-Request-ID": "req-plan-error-1",
+                "X-Correlation-ID": "corr-plan-error-1",
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        payload = response.get_json() or {}
+        self.assertFalse(payload.get("ok"))
+        error = payload.get("error") or {}
+        self.assertEqual("invalid_request", error.get("code"))
+        self.assertEqual("req-plan-error-1", error.get("request_id"))
+        self.assertEqual("corr-plan-error-1", payload.get("correlation_id"))
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from collections import deque
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +53,7 @@ from services.realtime_events import (
     flowchart_scope_rooms,
     task_scope_rooms,
 )
+from core.integrated_mcp import INTEGRATED_MCP_LLMCTL_KEY
 from core.mcp_config import build_mcp_overrides, parse_mcp_config
 from core.prompt_envelope import (
     build_prompt_envelope,
@@ -89,6 +90,15 @@ from core.models import (
     Memory,
     Milestone,
     MILESTONE_STATUS_DONE,
+    MILESTONE_STATUS_IN_PROGRESS,
+    NodeArtifact,
+    NODE_ARTIFACT_RETENTION_FOREVER,
+    NODE_ARTIFACT_RETENTION_MAX_COUNT,
+    NODE_ARTIFACT_RETENTION_TTL,
+    NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    NODE_ARTIFACT_TYPE_MEMORY,
+    NODE_ARTIFACT_TYPE_MILESTONE,
+    NODE_ARTIFACT_TYPE_PLAN,
     Plan,
     PlanStage,
     PlanTask,
@@ -172,6 +182,14 @@ QUICK_RAG_TASK_KINDS = {
 EXECUTOR_NODE_TYPE_AGENT_TASK = "agent_task"
 EXECUTOR_NODE_TYPE_LLM_CALL = "llm_call"
 EXECUTOR_NODE_TYPE_RAG_CHAT_COMPLETION = "rag_chat_completion"
+MILESTONE_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update"
+MILESTONE_NODE_ACTION_MARK_COMPLETE = "mark_complete"
+PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
+PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
+MEMORY_NODE_ACTION_ADD = "add"
+MEMORY_NODE_ACTION_RETRIEVE = "retrieve"
+DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS = 3600
+DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT = 25
 
 
 def _utcnow() -> datetime:
@@ -5279,6 +5297,565 @@ def _serialize_milestone_for_node(milestone: Milestone) -> dict[str, Any]:
     }
 
 
+def _normalize_milestone_node_action(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {
+        "update",
+        "checkpoint",
+        "read",
+        "create",
+        "create_or_update",
+        "create/update",
+    }:
+        return MILESTONE_NODE_ACTION_CREATE_OR_UPDATE
+    if cleaned in {"complete", "mark_complete", "mark milestone complete"}:
+        return MILESTONE_NODE_ACTION_MARK_COMPLETE
+    return MILESTONE_NODE_ACTION_CREATE_OR_UPDATE
+
+
+def _normalize_plan_node_action(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {
+        "create",
+        "update",
+        "read",
+        "create_or_update",
+        "create_or_update_plan",
+        "create/update",
+        "create or update plan",
+        "update_completion",
+        "complete",
+    }:
+        return PLAN_NODE_ACTION_CREATE_OR_UPDATE
+    if cleaned in {
+        "complete_plan_item",
+        "complete plan item",
+        "mark_plan_item_complete",
+        "mark_task_complete",
+    }:
+        return PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM
+    return PLAN_NODE_ACTION_CREATE_OR_UPDATE
+
+
+def _normalize_plan_item_key(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "_", cleaned).strip("_")
+
+
+def _resolve_plan_completion_target(
+    *,
+    plan: Plan,
+    plan_item_id: Any,
+    stage_key: Any,
+    task_key: Any,
+) -> tuple[PlanStage, PlanTask, str, str, str]:
+    stage_rows = sorted(
+        list(plan.stages or []),
+        key=lambda item: (item.position, item.id),
+    )
+    explicit_task_id = _parse_optional_int(plan_item_id, default=0, minimum=0)
+    if explicit_task_id > 0:
+        for stage in stage_rows:
+            for task in sorted(list(stage.tasks or []), key=lambda item: (item.position, item.id)):
+                if int(task.id) == explicit_task_id:
+                    return (
+                        stage,
+                        task,
+                        "plan_item_id",
+                        _normalize_plan_item_key(stage.name),
+                        _normalize_plan_item_key(task.name),
+                    )
+        raise ValueError(
+            f"Plan item id {explicit_task_id} was not found in plan {plan.id}."
+        )
+
+    normalized_stage_key = _normalize_plan_item_key(stage_key)
+    normalized_task_key = _normalize_plan_item_key(task_key)
+    if not normalized_stage_key or not normalized_task_key:
+        raise ValueError(
+            "Complete plan item action requires plan_item_id or stage_key + task_key."
+        )
+
+    matches: list[tuple[PlanStage, PlanTask]] = []
+    for stage in stage_rows:
+        if _normalize_plan_item_key(stage.name) != normalized_stage_key:
+            continue
+        for task in sorted(list(stage.tasks or []), key=lambda item: (item.position, item.id)):
+            if _normalize_plan_item_key(task.name) == normalized_task_key:
+                matches.append((stage, task))
+
+    if not matches:
+        raise ValueError(
+            "No plan item matched complete target "
+            f"stage_key='{normalized_stage_key}' task_key='{normalized_task_key}'."
+        )
+    if len(matches) > 1:
+        matched_task_ids = ", ".join(str(int(task.id)) for _, task in matches)
+        raise ValueError(
+            "Ambiguous complete_plan_item target for "
+            f"stage_key='{normalized_stage_key}' task_key='{normalized_task_key}'; "
+            f"matched task ids: {matched_task_ids}."
+        )
+    stage, task = matches[0]
+    return stage, task, "stage_task_key", normalized_stage_key, normalized_task_key
+
+
+def _normalize_memory_node_action(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {
+        MEMORY_NODE_ACTION_ADD,
+        "store",
+        "upsert",
+        "append",
+        "create",
+        "create_or_update",
+    }:
+        return MEMORY_NODE_ACTION_ADD
+    if cleaned in {
+        MEMORY_NODE_ACTION_RETRIEVE,
+        "fetch",
+        "read",
+        "query",
+        "search",
+        "list",
+    }:
+        return MEMORY_NODE_ACTION_RETRIEVE
+    return ""
+
+
+def _memory_context_value_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, dict):
+        for key in ("answer", "raw_output", "message", "latest_update", "description"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return _json_dumps(_json_safe(value))
+    if isinstance(value, list):
+        if not value:
+            return ""
+        lines: list[str] = []
+        for item in value:
+            text = _memory_context_value_to_text(item)
+            if text:
+                lines.append(text)
+        return "\n".join(lines)
+    return _json_dumps(_json_safe(value))
+
+
+def _infer_memory_node_prompt(
+    *,
+    action: str,
+    input_context: dict[str, Any],
+) -> str:
+    latest_upstream = (
+        input_context.get("latest_upstream")
+        if isinstance(input_context.get("latest_upstream"), dict)
+        else {}
+    )
+    latest_output_text = _memory_context_value_to_text(latest_upstream.get("output_state"))
+    if latest_output_text:
+        return latest_output_text[:4000]
+
+    upstream_nodes = input_context.get("upstream_nodes")
+    if isinstance(upstream_nodes, list):
+        combined: list[str] = []
+        for item in upstream_nodes:
+            if not isinstance(item, dict):
+                continue
+            text = _memory_context_value_to_text(item.get("output_state"))
+            if text:
+                combined.append(text)
+        if combined:
+            return "\n\n".join(combined)[:4000]
+
+    if action == MEMORY_NODE_ACTION_RETRIEVE:
+        return "latest"
+    return ""
+
+
+def _normalize_node_artifact_retention_mode(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"forever", "none", "disabled"}:
+        return NODE_ARTIFACT_RETENTION_FOREVER
+    if cleaned in {"max", "max_count"}:
+        return NODE_ARTIFACT_RETENTION_MAX_COUNT
+    if cleaned in {"ttl_max", "ttl+max", "ttl_max_count"}:
+        return NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT
+    return NODE_ARTIFACT_RETENTION_TTL
+
+
+def _node_artifact_retention_settings(node_config: dict[str, Any]) -> tuple[str, int, int]:
+    retention_mode = _normalize_node_artifact_retention_mode(
+        node_config.get("retention_mode")
+    )
+    ttl_seconds = _parse_optional_int(
+        node_config.get("retention_ttl_seconds"),
+        default=DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS,
+        minimum=1,
+    )
+    max_count = _parse_optional_int(
+        node_config.get("retention_max_count"),
+        default=DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT,
+        minimum=1,
+    )
+    return retention_mode, ttl_seconds, max_count
+
+
+def _serialize_node_artifact_for_flow(node_artifact: NodeArtifact) -> dict[str, Any]:
+    payload = _parse_json_object(node_artifact.payload_json)
+    return {
+        "id": node_artifact.id,
+        "flowchart_id": node_artifact.flowchart_id,
+        "flowchart_node_id": node_artifact.flowchart_node_id,
+        "flowchart_run_id": node_artifact.flowchart_run_id,
+        "flowchart_run_node_id": node_artifact.flowchart_run_node_id,
+        "node_type": node_artifact.node_type,
+        "artifact_type": node_artifact.artifact_type,
+        "ref_id": node_artifact.ref_id,
+        "execution_index": node_artifact.execution_index,
+        "variant_key": node_artifact.variant_key,
+        "retention_mode": node_artifact.retention_mode,
+        "expires_at": _json_safe(node_artifact.expires_at),
+        "request_id": node_artifact.request_id,
+        "correlation_id": node_artifact.correlation_id,
+        "payload": payload,
+        "created_at": _json_safe(node_artifact.created_at),
+        "updated_at": _json_safe(node_artifact.updated_at),
+    }
+
+
+def _prune_node_artifact_history(
+    session,
+    *,
+    flowchart_node_id: int,
+    artifact_type: str,
+    retention_mode: str,
+    max_count: int,
+) -> None:
+    now = _utcnow()
+    if retention_mode in {
+        NODE_ARTIFACT_RETENTION_TTL,
+        NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    }:
+        expired = (
+            session.execute(
+                select(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_node_id == flowchart_node_id,
+                    NodeArtifact.artifact_type == artifact_type,
+                    NodeArtifact.expires_at.is_not(None),
+                    NodeArtifact.expires_at <= now,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for item in expired:
+            session.delete(item)
+    if retention_mode in {
+        NODE_ARTIFACT_RETENTION_MAX_COUNT,
+        NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    }:
+        overflow = (
+            session.execute(
+                select(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_node_id == flowchart_node_id,
+                    NodeArtifact.artifact_type == artifact_type,
+                )
+                .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                .offset(max_count)
+            )
+            .scalars()
+            .all()
+        )
+        for item in overflow:
+            session.delete(item)
+
+
+def _persist_milestone_node_artifact(
+    session,
+    *,
+    flowchart_id: int,
+    flowchart_node_id: int,
+    flowchart_run_id: int,
+    flowchart_run_node_id: int,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    output_state: dict[str, Any],
+    routing_state: dict[str, Any],
+) -> dict[str, Any]:
+    retention_mode, ttl_seconds, max_count = _node_artifact_retention_settings(
+        node_config
+    )
+    expires_at: datetime | None = None
+    if retention_mode in {
+        NODE_ARTIFACT_RETENTION_TTL,
+        NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    }:
+        expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
+
+    request_id = str(
+        node_config.get("request_id")
+        or input_context.get("request_id")
+        or output_state.get("request_id")
+        or ""
+    ).strip() or None
+    correlation_id = str(
+        node_config.get("correlation_id")
+        or input_context.get("correlation_id")
+        or output_state.get("correlation_id")
+        or ""
+    ).strip() or None
+    milestone_payload = output_state.get("milestone")
+    milestone_id = None
+    if isinstance(milestone_payload, dict):
+        milestone_id = _parse_optional_int(
+            milestone_payload.get("id"),
+            default=0,
+            minimum=1,
+        ) or None
+
+    artifact_payload = {
+        "action": output_state.get("action"),
+        "action_results": output_state.get("action_results") or [],
+        "additive_prompt": output_state.get("additive_prompt") or "",
+        "checkpoint_hit": output_state.get("checkpoint_hit"),
+        "before_milestone": output_state.get("before_milestone") or {},
+        "milestone": milestone_payload if isinstance(milestone_payload, dict) else {},
+        "routing_state": routing_state or {},
+    }
+    artifact = NodeArtifact.create(
+        session,
+        flowchart_id=flowchart_id,
+        flowchart_node_id=flowchart_node_id,
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+        artifact_type=NODE_ARTIFACT_TYPE_MILESTONE,
+        ref_id=milestone_id,
+        execution_index=_parse_optional_int(
+            output_state.get("execution_index"),
+            default=0,
+            minimum=1,
+        )
+        or None,
+        variant_key=f"run-{flowchart_run_id}-node-run-{flowchart_run_node_id}",
+        retention_mode=retention_mode,
+        expires_at=expires_at,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        payload_json=_json_dumps(artifact_payload),
+    )
+    _prune_node_artifact_history(
+        session,
+        flowchart_node_id=flowchart_node_id,
+        artifact_type=NODE_ARTIFACT_TYPE_MILESTONE,
+        retention_mode=retention_mode,
+        max_count=max_count,
+    )
+    return _serialize_node_artifact_for_flow(artifact)
+
+
+def _persist_memory_node_artifact(
+    session,
+    *,
+    flowchart_id: int,
+    flowchart_node_id: int,
+    flowchart_run_id: int,
+    flowchart_run_node_id: int,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    output_state: dict[str, Any],
+    routing_state: dict[str, Any],
+) -> dict[str, Any]:
+    retention_mode, ttl_seconds, max_count = _node_artifact_retention_settings(
+        node_config
+    )
+    expires_at: datetime | None = None
+    if retention_mode in {
+        NODE_ARTIFACT_RETENTION_TTL,
+        NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    }:
+        expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
+
+    request_id = str(
+        node_config.get("request_id")
+        or input_context.get("request_id")
+        or output_state.get("request_id")
+        or ""
+    ).strip() or None
+    correlation_id = str(
+        node_config.get("correlation_id")
+        or input_context.get("correlation_id")
+        or output_state.get("correlation_id")
+        or ""
+    ).strip() or None
+
+    stored_memory = (
+        output_state.get("stored_memory")
+        if isinstance(output_state.get("stored_memory"), dict)
+        else {}
+    )
+    retrieved_memories = (
+        output_state.get("retrieved_memories")
+        if isinstance(output_state.get("retrieved_memories"), list)
+        else []
+    )
+    ref_id = (
+        _parse_optional_int(stored_memory.get("id"), default=0, minimum=1)
+        if stored_memory
+        else None
+    )
+    if ref_id is None:
+        ref_id = _parse_optional_int(
+            output_state.get("memory_id"),
+            default=0,
+            minimum=1,
+        ) or None
+    if ref_id is None and retrieved_memories:
+        first_item = retrieved_memories[0]
+        if isinstance(first_item, dict):
+            ref_id = _parse_optional_int(first_item.get("id"), default=0, minimum=1) or None
+
+    artifact_payload = {
+        "action": output_state.get("action"),
+        "action_results": output_state.get("action_results") or [],
+        "additive_prompt": output_state.get("additive_prompt") or "",
+        "inferred_prompt": output_state.get("inferred_prompt") or "",
+        "effective_prompt": output_state.get("effective_prompt") or "",
+        "stored_memory": stored_memory,
+        "retrieved_memories": retrieved_memories,
+        "routing_state": routing_state or {},
+        "mcp_server_keys": output_state.get("mcp_server_keys") or [],
+    }
+    artifact = NodeArtifact.create(
+        session,
+        flowchart_id=flowchart_id,
+        flowchart_node_id=flowchart_node_id,
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_type=FLOWCHART_NODE_TYPE_MEMORY,
+        artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+        ref_id=ref_id,
+        execution_index=_parse_optional_int(
+            output_state.get("execution_index"),
+            default=0,
+            minimum=1,
+        )
+        or None,
+        variant_key=f"run-{flowchart_run_id}-node-run-{flowchart_run_node_id}",
+        retention_mode=retention_mode,
+        expires_at=expires_at,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        payload_json=_json_dumps(artifact_payload),
+    )
+    _prune_node_artifact_history(
+        session,
+        flowchart_node_id=flowchart_node_id,
+        artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+        retention_mode=retention_mode,
+        max_count=max_count,
+    )
+    return _serialize_node_artifact_for_flow(artifact)
+
+
+def _persist_plan_node_artifact(
+    session,
+    *,
+    flowchart_id: int,
+    flowchart_node_id: int,
+    flowchart_run_id: int,
+    flowchart_run_node_id: int,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    output_state: dict[str, Any],
+    routing_state: dict[str, Any],
+) -> dict[str, Any]:
+    retention_mode, ttl_seconds, max_count = _node_artifact_retention_settings(
+        node_config
+    )
+    expires_at: datetime | None = None
+    if retention_mode in {
+        NODE_ARTIFACT_RETENTION_TTL,
+        NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    }:
+        expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
+
+    request_id = str(
+        node_config.get("request_id")
+        or input_context.get("request_id")
+        or output_state.get("request_id")
+        or ""
+    ).strip() or None
+    correlation_id = str(
+        node_config.get("correlation_id")
+        or input_context.get("correlation_id")
+        or output_state.get("correlation_id")
+        or ""
+    ).strip() or None
+
+    node_context = input_context.get("node") if isinstance(input_context.get("node"), dict) else {}
+    execution_index = _parse_optional_int(
+        node_context.get("execution_index"),
+        default=0,
+        minimum=1,
+    ) or None
+
+    plan_payload = output_state.get("plan")
+    plan_id = None
+    if isinstance(plan_payload, dict):
+        plan_id = _parse_optional_int(
+            plan_payload.get("id"),
+            default=0,
+            minimum=1,
+        ) or None
+
+    artifact_payload = {
+        "action": output_state.get("action"),
+        "action_results": output_state.get("action_results") or [],
+        "additive_prompt": output_state.get("additive_prompt") or "",
+        "completion_target": output_state.get("completion_target") or {},
+        "touched": output_state.get("touched") or {},
+        "plan": plan_payload if isinstance(plan_payload, dict) else {},
+        "routing_state": routing_state or {},
+    }
+    artifact = NodeArtifact.create(
+        session,
+        flowchart_id=flowchart_id,
+        flowchart_node_id=flowchart_node_id,
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_type=FLOWCHART_NODE_TYPE_PLAN,
+        artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+        ref_id=plan_id,
+        execution_index=execution_index,
+        variant_key=f"run-{flowchart_run_id}-node-run-{flowchart_run_node_id}",
+        retention_mode=retention_mode,
+        expires_at=expires_at,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        payload_json=_json_dumps(artifact_payload),
+    )
+    _prune_node_artifact_history(
+        session,
+        flowchart_node_id=flowchart_node_id,
+        artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+        retention_mode=retention_mode,
+        max_count=max_count,
+    )
+    return _serialize_node_artifact_for_flow(artifact)
+
+
 def _serialize_plan_for_node(plan: Plan) -> dict[str, Any]:
     stages = sorted(
         list(plan.stages or []),
@@ -5928,6 +6505,26 @@ def _resolve_flowchart_outgoing_edges(
     if node_type == FLOWCHART_NODE_TYPE_DECISION:
         if not solid_edges:
             raise ValueError("Decision node has no solid outgoing edges.")
+        matched_connector_ids = [
+            str(value).strip()
+            for value in (routing_state.get("matched_connector_ids") or [])
+            if str(value).strip()
+        ]
+        has_explicit_match_set = (
+            "matched_connector_ids" in routing_state
+            or _coerce_bool(routing_state.get("no_match"))
+        )
+        if has_explicit_match_set:
+            if not matched_connector_ids:
+                return []
+            matched_lookup = set(matched_connector_ids)
+            return [
+                edge
+                for edge in solid_edges
+                if str(edge.get("condition_key") or "").strip() in matched_lookup
+            ]
+
+        # Backward compatibility for legacy route_key-only decision routing.
         if not route_key:
             raise ValueError("Decision node did not produce a route_key.")
         for edge in solid_edges:
@@ -6826,24 +7423,184 @@ def _execute_flowchart_decision_node(
     input_context: dict[str, Any],
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    route_field_path = str(node_config.get("route_field_path") or "").strip()
-    if not route_field_path:
-        route_field_path = "latest_upstream.output_state.structured_output.route_key"
-    route_value = _extract_path_value(input_context, route_field_path)
-    if route_value is None:
-        route_value = _extract_path_value(input_context, "latest_upstream.routing_state.route_key")
-    if route_value is None or not str(route_value).strip():
-        raise ValueError(
-            f"Decision node could not resolve route key from '{route_field_path}'."
+    del mcp_server_keys
+
+    def _stringify(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (dict, list, tuple)):
+            return _json_dumps(value)
+        return str(value)
+
+    def _strip_quotes(value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+            return cleaned[1:-1]
+        return cleaned
+
+    def _evaluate_condition(condition_text: str) -> tuple[bool, str]:
+        cleaned = str(condition_text or "").strip()
+        if not cleaned:
+            return False, "Condition text is empty."
+
+        equals_match = re.fullmatch(r"([A-Za-z0-9_.]+)\s*(==|!=)\s*(.+)", cleaned)
+        if equals_match:
+            path = equals_match.group(1).strip()
+            operator = equals_match.group(2).strip()
+            expected = _strip_quotes(equals_match.group(3))
+            resolved = _extract_path_value(input_context, path)
+            if resolved is None:
+                return False, f"Path '{path}' was not found."
+            actual_text = _stringify(resolved)
+            matched = actual_text == expected
+            if operator == "!=":
+                matched = not matched
+            return (
+                matched,
+                f"Compared path '{path}' value '{actual_text}' {operator} '{expected}'.",
+            )
+
+        contains_match = re.fullmatch(
+            r"([A-Za-z0-9_.]+)\s+contains\s+(.+)", cleaned, flags=re.IGNORECASE
         )
-    route_key = str(route_value).strip()
+        if contains_match:
+            path = contains_match.group(1).strip()
+            expected = _strip_quotes(contains_match.group(2))
+            resolved = _extract_path_value(input_context, path)
+            if resolved is None:
+                return False, f"Path '{path}' was not found."
+            actual_text = _stringify(resolved)
+            matched = expected.lower() in actual_text.lower()
+            return (
+                matched,
+                f"Checked whether path '{path}' value '{actual_text}' contains '{expected}'.",
+            )
+
+        resolved_path_value = _extract_path_value(input_context, cleaned)
+        if resolved_path_value is not None:
+            if isinstance(resolved_path_value, bool):
+                return (
+                    resolved_path_value,
+                    f"Resolved '{cleaned}' to boolean {str(resolved_path_value).lower()}.",
+                )
+            matched = _coerce_bool(resolved_path_value)
+            return (
+                matched,
+                f"Resolved '{cleaned}' to '{_stringify(resolved_path_value)}' (truthy={str(matched).lower()}).",
+            )
+
+        route_candidates = [
+            _extract_path_value(input_context, "latest_upstream.output_state.structured_output.route_key"),
+            _extract_path_value(input_context, "latest_upstream.routing_state.route_key"),
+        ]
+        for candidate in route_candidates:
+            candidate_text = str(candidate or "").strip()
+            if candidate_text and candidate_text.lower() == cleaned.lower():
+                return True, f"Matched route_key '{candidate_text}'."
+
+        context_blob = _json_dumps(input_context).lower()
+        if cleaned.lower() in context_blob:
+            return True, "Matched condition text in serialized input context."
+
+        return False, "No matching value found in input context."
+
+    raw_conditions = (
+        node_config.get("decision_conditions")
+        if isinstance(node_config.get("decision_conditions"), list)
+        else []
+    )
+    conditions: list[dict[str, str]] = []
+    seen_connectors: set[str] = set()
+    for item in raw_conditions:
+        if not isinstance(item, dict):
+            continue
+        connector_id = str(item.get("connector_id") or "").strip()
+        if not connector_id or connector_id in seen_connectors:
+            continue
+        seen_connectors.add(connector_id)
+        conditions.append(
+            {
+                "connector_id": connector_id,
+                "condition_text": str(item.get("condition_text") or "").strip(),
+            }
+        )
+
+    if not conditions:
+        # Backward compatibility for legacy route_key-only decision behavior.
+        route_field_path = str(node_config.get("route_field_path") or "").strip()
+        if not route_field_path:
+            route_field_path = "latest_upstream.output_state.structured_output.route_key"
+        route_value = _extract_path_value(input_context, route_field_path)
+        if route_value is None:
+            route_value = _extract_path_value(
+                input_context, "latest_upstream.routing_state.route_key"
+            )
+        route_key = str(route_value or "").strip()
+        matched_connector_ids = [route_key] if route_key else []
+        evaluations = [
+            {
+                "connector_id": route_key,
+                "condition_text": route_field_path,
+                "matched": bool(route_key),
+                "reason": (
+                    f"Resolved legacy route key '{route_key}'."
+                    if route_key
+                    else f"Could not resolve route key from '{route_field_path}'."
+                ),
+            }
+        ]
+        no_match = len(matched_connector_ids) == 0
+        output_state = {
+            "node_type": FLOWCHART_NODE_TYPE_DECISION,
+            "resolved_route_path": route_field_path,
+            "resolved_route_key": route_key or None,
+            "matched_connector_ids": matched_connector_ids,
+            "evaluations": evaluations,
+            "no_match": no_match,
+        }
+        routing_state: dict[str, Any] = {
+            "matched_connector_ids": matched_connector_ids,
+            "evaluations": evaluations,
+            "no_match": no_match,
+        }
+        if route_key:
+            routing_state["route_key"] = route_key
+        return output_state, routing_state
+
+    evaluations: list[dict[str, Any]] = []
+    matched_connector_ids: list[str] = []
+    for condition in conditions:
+        connector_id = condition["connector_id"]
+        condition_text = condition["condition_text"]
+        matched, reason = _evaluate_condition(condition_text)
+        evaluations.append(
+            {
+                "connector_id": connector_id,
+                "condition_text": condition_text,
+                "matched": matched,
+                "reason": reason,
+            }
+        )
+        if matched:
+            matched_connector_ids.append(connector_id)
+
+    no_match = len(matched_connector_ids) == 0
     output_state = {
         "node_type": FLOWCHART_NODE_TYPE_DECISION,
-        "resolved_route_path": route_field_path,
-        "resolved_route_key": route_key,
-        "mcp_server_keys": list(mcp_server_keys),
+        "matched_connector_ids": matched_connector_ids,
+        "evaluations": evaluations,
+        "no_match": no_match,
     }
-    return output_state, {"route_key": route_key}
+    routing_state = {
+        "matched_connector_ids": matched_connector_ids,
+        "evaluations": evaluations,
+        "no_match": no_match,
+    }
+    if matched_connector_ids:
+        routing_state["route_key"] = matched_connector_ids[0]
+    return output_state, routing_state
 
 
 def _apply_plan_completion_patch(
@@ -6852,6 +7609,8 @@ def _apply_plan_completion_patch(
     patch: dict[str, Any],
     action_results: list[str],
     now: datetime,
+    touched_stage_ids: set[int] | None = None,
+    touched_task_ids: set[int] | None = None,
 ) -> None:
     if _coerce_bool(patch.get("mark_plan_complete")):
         plan.completed_at = now
@@ -6867,6 +7626,8 @@ def _apply_plan_completion_patch(
         if stage is None:
             continue
         stage.completed_at = now
+        if touched_stage_ids is not None:
+            touched_stage_ids.add(int(stage.id))
         action_results.append(f"Marked stage {stage_id} as completed.")
 
     task_ids_raw = patch.get("complete_task_ids") or patch.get("task_ids") or []
@@ -6880,6 +7641,10 @@ def _apply_plan_completion_patch(
         if task is None:
             continue
         task.completed_at = now
+        if touched_task_ids is not None:
+            touched_task_ids.add(int(task.id))
+            if touched_stage_ids is not None:
+                touched_stage_ids.add(int(task.plan_stage_id))
         action_results.append(f"Marked task {task_id} as completed.")
 
 
@@ -6921,10 +7686,15 @@ def _execute_flowchart_plan_node(
         if plan is None:
             raise ValueError(f"Plan {node_ref_id} was not found.")
 
-        action = str(node_config.get("action") or "read").strip().lower()
+        action = _normalize_plan_node_action(node_config.get("action"))
+        additive_prompt = str(node_config.get("additive_prompt") or "").strip()
         now = _utcnow()
         action_results: list[str] = []
-        if action in {"update", "update_completion", "complete"}:
+        touched_stage_ids: set[int] = set()
+        touched_task_ids: set[int] = set()
+        completion_target: dict[str, Any] = {}
+
+        if action == PLAN_NODE_ACTION_CREATE_OR_UPDATE:
             direct_patch = node_config.get("patch")
             if isinstance(direct_patch, dict):
                 _apply_plan_completion_patch(
@@ -6932,6 +7702,8 @@ def _execute_flowchart_plan_node(
                     patch=direct_patch,
                     action_results=action_results,
                     now=now,
+                    touched_stage_ids=touched_stage_ids,
+                    touched_task_ids=touched_task_ids,
                 )
             completion_source_path = str(
                 node_config.get("completion_source_path") or ""
@@ -6944,40 +7716,138 @@ def _execute_flowchart_plan_node(
                         patch=completion_patch,
                         action_results=action_results,
                         now=now,
+                        touched_stage_ids=touched_stage_ids,
+                        touched_task_ids=touched_task_ids,
                     )
                 else:
                     action_results.append(
                         f"No completion patch found at '{completion_source_path}'."
                     )
-
-        if _coerce_bool(node_config.get("transform_with_llm")):
-            transform_prompt = str(node_config.get("transform_prompt") or "").strip()
-            if transform_prompt:
-                model = _resolve_node_model(
-                    session,
-                    node=node,
-                    default_model_id=default_model_id,
-                )
-                llm_patch = _execute_optional_llm_transform(
-                    prompt=transform_prompt,
-                    model=model,
-                    enabled_providers=enabled_providers,
-                    mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
-                    attachments=list(node.attachments),
-                )
-                if isinstance(llm_patch, dict):
-                    _apply_plan_completion_patch(
-                        plan=plan,
-                        patch=llm_patch,
-                        action_results=action_results,
-                        now=now,
+            if _coerce_bool(node_config.get("transform_with_llm")):
+                transform_prompt = str(node_config.get("transform_prompt") or "").strip()
+                if transform_prompt:
+                    model = _resolve_node_model(
+                        session,
+                        node=node,
+                        default_model_id=default_model_id,
                     )
-                    action_results.append("Applied LLM transform patch to plan.")
+                    llm_patch = _execute_optional_llm_transform(
+                        prompt=transform_prompt,
+                        model=model,
+                        enabled_providers=enabled_providers,
+                        mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
+                        attachments=list(node.attachments),
+                    )
+                    if isinstance(llm_patch, dict):
+                        _apply_plan_completion_patch(
+                            plan=plan,
+                            patch=llm_patch,
+                            action_results=action_results,
+                            now=now,
+                            touched_stage_ids=touched_stage_ids,
+                            touched_task_ids=touched_task_ids,
+                        )
+                        action_results.append("Applied LLM transform patch to plan.")
+        elif action == PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM:
+            completion_source_path = str(
+                node_config.get("completion_source_path") or ""
+            ).strip()
+            completion_target_payload = (
+                _extract_path_value(input_context, completion_source_path)
+                if completion_source_path
+                else None
+            )
+            plan_item_id = node_config.get("plan_item_id")
+            stage_key = node_config.get("stage_key")
+            task_key = node_config.get("task_key")
+            if isinstance(completion_target_payload, dict):
+                if not str(plan_item_id or "").strip():
+                    plan_item_id = completion_target_payload.get(
+                        "plan_item_id",
+                        completion_target_payload.get(
+                            "task_id", completion_target_payload.get("plan_task_id")
+                        ),
+                    )
+                if not str(stage_key or "").strip():
+                    stage_key = completion_target_payload.get("stage_key")
+                if not str(task_key or "").strip():
+                    task_key = completion_target_payload.get("task_key")
+            stage, task, resolution, normalized_stage_key, normalized_task_key = (
+                _resolve_plan_completion_target(
+                    plan=plan,
+                    plan_item_id=plan_item_id,
+                    stage_key=stage_key,
+                    task_key=task_key,
+                )
+            )
+            task.completed_at = now
+            touched_stage_ids.add(int(stage.id))
+            touched_task_ids.add(int(task.id))
+            completion_target = {
+                "resolution": resolution,
+                "plan_item_id": int(task.id),
+                "stage_id": int(stage.id),
+                "stage_key": normalized_stage_key,
+                "task_key": normalized_task_key,
+            }
+            action_results.append(
+                "Completed plan item "
+                f"{int(task.id)} (stage '{normalized_stage_key}', task '{normalized_task_key}')."
+            )
+        else:
+            raise ValueError(f"Unsupported plan node action '{action}'.")
+
+        if additive_prompt:
+            action_results.append("Captured additive prompt instructions.")
+
+        stage_rows = sorted(
+            list(plan.stages or []),
+            key=lambda item: (item.position, item.id),
+        )
+        stage_by_id = {int(stage.id): stage for stage in stage_rows}
+        task_by_id: dict[int, PlanTask] = {}
+        for stage in stage_rows:
+            for task in sorted(list(stage.tasks or []), key=lambda item: (item.position, item.id)):
+                task_by_id[int(task.id)] = task
+        touched_stages = [
+            {
+                "id": int(stage.id),
+                "name": stage.name,
+                "stage_key": _normalize_plan_item_key(stage.name),
+            }
+            for stage_id in sorted(touched_stage_ids)
+            for stage in [stage_by_id.get(stage_id)]
+            if stage is not None
+        ]
+        touched_tasks = [
+            {
+                "id": int(task.id),
+                "plan_stage_id": int(task.plan_stage_id),
+                "name": task.name,
+                "stage_key": _normalize_plan_item_key(
+                    stage_by_id.get(int(task.plan_stage_id)).name
+                    if stage_by_id.get(int(task.plan_stage_id)) is not None
+                    else ""
+                ),
+                "task_key": _normalize_plan_item_key(task.name),
+            }
+            for task_id in sorted(touched_task_ids)
+            for task in [task_by_id.get(task_id)]
+            if task is not None
+        ]
 
         output_state = {
             "node_type": FLOWCHART_NODE_TYPE_PLAN,
             "action": action,
+            "additive_prompt": additive_prompt,
             "action_results": action_results,
+            "completion_target": completion_target,
+            "touched": {
+                "stage_ids": sorted(touched_stage_ids),
+                "task_ids": sorted(touched_task_ids),
+                "stages": touched_stages,
+                "tasks": touched_tasks,
+            },
             "mcp_server_keys": list(mcp_server_keys),
             "attachments": _build_attachment_entries(list(node.attachments)),
             "plan": _serialize_plan_for_node(plan),
@@ -7024,11 +7894,12 @@ def _execute_flowchart_milestone_node(
         if milestone is None:
             raise ValueError(f"Milestone {node_ref_id} was not found.")
 
-        action = str(node_config.get("action") or "read").strip().lower()
-        now = _utcnow()
+        action = _normalize_milestone_node_action(node_config.get("action"))
+        additive_prompt = str(node_config.get("additive_prompt") or "").strip()
         action_results: list[str] = []
+        before_milestone = _serialize_milestone_for_node(milestone)
 
-        if action in {"update", "checkpoint", "complete"}:
+        if action == MILESTONE_NODE_ACTION_CREATE_OR_UPDATE:
             patch = node_config.get("patch")
             if isinstance(patch, dict):
                 if "name" in patch:
@@ -7055,12 +7926,16 @@ def _execute_flowchart_milestone_node(
                     milestone.latest_update = str(patch.get("latest_update") or "")
                 action_results.append("Applied milestone patch.")
 
-            completion_source_path = str(
-                node_config.get("completion_source_path") or ""
-            ).strip()
+            completion_source_path = str(node_config.get("completion_source_path") or "").strip()
             if completion_source_path:
                 completion_patch = _extract_path_value(input_context, completion_source_path)
                 if isinstance(completion_patch, dict):
+                    if "name" in completion_patch:
+                        milestone.name = (
+                            str(completion_patch.get("name") or "").strip() or milestone.name
+                        )
+                    if "description" in completion_patch:
+                        milestone.description = str(completion_patch.get("description") or "")
                     if "status" in completion_patch:
                         milestone.status = str(completion_patch.get("status") or milestone.status)
                     if "progress_percent" in completion_patch:
@@ -7070,37 +7945,33 @@ def _execute_flowchart_milestone_node(
                             minimum=0,
                         )
                         milestone.progress_percent = min(progress, 100)
+                    if "latest_update" in completion_patch:
+                        milestone.latest_update = str(completion_patch.get("latest_update") or "")
                     if _coerce_bool(completion_patch.get("completed")):
                         milestone.completed = True
                     action_results.append("Applied upstream completion patch.")
 
-            if _coerce_bool(node_config.get("mark_complete")):
-                milestone.completed = True
-                milestone.status = MILESTONE_STATUS_DONE
-                milestone.progress_percent = 100
-                action_results.append("Marked milestone complete.")
+            if additive_prompt:
+                milestone.latest_update = additive_prompt
+                if (
+                    str(milestone.status or "").strip().lower()
+                    not in {MILESTONE_STATUS_DONE}
+                ):
+                    milestone.status = MILESTONE_STATUS_IN_PROGRESS
+                action_results.append("Applied additive prompt update.")
+        elif action == MILESTONE_NODE_ACTION_MARK_COMPLETE:
+            if additive_prompt:
+                milestone.latest_update = additive_prompt
+            milestone.completed = True
+            milestone.status = MILESTONE_STATUS_DONE
+            milestone.progress_percent = 100
+            action_results.append("Marked milestone complete.")
 
-        if _coerce_bool(node_config.get("transform_with_llm")):
-            transform_prompt = str(node_config.get("transform_prompt") or "").strip()
-            if transform_prompt:
-                model = _resolve_node_model(
-                    session,
-                    node=node,
-                    default_model_id=default_model_id,
-                )
-                llm_patch = _execute_optional_llm_transform(
-                    prompt=transform_prompt,
-                    model=model,
-                    enabled_providers=enabled_providers,
-                    mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
-                    attachments=list(node.attachments),
-                )
-                if isinstance(llm_patch, dict):
-                    if "latest_update" in llm_patch:
-                        milestone.latest_update = str(llm_patch.get("latest_update") or "")
-                    if "health" in llm_patch:
-                        milestone.health = str(llm_patch.get("health") or milestone.health)
-                    action_results.append("Applied LLM semantic patch.")
+        if _coerce_bool(node_config.get("mark_complete")):
+            milestone.completed = True
+            milestone.status = MILESTONE_STATUS_DONE
+            milestone.progress_percent = 100
+            action_results.append("Marked milestone complete.")
 
         if milestone.status == MILESTONE_STATUS_DONE:
             milestone.completed = True
@@ -7120,11 +7991,13 @@ def _execute_flowchart_milestone_node(
         output_state = {
             "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
             "action": action,
+            "additive_prompt": additive_prompt,
             "execution_index": execution_index,
             "checkpoint_hit": checkpoint_hit,
             "action_results": action_results,
             "mcp_server_keys": list(mcp_server_keys),
             "attachments": _build_attachment_entries(list(node.attachments)),
+            "before_milestone": before_milestone,
             "milestone": _serialize_milestone_for_node(milestone),
         }
 
@@ -7162,12 +8035,28 @@ def _execute_flowchart_memory_node(
     input_context: dict[str, Any],
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    action = str(node_config.get("action") or "fetch").strip().lower()
+    normalized_mcp_keys = {
+        str(item or "").strip().lower() for item in (mcp_server_keys or [])
+    }
+    required_mcp_key = INTEGRATED_MCP_LLMCTL_KEY.strip().lower()
+    if required_mcp_key not in normalized_mcp_keys:
+        raise ValueError(
+            "Memory nodes require the system-managed LLMCTL MCP server (llmctl-mcp)."
+        )
+
+    action = _normalize_memory_node_action(node_config.get("action"))
+    if not action:
+        raise ValueError("Memory node action is required: add or retrieve.")
     limit = _parse_optional_int(node_config.get("limit"), default=10, minimum=1)
     retrieved: list[dict[str, Any]] = []
     stored_memory: dict[str, Any] | None = None
     action_results: list[str] = []
     attachment_entries: list[dict[str, object]] = []
+    additive_prompt = str(node_config.get("additive_prompt") or "").strip()
+    inferred_prompt = ""
+    if not additive_prompt:
+        inferred_prompt = _infer_memory_node_prompt(action=action, input_context=input_context)
+    effective_prompt = additive_prompt or inferred_prompt
 
     with session_scope() as session:
         node = (
@@ -7182,13 +8071,15 @@ def _execute_flowchart_memory_node(
         if node is None:
             raise ValueError(f"Flowchart node {node_id} was not found.")
         attachment_entries = _build_attachment_entries(list(node.attachments))
-        if action == "fetch":
+        if action == MEMORY_NODE_ACTION_RETRIEVE:
             if node_ref_id is not None:
                 memory = session.get(Memory, node_ref_id)
                 if memory is None:
                     raise ValueError(f"Memory {node_ref_id} was not found.")
                 retrieved = [_serialize_memory_for_node(memory)]
-                action_results.append(f"Fetched memory {node_ref_id}.")
+                action_results.append(
+                    f"Retrieved memory {node_ref_id} via {INTEGRATED_MCP_LLMCTL_KEY}."
+                )
             else:
                 query_text = str(node_config.get("query") or "").strip()
                 query_path = str(node_config.get("query_source_path") or "").strip()
@@ -7196,13 +8087,17 @@ def _execute_flowchart_memory_node(
                     query_value = _extract_path_value(input_context, query_path)
                     if isinstance(query_value, str) and query_value.strip():
                         query_text = query_value.strip()
+                if not query_text and effective_prompt:
+                    query_text = effective_prompt
                 stmt = select(Memory).order_by(Memory.updated_at.desc(), Memory.id.desc())
                 if query_text:
                     stmt = stmt.where(Memory.description.ilike(f"%{query_text}%"))
                 items = session.execute(stmt.limit(limit)).scalars().all()
                 retrieved = [_serialize_memory_for_node(item) for item in items]
-                action_results.append(f"Fetched {len(retrieved)} memory item(s).")
-        elif action in {"store", "upsert", "append"}:
+                action_results.append(
+                    f"Retrieved {len(retrieved)} memory item(s) via {INTEGRATED_MCP_LLMCTL_KEY}."
+                )
+        elif action == MEMORY_NODE_ACTION_ADD:
             text = str(node_config.get("text") or "").strip()
             source_path = str(node_config.get("text_source_path") or "").strip()
             if source_path:
@@ -7212,35 +8107,62 @@ def _execute_flowchart_memory_node(
                         text = source_value.strip()
                     else:
                         text = json.dumps(_json_safe(source_value), sort_keys=True)
+            if not text and effective_prompt:
+                text = effective_prompt
             if not text:
-                raise ValueError("Memory store action requires text or text_source_path.")
+                raise ValueError(
+                    "Memory add action requires additive prompt or upstream context."
+                )
             if node_ref_id is not None:
                 memory = session.get(Memory, node_ref_id)
                 if memory is None:
                     raise ValueError(f"Memory {node_ref_id} was not found.")
-                store_mode = str(node_config.get("store_mode") or "replace").strip().lower()
-                if store_mode == "append":
+                store_mode = str(node_config.get("store_mode") or "append").strip().lower()
+                if store_mode == "replace":
+                    memory.description = text
+                else:
                     prefix = memory.description.rstrip()
                     memory.description = f"{prefix}\n\n{text}" if prefix else text
-                else:
-                    memory.description = text
                 stored_memory = _serialize_memory_for_node(memory)
-                action_results.append(f"Updated memory {node_ref_id}.")
+                action_results.append(
+                    f"Added memory content to {node_ref_id} via {INTEGRATED_MCP_LLMCTL_KEY}."
+                )
             else:
                 created = Memory.create(session, description=text)
                 stored_memory = _serialize_memory_for_node(created)
-                action_results.append(f"Created memory {created.id}.")
+                action_results.append(
+                    f"Created memory {created.id} via {INTEGRATED_MCP_LLMCTL_KEY}."
+                )
         else:
             raise ValueError(f"Unsupported memory node action '{action}'.")
 
+    memory_id = (
+        _parse_optional_int(stored_memory.get("id"), default=0, minimum=1)
+        if isinstance(stored_memory, dict)
+        else None
+    )
+    if memory_id is None and node_ref_id is not None:
+        memory_id = node_ref_id
     output_state = {
         "node_type": FLOWCHART_NODE_TYPE_MEMORY,
         "action": action,
         "action_results": action_results,
-        "mcp_server_keys": list(mcp_server_keys),
+        "additive_prompt": additive_prompt,
+        "inferred_prompt": inferred_prompt,
+        "effective_prompt": effective_prompt,
+        "memory_id": memory_id,
+        "mcp_server_keys": [INTEGRATED_MCP_LLMCTL_KEY],
         "attachments": attachment_entries,
         "retrieved_memories": retrieved,
         "stored_memory": stored_memory,
+        "execution_index": _parse_optional_int(
+            ((input_context.get("node") if isinstance(input_context.get("node"), dict) else {}) or {}).get(
+                "execution_index"
+            ),
+            default=0,
+            minimum=1,
+        )
+        or None,
     }
     route_key = str(node_config.get("route_key") or "").strip()
     routing_state: dict[str, Any] = {}
@@ -8468,8 +9390,6 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         succeeded_node_run = session.get(FlowchartRunNode, node_run_id)
                         if succeeded_node_run is not None:
                             succeeded_node_run.status = "succeeded"
-                            succeeded_node_run.output_state_json = _json_dumps(output_state)
-                            succeeded_node_run.routing_state_json = _json_dumps(routing_state)
                             skill_ids = output_state.get("resolved_skill_ids")
                             if isinstance(skill_ids, list):
                                 succeeded_node_run.resolved_skill_ids_json = _json_dumps(skill_ids)
@@ -8528,6 +9448,73 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                     instruction_materialized_paths
                                 )
                             succeeded_node_run.finished_at = finished_at
+                            input_context_payload = _parse_json_object(
+                                succeeded_node_run.input_context_json
+                            )
+                            if (
+                                str(node_spec.get("node_type") or "").strip().lower()
+                                == FLOWCHART_NODE_TYPE_PLAN
+                            ):
+                                artifact_summary = _persist_plan_node_artifact(
+                                    session,
+                                    flowchart_id=flowchart_id,
+                                    flowchart_node_id=node_id,
+                                    flowchart_run_id=run_id,
+                                    flowchart_run_node_id=node_run_id,
+                                    node_config=(
+                                        node_spec.get("config")
+                                        if isinstance(node_spec.get("config"), dict)
+                                        else {}
+                                    ),
+                                    input_context=input_context_payload,
+                                    output_state=output_state,
+                                    routing_state=routing_state,
+                                )
+                                output_state["artifact"] = artifact_summary
+                            elif (
+                                str(node_spec.get("node_type") or "").strip().lower()
+                                == FLOWCHART_NODE_TYPE_MILESTONE
+                            ):
+                                artifact_summary = _persist_milestone_node_artifact(
+                                    session,
+                                    flowchart_id=flowchart_id,
+                                    flowchart_node_id=node_id,
+                                    flowchart_run_id=run_id,
+                                    flowchart_run_node_id=node_run_id,
+                                    node_config=(
+                                        node_spec.get("config")
+                                        if isinstance(node_spec.get("config"), dict)
+                                        else {}
+                                    ),
+                                    input_context=input_context_payload,
+                                    output_state=output_state,
+                                    routing_state=routing_state,
+                                )
+                                output_state["artifact"] = artifact_summary
+                            if (
+                                str(node_spec.get("node_type") or "").strip().lower()
+                                == FLOWCHART_NODE_TYPE_MEMORY
+                            ):
+                                artifact_summary = _persist_memory_node_artifact(
+                                    session,
+                                    flowchart_id=flowchart_id,
+                                    flowchart_node_id=node_id,
+                                    flowchart_run_id=run_id,
+                                    flowchart_run_node_id=node_run_id,
+                                    node_config=(
+                                        node_spec.get("config")
+                                        if isinstance(node_spec.get("config"), dict)
+                                        else {}
+                                    ),
+                                    input_context=_parse_json_object(
+                                        succeeded_node_run.input_context_json
+                                    ),
+                                    output_state=output_state,
+                                    routing_state=routing_state,
+                                )
+                                output_state["artifact"] = artifact_summary
+                            succeeded_node_run.output_state_json = _json_dumps(output_state)
+                            succeeded_node_run.routing_state_json = _json_dumps(routing_state)
                         _update_flowchart_node_task(
                             session,
                             node_run=succeeded_node_run,

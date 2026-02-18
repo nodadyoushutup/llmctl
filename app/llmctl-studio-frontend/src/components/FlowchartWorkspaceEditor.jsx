@@ -1,5 +1,4 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import ActionIcon from './ActionIcon'
 import PanelHeader from './PanelHeader'
 
 const DEFAULT_NODE_TYPES = ['start', 'end', 'flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag']
@@ -7,12 +6,37 @@ const NODE_TYPE_WITH_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
 const NODE_TYPE_REQUIRES_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left']
 const EDGE_MODE_OPTIONS = ['solid', 'dotted']
+const MILESTONE_ACTION_OPTIONS = [
+  { value: 'create_or_update', label: 'Create/Update milestone' },
+  { value: 'mark_complete', label: 'Mark milestone complete' },
+]
+const MEMORY_ACTION_OPTIONS = [
+  { value: 'add', label: 'Add memory' },
+  { value: 'retrieve', label: 'Retrieve memory' },
+]
+const PLAN_ACTION_CREATE_OR_UPDATE = 'create_or_update_plan'
+const PLAN_ACTION_COMPLETE_PLAN_ITEM = 'complete_plan_item'
+const PLAN_ACTION_OPTIONS = [
+  { value: PLAN_ACTION_CREATE_OR_UPDATE, label: 'Create or update plan' },
+  { value: PLAN_ACTION_COMPLETE_PLAN_ITEM, label: 'Complete plan item' },
+]
+const MILESTONE_RETENTION_OPTIONS = [
+  { value: 'ttl', label: 'TTL' },
+  { value: 'max_count', label: 'Max count' },
+  { value: 'ttl_max_count', label: 'TTL + max count' },
+  { value: 'forever', label: 'Forever' },
+]
+const DEFAULT_MILESTONE_RETENTION_TTL_SECONDS = 3600
+const DEFAULT_MILESTONE_RETENTION_MAX_COUNT = 25
+const DEFAULT_PLAN_RETENTION_TTL_SECONDS = 3600
+const DEFAULT_PLAN_RETENTION_MAX_COUNT = 25
 const TYPE_TO_REF_CATALOG_KEY = {
   flowchart: 'flowcharts',
   plan: 'plans',
   milestone: 'milestones',
   memory: 'memories',
 }
+const NODE_TYPES_WITH_MODEL = new Set(['task', 'milestone', 'memory', 'rag'])
 
 const WORLD_WIDTH = 16000
 const WORLD_HEIGHT = 12000
@@ -520,6 +544,37 @@ function defaultConfigForType(nodeType) {
   if (normalized === 'task') {
     return { task_prompt: '' }
   }
+  if (normalized === 'plan') {
+    return {
+      action: PLAN_ACTION_CREATE_OR_UPDATE,
+      additive_prompt: '',
+      retention_mode: 'ttl',
+      retention_ttl_seconds: DEFAULT_PLAN_RETENTION_TTL_SECONDS,
+      retention_max_count: DEFAULT_PLAN_RETENTION_MAX_COUNT,
+      plan_item_id: null,
+      stage_key: '',
+      task_key: '',
+      completion_source_path: '',
+    }
+  }
+  if (normalized === 'milestone') {
+    return {
+      action: 'create_or_update',
+      additive_prompt: '',
+      retention_mode: 'ttl',
+      retention_ttl_seconds: DEFAULT_MILESTONE_RETENTION_TTL_SECONDS,
+      retention_max_count: DEFAULT_MILESTONE_RETENTION_MAX_COUNT,
+    }
+  }
+  if (normalized === 'memory') {
+    return {
+      action: 'add',
+      additive_prompt: '',
+      retention_mode: 'ttl',
+      retention_ttl_seconds: DEFAULT_MILESTONE_RETENTION_TTL_SECONDS,
+      retention_max_count: DEFAULT_MILESTONE_RETENTION_MAX_COUNT,
+    }
+  }
   if (normalized === 'rag') {
     return {
       mode: 'query',
@@ -528,6 +583,232 @@ function defaultConfigForType(nodeType) {
     }
   }
   return {}
+}
+
+function normalizeMilestoneAction(value) {
+  const action = String(value || '').trim().toLowerCase()
+  return action === 'mark_complete' || action === 'complete'
+    ? 'mark_complete'
+    : 'create_or_update'
+}
+
+function normalizePlanAction(value) {
+  const action = String(value || '').trim().toLowerCase()
+  if ([
+    'complete_plan_item',
+    'complete plan item',
+    'mark_plan_item_complete',
+    'mark_task_complete',
+  ].includes(action)) {
+    return PLAN_ACTION_COMPLETE_PLAN_ITEM
+  }
+  return PLAN_ACTION_CREATE_OR_UPDATE
+}
+
+function normalizeMemoryAction(value) {
+  const action = String(value || '').trim().toLowerCase()
+  if (['retrieve', 'fetch', 'read', 'query', 'search', 'list'].includes(action)) {
+    return 'retrieve'
+  }
+  return 'add'
+}
+
+function normalizeMilestoneRetentionMode(value) {
+  const mode = String(value || '').trim().toLowerCase()
+  if (mode === 'forever' || mode === 'none') {
+    return 'forever'
+  }
+  if (mode === 'max_count' || mode === 'max') {
+    return 'max_count'
+  }
+  if (mode === 'ttl_max_count' || mode === 'ttl_max' || mode === 'ttl+max') {
+    return 'ttl_max_count'
+  }
+  return 'ttl'
+}
+
+function retentionModeUsesTtl(mode) {
+  const normalized = normalizeMilestoneRetentionMode(mode)
+  return normalized === 'ttl' || normalized === 'ttl_max_count'
+}
+
+function retentionModeUsesMaxCount(mode) {
+  const normalized = normalizeMilestoneRetentionMode(mode)
+  return normalized === 'max_count' || normalized === 'ttl_max_count'
+}
+
+function normalizeNodeConfig(config, nodeType = '') {
+  const normalizedType = normalizeNodeType(nodeType)
+  const nextConfig = config && typeof config === 'object' ? { ...config } : {}
+  if (normalizedType === 'plan') {
+    nextConfig.action = normalizePlanAction(nextConfig.action)
+    nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+    nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
+    nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_PLAN_RETENTION_TTL_SECONDS
+    nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_PLAN_RETENTION_MAX_COUNT
+    const planItemId = parsePositiveInt(nextConfig.plan_item_id)
+    if (planItemId == null) {
+      delete nextConfig.plan_item_id
+    } else {
+      nextConfig.plan_item_id = planItemId
+    }
+    nextConfig.stage_key = String(nextConfig.stage_key || '').trim()
+    nextConfig.task_key = String(nextConfig.task_key || '').trim()
+    nextConfig.completion_source_path = String(nextConfig.completion_source_path || '').trim()
+    delete nextConfig.agent_id
+    return nextConfig
+  }
+  if (normalizedType === 'milestone') {
+    nextConfig.action = normalizeMilestoneAction(nextConfig.action)
+    nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+    nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
+    nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
+    nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
+    delete nextConfig.agent_id
+    return nextConfig
+  }
+  if (normalizedType === 'memory') {
+    nextConfig.action = normalizeMemoryAction(nextConfig.action)
+    nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+    nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
+    nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
+    nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
+    delete nextConfig.agent_id
+    return nextConfig
+  }
+  const agentId = parsePositiveInt(nextConfig.agent_id)
+  if (agentId == null) {
+    delete nextConfig.agent_id
+  } else {
+    nextConfig.agent_id = agentId
+  }
+  return nextConfig
+}
+
+function normalizeDecisionConditions(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const seen = new Set()
+  const normalized = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+    const connectorId = String(item.connector_id || '').trim()
+    if (!connectorId || seen.has(connectorId)) {
+      continue
+    }
+    seen.add(connectorId)
+    normalized.push({
+      connector_id: connectorId,
+      condition_text: String(item.condition_text || '').trim(),
+    })
+  }
+  return normalized
+}
+
+function decisionConditionsEqual(left, right) {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((entry, index) => (
+    entry.connector_id === right[index]?.connector_id
+    && entry.condition_text === right[index]?.condition_text
+  ))
+}
+
+function syncDecisionNodeConditions(nodes, edges) {
+  if (!Array.isArray(nodes) || !Array.isArray(edges)) {
+    return { nodes, edges, changed: false }
+  }
+
+  const nodeTypeByToken = new Map(nodes.map((node) => [node.token, normalizeNodeType(node.node_type)]))
+  const connectorIdsByNodeToken = new Map()
+  const usedConnectorIdsByNodeToken = new Map()
+  const nextConnectorIndexByNodeToken = new Map()
+  let changed = false
+
+  function nextConnectorId(nodeToken) {
+    const used = usedConnectorIdsByNodeToken.get(nodeToken) || new Set()
+    usedConnectorIdsByNodeToken.set(nodeToken, used)
+    let nextIndex = nextConnectorIndexByNodeToken.get(nodeToken) || 1
+    while (used.has(`connector_${nextIndex}`)) {
+      nextIndex += 1
+    }
+    const connectorId = `connector_${nextIndex}`
+    used.add(connectorId)
+    nextConnectorIndexByNodeToken.set(nodeToken, nextIndex + 1)
+    return connectorId
+  }
+
+  const nextEdges = edges.map((edge) => {
+    const sourceNodeType = nodeTypeByToken.get(edge.sourceToken) || 'task'
+    if (sourceNodeType !== 'decision' || normalizeEdgeMode(edge.edge_mode) !== 'solid') {
+      return edge
+    }
+    const used = usedConnectorIdsByNodeToken.get(edge.sourceToken) || new Set()
+    usedConnectorIdsByNodeToken.set(edge.sourceToken, used)
+    let connectorId = String(edge.condition_key || '').trim()
+    if (!connectorId || used.has(connectorId)) {
+      connectorId = nextConnectorId(edge.sourceToken)
+    } else {
+      used.add(connectorId)
+    }
+    const nodeConnectorIds = connectorIdsByNodeToken.get(edge.sourceToken) || []
+    nodeConnectorIds.push(connectorId)
+    connectorIdsByNodeToken.set(edge.sourceToken, nodeConnectorIds)
+    if (connectorId === String(edge.condition_key || '').trim()) {
+      return edge
+    }
+    changed = true
+    return {
+      ...edge,
+      condition_key: connectorId,
+    }
+  })
+
+  const nextNodes = nodes.map((node) => {
+    const nodeType = normalizeNodeType(node.node_type)
+    const currentConfig = node.config && typeof node.config === 'object' ? node.config : {}
+    if (nodeType !== 'decision') {
+      if (!Object.prototype.hasOwnProperty.call(currentConfig, 'decision_conditions')) {
+        return node
+      }
+      const nextConfig = { ...currentConfig }
+      delete nextConfig.decision_conditions
+      changed = true
+      return {
+        ...node,
+        config: nextConfig,
+      }
+    }
+    const connectorIds = connectorIdsByNodeToken.get(node.token) || []
+    const existingConditions = normalizeDecisionConditions(currentConfig.decision_conditions)
+    const conditionTextByConnector = new Map(
+      existingConditions.map((entry) => [entry.connector_id, entry.condition_text]),
+    )
+    const nextConditions = connectorIds.map((connectorId) => ({
+      connector_id: connectorId,
+      condition_text: conditionTextByConnector.get(connectorId) || '',
+    }))
+    if (decisionConditionsEqual(existingConditions, nextConditions)) {
+      return node
+    }
+    changed = true
+    return {
+      ...node,
+      config: {
+        ...currentConfig,
+        decision_conditions: nextConditions,
+      },
+    }
+  })
+
+  if (!changed) {
+    return { nodes, edges, changed: false }
+  }
+  return { nodes: nextNodes, edges: nextEdges, changed: true }
 }
 
 function hasTaskPrompt(config) {
@@ -550,8 +831,11 @@ function normalizeEdgeMode(value) {
   return EDGE_MODE_OPTIONS.includes(mode) ? mode : 'solid'
 }
 
-function buildNodePayload(node) {
+function buildNodePayload(node, llmctlMcpServerId = null) {
   const nodeType = normalizeNodeType(node.node_type)
+  const mcpServerIds = nodeType === 'memory' && llmctlMcpServerId != null
+    ? [llmctlMcpServerId]
+    : (Array.isArray(node.mcp_server_ids) ? node.mcp_server_ids : [])
   const payload = {
     id: node.persistedId || null,
     node_type: nodeType,
@@ -561,9 +845,9 @@ function buildNodePayload(node) {
       : null,
     x: Number(toNumber(node.x, 0).toFixed(2)),
     y: Number(toNumber(node.y, 0).toFixed(2)),
-    config: node.config && typeof node.config === 'object' ? node.config : {},
+    config: normalizeNodeConfig(node.config, nodeType),
     model_id: node.model_id == null ? null : parseOptionalInt(node.model_id),
-    mcp_server_ids: Array.isArray(node.mcp_server_ids) ? node.mcp_server_ids : [],
+    mcp_server_ids: mcpServerIds,
     script_ids: Array.isArray(node.script_ids) ? node.script_ids : [],
     attachment_ids: Array.isArray(node.attachment_ids) ? node.attachment_ids : [],
   }
@@ -615,7 +899,12 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
       ref_id: NODE_TYPE_WITH_REF.has(nodeType) ? parseOptionalInt(raw?.ref_id) : null,
       x: toNumber(raw?.x, 0),
       y: toNumber(raw?.y, 0),
-      config: raw?.config && typeof raw.config === 'object' ? { ...raw.config } : defaultConfigForType(nodeType),
+      config: normalizeNodeConfig(
+        raw?.config && typeof raw.config === 'object'
+          ? { ...raw.config }
+          : defaultConfigForType(nodeType),
+        nodeType,
+      ),
       model_id: parseOptionalInt(raw?.model_id),
       mcp_server_ids: Array.isArray(raw?.mcp_server_ids) ? raw.mcp_server_ids.filter((value) => parsePositiveInt(value) != null) : [],
       script_ids: Array.isArray(raw?.script_ids) ? raw.script_ids.filter((value) => parsePositiveInt(value) != null) : [],
@@ -642,7 +931,7 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
       ref_id: null,
       x: centered.x,
       y: centered.y,
-      config: defaultConfigForType('start'),
+      config: normalizeNodeConfig(defaultConfigForType('start'), 'start'),
       model_id: null,
       mcp_server_ids: [],
       script_ids: [],
@@ -689,9 +978,10 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
     })
   }
 
+  const synchronized = syncDecisionNodeConditions(normalizedNodes, normalizedEdges)
   return {
-    nodes: normalizedNodes,
-    edges: normalizedEdges,
+    nodes: synchronized.nodes,
+    edges: synchronized.edges,
     nextClientNodeId: Math.max(maxClientNodeId + 1, 1),
     nextClientEdgeId: Math.max(maxClientEdgeId + 1, 1),
   }
@@ -866,6 +1156,15 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     () => availableNodeTypes.filter((nodeType) => nodeType !== 'start'),
     [availableNodeTypes],
   )
+  const llmctlMcpServerId = useMemo(() => {
+    const mcpServers = catalog && typeof catalog === 'object' && Array.isArray(catalog.mcp_servers)
+      ? catalog.mcp_servers
+      : []
+    const llmctlServer = mcpServers.find(
+      (server) => String(server?.server_key || '').trim().toLowerCase() === 'llmctl-mcp',
+    )
+    return parsePositiveInt(llmctlServer?.id)
+  }, [catalog])
 
   const centerViewportOnGraphPoint = useCallback((graphX, graphY, zoomValue) => {
     const viewport = viewportRef.current
@@ -918,15 +1217,53 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   }, [nodes])
 
   useEffect(() => {
+    const synchronized = syncDecisionNodeConditions(nodes, edges)
+    if (!synchronized.changed) {
+      return
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNodes(synchronized.nodes)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEdges(synchronized.edges)
+    if (selectedEdgeId && !synchronized.edges.some((edge) => edge.localId === selectedEdgeId)) {
+      setSelectedEdgeId('')
+    }
+  }, [nodes, edges, selectedEdgeId])
+
+  useEffect(() => {
+    if (llmctlMcpServerId == null) {
+      return
+    }
+    setNodes((current) => {
+      let changed = false
+      const next = current.map((node) => {
+        if (normalizeNodeType(node.node_type) !== 'memory') {
+          return node
+        }
+        const existing = Array.isArray(node.mcp_server_ids) ? node.mcp_server_ids : []
+        if (existing.length === 1 && parsePositiveInt(existing[0]) === llmctlMcpServerId) {
+          return node
+        }
+        changed = true
+        return { ...node, mcp_server_ids: [llmctlMcpServerId] }
+      })
+      return changed ? next : current
+    })
+  }, [llmctlMcpServerId])
+
+  useEffect(() => {
     if (typeof onGraphChange !== 'function') {
       return
     }
-    const payloadNodes = nodes.map((node) => buildNodePayload(node))
+    if (syncDecisionNodeConditions(nodes, edges).changed) {
+      return
+    }
+    const payloadNodes = nodes.map((node) => buildNodePayload(node, llmctlMcpServerId))
     const payloadEdges = edges
       .map((edge) => buildEdgePayload(edge, nodesByToken))
       .filter((edge) => edge != null)
     onGraphChange({ nodes: payloadNodes, edges: payloadEdges })
-  }, [nodes, edges, nodesByToken, onGraphChange])
+  }, [nodes, edges, nodesByToken, llmctlMcpServerId, onGraphChange])
 
   useEffect(() => {
     if (typeof onNodeSelectionChange !== 'function') {
@@ -1013,6 +1350,76 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const selectedEdge = selectedEdgeId
     ? edges.find((edge) => edge.localId === selectedEdgeId) || null
     : null
+  const decisionConditionLookupByNodeToken = useMemo(() => {
+    const lookup = new Map()
+    for (const node of nodes) {
+      if (normalizeNodeType(node.node_type) !== 'decision') {
+        continue
+      }
+      const entries = normalizeDecisionConditions(node.config?.decision_conditions)
+      lookup.set(
+        node.token,
+        new Map(entries.map((entry) => [entry.connector_id, entry.condition_text])),
+      )
+    }
+    return lookup
+  }, [nodes])
+  const selectedEdgeSourceNode = selectedEdge ? nodesByToken.get(selectedEdge.sourceToken) || null : null
+  const selectedEdgeIsDecisionManaged = Boolean(
+    selectedEdge
+    && selectedEdgeSourceNode
+    && normalizeNodeType(selectedEdgeSourceNode.node_type) === 'decision'
+    && normalizeEdgeMode(selectedEdge.edge_mode) === 'solid',
+  )
+  const selectedDecisionConditions = useMemo(() => {
+    if (!selectedNode || selectedNodeType !== 'decision') {
+      return []
+    }
+    const configured = new Map(
+      normalizeDecisionConditions(selectedNode.config?.decision_conditions)
+        .map((entry) => [entry.connector_id, entry.condition_text]),
+    )
+    return edges
+      .filter((edge) => (
+        edge.sourceToken === selectedNode.token
+        && normalizeEdgeMode(edge.edge_mode) === 'solid'
+      ))
+      .map((edge) => {
+        const connectorId = String(edge.condition_key || '').trim()
+        const targetNode = nodesByToken.get(edge.targetToken)
+        const targetLabel = targetNode
+          ? String(targetNode.title || titleForType(targetNode.node_type) || '').trim()
+          : ''
+        return {
+          connectorId,
+          targetLabel: targetLabel || 'Unresolved',
+          conditionText: configured.get(connectorId) || '',
+        }
+      })
+      .filter((entry) => Boolean(entry.connectorId))
+  }, [selectedNode, selectedNodeType, edges, nodesByToken])
+  const selectedMilestoneConfig = (
+    selectedNode && selectedNodeType === 'milestone'
+      ? normalizeNodeConfig(selectedNode.config, 'milestone')
+      : null
+  )
+  const selectedMemoryConfig = (
+    selectedNode && selectedNodeType === 'memory'
+      ? normalizeNodeConfig(selectedNode.config, 'memory')
+      : null
+  )
+  const selectedPlanConfig = (
+    selectedNode && selectedNodeType === 'plan'
+      ? normalizeNodeConfig(selectedNode.config, 'plan')
+      : null
+  )
+  const selectedPlanNodeNeedsCompletionTarget = Boolean(
+    selectedPlanConfig
+    && selectedPlanConfig.action === PLAN_ACTION_COMPLETE_PLAN_ITEM
+    && !selectedPlanConfig.plan_item_id
+    && !(selectedPlanConfig.stage_key && selectedPlanConfig.task_key)
+    && !selectedPlanConfig.completion_source_path,
+  )
   const selectedTaskNodeNeedsPrompt = Boolean(
     selectedNode
     && selectedNodeType === 'task'
@@ -1038,9 +1445,12 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       return {
         ...nextNode,
         node_type: normalizedType,
-        config: nextNode.config && typeof nextNode.config === 'object'
-          ? nextNode.config
-          : defaultConfigForType(normalizedType),
+        config: normalizeNodeConfig(
+          nextNode.config && typeof nextNode.config === 'object'
+            ? nextNode.config
+            : defaultConfigForType(normalizedType),
+          normalizedType,
+        ),
       }
     }))
   }
@@ -1076,9 +1486,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       ref_id: null,
       x: nextPosition.x,
       y: nextPosition.y,
-      config: defaultConfigForType(normalizedType),
+      config: normalizeNodeConfig(defaultConfigForType(normalizedType), normalizedType),
       model_id: null,
-      mcp_server_ids: [],
+      mcp_server_ids: normalizedType === 'memory' && llmctlMcpServerId != null ? [llmctlMcpServerId] : [],
       script_ids: [],
       attachment_ids: [],
     }
@@ -1240,8 +1650,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       return
     }
 
-    const isDecision = normalizeNodeType(sourceNode.node_type) === 'decision'
-    const decisionEdgeCount = edges.filter((edge) => edge.sourceToken === sourceToken).length
     const edge = {
       localId: `client-edge:${nextClientEdgeIdRef.current++}`,
       persistedId: null,
@@ -1250,7 +1658,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       sourceHandleId: resolvedSourceHandleId,
       targetHandleId: resolvedTargetHandleId,
       edge_mode: 'solid',
-      condition_key: isDecision ? `path_${decisionEdgeCount + 1}` : '',
+      condition_key: '',
       label: '',
     }
     setEdges((current) => [...current, edge])
@@ -1381,6 +1789,19 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
         delete nextConfig.collections
         delete nextConfig.question_prompt
       }
+      if (normalizedType !== 'milestone' && normalizedType !== 'memory' && normalizedType !== 'plan') {
+        delete nextConfig.action
+        delete nextConfig.additive_prompt
+        delete nextConfig.retention_mode
+        delete nextConfig.retention_ttl_seconds
+        delete nextConfig.retention_max_count
+      }
+      if (normalizedType !== 'plan') {
+        delete nextConfig.plan_item_id
+        delete nextConfig.stage_key
+        delete nextConfig.task_key
+        delete nextConfig.completion_source_path
+      }
       if (normalizedType === 'task' && typeof nextConfig.task_prompt !== 'string') {
         nextConfig.task_prompt = ''
       }
@@ -1395,11 +1816,39 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
           nextConfig.question_prompt = ''
         }
       }
+      if (normalizedType === 'milestone') {
+        nextConfig.action = normalizeMilestoneAction(nextConfig.action)
+        nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+        nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
+        nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
+        nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
+      }
+      if (normalizedType === 'memory') {
+        nextConfig.action = normalizeMemoryAction(nextConfig.action)
+        nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+        nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
+        nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
+        nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
+      }
+      if (normalizedType === 'plan') {
+        nextConfig.action = normalizePlanAction(nextConfig.action)
+        nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+        nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
+        nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_PLAN_RETENTION_TTL_SECONDS
+        nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_PLAN_RETENTION_MAX_COUNT
+        nextConfig.plan_item_id = parsePositiveInt(nextConfig.plan_item_id)
+        nextConfig.stage_key = String(nextConfig.stage_key || '').trim()
+        nextConfig.task_key = String(nextConfig.task_key || '').trim()
+        nextConfig.completion_source_path = String(nextConfig.completion_source_path || '').trim()
+      }
       return {
         ...current,
         node_type: normalizedType,
         ref_id: NODE_TYPE_WITH_REF.has(normalizedType) ? current.ref_id : null,
         config: nextConfig,
+        mcp_server_ids: normalizedType === 'memory' && llmctlMcpServerId != null
+          ? [llmctlMcpServerId]
+          : current.mcp_server_ids,
       }
     })
   }
@@ -1411,6 +1860,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const selectedNodeRefOptions = Array.isArray(selectedNodeRefRows) ? selectedNodeRefRows : []
   const modelOptions = catalog && typeof catalog === 'object' && Array.isArray(catalog.models)
     ? catalog.models
+    : []
+  const agentOptions = catalog && typeof catalog === 'object' && Array.isArray(catalog.agents)
+    ? catalog.agents
     : []
 
   function setZoomKeepingCenter(nextZoomValue) {
@@ -1667,6 +2119,14 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   if (!sourceNode || !targetNode) {
                     return null
                   }
+                  const connectorId = String(edge.condition_key || '').trim()
+                  const sourceConditionLookup = decisionConditionLookupByNodeToken.get(sourceNode.token)
+                  const decisionConditionText = connectorId
+                    ? String(sourceConditionLookup?.get(connectorId) || '').trim()
+                    : ''
+                  const edgeCaption = String(edge.label || '').trim()
+                    || decisionConditionText
+                    || connectorId
                   const start = connectorPosition(sourceNode, edge.sourceHandleId)
                   const end = connectorPosition(targetNode, edge.targetHandleId)
                   const pathMeta = edgePath(start, end)
@@ -1678,9 +2138,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                         className={`flow-ws-edge-path${edge.edge_mode === 'dotted' ? ' is-dotted' : ''}${selected ? ' is-selected' : ''}`}
                         markerEnd="url(#flow-ws-arrow)"
                       />
-                      {(edge.label || edge.condition_key) ? (
+                      {edgeCaption ? (
                         <text x={pathMeta.labelX} y={pathMeta.labelY} className="flow-ws-edge-label">
-                          {edge.label || edge.condition_key}
+                          {edgeCaption}
                         </text>
                       ) : null}
                       <path
@@ -1805,7 +2265,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   }
                 }}
               >
-                <ActionIcon name="save" />
+                <i className="fa-solid fa-floppy-disk" />
               </button>
               <button
                 type="button"
@@ -1814,7 +2274,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 title="Delete node"
                 onClick={() => confirmAndRemoveNode(selectedNode)}
               >
-                <ActionIcon name="trash" />
+                <i className="fa-solid fa-trash" />
               </button>
             </>
           ) : null}
@@ -1885,23 +2345,447 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 />
               </label>
             ) : null}
+            {selectedNodeType === 'milestone' && selectedMilestoneConfig ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>action</span>
+                  <select
+                    value={selectedMilestoneConfig.action}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        action: normalizeMilestoneAction(event.target.value),
+                      },
+                    }))}
+                  >
+                    {MILESTONE_ACTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>optional additive prompt</span>
+                  <textarea
+                    value={selectedMilestoneConfig.additive_prompt}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        additive_prompt: event.target.value,
+                      },
+                    }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>artifact retention</span>
+                  <select
+                    value={selectedMilestoneConfig.retention_mode}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        retention_mode: normalizeMilestoneRetentionMode(event.target.value),
+                      },
+                    }))}
+                  >
+                    {MILESTONE_RETENTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {retentionModeUsesTtl(selectedMilestoneConfig.retention_mode) ? (
+                  <label className="field">
+                    <span>retention ttl (seconds)</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={selectedMilestoneConfig.retention_ttl_seconds ?? ''}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          retention_ttl_seconds: parseOptionalInt(event.target.value),
+                        },
+                      }))}
+                    />
+                  </label>
+                ) : null}
+                {retentionModeUsesMaxCount(selectedMilestoneConfig.retention_mode) ? (
+                  <label className="field">
+                    <span>retention max count</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={selectedMilestoneConfig.retention_max_count ?? ''}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          retention_max_count: parseOptionalInt(event.target.value),
+                        },
+                      }))}
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+            {selectedNodeType === 'memory' && selectedMemoryConfig ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>action</span>
+                  <select
+                    value={selectedMemoryConfig.action}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        action: normalizeMemoryAction(event.target.value),
+                      },
+                    }))}
+                  >
+                    {MEMORY_ACTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>optional additive prompt</span>
+                  <textarea
+                    value={selectedMemoryConfig.additive_prompt}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        additive_prompt: event.target.value,
+                      },
+                    }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>artifact retention</span>
+                  <select
+                    value={selectedMemoryConfig.retention_mode}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        retention_mode: normalizeMilestoneRetentionMode(event.target.value),
+                      },
+                    }))}
+                  >
+                    {MILESTONE_RETENTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {retentionModeUsesTtl(selectedMemoryConfig.retention_mode) ? (
+                  <label className="field">
+                    <span>retention ttl (seconds)</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={selectedMemoryConfig.retention_ttl_seconds ?? ''}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          retention_ttl_seconds: parseOptionalInt(event.target.value),
+                        },
+                      }))}
+                    />
+                  </label>
+                ) : null}
+                {retentionModeUsesMaxCount(selectedMemoryConfig.retention_mode) ? (
+                  <label className="field">
+                    <span>retention max count</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={selectedMemoryConfig.retention_max_count ?? ''}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          retention_max_count: parseOptionalInt(event.target.value),
+                        },
+                      }))}
+                    />
+                  </label>
+                ) : null}
+                <label className="field">
+                  <span>LLMCTL MCP</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                    <input
+                      type="checkbox"
+                      checked={llmctlMcpServerId != null}
+                      disabled
+                      readOnly
+                      aria-label="LLMCTL MCP (required)"
+                    />
+                    <span>{llmctlMcpServerId != null ? 'llmctl-mcp (required)' : 'llmctl-mcp unavailable'}</span>
+                  </span>
+                </label>
+              </div>
+            ) : null}
+            {selectedNodeType === 'plan' && selectedPlanConfig ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>action</span>
+                  <select
+                    value={selectedPlanConfig.action}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        action: normalizePlanAction(event.target.value),
+                      },
+                    }))}
+                  >
+                    {PLAN_ACTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>optional additive prompt</span>
+                  <textarea
+                    value={selectedPlanConfig.additive_prompt}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        additive_prompt: event.target.value,
+                      },
+                    }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>artifact retention</span>
+                  <select
+                    value={selectedPlanConfig.retention_mode}
+                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                      ...current,
+                      config: {
+                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                        retention_mode: normalizeMilestoneRetentionMode(event.target.value),
+                      },
+                    }))}
+                  >
+                    {MILESTONE_RETENTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {retentionModeUsesTtl(selectedPlanConfig.retention_mode) ? (
+                  <label className="field">
+                    <span>retention ttl (seconds)</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={selectedPlanConfig.retention_ttl_seconds ?? ''}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          retention_ttl_seconds: parseOptionalInt(event.target.value),
+                        },
+                      }))}
+                    />
+                  </label>
+                ) : null}
+                {retentionModeUsesMaxCount(selectedPlanConfig.retention_mode) ? (
+                  <label className="field">
+                    <span>retention max count</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={selectedPlanConfig.retention_max_count ?? ''}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          retention_max_count: parseOptionalInt(event.target.value),
+                        },
+                      }))}
+                    />
+                  </label>
+                ) : null}
+                {selectedPlanConfig.action === PLAN_ACTION_COMPLETE_PLAN_ITEM ? (
+                  <>
+                    <label className="field">
+                      <span>plan item id (preferred)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={selectedPlanConfig.plan_item_id ?? ''}
+                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                          ...current,
+                          config: {
+                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                            plan_item_id: parsePositiveInt(event.target.value),
+                          },
+                        }))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>stage key</span>
+                      <input
+                        type="text"
+                        value={selectedPlanConfig.stage_key || ''}
+                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                          ...current,
+                          config: {
+                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                            stage_key: event.target.value,
+                          },
+                        }))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>task key</span>
+                      <input
+                        type="text"
+                        value={selectedPlanConfig.task_key || ''}
+                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                          ...current,
+                          config: {
+                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                            task_key: event.target.value,
+                          },
+                        }))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>completion source path</span>
+                      <input
+                        type="text"
+                        value={selectedPlanConfig.completion_source_path || ''}
+                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                          ...current,
+                          config: {
+                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                            completion_source_path: event.target.value,
+                          },
+                        }))}
+                      />
+                    </label>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
             {selectedTaskNodeNeedsPrompt ? (
               <p className="error-text">Task nodes require a non-empty task prompt before save/validate.</p>
             ) : null}
-            <label className="field">
-              <span>model</span>
-              <select
-                value={selectedNode.model_id ?? ''}
-                onChange={(event) => updateNode(selectedNode.token, { model_id: parseOptionalInt(event.target.value) })}
-              >
-                <option value="">None</option>
-                {modelOptions.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name || `Model ${model.id}`}
-                  </option>
+            {selectedPlanNodeNeedsCompletionTarget ? (
+              <p className="error-text">Complete plan item requires plan item id, stage+task keys, or completion source path.</p>
+            ) : null}
+            {selectedNodeType === 'decision' ? (
+              <div className="stack-sm">
+                <p className="toolbar-meta">Decision conditions are synced from solid outgoing connectors.</p>
+                {selectedDecisionConditions.length === 0 ? (
+                  <p className="toolbar-meta">Add a solid outgoing connector to define the first condition.</p>
+                ) : null}
+                {selectedDecisionConditions.map((entry) => (
+                  <label className="field" key={entry.connectorId}>
+                    <span>{`${entry.connectorId} -> ${entry.targetLabel}`}</span>
+                    <input
+                      type="text"
+                      value={entry.conditionText}
+                      onChange={(event) => {
+                        const nextConditionText = event.target.value
+                        updateNode(selectedNode.token, (current) => {
+                          const nextConfig = current.config && typeof current.config === 'object'
+                            ? { ...current.config }
+                            : {}
+                          const existingConditions = normalizeDecisionConditions(nextConfig.decision_conditions)
+                          const conditionTextByConnector = new Map(
+                            existingConditions.map((condition) => [condition.connector_id, condition.condition_text]),
+                          )
+                          conditionTextByConnector.set(entry.connectorId, nextConditionText)
+                          const connectorIds = edges
+                            .filter((edge) => (
+                              edge.sourceToken === current.token
+                              && normalizeEdgeMode(edge.edge_mode) === 'solid'
+                            ))
+                            .map((edge) => String(edge.condition_key || '').trim())
+                            .filter((connectorId) => Boolean(connectorId))
+                          nextConfig.decision_conditions = connectorIds.map((connectorId) => ({
+                            connector_id: connectorId,
+                            condition_text: conditionTextByConnector.get(connectorId) || '',
+                          }))
+                          return { ...current, config: nextConfig }
+                        })
+                      }}
+                    />
+                  </label>
                 ))}
-              </select>
-            </label>
+              </div>
+            ) : null}
+            {NODE_TYPES_WITH_MODEL.has(selectedNodeType) && selectedNodeType !== 'milestone' ? (
+              <label className="field">
+                <span>model</span>
+                <select
+                  value={selectedNode.model_id ?? ''}
+                  onChange={(event) => updateNode(selectedNode.token, { model_id: parseOptionalInt(event.target.value) })}
+                >
+                  <option value="">None</option>
+                  {modelOptions.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name || `Model ${model.id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {selectedNodeType !== 'decision' && selectedNodeType !== 'milestone' && selectedNodeType !== 'memory' && selectedNodeType !== 'plan' ? (
+              <label className="field">
+                <span>agent</span>
+                <select
+                  value={selectedNode.config?.agent_id ?? ''}
+                  onChange={(event) => {
+                    const nextAgentId = parsePositiveInt(event.target.value)
+                    updateNode(selectedNode.token, (current) => {
+                      const nextConfig = current.config && typeof current.config === 'object'
+                        ? { ...current.config }
+                        : {}
+                      if (nextAgentId == null) {
+                        delete nextConfig.agent_id
+                      } else {
+                        nextConfig.agent_id = nextAgentId
+                      }
+                      return { ...current, config: nextConfig }
+                    })
+                  }}
+                >
+                  <option value="">None</option>
+                  {agentOptions.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name || `Agent ${agent.id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="flow-ws-position-grid">
               <label className="field">
                 <span>x</span>
@@ -1941,14 +2825,21 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>condition key</span>
-              <input
-                type="text"
-                value={selectedEdge.condition_key || ''}
-                onChange={(event) => updateEdge(selectedEdge.localId, { condition_key: event.target.value })}
-              />
-            </label>
+            {selectedEdgeIsDecisionManaged ? (
+              <label className="field">
+                <span>connector id</span>
+                <input type="text" value={selectedEdge.condition_key || ''} readOnly />
+              </label>
+            ) : (
+              <label className="field">
+                <span>condition key</span>
+                <input
+                  type="text"
+                  value={selectedEdge.condition_key || ''}
+                  onChange={(event) => updateEdge(selectedEdge.localId, { condition_key: event.target.value })}
+                />
+              </label>
+            )}
             <label className="field">
               <span>label</span>
               <input
