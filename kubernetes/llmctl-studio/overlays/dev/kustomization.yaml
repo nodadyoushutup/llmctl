@@ -17,7 +17,7 @@ patches:
     patch: |-
       - op: replace
         path: /data/LLMCTL_NODE_EXECUTOR_K8S_IMAGE
-        value: 10.107.62.134:80/llmctl/llmctl-executor:0.0.2@sha256:c0be48faca3e094c2736280ba77d678f4893710f193c29ca16b2fe71ce0e4b7d
+        value: 10.107.62.134:80/llmctl/llmctl-executor:0.0.3@sha256:e20e46d4c4e1c9d8292d49acdc48e3d25db4499bfab30f8ec4b14b263f453f75
   - path: studio-live-code-patch.yaml
     target:
       kind: Deployment

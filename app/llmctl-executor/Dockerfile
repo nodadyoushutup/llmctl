@@ -8,6 +8,12 @@ ARG INSTALL_VLLM=false
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY app/llmctl-executor/requirements.txt /app/app/llmctl-executor/requirements.txt
 COPY app/llmctl-studio-backend/requirements.txt /app/app/llmctl-studio-backend/requirements.txt
 RUN if [ ! -x /opt/venv/bin/python3 ]; then \

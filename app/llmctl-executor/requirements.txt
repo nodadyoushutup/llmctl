@@ -1,2 +1,8 @@
-# Stage 4 baseline keeps runtime dependencies stdlib-only.
-# Additional provider/runtime dependencies can be appended in later stages.
+pymupdf>=1.24.0
+pytesseract>=0.3.10
+pillow>=10.0.0
+python-docx>=1.1.0
+python-pptx>=0.6.23
+openpyxl>=3.1.2
+tiktoken>=0.7.0
+openai>=1.0.0
