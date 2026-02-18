@@ -581,6 +581,16 @@ select[size]:not([size='1']) {
   flex-wrap: nowrap;
 }
 
+.workflow-list-panel-header-actions {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.workflow-list-panel-header-actions .pagination {
+  justify-content: flex-end;
+}
+
 .panel-header-meta {
   margin: 0;
   font-size: 11px;

@@ -3060,6 +3060,94 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             self.assertIsNone(session.get(Flowchart, flowchart_id))
             self.assertIsNone(session.get(AgentTask, task_id))
 
+    def test_graph_upsert_detaches_agent_tasks_before_deleting_removed_nodes(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+        flowchart_id = self._create_flowchart("Stage 9 Graph Upsert Detach Linked Tasks")
+        graph_response = self.client.get(f"/flowcharts/{flowchart_id}/graph")
+        self.assertEqual(200, graph_response.status_code)
+        graph_payload = graph_response.get_json() or {}
+        start_node = next(
+            node
+            for node in (graph_payload.get("nodes") or [])
+            if node.get("node_type") == FLOWCHART_NODE_TYPE_START
+        )
+        start_node_id = int(start_node["id"])
+
+        initial_save_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "id": start_node_id,
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task-remove",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 200,
+                        "y": 20,
+                        "config": {"task_prompt": "Temporary task"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": start_node_id,
+                        "target_node_id": "n-task-remove",
+                        "edge_mode": "solid",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, initial_save_response.status_code)
+        saved_payload = initial_save_response.get_json() or {}
+        removable_task_node = next(
+            node
+            for node in (saved_payload.get("nodes") or [])
+            if node.get("node_type") == FLOWCHART_NODE_TYPE_TASK
+        )
+        removable_task_node_id = int(removable_task_node["id"])
+
+        with session_scope() as session:
+            task = AgentTask.create(
+                session,
+                flowchart_id=flowchart_id,
+                flowchart_node_id=removable_task_node_id,
+                status="queued",
+                kind="flowchart",
+            )
+            task_id = task.id
+
+        remove_node_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "id": start_node_id,
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    }
+                ],
+                "edges": [],
+            },
+        )
+        self.assertEqual(200, remove_node_response.status_code)
+
+        with session_scope() as session:
+            persisted_task = session.get(AgentTask, task_id)
+            self.assertIsNotNone(persisted_task)
+            assert persisted_task is not None
+            self.assertIsNone(persisted_task.flowchart_node_id)
+            self.assertIsNone(session.get(FlowchartNode, removable_task_node_id))
+
     def test_graph_requires_edge_mode_in_edge_payload(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Edge Mode Required")
         response = self.client.post(

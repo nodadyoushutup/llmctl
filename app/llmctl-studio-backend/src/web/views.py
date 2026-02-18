@@ -12823,6 +12823,18 @@ def upsert_flowchart_graph(flowchart_id: int):
 
             removed_node_ids = set(existing_nodes_by_id).difference(keep_node_ids)
             if removed_node_ids:
+                # Preserve task history rows while allowing removed nodes to be deleted.
+                session.execute(
+                    update(AgentTask)
+                    .where(AgentTask.flowchart_node_id.in_(removed_node_ids))
+                    .values(flowchart_node_id=None)
+                )
+                # Historical run-node rows still hold strict FKs to flowchart_nodes.
+                session.execute(
+                    delete(FlowchartRunNode).where(
+                        FlowchartRunNode.flowchart_node_id.in_(removed_node_ids)
+                    )
+                )
                 session.execute(
                     delete(flowchart_node_mcp_servers).where(
                         flowchart_node_mcp_servers.c.flowchart_node_id.in_(removed_node_ids)

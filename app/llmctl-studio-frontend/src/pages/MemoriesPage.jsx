@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getMemories } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -88,117 +89,115 @@ export default function MemoriesPage() {
 
   return (
     <section className="stack" aria-label="Memories">
-      <article className="card workflow-list-card">
-        <div className="pagination-bar pagination-bar-header">
-          <nav className="pagination" aria-label="Memories pages">
-            {page > 1 ? (
-              <button
-                type="button"
-                className="pagination-btn"
-                onClick={() => updateParams({ page: page - 1, per_page: perPage })}
-              >
-                Prev
-              </button>
-            ) : (
-              <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-            )}
-            <div className="pagination-pages">
-              {paginationItems.map((item, index) => {
-                const itemType = String(item?.type || '')
-                if (itemType === 'gap') {
-                  return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
-                }
-                const itemPage = Number.parseInt(String(item?.page || ''), 10)
-                if (!Number.isInteger(itemPage) || itemPage <= 0) {
-                  return null
-                }
-                if (itemPage === page) {
-                  return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
-                }
-                return (
-                  <button
-                    key={itemPage}
-                    type="button"
-                    className="pagination-link"
-                    onClick={() => updateParams({ page: itemPage, per_page: perPage })}
-                  >
-                    {itemPage}
-                  </button>
-                )
-              })}
-            </div>
-            {page < totalPages ? (
-              <button
-                type="button"
-                className="pagination-btn"
-                onClick={() => updateParams({ page: page + 1, per_page: perPage })}
-              >
-                Next
-              </button>
-            ) : (
-              <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-            )}
-          </nav>
-        </div>
-        <div className="card-header">
-          <div>
-            <h2 className="section-title">Memories</h2>
-          </div>
-        </div>
-        <p className="muted" style={{ marginTop: '12px' }}>
-          Capture simple facts to reuse across tasks and workflows.
-        </p>
-        {state.loading ? <p>Loading memories...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {!state.loading && !state.error && memories.length === 0 ? (
-          <p className="muted" style={{ marginTop: '16px' }}>
-            No memories found yet. Add a Memory node in a flowchart to create one.
-          </p>
-        ) : null}
-        {!state.loading && !state.error && memories.length > 0 ? (
-          <div className="workflow-list-table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Description</th>
-                  <th>Created</th>
-                  <th className="table-actions-cell">Edit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {memories.map((memory) => {
-                  const href = `/memories/${memory.id}`
+      <article className="card panel-card workflow-list-card">
+        <PanelHeader
+          title="Memories"
+          actionsClassName="workflow-list-panel-header-actions"
+          actions={(
+            <nav className="pagination" aria-label="Memories pages">
+              {page > 1 ? (
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => updateParams({ page: page - 1, per_page: perPage })}
+                >
+                  Prev
+                </button>
+              ) : (
+                <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+              )}
+              <div className="pagination-pages">
+                {paginationItems.map((item, index) => {
+                  const itemType = String(item?.type || '')
+                  if (itemType === 'gap') {
+                    return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
+                  }
+                  const itemPage = Number.parseInt(String(item?.page || ''), 10)
+                  if (!Number.isInteger(itemPage) || itemPage <= 0) {
+                    return null
+                  }
+                  if (itemPage === page) {
+                    return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
+                  }
                   return (
-                    <tr
-                      key={memory.id}
-                      className="table-row-link"
-                      data-href={href}
-                      onClick={(event) => handleRowClick(event, href)}
+                    <button
+                      key={itemPage}
+                      type="button"
+                      className="pagination-link"
+                      onClick={() => updateParams({ page: itemPage, per_page: perPage })}
                     >
-                      <td>
-                        <p>{truncateText(memory.description)}</p>
-                      </td>
-                      <td>
-                        <p className="muted" style={{ fontSize: '12px' }}>{memory.created_at || '-'}</p>
-                      </td>
-                      <td className="table-actions-cell">
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label="Edit memory"
-                          title="Edit memory"
-                          onClick={() => navigate(`/memories/${memory.id}/edit`)}
-                        >
-                          <ActionIcon name="edit" />
-                        </button>
-                      </td>
-                    </tr>
+                      {itemPage}
+                    </button>
                   )
                 })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+              </div>
+              {page < totalPages ? (
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => updateParams({ page: page + 1, per_page: perPage })}
+                >
+                  Next
+                </button>
+              ) : (
+                <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+              )}
+            </nav>
+          )}
+        />
+        <div className="panel-card-body">
+          {state.loading ? <p>Loading memories...</p> : null}
+          {state.error ? <p className="error-text">{state.error}</p> : null}
+          {!state.loading && !state.error && memories.length === 0 ? (
+            <p className="muted">
+              No memories found yet. Add a Memory node in a flowchart to create one.
+            </p>
+          ) : null}
+          {!state.loading && !state.error && memories.length > 0 ? (
+            <div className="table-wrap workflow-list-table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Created</th>
+                    <th className="table-actions-cell">Edit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {memories.map((memory) => {
+                    const href = `/memories/${memory.id}`
+                    return (
+                      <tr
+                        key={memory.id}
+                        className="table-row-link"
+                        data-href={href}
+                        onClick={(event) => handleRowClick(event, href)}
+                      >
+                        <td>
+                          <p>{truncateText(memory.description)}</p>
+                        </td>
+                        <td>
+                          <p className="muted" style={{ fontSize: '12px' }}>{memory.created_at || '-'}</p>
+                        </td>
+                        <td className="table-actions-cell">
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label="Edit memory"
+                            title="Edit memory"
+                            onClick={() => navigate(`/memories/${memory.id}/edit`)}
+                          >
+                            <ActionIcon name="edit" />
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
       </article>
     </section>
   )

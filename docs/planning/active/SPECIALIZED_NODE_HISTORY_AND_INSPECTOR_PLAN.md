@@ -148,10 +148,24 @@ Stage 7 evidence:
 
 ## Stage 8 - Automated Testing
 
-- [ ] Run backend unit/contract/integration tests for schema, API, socket events, execution routing, and retention pruning.
-- [ ] Run MCP test coverage for specialized artifact CRUD contract alignment.
-- [ ] Run frontend test suites for inspector controls and Memory history UI behavior.
-- [ ] Record pass/fail outcomes and unresolved defects directly in this plan.
+- [x] Run backend unit/contract/integration tests for schema, API, socket events, execution routing, and retention pruning.
+- [x] Run MCP test coverage for specialized artifact CRUD contract alignment.
+- [x] Run frontend test suites for inspector controls and Memory history UI behavior.
+- [x] Record pass/fail outcomes and unresolved defects directly in this plan.
+
+Stage 8 outcomes:
+- Backend suite command: `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh -- .venv/bin/python3 -m unittest app/llmctl-studio-backend/tests/test_flowchart_stage9.py`.
+- Backend result: `FAILED (failures=30, errors=1)` across 80 tests.
+- MCP suite command: `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh -- .venv/bin/python3 -m unittest app/llmctl-mcp/tests/test_flowchart_stage9_mcp.py`.
+- MCP result: `OK` (8 tests passed).
+- Frontend suite command: `npm test -- src/components/FlowchartWorkspaceEditor.test.jsx src/pages/MemoryDetailPage.test.jsx`.
+- Frontend result: `OK` (16 tests passed; 2 files).
+
+Unresolved defects identified during Stage 8:
+- Backend graph/API tests are being short-circuited by `System-managed LLMCTL MCP server is missing. Sync integrations and retry.` before expected per-test validation messages, causing broad assertion mismatches in `FlowchartStage9ApiTests`.
+- Multiple backend runtime/scheduler tests fail because Memory execution now hard-requires `llmctl-mcp`; existing fixtures/runs do not always provide that server key (`ValueError: Memory nodes require the system-managed LLMCTL MCP server`).
+- One backend run path fails with provider dispatch uniqueness collision (`uq_agent_tasks_provider_dispatch_id`, `kubernetes:default/job-test-conflict`) during task persistence.
+- One backend API test errors on missing template rendering dependency (`TemplateNotFound: flowchart_history_run_detail.html`).
 
 ## Stage 9 - Docs Updates
 
