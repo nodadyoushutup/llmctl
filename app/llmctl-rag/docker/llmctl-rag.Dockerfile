@@ -11,6 +11,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
+    openssh-client \
     python3 \
     python3-venv \
     tesseract-ocr \

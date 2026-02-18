@@ -2001,24 +2001,31 @@ def _clone_github_repo(
     if ssh_key:
         key_path = Path(ssh_key)
         if key_path.is_file():
-            known_hosts_path = Path(Config.DATA_DIR) / "known_hosts"
-            ssh_cmd = [
-                "ssh",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                "-o",
-                f"UserKnownHostsFile={known_hosts_path}",
-                "-i",
-                str(key_path),
-                "-o",
-                "IdentitiesOnly=yes",
-            ]
-            env["GIT_SSH_COMMAND"] = " ".join(ssh_cmd)
-            repo_url = f"git@github.com:{repo}.git"
-            if on_log:
-                on_log("Using uploaded SSH key for GitHub clone.")
+            ssh_binary = shutil.which("ssh") or shutil.which("ssh", path=os.defpath)
+            if not ssh_binary:
+                if on_log:
+                    on_log(
+                        "SSH client not found in runtime; falling back to HTTPS for GitHub clone."
+                    )
+            else:
+                known_hosts_path = Path(Config.DATA_DIR) / "known_hosts"
+                ssh_cmd = [
+                    ssh_binary,
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "StrictHostKeyChecking=accept-new",
+                    "-o",
+                    f"UserKnownHostsFile={known_hosts_path}",
+                    "-i",
+                    str(key_path),
+                    "-o",
+                    "IdentitiesOnly=yes",
+                ]
+                env["GIT_SSH_COMMAND"] = shlex.join(ssh_cmd)
+                repo_url = f"git@github.com:{repo}.git"
+                if on_log:
+                    on_log("Using uploaded SSH key for GitHub clone.")
         elif on_log:
             on_log("Configured SSH key not found; falling back to HTTPS.")
     if repo_url is None:

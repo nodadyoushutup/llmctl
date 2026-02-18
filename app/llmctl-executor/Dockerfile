@@ -13,6 +13,7 @@ RUN apt-get update \
         curl \
         git \
         gnupg \
+        openssh-client \
         python3 \
         python3-pip \
         python3-venv \

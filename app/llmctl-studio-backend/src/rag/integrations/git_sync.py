@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -40,8 +42,11 @@ def git_env(config) -> dict[str, str]:
     if ssh_key:
         key_path = Path(ssh_key)
         if key_path.is_file():
+            ssh_binary = shutil.which("ssh") or shutil.which("ssh", path=os.defpath)
+            if not ssh_binary:
+                return env
             ssh_cmd = [
-                "ssh",
+                ssh_binary,
                 "-o",
                 "BatchMode=yes",
                 "-o",
@@ -53,7 +58,7 @@ def git_env(config) -> dict[str, str]:
                 "-o",
                 "IdentitiesOnly=yes",
             ]
-            env["GIT_SSH_COMMAND"] = " ".join(ssh_cmd)
+            env["GIT_SSH_COMMAND"] = shlex.join(ssh_cmd)
     return env
 
 

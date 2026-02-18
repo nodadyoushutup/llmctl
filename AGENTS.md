@@ -7,6 +7,14 @@
 - When asked to update templates or pipelines, treat it as a database update unless explicitly requested to update the seed.
 - Use `python3` in commands and examples instead of `python`.
 
+# Flash Message Area
+
+- Route user-facing operation notifications (success, error, warning, info) through the shared flash message area.
+- In React pages/components, use the shared flash mechanism (`FlashProvider`/`useFlash`) instead of per-page ad-hoc banners for operation outcomes.
+- Avoid introducing new one-off notification UI patterns (custom inline save banners, toast systems, or `alert()` calls) for mutation results.
+- Keep inline field-level validation near inputs when needed, but send operation-level outcomes to the flash message area.
+- When touching existing notification code, migrate non-flash operation messages to the shared flash message area unless there is a documented exception.
+
 # Planning Workflow
 
 - Store in-progress plans in `docs/planning/active/`.

@@ -226,13 +226,31 @@ class SourceConfigAndGitSyncTests(unittest.TestCase):
             key_path = Path(temp_dir) / "id_ed25519"
             key_path.write_text("fake-key", encoding="utf-8")
             config = types.SimpleNamespace(git_ssh_key_path=str(key_path))
-            env = git_env(config)
+            with patch(
+                "rag.integrations.git_sync.shutil.which",
+                side_effect=[None, "/usr/bin/ssh"],
+            ):
+                env = git_env(config)
 
         self.assertEqual("0", env.get("GIT_TERMINAL_PROMPT"))
         ssh_command = env.get("GIT_SSH_COMMAND") or ""
+        self.assertTrue(ssh_command.startswith("/usr/bin/ssh "))
         self.assertIn("BatchMode=yes", ssh_command)
         self.assertIn(f"UserKnownHostsFile={KNOWN_HOSTS_PATH}", ssh_command)
         self.assertIn(f"-i {key_path}", ssh_command)
+
+    def test_git_env_skips_ssh_command_when_ssh_client_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            key_path = Path(temp_dir) / "id_ed25519"
+            key_path.write_text("fake-key", encoding="utf-8")
+            config = types.SimpleNamespace(git_ssh_key_path=str(key_path))
+            with patch(
+                "rag.integrations.git_sync.shutil.which",
+                side_effect=[None, None],
+            ):
+                env = git_env(config)
+        self.assertEqual("0", env.get("GIT_TERMINAL_PROMPT"))
+        self.assertNotIn("GIT_SSH_COMMAND", env)
 
     def test_git_clone_and_fetch_reset_flows(self):
         with tempfile.TemporaryDirectory() as temp_dir:
