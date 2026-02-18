@@ -70,6 +70,7 @@ app/llmctl-executor/build-executor.sh
 Build args:
 - `IMAGE_NAME=llmctl-executor:latest`
 - `INSTALL_VLLM=true|false` (default `false`; normally `false` because base includes pinned vLLM)
+- `VLLM_VERSION=<version>` (default `0.9.0`; used when `INSTALL_VLLM=true`)
 
 Examples:
 

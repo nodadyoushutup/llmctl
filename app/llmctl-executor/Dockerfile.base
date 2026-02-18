@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LLMCTL_EXECUTOR_BASE_CUDA_TAG="12.8.0-cudnn-runtime-ubuntu24.04"
 
 ARG INSTALL_CLAUDE=true
-ARG VLLM_VERSION=0.8.5
+ARG VLLM_VERSION=0.9.0
 
 LABEL org.opencontainers.image.title="llmctl-executor-base" \
       org.opencontainers.image.description="Pinned CUDA + vLLM + Chromium + Node CLIs base image for llmctl executor" \

@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 IMAGE_NAME="${IMAGE_NAME:-llmctl-executor-base:latest}"
 INSTALL_CLAUDE="${INSTALL_CLAUDE:-true}"
-VLLM_VERSION="${VLLM_VERSION:-0.8.5}"
+VLLM_VERSION="${VLLM_VERSION:-0.9.0}"
 
 cd "${REPO_ROOT}"
 
