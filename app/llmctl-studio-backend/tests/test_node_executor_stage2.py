@@ -32,6 +32,7 @@ from services.integrations import (
     load_node_executor_runtime_settings,
     normalize_node_executor_run_metadata,
     node_executor_effective_config_summary,
+    resolve_node_executor_k8s_image,
     save_node_executor_settings,
 )
 from web import views as studio_views
@@ -129,12 +130,14 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "provider": "kubernetes",
                 "workspace_identity_key": "workspace-prod",
                 "k8s_image": "llmctl-executor@sha256:" + ("a" * 64),
+                "k8s_image_tag": "release-2026-02-18",
                 "k8s_gpu_limit": "2",
                 "k8s_job_ttl_seconds": "2400",
             }
         )
         self.assertEqual("kubernetes", updated.get("provider"))
         self.assertEqual("workspace-prod", updated.get("workspace_identity_key"))
+        self.assertEqual("release-2026-02-18", updated.get("k8s_image_tag"))
         self.assertEqual("2", updated.get("k8s_gpu_limit"))
         self.assertEqual("2400", updated.get("k8s_job_ttl_seconds"))
 
@@ -196,6 +199,23 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertTrue(str(row.value).startswith("enc:v1:"))
 
+    def test_runtime_settings_include_image_tag_for_executor_image_selection(self) -> None:
+        save_node_executor_settings(
+            {
+                "k8s_image": "ghcr.io/acme/llmctl-executor:latest",
+                "k8s_image_tag": "v2026.02.18",
+            }
+        )
+        runtime_settings = load_node_executor_runtime_settings()
+        self.assertEqual("v2026.02.18", runtime_settings.get("k8s_image_tag"))
+        self.assertEqual(
+            "ghcr.io/acme/llmctl-executor:v2026.02.18",
+            resolve_node_executor_k8s_image(
+                runtime_settings.get("k8s_image"),
+                runtime_settings.get("k8s_image_tag"),
+            ),
+        )
+
     def test_runtime_route_updates_node_executor_settings(self) -> None:
         response = self.client.post(
             "/settings/runtime/node-executor",
@@ -209,6 +229,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "workspace_identity_key": "default",
                 "k8s_namespace": "default",
                 "k8s_image": "llmctl-executor:latest",
+                "k8s_image_tag": "dev-2026-02-18",
                 "k8s_in_cluster": "true",
                 "k8s_service_account": "executor",
                 "k8s_gpu_limit": "1",
@@ -225,6 +246,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("kubernetes", settings.get("provider"))
         self.assertEqual("120", settings.get("dispatch_timeout_seconds"))
         self.assertEqual("true", settings.get("k8s_in_cluster"))
+        self.assertEqual("dev-2026-02-18", settings.get("k8s_image_tag"))
         self.assertEqual("1", settings.get("k8s_gpu_limit"))
         self.assertEqual("900", settings.get("k8s_job_ttl_seconds"))
 

@@ -6,6 +6,7 @@ import {
   archiveChatThread,
   clearChatThread,
   createChatThread,
+  getChatThread,
   getChatRuntime,
   sendChatTurn,
   updateChatThreadConfig,
@@ -15,6 +16,7 @@ vi.mock('../lib/studioApi', () => ({
   archiveChatThread: vi.fn(),
   clearChatThread: vi.fn(),
   createChatThread: vi.fn(),
+  getChatThread: vi.fn(),
   getChatRuntime: vi.fn(),
   sendChatTurn: vi.fn(),
   updateChatThreadConfig: vi.fn(),
@@ -59,6 +61,21 @@ function buildRuntimePayload() {
   }
 }
 
+function buildThreadPayload(id, title = `Thread ${id}`) {
+  return {
+    id,
+    title,
+    status: 'active',
+    model_id: null,
+    model_name: null,
+    response_complexity: 'medium',
+    response_complexity_label: 'Medium',
+    rag_collections: [],
+    mcp_servers: [],
+    messages: [],
+  }
+}
+
 function renderPage(initialEntry = '/chat?thread_id=1') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -73,13 +90,14 @@ describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     getChatRuntime.mockResolvedValue(buildRuntimePayload())
-    createChatThread.mockResolvedValue({ ok: true, thread: { id: 2 } })
+    createChatThread.mockResolvedValue({ ok: true, thread: buildThreadPayload(2, 'Thread 2') })
+    getChatThread.mockResolvedValue(buildRuntimePayload().selected_thread)
     archiveChatThread.mockResolvedValue({ ok: true })
     clearChatThread.mockResolvedValue({ ok: true, thread: buildRuntimePayload().selected_thread })
     updateChatThreadConfig.mockResolvedValue({ ok: true, thread: buildRuntimePayload().selected_thread })
   })
 
-  test('shows a pending thinking bubble immediately after submit', async () => {
+  test('shows optimistic user message and pending thinking bubble immediately after submit', async () => {
     sendChatTurn.mockImplementation(
       () =>
         new Promise(() => {
@@ -97,6 +115,10 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(sendChatTurn).toHaveBeenCalledWith(1, 'hello there')
     })
+
+    expect(messageInput).toHaveValue('')
+    const userBubble = await screen.findByText('hello there')
+    expect(userBubble.closest('.chat-message')).toHaveClass('chat-message-user')
 
     const thinkingBubble = await screen.findByText('Thinking...')
     expect(thinkingBubble).toBeInTheDocument()
@@ -143,5 +165,25 @@ describe('ChatPage', () => {
     await screen.findByText('A compact assistant reply.')
 
     expect(container.querySelector('.chat-message-header')).toBeNull()
+  })
+
+  test('submits against created thread id without stale prior thread id', async () => {
+    sendChatTurn.mockResolvedValue({ ok: true, thread: buildThreadPayload(2, 'Thread 2') })
+
+    renderPage()
+
+    await screen.findByRole('button', { name: /create thread/i })
+    fireEvent.click(screen.getByRole('button', { name: /create thread/i }))
+
+    await waitFor(() => {
+      expect(createChatThread).toHaveBeenCalled()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'hello new thread' } })
+    fireEvent.click(screen.getByRole('button', { name: /send/i }))
+
+    await waitFor(() => {
+      expect(sendChatTurn).toHaveBeenCalledWith(2, 'hello new thread')
+    })
   })
 })

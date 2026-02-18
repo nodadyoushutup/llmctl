@@ -96,6 +96,7 @@ NODE_EXECUTOR_SETTING_KEYS = (
     "workspace_identity_key",
     "k8s_namespace",
     "k8s_image",
+    "k8s_image_tag",
     "k8s_in_cluster",
     "k8s_service_account",
     "k8s_kubeconfig",
@@ -330,6 +331,55 @@ def validate_node_executor_image_reference(
     return cleaned
 
 
+def _split_node_executor_image_reference(value: str | None) -> tuple[str, str]:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return "", ""
+    base = cleaned
+    if "@" in cleaned:
+        base, _digest = cleaned.rsplit("@", 1)
+    last_slash = base.rfind("/")
+    last_colon = base.rfind(":")
+    if last_colon > last_slash:
+        return base[:last_colon], base[last_colon + 1 :]
+    return base, ""
+
+
+def normalize_node_executor_image_tag(
+    value: str | None,
+    *,
+    field_name: str = "Kubernetes image tag",
+) -> str:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return ""
+    if any(char.isspace() for char in cleaned):
+        raise ValueError(f"{field_name} is invalid. Spaces are not allowed in tags.")
+    if not NODE_EXECUTOR_IMAGE_TAG_PATTERN.fullmatch(cleaned):
+        raise ValueError(f"{field_name} is invalid. Tag format is not supported.")
+    return cleaned
+
+
+def extract_node_executor_image_tag(value: str | None) -> str:
+    _repo, tag = _split_node_executor_image_reference(value)
+    return tag
+
+
+def resolve_node_executor_k8s_image(
+    image_reference: str | None,
+    image_tag: str | None = None,
+) -> str:
+    image = validate_node_executor_image_reference(
+        image_reference,
+        field_name="Kubernetes image",
+    ) or "llmctl-executor:latest"
+    tag = normalize_node_executor_image_tag(image_tag)
+    if not tag:
+        return image
+    repo, _current_tag = _split_node_executor_image_reference(image)
+    return f"{repo}:{tag}" if repo else f"llmctl-executor:{tag}"
+
+
 def normalize_provider_dispatch_id(
     value: str | None,
     *,
@@ -419,6 +469,9 @@ def normalize_node_executor_run_metadata(
 
 
 def node_executor_default_settings() -> dict[str, str]:
+    default_k8s_image = (
+        (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip() or "llmctl-executor:latest"
+    )
     return {
         "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": _coerce_int_setting(
@@ -452,10 +505,8 @@ def node_executor_default_settings() -> dict[str, str]:
             Config.NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY
         ),
         "k8s_namespace": (Config.NODE_EXECUTOR_K8S_NAMESPACE or "").strip() or "default",
-        "k8s_image": (
-            (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip()
-            or "llmctl-executor:latest"
-        ),
+        "k8s_image": default_k8s_image,
+        "k8s_image_tag": "",
         "k8s_in_cluster": _bool_string(Config.NODE_EXECUTOR_K8S_IN_CLUSTER),
         "k8s_service_account": (
             (Config.NODE_EXECUTOR_K8S_SERVICE_ACCOUNT or "").strip()
@@ -606,6 +657,19 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
         ) or defaults["k8s_image"]
     except ValueError:
         settings["k8s_image"] = defaults["k8s_image"]
+    image_tag_candidate = (
+        settings.get("k8s_image_tag")
+        or extract_node_executor_image_tag(settings.get("k8s_image"))
+        or extract_node_executor_image_tag(defaults.get("k8s_image"))
+    )
+    try:
+        settings["k8s_image_tag"] = normalize_node_executor_image_tag(
+            image_tag_candidate
+        )
+    except ValueError:
+        settings["k8s_image_tag"] = extract_node_executor_image_tag(
+            settings.get("k8s_image")
+        )
     settings["k8s_in_cluster"] = _bool_string(
         _as_bool_flag(settings.get("k8s_in_cluster"), default=False)
     )
@@ -687,10 +751,8 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         "k8s_namespace": (
             (candidate.get("k8s_namespace") or "").strip() or "default"
         ),
-        "k8s_image": validate_node_executor_image_reference(
-            candidate.get("k8s_image"),
-            field_name="Kubernetes image",
-        ) or "llmctl-executor:latest",
+        "k8s_image": "",
+        "k8s_image_tag": "",
         "k8s_in_cluster": _bool_string(
             _as_bool_flag(candidate.get("k8s_in_cluster"), default=False)
         ),
@@ -714,6 +776,17 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
             candidate.get("k8s_image_pull_secrets_json") or ""
         ).strip(),
     }
+    validated["k8s_image"] = validate_node_executor_image_reference(
+        candidate.get("k8s_image"),
+        field_name="Kubernetes image",
+    ) or "llmctl-executor:latest"
+    image_tag_candidate = (
+        candidate.get("k8s_image_tag")
+        or extract_node_executor_image_tag(validated.get("k8s_image"))
+    )
+    validated["k8s_image_tag"] = normalize_node_executor_image_tag(
+        image_tag_candidate
+    )
     image_pull_secrets_json = (validated.get("k8s_image_pull_secrets_json") or "").strip()
     if image_pull_secrets_json:
         try:
@@ -743,6 +816,11 @@ def node_executor_effective_config_summary() -> dict[str, str]:
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
         "k8s_image": settings.get("k8s_image") or "llmctl-executor:latest",
+        "k8s_image_tag": settings.get("k8s_image_tag") or "",
+        "k8s_effective_image": resolve_node_executor_k8s_image(
+            settings.get("k8s_image"),
+            settings.get("k8s_image_tag"),
+        ),
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
         "k8s_gpu_limit": settings.get("k8s_gpu_limit") or "0",
@@ -770,6 +848,7 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
         "k8s_image": settings.get("k8s_image") or "llmctl-executor:latest",
+        "k8s_image_tag": settings.get("k8s_image_tag") or "",
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
         "k8s_kubeconfig": settings.get("k8s_kubeconfig") or "",

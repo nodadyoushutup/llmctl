@@ -1,5 +1,4 @@
-ARG EXECUTOR_BASE_IMAGE=llmctl-executor-base:latest
-FROM ${EXECUTOR_BASE_IMAGE}
+FROM llmctl-executor-base:latest
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -12,7 +11,7 @@ WORKDIR /app
 COPY app/llmctl-executor/requirements.txt /app/app/llmctl-executor/requirements.txt
 COPY app/llmctl-studio-backend/requirements.txt /app/app/llmctl-studio-backend/requirements.txt
 RUN if [ ! -x /opt/venv/bin/python3 ]; then \
-        echo "Missing /opt/venv in base image. Build/use llmctl-executor-base or set EXECUTOR_BASE_IMAGE to a compatible tag." >&2; \
+        echo "Missing /opt/venv in base image. Build/use llmctl-executor-base:latest (or retag a compatible base to that local tag)." >&2; \
         exit 1; \
     fi \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \

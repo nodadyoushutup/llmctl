@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: celery-beat
-          image: 10.107.62.134:80/llmctl/llmctl-celery-worker:latest@sha256:4c0f8f885f1cfb0529fcc813aea3480023d1761ea0a4b13a1a560ddbd07c16bf
+          image: 10.107.62.134:80/llmctl/llmctl-celery-worker:0.0.1@sha256:4c0f8f885f1cfb0529fcc813aea3480023d1761ea0a4b13a1a560ddbd07c16bf
           command:
             - python3
             - app/llmctl-celery-worker/run.py

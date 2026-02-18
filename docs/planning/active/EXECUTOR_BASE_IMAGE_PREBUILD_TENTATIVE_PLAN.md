@@ -73,7 +73,7 @@ Goal: create a reusable prebuilt `llmctl-executor-base` image that bakes in CUDA
 - [x] Build arg and runtime contract between base and executor:
   - [x] Base image exposes `/opt/venv` and downstream image keeps `PATH=/opt/venv/bin:$PATH`.
   - [x] Base build args include exact vLLM version and optional Claude CLI install toggle.
-  - [x] Downstream executor image consumes `EXECUTOR_BASE_IMAGE` reference and does not reinstall vLLM by default when base already contains it.
+  - [x] Downstream executor image consumes `llmctl-executor-base:latest` directly and does not reinstall vLLM by default when base already contains it.
   - [x] Contract labels/env metadata to be added in Stage 3/4 for traceability (`cuda_tag`, `vllm_version`, build timestamp).
 - [x] Harbor naming and tagging convention:
   - [x] Local build name: `llmctl-executor-base:latest`.
@@ -112,8 +112,7 @@ Goal: create a reusable prebuilt `llmctl-executor-base` image that bakes in CUDA
 ## Stage 4 - Output (Implemented)
 
 - [x] Updated `app/llmctl-executor/Dockerfile` to default to:
-  - [x] `ARG EXECUTOR_BASE_IMAGE=llmctl-executor-base:latest`
-  - [x] `FROM ${EXECUTOR_BASE_IMAGE}`
+  - [x] `FROM llmctl-executor-base:latest`
 - [x] Reduced executor image layering to app-focused steps:
   - [x] Removed heavyweight CUDA/Node/CLI/Chromium/vLLM bootstrap from executor image (moved to base image).
   - [x] Kept only app dependency layering and code copy in executor Dockerfile.
@@ -122,7 +121,7 @@ Goal: create a reusable prebuilt `llmctl-executor-base` image that bakes in CUDA
   - [x] `CMD ["python3", "app/llmctl-executor/run.py"]` unchanged.
   - [x] Compatibility guard added: build fails fast if base image does not provide `/opt/venv`.
 - [x] Updated `app/llmctl-executor/build-executor.sh`:
-  - [x] Added `EXECUTOR_BASE_IMAGE` build arg (default `llmctl-executor-base:latest`).
+  - [x] Simplified executor build to consume local `llmctl-executor-base:latest` without base-image override arg.
   - [x] Set `INSTALL_VLLM=false` default for downstream executor builds.
 - [x] Documented fallback path in `app/llmctl-executor/README.md`:
   - [x] Build base first, then executor image.

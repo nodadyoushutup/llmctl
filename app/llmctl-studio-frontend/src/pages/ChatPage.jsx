@@ -7,6 +7,7 @@ import {
   archiveChatThread,
   clearChatThread,
   createChatThread,
+  getChatThread,
   getChatRuntime,
   sendChatTurn,
   updateChatThreadConfig,
@@ -113,6 +114,7 @@ export default function ChatPage() {
   const [, setChatError] = useFlashState('error')
   const [draftMessage, setDraftMessage] = useState('')
   const [sending, setSending] = useState(false)
+  const [pendingUserMessages, setPendingUserMessages] = useState([])
   const [showPendingAssistantBubble, setShowPendingAssistantBubble] = useState(false)
   const [creatingThread, setCreatingThread] = useState(false)
   const [archivingThreadId, setArchivingThreadId] = useState(null)
@@ -135,9 +137,21 @@ export default function ChatPage() {
 
   const messageInputRef = useRef(null)
   const messageLogRef = useRef(null)
+  const skipNextRuntimeLoadRef = useRef(false)
+  const pendingMessageCounterRef = useRef(0)
 
   useEffect(() => {
+    if (skipNextRuntimeLoadRef.current) {
+      skipNextRuntimeLoadRef.current = false
+      return undefined
+    }
+
     let cancelled = false
+    setState((current) => ({
+      ...current,
+      loading: true,
+      error: '',
+    }))
 
     async function loadRuntime() {
       try {
@@ -157,8 +171,10 @@ export default function ChatPage() {
 
         const resolvedSelectedThreadId = parseThreadId(payload?.selected_thread_id)
         if (resolvedSelectedThreadId && resolvedSelectedThreadId !== selectedThreadIdFromQuery) {
+          skipNextRuntimeLoadRef.current = true
           setSearchParams({ thread_id: String(resolvedSelectedThreadId) }, { replace: true })
         } else if (!resolvedSelectedThreadId && selectedThreadIdFromQuery) {
+          skipNextRuntimeLoadRef.current = true
           setSearchParams({}, { replace: true })
         }
       } catch (error) {
@@ -212,11 +228,12 @@ export default function ChatPage() {
     [selectedThread?.messages],
   )
   const visibleMessages = useMemo(() => {
+    const messages = [...selectedThreadMessages, ...pendingUserMessages]
     if (!showPendingAssistantBubble) {
-      return selectedThreadMessages
+      return messages
     }
     return [
-      ...selectedThreadMessages,
+      ...messages,
       {
         id: 'pending-assistant',
         role: 'assistant',
@@ -224,7 +241,12 @@ export default function ChatPage() {
         pending: true,
       },
     ]
-  }, [selectedThreadMessages, showPendingAssistantBubble])
+  }, [pendingUserMessages, selectedThreadMessages, showPendingAssistantBubble])
+
+  useEffect(() => {
+    setPendingUserMessages([])
+    setShowPendingAssistantBubble(false)
+  }, [selectedThreadId])
 
   const sessionModelLabel = useMemo(() => {
     const modelId = parseThreadId(sessionConfig.modelId)
@@ -322,11 +344,20 @@ export default function ChatPage() {
     setChatError('')
     try {
       const response = await createChatThread()
-      const nextThreadId = parseThreadId(response?.thread?.id)
+      const thread = response && typeof response === 'object' ? response.thread : null
+      const nextThreadId = parseThreadId(thread?.id)
+      if (thread && typeof thread === 'object') {
+        updateSelectedThread(thread)
+        setSessionConfig(buildSessionConfig(thread, payload?.chat_default_settings || null))
+        setSessionDirty(false)
+      }
       if (nextThreadId) {
+        skipNextRuntimeLoadRef.current = true
         setSearchParams({ thread_id: String(nextThreadId) })
       }
-      setRefreshVersion((value) => value + 1)
+      if (!thread || typeof thread !== 'object') {
+        setRefreshVersion((value) => value + 1)
+      }
     } catch (error) {
       setChatError(messageFromError(error, 'Failed to create chat thread.'))
     } finally {
@@ -346,14 +377,52 @@ export default function ChatPage() {
     try {
       await archiveChatThread(threadId)
       const fallbackThread = threads.find((item) => Number(item?.id) !== Number(threadId))
+      const deletedSelectedThread = selectedThreadId && Number(selectedThreadId) === Number(threadId)
+      setState((current) => {
+        if (!current.payload || typeof current.payload !== 'object') {
+          return current
+        }
+        const nextThreads = Array.isArray(current.payload.threads)
+          ? current.payload.threads.filter((item) => Number(item?.id) !== Number(threadId))
+          : []
+        return {
+          ...current,
+          payload: {
+            ...current.payload,
+            threads: nextThreads,
+            selected_thread_id: deletedSelectedThread ? null : current.payload.selected_thread_id,
+            selected_thread: deletedSelectedThread ? null : current.payload.selected_thread,
+          },
+        }
+      })
+
       if (selectedThreadId && Number(selectedThreadId) === Number(threadId)) {
         if (fallbackThread?.id) {
+          const fallbackThreadId = Number(fallbackThread.id)
+          let loadedFallback = false
+          try {
+            const fallbackPayload = await getChatThread(fallbackThreadId)
+            if (fallbackPayload && typeof fallbackPayload === 'object') {
+              updateSelectedThread(fallbackPayload)
+              setSessionConfig(
+                buildSessionConfig(fallbackPayload, payload?.chat_default_settings || null),
+              )
+              setSessionDirty(false)
+              loadedFallback = true
+            }
+          } catch (error) {
+            setChatError(messageFromError(error, 'Failed to load fallback thread.'))
+            setRefreshVersion((value) => value + 1)
+          }
+          skipNextRuntimeLoadRef.current = loadedFallback
           setSearchParams({ thread_id: String(fallbackThread.id) })
         } else {
+          setSessionConfig(buildSessionConfig(null, payload?.chat_default_settings || null))
+          setSessionDirty(false)
+          skipNextRuntimeLoadRef.current = true
           setSearchParams({})
         }
       }
-      setRefreshVersion((value) => value + 1)
     } catch (error) {
       setChatError(messageFromError(error, 'Failed to archive chat thread.'))
     } finally {
@@ -420,7 +489,7 @@ export default function ChatPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    if (!selectedThreadId) {
+    if (!selectedThreadId || state.loading) {
       return
     }
     const message = draftMessage.trim()
@@ -428,11 +497,24 @@ export default function ChatPage() {
       setChatError('Message is required.')
       return
     }
+    pendingMessageCounterRef.current += 1
+    const optimisticMessageId = `pending-user-${pendingMessageCounterRef.current}`
+    setPendingUserMessages((current) => [
+      ...current,
+      {
+        id: optimisticMessageId,
+        role: 'user',
+        content: message,
+      },
+    ])
+    setDraftMessage('')
     setSending(true)
     setShowPendingAssistantBubble(true)
     setChatError('')
     const controlsSynced = await saveSessionControls()
     if (!controlsSynced) {
+      setPendingUserMessages((current) => current.filter((item) => item.id !== optimisticMessageId))
+      setDraftMessage(message)
       setShowPendingAssistantBubble(false)
       setSending(false)
       return
@@ -440,17 +522,20 @@ export default function ChatPage() {
     try {
       const response = await sendChatTurn(selectedThreadId, message)
       setShowPendingAssistantBubble(false)
+      setPendingUserMessages((current) => current.filter((item) => item.id !== optimisticMessageId))
       if (!response || typeof response !== 'object' || !response.ok) {
+        setDraftMessage(message)
         setChatError('Chat request failed.')
         return
       }
-      setDraftMessage('')
       if (response.thread && typeof response.thread === 'object') {
         updateSelectedThread(response.thread)
       } else {
         setRefreshVersion((value) => value + 1)
       }
     } catch (error) {
+      setPendingUserMessages((current) => current.filter((item) => item.id !== optimisticMessageId))
+      setDraftMessage(message)
       setShowPendingAssistantBubble(false)
       setChatError(messageFromError(error, 'Chat request failed.'))
     } finally {
@@ -463,14 +548,15 @@ export default function ChatPage() {
   }
 
   function handleThreadRowClick(event, threadId) {
-    if (!threadId || shouldIgnoreRowClick(event.target)) {
+    if (!threadId || state.loading || shouldIgnoreRowClick(event.target)) {
       return
     }
+    skipNextRuntimeLoadRef.current = false
     setSearchParams({ thread_id: String(threadId) })
   }
 
   function handleMessageKeyDown(event) {
-    if (event.isComposing || sending || !selectedThreadId) {
+    if (event.isComposing || sending || state.loading || !selectedThreadId) {
       return
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -497,7 +583,7 @@ export default function ChatPage() {
                 aria-label="Create thread"
                 title="Create thread"
                 onClick={handleCreateThread}
-                disabled={creatingThread}
+                disabled={creatingThread || state.loading}
               >
                 <i className="fa-solid fa-plus" />
               </button>
@@ -692,7 +778,7 @@ export default function ChatPage() {
                       className="icon-button icon-button-danger"
                       aria-label="Delete thread"
                       onClick={() => handleArchiveThread(threadId)}
-                      disabled={archivingThreadId === threadId}
+                      disabled={archivingThreadId === threadId || state.loading}
                     >
                       <i className="fa-solid fa-trash" />
                     </button>
@@ -737,7 +823,7 @@ export default function ChatPage() {
                     className="icon-button"
                     aria-label="Clear thread"
                     onClick={handleClearThread}
-                    disabled={clearingThread}
+                    disabled={clearingThread || state.loading}
                   >
                     <i className="fa-solid fa-eraser" />
                   </button>
@@ -746,7 +832,7 @@ export default function ChatPage() {
                     type="submit"
                     form="chat-turn-form"
                     className="btn-link"
-                    disabled={sending || savingSession}
+                    disabled={sending || savingSession || state.loading}
                   >
                     <i className="fa-solid fa-paper-plane" />
                     send
@@ -803,7 +889,7 @@ export default function ChatPage() {
                 value={draftMessage}
                 onChange={(event) => setDraftMessage(event.target.value)}
                 onKeyDown={handleMessageKeyDown}
-                disabled={sending || savingSession}
+                disabled={sending || savingSession || state.loading}
                 ref={messageInputRef}
               />
             </form>

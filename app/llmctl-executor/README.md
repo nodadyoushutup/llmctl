@@ -69,7 +69,6 @@ app/llmctl-executor/build-executor.sh
 
 Build args:
 - `IMAGE_NAME=llmctl-executor:latest`
-- `EXECUTOR_BASE_IMAGE=llmctl-executor-base:latest|<registry>/<project>/llmctl-executor-base:<tag>`
 - `INSTALL_VLLM=true|false` (default `false`; normally `false` because base includes pinned vLLM)
 
 Examples:
@@ -78,13 +77,8 @@ Examples:
 # Default: consume local llmctl-executor-base:latest
 app/llmctl-executor/build-executor.sh
 
-# Consume Harbor-published immutable base tag
-EXECUTOR_BASE_IMAGE=127.0.0.1:30082/llmctl/llmctl-executor-base:sha-<gitsha> \
-app/llmctl-executor/build-executor.sh
-
-# Fallback: if latest base is unavailable, use a prior known-good base tag
-EXECUTOR_BASE_IMAGE=127.0.0.1:30082/llmctl/llmctl-executor-base:sha-<previous-sha> \
-app/llmctl-executor/build-executor.sh
+# If you need a different base source, retag it locally as llmctl-executor-base:latest first
+# docker tag 127.0.0.1:30082/llmctl/llmctl-executor-base:sha-<tag> llmctl-executor-base:latest
 ```
 
 ## Smoke Test

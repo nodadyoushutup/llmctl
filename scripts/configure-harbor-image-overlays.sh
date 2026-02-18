@@ -15,12 +15,12 @@ Render Harbor image settings into the llmctl-studio dev overlay.
 Defaults:
   - Registry endpoint auto-discovered from Harbor ClusterIP service (fallback: NodePort)
   - Project: llmctl
-  - Tag: latest
+  - Tag: 0.0.1
 
 Options:
   --registry <host:port>   Harbor registry endpoint (example: 10.107.62.134:80)
   --project <name>         Harbor project name (default: llmctl)
-  --tag <tag>              Image tag for backend/frontend/mcp/executor (default: latest)
+  --tag <tag>              Image tag for llmctl images (default: 0.0.1)
   --argocd-app <name>      Also run argocd app set with Harbor image overrides
   -h, --help               Show this help
 
@@ -76,8 +76,7 @@ discover_registry() {
 
 HARBOR_REGISTRY="${HARBOR_REGISTRY:-}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-llmctl}"
-HARBOR_TAG="${HARBOR_TAG:-latest}"
-CELERY_WORKER_TAG="latest"
+HARBOR_TAG="${HARBOR_TAG:-0.0.1}"
 ARGOCD_APP="${ARGOCD_APP:-}"
 
 while [ $# -gt 0 ]; do
@@ -155,7 +154,6 @@ echo "Rendered ${OUTPUT_PATH}"
 echo "  registry: ${HARBOR_REGISTRY}"
 echo "  project:  ${HARBOR_PROJECT}"
 echo "  tag:      ${HARBOR_TAG}"
-echo "  celery:   ${CELERY_WORKER_TAG} (fixed)"
 echo
 echo "Apply dev overlay:"
 echo "  kubectl apply -k kubernetes/llmctl-studio/overlays/dev"
@@ -173,9 +171,10 @@ if [ -n "${ARGOCD_APP}" ]; then
   argocd app set "${ARGOCD_APP}" \
     --kustomize-image "llmctl-studio-backend=${harbor_base}/llmctl-studio-backend:${HARBOR_TAG}" \
     --kustomize-image "llmctl-studio-frontend=${harbor_base}/llmctl-studio-frontend:${HARBOR_TAG}" \
-    --kustomize-image "llmctl-celery-worker=${harbor_base}/llmctl-celery-worker:${CELERY_WORKER_TAG}" \
+    --kustomize-image "llmctl-celery-worker=${harbor_base}/llmctl-celery-worker:${HARBOR_TAG}" \
     --kustomize-image "llmctl-mcp=${harbor_base}/llmctl-mcp:${HARBOR_TAG}" \
-    --kustomize-image "llmctl-executor=${harbor_base}/llmctl-executor:${HARBOR_TAG}"
+    --kustomize-image "llmctl-executor=${harbor_base}/llmctl-executor:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-chromadb-mcp=${harbor_base}/llmctl-chromadb-mcp:${HARBOR_TAG}"
 
   echo "ArgoCD app image overrides updated."
   echo "To apply immediately:"

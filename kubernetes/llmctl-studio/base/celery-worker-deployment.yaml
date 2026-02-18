@@ -17,7 +17,7 @@ spec:
       serviceAccountName: llmctl-studio-backend
       containers:
         - name: celery-worker
-          image: llmctl-celery-worker:latest
+          image: llmctl-celery-worker:0.0.1
           imagePullPolicy: IfNotPresent
           command:
             - python3

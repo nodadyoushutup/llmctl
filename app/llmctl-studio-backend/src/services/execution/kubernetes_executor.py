@@ -22,6 +22,7 @@ from services.execution.contracts import (
     ExecutionResult,
 )
 from services.execution.idempotency import register_dispatch_key
+from services.integrations import resolve_node_executor_k8s_image
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,13 @@ class KubernetesExecutor:
         started_at = _utcnow()
         settings = self._settings
         namespace = str(settings.get("k8s_namespace") or "default").strip() or "default"
-        image = str(settings.get("k8s_image") or "llmctl-executor:latest")
+        try:
+            image = resolve_node_executor_k8s_image(
+                settings.get("k8s_image"),
+                settings.get("k8s_image_tag"),
+            )
+        except ValueError:
+            image = str(settings.get("k8s_image") or "llmctl-executor:latest")
         in_cluster = _as_bool(settings.get("k8s_in_cluster"), default=False)
         service_account = str(settings.get("k8s_service_account") or "").strip()
         kubeconfig = str(settings.get("k8s_kubeconfig") or "")

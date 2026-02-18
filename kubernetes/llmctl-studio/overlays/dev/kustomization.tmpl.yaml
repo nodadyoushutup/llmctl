@@ -17,7 +17,10 @@ images:
     newTag: __HARBOR_TAG__
   - name: llmctl-celery-worker
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-celery-worker
-    newTag: latest
+    newTag: __HARBOR_TAG__
+  - name: llmctl-chromadb-mcp
+    newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-chromadb-mcp
+    newTag: __HARBOR_TAG__
 patches:
   - target:
       kind: ConfigMap

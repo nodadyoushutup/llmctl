@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: studio-frontend
-          image: llmctl-studio-frontend:latest
+          image: llmctl-studio-frontend:0.0.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

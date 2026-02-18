@@ -160,6 +160,37 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         self.assertEqual("dispatch_failed", result.run_metadata.get("dispatch_status"))
         self.assertIn("requires kubeconfig", str(result.error.get("message") if result.error else ""))
 
+    def test_kubernetes_executor_uses_runtime_image_tag_for_spawned_job_image(self) -> None:
+        settings = {
+            "k8s_in_cluster": "true",
+            "k8s_image": "ghcr.io/acme/llmctl-executor:latest",
+            "k8s_image_tag": "v2026.02.18",
+        }
+        executor = KubernetesExecutor(settings)
+        captured = {"image": ""}
+        executor._dispatch_via_kubernetes = (  # type: ignore[method-assign]
+            lambda **kwargs: captured.update({"image": str(kwargs.get("image") or "")})
+            or _KubernetesDispatchOutcome(
+                job_name="job-tag-1",
+                pod_name="pod-tag-1",
+                stdout="",
+                stderr="",
+                startup_marker_seen=True,
+                executor_result={
+                    "status": "success",
+                    "output_state": {"node_type": "start"},
+                    "routing_state": {},
+                },
+                terminal_reason="Complete",
+            )
+        )
+        result = executor.execute(_request(), lambda _request: ({"local": True}, {}))
+        self.assertEqual("success", result.status)
+        self.assertEqual(
+            "ghcr.io/acme/llmctl-executor:v2026.02.18",
+            captured["image"],
+        )
+
     def test_cancel_job_uses_grace_then_force(self) -> None:
         executor = KubernetesExecutor({})
         commands: list[list[str]] = []

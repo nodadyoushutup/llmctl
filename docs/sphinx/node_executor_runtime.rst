@@ -25,6 +25,7 @@ Keys:
 - ``workspace_identity_key`` (stable logical key, persisted per run as ``workspace_identity``).
 - ``k8s_namespace``.
 - ``k8s_image``.
+- ``k8s_image_tag`` (free-form executor tag override used when spawning job pods).
 - ``k8s_in_cluster``.
 - ``k8s_service_account``.
 - ``k8s_kubeconfig`` (encrypted at rest; runtime-only plaintext access).

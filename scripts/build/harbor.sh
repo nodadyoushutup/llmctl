@@ -13,8 +13,9 @@ Usage: scripts/build/harbor.sh [options]
 Build and push llmctl images to Harbor.
 
 Defaults:
-  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-executor-base, llmctl-executor, llmctl-celery-worker
+  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-chromadb-mcp, llmctl-executor-base, llmctl-executor, llmctl-celery-worker
   - Pushes tag: latest
+  - If --tag is non-latest, pushes both <tag> and latest
   - Project: llmctl
   - Harbor login user: admin
   - Harbor login password: Harbor12345
@@ -23,7 +24,7 @@ Defaults:
 Options:
   --registry <host:port>   Harbor registry endpoint (example: 192.168.49.2:30082)
   --project <name>         Harbor project (default: llmctl)
-  --tag <tag>              Image tag to push (default: latest)
+  --tag <tag>              Image tag to push (default: latest). Non-latest also pushes latest
   --username <name>        Harbor username (default: admin)
   --password <value>       Harbor password (default: Harbor12345)
   --no-login               Skip docker login before push
@@ -31,6 +32,7 @@ Options:
   --studio                 Build/push llmctl-studio-backend only
   --frontend               Build/push llmctl-studio-frontend only
   --mcp                    Build/push llmctl-mcp only
+  --mcp-chroma             Build/push llmctl-chromadb-mcp only
   --executor-base          Build/push llmctl-executor-base only
   --executor               Build/push llmctl-executor only
   --celery-worker          Build/push llmctl-celery-worker only
@@ -105,10 +107,12 @@ DO_LOGIN=true
 SELECTED_STUDIO=false
 SELECTED_FRONTEND=false
 SELECTED_MCP=false
+SELECTED_MCP_CHROMA=false
 SELECTED_EXECUTOR_BASE=false
 SELECTED_EXECUTOR=false
 SELECTED_CELERY_WORKER=false
 SELECTION_MADE=false
+HARBOR_TAGS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -176,6 +180,11 @@ while [ $# -gt 0 ]; do
       SELECTION_MADE=true
       shift
       ;;
+    --mcp-chroma)
+      SELECTED_MCP_CHROMA=true
+      SELECTION_MADE=true
+      shift
+      ;;
     --executor-base)
       SELECTED_EXECUTOR_BASE=true
       SELECTION_MADE=true
@@ -195,6 +204,7 @@ while [ $# -gt 0 ]; do
       SELECTED_STUDIO=true
       SELECTED_FRONTEND=true
       SELECTED_MCP=true
+      SELECTED_MCP_CHROMA=true
       SELECTED_EXECUTOR_BASE=true
       SELECTED_EXECUTOR=true
       SELECTED_CELERY_WORKER=true
@@ -217,6 +227,7 @@ if [ "${SELECTION_MADE}" = false ]; then
   SELECTED_STUDIO=true
   SELECTED_FRONTEND=true
   SELECTED_MCP=true
+  SELECTED_MCP_CHROMA=true
   SELECTED_EXECUTOR_BASE=true
   SELECTED_EXECUTOR=true
   SELECTED_CELERY_WORKER=true
@@ -397,22 +408,33 @@ build_and_push() {
   local image_name="$1"
   local build_script="$2"
   local local_image="${image_name}:latest"
-  local remote_image="${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${image_name}:${HARBOR_TAG}"
+  local remote_image=""
+  local tag=""
 
   echo
   echo "==> Building ${local_image}"
   "${build_script}"
 
-  echo "==> Tagging ${local_image} -> ${remote_image}"
-  docker tag "${local_image}" "${remote_image}"
+  for tag in "${HARBOR_TAGS[@]}"; do
+    remote_image="${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${image_name}:${tag}"
+    echo "==> Tagging ${local_image} -> ${remote_image}"
+    docker tag "${local_image}" "${remote_image}"
 
-  echo "==> Pushing ${remote_image}"
-  docker push "${remote_image}"
+    echo "==> Pushing ${remote_image}"
+    docker push "${remote_image}"
+  done
 }
+
+# By default, push latest only. If a non-latest tag is requested, push both.
+if [ "${HARBOR_TAG}" = "latest" ]; then
+  HARBOR_TAGS=("latest")
+else
+  HARBOR_TAGS=("${HARBOR_TAG}" "latest")
+fi
 
 echo "Harbor registry: ${HARBOR_REGISTRY}"
 echo "Harbor project: ${HARBOR_PROJECT}"
-echo "Harbor tag: ${HARBOR_TAG}"
+echo "Harbor tags: ${HARBOR_TAGS[*]}"
 
 login_harbor
 ensure_harbor_project
@@ -429,6 +451,10 @@ if [ "${SELECTED_MCP}" = true ]; then
   build_and_push "llmctl-mcp" "${REPO_ROOT}/app/llmctl-mcp/docker/build-llmctl-mcp.sh"
 fi
 
+if [ "${SELECTED_MCP_CHROMA}" = true ]; then
+  build_and_push "llmctl-chromadb-mcp" "${REPO_ROOT}/app/llmctl-mcp/docker/build-chromadb-mcp.sh"
+fi
+
 if [ "${SELECTED_EXECUTOR_BASE}" = true ]; then
   build_and_push "llmctl-executor-base" "${REPO_ROOT}/app/llmctl-executor/build-executor-base.sh"
 fi
@@ -442,4 +468,4 @@ if [ "${SELECTED_CELERY_WORKER}" = true ]; then
 fi
 
 echo
-echo "Done. Pushed selected images to Harbor project '${HARBOR_PROJECT}' with tag '${HARBOR_TAG}'."
+echo "Done. Pushed selected images to Harbor project '${HARBOR_PROJECT}' with tags: ${HARBOR_TAGS[*]}."
