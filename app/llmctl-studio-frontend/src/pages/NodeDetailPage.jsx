@@ -3,7 +3,6 @@ import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
-import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
 import { cancelNode, deleteNode, getNode, getNodeStatus, removeNodeAttachment, retryNode } from '../lib/studioApi'
 
@@ -58,7 +57,14 @@ function stageStatusMeta(status) {
 
 function canCancel(status) {
   const normalized = String(status || '').toLowerCase()
-  return normalized === 'queued' || normalized === 'running' || normalized === 'pending'
+  return normalized === 'queued'
+    || normalized === 'running'
+    || normalized === 'pending'
+    || normalized === 'starting'
+    || normalized === 'in_progress'
+    || normalized === 'in progress'
+    || normalized === 'processing'
+    || normalized === 'executing'
 }
 
 function scriptTypeLabel(value) {
@@ -120,6 +126,7 @@ export default function NodeDetailPage() {
   const [busy, setBusy] = useState(false)
   const [busyAttachmentId, setBusyAttachmentId] = useState(null)
   const [expandedStageKey, setExpandedStageKey] = useState('')
+  const [expandedLeftSectionKey, setExpandedLeftSectionKey] = useState('prompt')
   const [leftPanelExpanded, setLeftPanelExpanded] = useState(false)
   const stageLogRefs = useRef(new Map())
   const stageLogPinnedBottomRef = useRef(new Map())
@@ -185,10 +192,13 @@ export default function NodeDetailPage() {
     refreshDetail()
   }, [refreshDetail])
 
+  useEffect(() => {
+    setBusy(false)
+  }, [parsedNodeId])
+
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const task = payload && payload.task && typeof payload.task === 'object' ? payload.task : null
   const agent = payload && payload.agent && typeof payload.agent === 'object' ? payload.agent : null
-  const template = payload && payload.template && typeof payload.template === 'object' ? payload.template : null
   const stageEntries = useMemo(
     () => (payload && Array.isArray(payload.stage_entries) ? payload.stage_entries : []),
     [payload],
@@ -211,7 +221,48 @@ export default function NodeDetailPage() {
   const isQuickTask = Boolean(payload?.is_quick_task)
   const active = canCancel(task?.status)
   const status = nodeStatusMeta(task?.status)
-  const nodeTitle = task?.id ? `Node ${task.id}` : (parsedNodeId ? `Node ${parsedNodeId}` : 'Node')
+  const hasLeftHeaderMessage = state.loading || Boolean(state.error) || Boolean(actionError)
+  const detailItems = useMemo(() => {
+    if (!task) {
+      return []
+    }
+    return [
+      { label: 'Kind', value: task.kind || '-' },
+      {
+        label: 'Agent',
+        value: agent ? <Link to={`/agents/${agent.id}`}>{agent.name}</Link> : (task.agent_id || '-'),
+      },
+      {
+        label: 'Flowchart',
+        value: task.flowchart_id
+          ? <Link to={`/flowcharts/${task.flowchart_id}`}>{task.flowchart_id}</Link>
+          : '-',
+      },
+      {
+        label: 'Flowchart run',
+        value: task.flowchart_run_id && task.flowchart_id
+          ? <Link to={`/flowcharts/${task.flowchart_id}/history/${task.flowchart_run_id}`}>{task.flowchart_run_id}</Link>
+          : (task.flowchart_run_id || '-'),
+      },
+      { label: 'Flowchart node', value: task.flowchart_node_id || '-' },
+      { label: 'Model', value: task.model_id || '-' },
+      { label: 'Autorun node', value: task.run_task_id || '-' },
+      { label: 'Celery task', value: task.celery_task_id || '-' },
+      { label: 'Current stage', value: task.current_stage || '-' },
+      { label: 'Created', value: task.created_at || '-' },
+      { label: 'Started', value: task.started_at || '-' },
+      { label: 'Finished', value: task.finished_at || '-' },
+    ]
+  }, [agent, task])
+  const leftSectionEntries = useMemo(
+    () => [
+      { key: 'prompt', label: 'Prompt' },
+      { key: 'output', label: 'Output' },
+      { key: 'details', label: 'Details' },
+      { key: 'context', label: 'Context' },
+    ],
+    [],
+  )
 
   useEffect(() => {
     if (!stageEntries.length) {
@@ -356,8 +407,9 @@ export default function NodeDetailPage() {
       flash.success(`Node ${nextTaskId} queued.`)
       navigate(`/nodes/${nextTaskId}`)
     } catch (error) {
-      setBusy(false)
       setActionError(errorMessage(error, 'Failed to retry node.'))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -397,7 +449,8 @@ export default function NodeDetailPage() {
       <div className={`node-detail-fixed-layout${leftPanelExpanded ? ' is-left-expanded' : ''}`}>
         <article className="card node-detail-panel node-detail-panel-main">
           <PanelHeader
-            title={nodeTitle}
+            title={<span className={status.className}>{status.label}</span>}
+            titleClassName="node-panel-status-title"
             className="node-panel-header"
             actions={(
               <>
@@ -441,182 +494,130 @@ export default function NodeDetailPage() {
                   disabled={busy || !task}
                   onClick={handleDelete}
                 >
-                  <ActionIcon name="trash" />
+                  <i className="fa-solid fa-trash" />
                 </button>
               </>
             )}
           />
           <div className="node-detail-scroll">
-            <header className="node-detail-header">
-              {state.loading ? <p>Loading node...</p> : null}
-              {state.error ? <p className="error-text">{state.error}</p> : null}
-              {actionError ? <p className="error-text">{actionError}</p> : null}
-            </header>
-
-            <PersistedDetails
-              className="subcard node-detail-section node-detail-collapsible"
-              storageKey={`node:${parsedNodeId || 'unknown'}:left:prompt`}
-              defaultOpen
-            >
-              <summary className="node-detail-summary">
-                <span className="node-detail-summary-title">Prompt</span>
-                <i className="fa-solid fa-chevron-down" aria-hidden="true" />
-              </summary>
-              <div className="node-detail-section-body">
-                {payload?.prompt_text ? <pre className="node-detail-code-block">{payload.prompt_text}</pre> : <p>No prompt recorded.</p>}
-              </div>
-            </PersistedDetails>
-
-            <PersistedDetails
-              className="subcard node-detail-section node-detail-collapsible"
-              storageKey={`node:${parsedNodeId || 'unknown'}:left:output`}
-              defaultOpen
-            >
-              <summary className="node-detail-summary">
-                <span className="node-detail-summary-title">Output</span>
-                <i className="fa-solid fa-chevron-down" aria-hidden="true" />
-              </summary>
-              <div className="node-detail-section-body">
-                {task?.output ? <pre className="node-detail-code-block">{task.output}</pre> : <p>No output yet.</p>}
-              </div>
-            </PersistedDetails>
-
-            {task ? (
-              <PersistedDetails
-                className="subcard node-detail-section node-detail-collapsible"
-                storageKey={`node:${parsedNodeId || 'unknown'}:left:details`}
-                defaultOpen
-              >
-                <summary className="node-detail-summary">
-                  <span className="node-detail-summary-title">Details</span>
-                  <span className="node-detail-summary-meta">
-                    <span className={status.className}>{status.label}</span>
-                    <i className="fa-solid fa-chevron-down" aria-hidden="true" />
-                  </span>
-                </summary>
-                <div className="node-detail-section-body node-details-body">
-                  {active ? (
-                    <div className="table-actions node-details-actions">
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label="Cancel node"
-                        title="Cancel node"
-                        disabled={busy}
-                        onClick={handleCancel}
-                      >
-                        <ActionIcon name="stop" />
-                      </button>
-                    </div>
-                  ) : null}
-                  <dl className="node-details-list">
-                    <div className="node-details-item">
-                      <dt>Kind</dt>
-                      <dd>{task.kind || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Agent</dt>
-                      <dd>
-                        {agent ? <Link to={`/agents/${agent.id}`}>{agent.name}</Link> : (task.agent_id || '-')}
-                      </dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Task template</dt>
-                      <dd>{template?.name || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Model</dt>
-                      <dd>{task.model_id || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Autorun node</dt>
-                      <dd>{task.run_task_id || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Celery task</dt>
-                      <dd>{task.celery_task_id || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Current stage</dt>
-                      <dd>{task.current_stage || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Created</dt>
-                      <dd>{task.created_at || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Started</dt>
-                      <dd>{task.started_at || '-'}</dd>
-                    </div>
-                    <div className="node-details-item">
-                      <dt>Finished</dt>
-                      <dd>{task.finished_at || '-'}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </PersistedDetails>
+            {hasLeftHeaderMessage ? (
+              <header className="node-detail-header">
+                {state.loading ? <p>Loading node...</p> : null}
+                {state.error ? <p className="error-text">{state.error}</p> : null}
+                {actionError ? <p className="error-text">{actionError}</p> : null}
+              </header>
             ) : null}
 
-            <PersistedDetails
-              className="subcard node-detail-section node-detail-collapsible"
-              storageKey={`node:${parsedNodeId || 'unknown'}:left:context`}
-              defaultOpen={false}
-            >
-              <summary className="node-detail-summary">
-                <span className="node-detail-summary-title">Context</span>
-                <i className="fa-solid fa-chevron-down" aria-hidden="true" />
-              </summary>
-              <div className="node-detail-section-body stack-sm">
-                <p>
-                  Integrations:{' '}
-                  {selectedIntegrationLabels.length > 0
-                    ? selectedIntegrationLabels.join(', ')
-                    : '-'}
-                </p>
-                <p>
-                  MCP servers:{' '}
-                  {mcpServers.length > 0
-                    ? mcpServers.map((server) => server.name).join(', ')
-                    : '-'}
-                </p>
-                <p>Scripts:</p>
-                {scripts.length > 0 ? (
-                  <ul>
-                    {scripts.map((script) => (
-                      <li key={script.id}>
-                        {script.file_name} ({scriptTypeLabel(script.script_type)})
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="toolbar-meta">No scripts attached.</p>
-                )}
-                <p>Attachments:</p>
-                {attachments.length > 0 ? (
-                  <ul>
-                    {attachments.map((attachment) => (
-                      <li key={attachment.id} className="node-detail-attachment-row">
-                        <span>{attachment.file_name}</span>
-                        {isQuickTask ? (
-                          <button
-                            type="button"
-                            className="icon-button icon-button-danger"
-                            aria-label={`Remove ${attachment.file_name}`}
-                            title="Remove attachment"
-                            disabled={busyAttachmentId === attachment.id}
-                            onClick={() => handleAttachmentRemove(attachment.id)}
-                          >
-                            <ActionIcon name="trash" />
-                          </button>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="toolbar-meta">No attachments.</p>
-                )}
+            <div className="node-left-shell">
+              <div className="node-left-list">
+                {leftSectionEntries.map((section) => {
+                  const isExpanded = expandedLeftSectionKey === section.key
+                  const contentId = `node-left-content-${section.key}`
+                  return (
+                    <section
+                      key={section.key}
+                      className={`node-left-card${isExpanded ? ' is-expanded' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        className="node-left-toggle"
+                        aria-expanded={isExpanded}
+                        aria-controls={contentId}
+                        onClick={() => setExpandedLeftSectionKey((current) => (current === section.key ? '' : section.key))}
+                      >
+                        <span className="node-left-toggle-main">{section.label}</span>
+                        <span className="node-left-toggle-meta">
+                          <span className="status-chip node-left-toggle-chip-ghost" aria-hidden="true">completed</span>
+                          <i className={`fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true" />
+                        </span>
+                      </button>
+                      {isExpanded ? (
+                        <div className="node-left-content" id={contentId}>
+                          {section.key === 'prompt'
+                            ? (payload?.prompt_text ? <pre className="node-left-code-block">{payload.prompt_text}</pre> : <p className="toolbar-meta node-left-empty">No prompt recorded.</p>)
+                            : null}
+                          {section.key === 'output'
+                            ? (task?.output ? <pre className="node-left-code-block">{task.output}</pre> : <p className="toolbar-meta node-left-empty">No output yet.</p>)
+                            : null}
+                          {section.key === 'details'
+                            ? (
+                              task ? (
+                                <div className="node-left-scroll-panel">
+                                  <dl className="node-details-list">
+                                    {detailItems.map((item) => (
+                                      <div key={item.label} className="node-details-item">
+                                        <dt>{item.label}</dt>
+                                        <dd>{item.value}</dd>
+                                      </div>
+                                    ))}
+                                  </dl>
+                                </div>
+                              ) : (
+                                <p className="toolbar-meta node-left-empty">No details yet.</p>
+                              )
+                            )
+                            : null}
+                          {section.key === 'context'
+                            ? (
+                              <div className="node-left-scroll-panel stack-sm">
+                                <p>
+                                  Integrations:{' '}
+                                  {selectedIntegrationLabels.length > 0
+                                    ? selectedIntegrationLabels.join(', ')
+                                    : '-'}
+                                </p>
+                                <p>
+                                  MCP servers:{' '}
+                                  {mcpServers.length > 0
+                                    ? mcpServers.map((server) => server.name).join(', ')
+                                    : '-'}
+                                </p>
+                                <p>Scripts:</p>
+                                {scripts.length > 0 ? (
+                                  <ul>
+                                    {scripts.map((script) => (
+                                      <li key={script.id}>
+                                        {script.file_name} ({scriptTypeLabel(script.script_type)})
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="toolbar-meta">No scripts attached.</p>
+                                )}
+                                <p>Attachments:</p>
+                                {attachments.length > 0 ? (
+                                  <ul>
+                                    {attachments.map((attachment) => (
+                                      <li key={attachment.id} className="node-detail-attachment-row">
+                                        <span>{attachment.file_name}</span>
+                                        {isQuickTask ? (
+                                          <button
+                                            type="button"
+                                            className="icon-button icon-button-danger"
+                                            aria-label={`Remove ${attachment.file_name}`}
+                                            title="Remove attachment"
+                                            disabled={busyAttachmentId === attachment.id}
+                                            onClick={() => handleAttachmentRemove(attachment.id)}
+                                          >
+                                            <ActionIcon name="trash" />
+                                          </button>
+                                        ) : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="toolbar-meta">No attachments.</p>
+                                )}
+                              </div>
+                            )
+                            : null}
+                        </div>
+                      ) : null}
+                    </section>
+                  )
+                })}
               </div>
-            </PersistedDetails>
+            </div>
           </div>
         </article>
 

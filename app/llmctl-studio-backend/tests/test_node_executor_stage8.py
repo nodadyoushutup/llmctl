@@ -284,10 +284,27 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
 
     def test_node_detail_api_includes_runtime_evidence_metadata(self) -> None:
         with session_scope() as session:
+            flowchart = Flowchart.create(
+                session,
+                name="Node detail flowchart",
+            )
+            flowchart_node = FlowchartNode.create(
+                session,
+                flowchart_id=int(flowchart.id),
+                node_type=FLOWCHART_NODE_TYPE_START,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=int(flowchart.id),
+                status="succeeded",
+            )
             task = AgentTask.create(
                 session,
                 status="succeeded",
                 kind="rag_quick_index",
+                flowchart_id=int(flowchart.id),
+                flowchart_run_id=int(flowchart_run.id),
+                flowchart_node_id=int(flowchart_node.id),
                 selected_provider="kubernetes",
                 final_provider="kubernetes",
                 provider_dispatch_id="kubernetes:default/job-node-1",
@@ -321,6 +338,9 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         self.assertEqual("job-node-1", task_payload.get("k8s_job_name"))
         self.assertEqual("pod-node-1", task_payload.get("k8s_pod_name"))
         self.assertEqual("complete", task_payload.get("k8s_terminal_reason"))
+        self.assertEqual(task_payload.get("flowchart_id"), int(flowchart.id))
+        self.assertEqual(task_payload.get("flowchart_run_id"), int(flowchart_run.id))
+        self.assertEqual(task_payload.get("flowchart_node_id"), int(flowchart_node.id))
 
     def test_node_status_api_includes_runtime_evidence_metadata(self) -> None:
         with session_scope() as session:

@@ -3,21 +3,9 @@ kind: Kustomization
 resources:
   - ../../base
 images:
-  - name: llmctl-studio-backend
-    newName: 10.107.62.134:80/llmctl/llmctl-studio-backend
-    newTag: latest
   - name: llmctl-studio-frontend
     newName: node
     newTag: 22-alpine
-  - name: llmctl-mcp
-    newName: 10.107.62.134:80/llmctl/llmctl-mcp
-    newTag: latest
-  - name: llmctl-executor
-    newName: 10.107.62.134:80/llmctl/llmctl-executor
-    newTag: latest
-  - name: llmctl-celery-worker
-    newName: 10.107.62.134:80/llmctl/llmctl-celery-worker
-    newTag: latest
 patches:
   - target:
       kind: ConfigMap
@@ -26,7 +14,7 @@ patches:
     patch: |-
       - op: replace
         path: /data/LLMCTL_NODE_EXECUTOR_K8S_IMAGE
-        value: 10.107.62.134:80/llmctl/llmctl-executor:latest
+        value: 10.107.62.134:80/llmctl/llmctl-executor:latest@sha256:a8e1d8acf00f197b5cea491a574a4a97bd57fc8f7fa9058588b6a80a3b843a69
   - path: studio-live-code-patch.yaml
     target:
       kind: Deployment

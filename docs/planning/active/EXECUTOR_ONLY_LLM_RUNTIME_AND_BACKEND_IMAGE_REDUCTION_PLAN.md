@@ -66,29 +66,45 @@ Goal: route all LLM interactions through executor pods so the Studio backend no 
 - [x] Keep heavyweight runtime dependencies in executor image only.
 - [ ] Update backend Dockerfile/requirements/build steps and verify backend still boots and serves non-LLM control-plane APIs.
   - [x] Backend Dockerfile updated to remove Node-based LLM CLI installation and backend-side `vllm` install.
+  - [x] Executor Dockerfile/build flow updated with configurable CUDA/vLLM base images and optional system-site-packages inheritance to avoid repeated vLLM rebuild cost.
   - [ ] Runtime boot verification pending in environment with backend dependencies installed.
 - [ ] Acceptance criteria: backend image is smaller than baseline and removed dependencies are no longer present in backend image layers.
-  - [ ] Image-size delta measurement pending image rebuild.
+  - [ ] Image-size delta measurement pending user-run Harbor builds.
+  - [ ] Build handoff rule: Codex provides explicit Harbor build command(s); user runs builds and confirms resulting image tags/digests.
 
 ## Stage 7 - Integration Wiring And Dev Rollout Prep
 
 - [x] Update runtime/config wiring so executor-only LLM behavior is the hard default for dev rollout.
-- [ ] Ensure deployment manifests/env settings remain valid after backend image slimming.
+- [x] Ensure deployment manifests/env settings remain valid after backend image slimming.
+  - [x] Dev overlay now pins runtime images to Harbor artifacts using `latest@sha256:<digest>` for backend, executor, mcp, and celery worker/beat.
 - [ ] Execute smoke validations for chat + quick + flowchart + RAG chat paths with executor evidence checks.
+- [ ] After each user-confirmed image build, update Kubernetes image refs to new tags for both:
+  - [x] mutable tag (`latest`)
+  - [x] immutable content tag (git SHA tag and/or image digest)
+- [ ] Apply/verify Kubernetes rollout after image ref updates.
 - [ ] Acceptance criteria: dev rollout path is stable with fast rollback to prior image/tag if needed.
 
 ## Stage 8 - Automated Testing
 
-- [ ] Run targeted automated tests for affected backend/executor/runtime paths.
+- [x] Run targeted automated tests for affected backend/executor/runtime paths.
   - [x] Attempted targeted test runs.
   - [x] Installed/used local Postgres test harness and reran targeted tests.
   - [x] `test_node_executor_stage4.py` passes under Postgres harness.
-  - [ ] `test_chat_runtime_stage8.py` and `test_react_stage8_api_routes.py` currently fail in setup due SQLite initialization in tests (`SQLite is no longer supported`), not due executor-routing assertions.
+  - [x] `test_chat_runtime_stage8.py` and `test_react_stage8_api_routes.py` updated for Postgres schema isolation and now pass under harness.
 - [x] Run static compile checks for touched backend Python modules.
-- [ ] Add/adjust tests asserting LLM calls are executor-routed for all surfaces and backend-local execution is not used.
+- [x] Add/adjust tests asserting LLM calls are executor-routed for all surfaces and backend-local execution is not used.
   - [x] Added coverage for non-quick `run_agent_task` executor routing in `test_node_executor_stage4.py`.
 - [ ] Validate backend image composition checks (dependency absence/presence expectations) in automation where practical.
 - [ ] Record pass/fail outcomes and follow-up work.
+
+## Build/Deploy Handoff Protocol (New Required Workflow)
+
+- [ ] For every Docker rebuild request, Codex must provide the exact Harbor build/push command(s) instead of running long local Docker builds.
+- [ ] User runs the command(s) and replies with completion confirmation plus resulting image tag/digest.
+- [ ] Only after user confirmation, Codex updates Kubernetes manifests/values to reference:
+  - [ ] `latest`
+  - [ ] SHA/digest-pinned image reference
+- [ ] Codex then performs rollout/status checks and records outcomes in this plan.
 
 ## Stage 9 - Docs Updates
 

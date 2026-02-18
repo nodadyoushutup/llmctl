@@ -67,6 +67,24 @@ Build args:
 - `INSTALL_VLLM=true|false` (default `true`)
 - `INSTALL_CLAUDE=true|false` (default `true`)
 - `IMAGE_NAME=llmctl-executor:latest`
+- `EXECUTOR_BASE_IMAGE=nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04|ubuntu:24.04|vllm/vllm-openai:<tag>`
+- `VENV_SYSTEM_SITE_PACKAGES=true|false` (default `false`)
+
+Examples:
+
+```bash
+# CUDA base + pip install vLLM (default)
+app/llmctl-executor/build-executor.sh
+
+# CPU-only base image (no CUDA libs in image)
+EXECUTOR_BASE_IMAGE=ubuntu:24.04 app/llmctl-executor/build-executor.sh
+
+# Reuse preinstalled vLLM from vllm/vllm-openai image and skip pip install
+EXECUTOR_BASE_IMAGE=vllm/vllm-openai:v0.10.1.1 \
+INSTALL_VLLM=false \
+VENV_SYSTEM_SITE_PACKAGES=true \
+app/llmctl-executor/build-executor.sh
+```
 
 ## Smoke Test
 
