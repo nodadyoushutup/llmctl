@@ -12,7 +12,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: executor
-          image: llmctl-executor:0.0.1
+          image: llmctl-executor:0.0.2
           imagePullPolicy: IfNotPresent
           env:
             - name: LLMCTL_EXECUTOR_PAYLOAD_JSON

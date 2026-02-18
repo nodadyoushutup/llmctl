@@ -15,12 +15,12 @@ Render Harbor image settings into the llmctl-studio dev overlay.
 Defaults:
   - Registry endpoint auto-discovered from Harbor ClusterIP service (fallback: NodePort)
   - Project: llmctl
-  - Tag: 0.0.1
+  - Tag: 0.0.2
 
 Options:
   --registry <host:port>   Harbor registry endpoint (example: 10.107.62.134:80)
   --project <name>         Harbor project name (default: llmctl)
-  --tag <tag>              Image tag for llmctl images (default: 0.0.1)
+  --tag <tag>              Image tag for llmctl images (default: 0.0.2)
   --argocd-app <name>      Also run argocd app set with Harbor image overrides
   -h, --help               Show this help
 
@@ -76,7 +76,7 @@ discover_registry() {
 
 HARBOR_REGISTRY="${HARBOR_REGISTRY:-}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-llmctl}"
-HARBOR_TAG="${HARBOR_TAG:-0.0.1}"
+HARBOR_TAG="${HARBOR_TAG:-0.0.2}"
 ARGOCD_APP="${ARGOCD_APP:-}"
 
 while [ $# -gt 0 ]; do

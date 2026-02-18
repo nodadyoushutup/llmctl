@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: llmctl-mcp
-          image: 10.107.62.134:80/llmctl/llmctl-mcp:0.0.1@sha256:3783bf38d06fa9244d5c69cd82cf516ad199ab2504f846d289f61c6838b7a2c3
+          image: 10.107.62.134:80/llmctl/llmctl-mcp:0.0.2@sha256:a23227379ca33ca1301db1828e8f12595c78a0fb48338850aedc8a5229bef4e5
           command:
             - python3
             - app/llmctl-mcp/run.py
