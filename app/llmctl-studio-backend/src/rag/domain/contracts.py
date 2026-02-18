@@ -329,21 +329,30 @@ def execute_query_contract(
                     continue
                 metadata = meta if isinstance(meta, dict) else {}
                 collection_name = str(metadata.get("collection") or "").strip()
+                source_id = metadata.get("source_id")
+                path = metadata.get("path")
+                chunk_id = metadata.get("chunk_id")
+                score = metadata.get("score")
                 context_rows.append(
                     {
                         "text": text,
                         "collection": collection_name or None,
                         "rank": retrieval_rank,
+                        "provider": RAG_PROVIDER,
+                        "source_id": source_id,
+                        "path": path,
+                        "chunk_id": chunk_id,
+                        "score": score,
                     }
                 )
                 citation_rows.append(
                     {
                         "provider": RAG_PROVIDER,
                         "collection": collection_name or None,
-                        "source_id": metadata.get("source_id"),
-                        "path": metadata.get("path"),
-                        "chunk_id": metadata.get("chunk_id"),
-                        "score": metadata.get("score"),
+                        "source_id": source_id,
+                        "path": path,
+                        "chunk_id": chunk_id,
+                        "score": score,
                         "retrieval_rank": retrieval_rank,
                     }
                 )
@@ -351,10 +360,10 @@ def execute_query_contract(
                     {
                         "provider": RAG_PROVIDER,
                         "collection": collection_name,
-                        "source_id": metadata.get("source_id"),
-                        "path": metadata.get("path"),
-                        "chunk_id": metadata.get("chunk_id"),
-                        "score": metadata.get("score"),
+                        "source_id": source_id,
+                        "path": path,
+                        "chunk_id": chunk_id,
+                        "score": score,
                         "snippet": text[:1200],
                         "retrieval_rank": retrieval_rank,
                     }
@@ -402,6 +411,54 @@ def execute_query_contract(
         "mode": RAG_FLOWCHART_MODE_QUERY,
         "collections": selected_collections,
     }
+
+
+def format_retrieval_context_for_synthesis(
+    retrieval_context: list[dict[str, Any]],
+    *,
+    max_context_chars: int = 0,
+) -> str:
+    blocks: list[str] = []
+    for item in retrieval_context:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        rank_value = item.get("rank", item.get("retrieval_rank"))
+        try:
+            parsed_rank = int(rank_value)
+        except (TypeError, ValueError):
+            parsed_rank = None
+        if parsed_rank is not None and parsed_rank > 0:
+            label = f"[{parsed_rank}]"
+        else:
+            label = "[source]"
+
+        source_bits: list[str] = []
+        collection = str(item.get("collection") or "").strip()
+        if collection:
+            source_bits.append(f"collection={collection}")
+        path = str(item.get("path") or "").strip()
+        if path:
+            source_bits.append(f"path={path}")
+        source_id = str(item.get("source_id") or "").strip()
+        if source_id and not path:
+            source_bits.append(f"source_id={source_id}")
+        chunk_id = str(item.get("chunk_id") or "").strip()
+        if chunk_id:
+            source_bits.append(f"chunk_id={chunk_id}")
+        score = item.get("score")
+        if isinstance(score, (int, float)):
+            source_bits.append(f"score={score:.6g}")
+
+        header = f"{label} {'; '.join(source_bits)}".strip()
+        blocks.append(f"{header}\n{text}" if header else text)
+
+    context_text = "\n\n".join(blocks)
+    if max_context_chars > 0 and len(context_text) > max_context_chars:
+        return context_text[:max_context_chars]
+    return context_text
 
 
 def _relative_path(path: Path, root: Path) -> str:

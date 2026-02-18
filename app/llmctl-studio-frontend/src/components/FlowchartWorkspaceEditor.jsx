@@ -2815,36 +2815,51 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     ))}
                   </select>
                 </label>
-                {ragCollectionOptions.length > 0 ? (
-                  <label className="field">
-                    <span>collections</span>
-                    <select
-                      multiple
-                      size={Math.min(8, Math.max(3, ragCollectionOptions.length))}
-                      value={Array.from(selectedRagCollectionSet)}
-                      onChange={(event) => {
-                        const selectedValues = Array.from(event.target.selectedOptions || [])
-                          .map((option) => String(option.value || '').trim())
-                          .filter((value) => Boolean(value))
-                        updateNode(selectedNode.token, (current) => ({
-                          ...current,
-                          config: {
-                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                            collections: normalizeRagCollections(selectedValues),
-                          },
-                        }))
-                      }}
-                    >
+                <PersistedDetails
+                  className="chat-picker chat-picker-group flow-ws-mcp-picker"
+                  storageKey="flow-ws:inspector:rag-collections"
+                  defaultOpen
+                >
+                  <summary>
+                    <span className="chat-picker-summary">
+                      <i className="fa-solid fa-database" />
+                      <span>collections</span>
+                    </span>
+                  </summary>
+                  {ragCollectionOptions.length > 0 ? (
+                    <div className="chat-checklist flow-ws-mcp-checklist">
                       {ragCollectionOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
+                        <label key={option.id} className="flow-ws-mcp-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedRagCollectionSet.has(option.id)}
+                            onChange={(event) => {
+                              const nextChecked = Boolean(event.target.checked)
+                              updateNode(selectedNode.token, (current) => {
+                                const nextConfig = current.config && typeof current.config === 'object'
+                                  ? { ...current.config }
+                                  : {}
+                                const currentCollections = normalizeRagCollections(nextConfig.collections)
+                                nextConfig.collections = nextChecked
+                                  ? normalizeRagCollections([...currentCollections, option.id])
+                                  : currentCollections.filter((collectionId) => collectionId !== option.id)
+                                return {
+                                  ...current,
+                                  config: nextConfig,
+                                }
+                              })
+                            }}
+                          />
+                          <span className="flow-ws-mcp-option-content">
+                            <span className="flow-ws-mcp-option-title">{option.label}</span>
+                          </span>
+                        </label>
                       ))}
-                    </select>
-                  </label>
-                ) : (
-                  <p className="toolbar-meta">No RAG collections available.</p>
-                )}
+                    </div>
+                  ) : (
+                    <p className="toolbar-meta">No RAG collections available.</p>
+                  )}
+                </PersistedDetails>
                 {selectedRagMode === RAG_MODE_QUERY ? (
                   <label className="field">
                     <span>query prompt</span>

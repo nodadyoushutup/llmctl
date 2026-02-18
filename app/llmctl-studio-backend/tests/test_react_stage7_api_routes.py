@@ -22,7 +22,7 @@ os.environ.setdefault(
 import core.db as core_db
 from core.config import Config
 from core.db import session_scope
-from core.models import Attachment
+from core.models import Attachment, ChatThread, ChatTurn, LLMModel
 from rag.web.views import bp as rag_bp
 import web.views as studio_views
 
@@ -96,6 +96,50 @@ class Stage7ApiRouteTests(unittest.TestCase):
         detail = self.client.get(f"/models/{model_id}", headers={"Accept": "application/json"})
         self.assertEqual(200, detail.status_code)
         self.assertTrue(bool((detail.get_json() or {}).get("is_default")))
+
+    def test_models_json_delete_detaches_chat_bindings(self) -> None:
+        create = self.client.post(
+            "/models",
+            json={
+                "name": "Stage7 Delete Model",
+                "description": "delete with chat bindings",
+                "provider": "claude",
+                "config": {"model": "claude-sonnet-4-5"},
+            },
+        )
+        self.assertEqual(201, create.status_code)
+        model_id = int((((create.get_json() or {}).get("model") or {}).get("id") or 0))
+        self.assertGreater(model_id, 0)
+
+        with session_scope() as session:
+            thread = ChatThread(title="Delete-bound thread", model_id=model_id)
+            session.add(thread)
+            session.flush()
+
+            turn = ChatTurn(
+                thread_id=int(thread.id),
+                request_id=uuid.uuid4().hex,
+                model_id=model_id,
+            )
+            session.add(turn)
+            session.flush()
+            thread_id = int(thread.id)
+            turn_id = int(turn.id)
+
+        delete = self.client.post(f"/models/{model_id}/delete", json={})
+        self.assertEqual(200, delete.status_code)
+        payload = delete.get_json() or {}
+        self.assertTrue(bool(payload.get("ok")))
+        self.assertEqual(2, int(payload.get("detached_count") or 0))
+
+        with session_scope() as session:
+            self.assertIsNone(session.get(LLMModel, model_id))
+            thread = session.get(ChatThread, thread_id)
+            self.assertIsNotNone(thread)
+            self.assertIsNone(thread.model_id)
+            turn = session.get(ChatTurn, turn_id)
+            self.assertIsNotNone(turn)
+            self.assertIsNone(turn.model_id)
 
     def test_mcp_json_create_and_detail(self) -> None:
         server_key = f"stage7_mcp_{uuid.uuid4().hex[:8]}"

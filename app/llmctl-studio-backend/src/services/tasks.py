@@ -120,6 +120,7 @@ from rag.domain import (
     RAG_FLOWCHART_MODE_QUERY,
     RAG_HEALTH_CONFIGURED_HEALTHY,
     execute_query_contract,
+    format_retrieval_context_for_synthesis,
     normalize_collection_selection as normalize_rag_collection_selection,
     rag_health_snapshot as rag_runtime_health_snapshot,
     run_index_for_collections,
@@ -8620,14 +8621,11 @@ def _execute_flowchart_rag_node(
                     "RAG query synthesis",
                 )
             )
-        context_text = "\n\n".join(
-            str(item.get("text") or "").strip()
-            for item in retrieval_context
-            if isinstance(item, dict) and str(item.get("text") or "").strip()
-        )
         max_context_chars = int(getattr(config, "chat_max_context_chars", 12000) or 12000)
-        if max_context_chars > 0 and len(context_text) > max_context_chars:
-            context_text = context_text[:max_context_chars]
+        context_text = format_retrieval_context_for_synthesis(
+            retrieval_context,
+            max_context_chars=max_context_chars,
+        )
         messages = [
             {
                 "role": "system",

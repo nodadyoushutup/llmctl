@@ -685,12 +685,9 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
     expect(screen.queryByText('query prompt')).toBeFalsy()
 
-    const collectionsField = screen.getByText('collections').closest('label')
-    const collectionsSelect = collectionsField?.querySelector('select')
-    expect(collectionsSelect).toBeTruthy()
-    const options = Array.from(collectionsSelect.options)
-    options[0].selected = true
-    fireEvent.change(collectionsSelect)
+    const docsCollectionCheckbox = screen.getByLabelText(/Docs \(ready\)/)
+    expect(docsCollectionCheckbox).toBeTruthy()
+    fireEvent.click(docsCollectionCheckbox)
 
     await waitFor(() => {
       const payload = lastGraphPayload(onGraphChange)

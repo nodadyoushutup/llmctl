@@ -27,6 +27,7 @@ from rag.domain import (
     RAG_REASON_UNAVAILABLE_FOR_SELECTED_COLLECTIONS,
     RagContractError,
     execute_query_contract,
+    format_retrieval_context_for_synthesis,
     list_collection_contract,
     normalize_collection_selection,
     rag_health_snapshot,
@@ -965,13 +966,10 @@ def api_retrieve():
             raise RuntimeError(
                 missing_api_key_message(get_chat_provider(config), "Chat")
             )
-        context_text = "\n\n".join(
-            str(item.get("text") or "").strip()
-            for item in retrieval_context
-            if str(item.get("text") or "").strip()
+        context_text = format_retrieval_context_for_synthesis(
+            retrieval_context,
+            max_context_chars=max_context_chars,
         )
-        if max_context_chars > 0 and len(context_text) > max_context_chars:
-            context_text = context_text[:max_context_chars]
         messages = _build_messages(
             question=question_text,
             history=history,
@@ -1028,34 +1026,48 @@ def api_chat():
                 selected_collections.append(collection)
 
     if selected_collections:
+        chat_config = load_config()
+        top_k = _to_positive_int(payload.get("top_k"), 5, minimum=1, maximum=20)
+        request_id = str(payload.get("request_id") or "").strip() or None
+        history_limit = _to_positive_int(
+            payload.get("history_limit"),
+            chat_config.chat_max_history,
+            minimum=1,
+            maximum=50,
+        )
+        response_style = _normalize_chat_response_style(
+            str(payload.get("verbosity") or "").strip(),
+            chat_config.chat_response_style,
+        )
+        context_budget_tokens = _to_positive_int(
+            payload.get("context_budget_tokens"),
+            chat_config.chat_context_budget_tokens,
+            minimum=256,
+            maximum=100000,
+        )
+        max_context_chars = _context_char_limit(
+            context_budget_tokens,
+            chat_config.chat_max_context_chars,
+        )
         try:
             result = execute_query_contract(
                 question=message,
                 collections=selected_collections,
-                top_k=_to_positive_int(payload.get("top_k"), 5, minimum=1, maximum=20),
-                request_id=str(payload.get("request_id") or "").strip() or None,
+                top_k=top_k,
+                request_id=request_id,
                 runtime_kind="chat",
                 synthesize_answer=lambda question_text, retrieval_context: _chat_completion_via_executor(
                     messages=_build_messages(
                         question=question_text,
                         history=payload.get("history"),
-                        context_text="\n\n".join(
-                            str(item.get("text") or "").strip()
-                            for item in retrieval_context
-                            if str(item.get("text") or "").strip()
+                        context_text=format_retrieval_context_for_synthesis(
+                            retrieval_context,
+                            max_context_chars=max_context_chars,
                         ),
-                        history_limit=_to_positive_int(
-                            payload.get("history_limit"),
-                            load_config().chat_max_history,
-                            minimum=1,
-                            maximum=50,
-                        ),
-                        response_style=_normalize_chat_response_style(
-                            str(payload.get("verbosity") or "").strip(),
-                            load_config().chat_response_style,
-                        ),
+                        history_limit=history_limit,
+                        response_style=response_style,
                     ),
-                    request_id=str(payload.get("request_id") or "").strip() or question_text,
+                    request_id=request_id or question_text,
                 ),
             )
         except RagContractError as exc:
@@ -1080,10 +1092,10 @@ def api_chat():
             "synthesis_error": result.get("synthesis_error"),
             "mode": result.get("mode"),
             "collections": result.get("collections"),
-        "provider": get_chat_provider(load_config()),
-        "model": get_chat_model(load_config()),
-        "contract_version": "v1",
-    }
+            "provider": get_chat_provider(chat_config),
+            "model": get_chat_model(chat_config),
+            "contract_version": "v1",
+        }
 
     config = load_config()
     if not has_chat_api_key(config):

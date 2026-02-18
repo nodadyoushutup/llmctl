@@ -114,6 +114,8 @@ from core.models import (
     FlowchartNode,
     FlowchartRun,
     FlowchartRunNode,
+    ChatThread,
+    ChatTurn,
     LLMModel,
     Memory,
     MCP_SERVER_TYPE_CUSTOM,
@@ -14356,23 +14358,50 @@ def delete_model(model_id: int):
         model = session.get(LLMModel, model_id)
         if model is None:
             abort(404)
-        attached_nodes = (
-            session.execute(select(FlowchartNode).where(FlowchartNode.model_id == model_id))
-            .scalars()
-            .all()
+        attached_node_count = int(
+            session.scalar(
+                select(func.count()).select_from(FlowchartNode).where(FlowchartNode.model_id == model_id)
+            )
+            or 0
         )
-        attached_tasks = (
-            session.execute(select(AgentTask).where(AgentTask.model_id == model_id))
-            .scalars()
-            .all()
+        attached_task_count = int(
+            session.scalar(
+                select(func.count()).select_from(AgentTask).where(AgentTask.model_id == model_id)
+            )
+            or 0
         )
-        for node in attached_nodes:
-            node.model_id = None
-        for task in attached_tasks:
-            task.model_id = None
+        attached_thread_count = int(
+            session.scalar(
+                select(func.count()).select_from(ChatThread).where(ChatThread.model_id == model_id)
+            )
+            or 0
+        )
+        attached_turn_count = int(
+            session.scalar(
+                select(func.count()).select_from(ChatTurn).where(ChatTurn.model_id == model_id)
+            )
+            or 0
+        )
+        if attached_node_count:
+            session.execute(
+                update(FlowchartNode).where(FlowchartNode.model_id == model_id).values(model_id=None)
+            )
+        if attached_task_count:
+            session.execute(update(AgentTask).where(AgentTask.model_id == model_id).values(model_id=None))
+        if attached_thread_count:
+            session.execute(
+                update(ChatThread).where(ChatThread.model_id == model_id).values(model_id=None)
+            )
+        if attached_turn_count:
+            session.execute(update(ChatTurn).where(ChatTurn.model_id == model_id).values(model_id=None))
         session.delete(model)
 
-    detached_count = len(attached_nodes) + len(attached_tasks)
+    detached_count = (
+        attached_node_count
+        + attached_task_count
+        + attached_thread_count
+        + attached_turn_count
+    )
     default_cleared = False
     llm_settings = _load_integration_settings("llm")
     if resolve_default_model_id(llm_settings) == model_id:
