@@ -476,11 +476,13 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('artifact retention')).toBeTruthy()
     expect(screen.getByLabelText('LLMCTL MCP (required)')).toBeChecked()
     expect(screen.getByLabelText('LLMCTL MCP (required)')).toBeDisabled()
+    expect(screen.queryByText('model')).toBeFalsy()
     expect(screen.queryByText('agent')).toBeFalsy()
 
     const actionField = screen.getByText('action').closest('label')
     const actionSelect = actionField?.querySelector('select')
     expect(actionSelect).toBeTruthy()
+    expect(actionSelect).toHaveAttribute('required')
     fireEvent.change(actionSelect, { target: { value: 'retrieve' } })
 
     const additivePromptField = screen.getByText('optional additive prompt').closest('label')

@@ -76,6 +76,7 @@ Build args:
 - `INSTALL_VLLM=true|false` (default `false`; normally `false` because base includes pinned vLLM)
 - `VLLM_VERSION=<version>` (default `0.9.0`; used when `INSTALL_VLLM=true`)
 - `TRANSFORMERS_VERSION=<version>` (default `4.53.3`; pinned for `vllm==0.9.0` compatibility)
+- `PUSH_IMAGE=true|false` for `build-executor-base.sh` (default `false`; when `true`, pushes the built image tag)
 
 Compatibility note:
 - `vllm==0.9.0` must be paired with `transformers` 4.x (`4.53.3` default). Using `transformers` 5.x causes an `aimv2` registration conflict at import time.
@@ -88,6 +89,9 @@ app/llmctl-executor/build-executor.sh
 
 # If you need a different base source, retag it locally as llmctl-executor-base:latest first
 # docker tag 127.0.0.1:30082/llmctl/llmctl-executor-base:sha-<tag> llmctl-executor-base:latest
+
+# Build and push base image directly in one command
+# IMAGE_NAME=127.0.0.1:30082/llmctl/llmctl-executor-base:0.0.4 PUSH_IMAGE=true app/llmctl-executor/build-executor-base.sh
 ```
 
 ## Smoke Test

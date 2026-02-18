@@ -570,6 +570,107 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             self.assertEqual([], decision_artifact_payload.get("matched_connector_ids"))
             self.assertTrue(decision_artifact_payload.get("no_match"))
 
+    def test_runtime_emits_artifact_socket_event_with_request_and_correlation_ids(self) -> None:
+        decision_config = {
+            "request_id": "req-decision-socket-1",
+            "correlation_id": "corr-decision-socket-1",
+            "decision_conditions": [
+                {
+                    "connector_id": "approve_connector",
+                    "condition_text": "Start node executed.",
+                }
+            ],
+        }
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="Stage 9 Decision Artifact Event")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            decision_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                x=160.0,
+                y=0.0,
+                config_json=json.dumps(decision_config, sort_keys=True),
+            )
+            end_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_END,
+                x=320.0,
+                y=0.0,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=decision_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=decision_node.id,
+                target_node_id=end_node.id,
+                edge_mode="solid",
+                condition_key="approve_connector",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+
+        captured_events: list[dict[str, object]] = []
+        artifact_visible_during_emit: list[bool] = []
+
+        def _capture_emit(**kwargs):
+            captured_events.append(dict(kwargs))
+            if kwargs.get("event_type") == "flowchart:node_artifact:persisted":
+                payload = kwargs.get("payload") if isinstance(kwargs.get("payload"), dict) else {}
+                artifact_id = int(payload.get("artifact_id") or 0)
+                with session_scope() as session:
+                    artifact_visible_during_emit.append(
+                        session.get(NodeArtifact, artifact_id) is not None
+                    )
+            return {
+                "event_type": kwargs.get("event_type"),
+                "payload": kwargs.get("payload") or {},
+            }
+
+        with patch.object(studio_tasks, "emit_contract_event", side_effect=_capture_emit):
+            self._invoke_flowchart_run(flowchart_id, run_id)
+
+        artifact_events = [
+            item
+            for item in captured_events
+            if item.get("event_type") == "flowchart:node_artifact:persisted"
+        ]
+        self.assertEqual(1, len(artifact_events))
+        event_payload = artifact_events[0].get("payload") or {}
+        self.assertEqual(
+            "req-decision-socket-1",
+            event_payload.get("request_id"),
+        )
+        self.assertEqual(
+            "corr-decision-socket-1",
+            event_payload.get("correlation_id"),
+        )
+        self.assertEqual("decision", event_payload.get("artifact_type"))
+        artifact_payload = (event_payload.get("artifact") or {}).get("payload") or {}
+        self.assertEqual(
+            ["approve_connector"],
+            artifact_payload.get("matched_connector_ids") or [],
+        )
+        self.assertEqual([True], artifact_visible_during_emit)
+
     def test_input_context_includes_trigger_and_pulled_source_metadata(self) -> None:
         context = studio_tasks._build_flowchart_input_context(
             flowchart_id=10,
@@ -4161,7 +4262,11 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 payload_json=json.dumps(
                     {
                         "action": "complete_plan_item",
-                        "completion_target": {"plan_item_id": task.id},
+                        "completion_target": {
+                            "plan_item_id": task.id,
+                            "stage_key": "stage_api",
+                            "task_key": "task_api",
+                        },
                         "touched": {"stage_ids": [stage.id], "task_ids": [task.id]},
                     },
                     sort_keys=True,
@@ -4211,7 +4316,268 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         item = detail_payload.get("item") or {}
         self.assertEqual(artifact_id, item.get("id"))
         self.assertEqual(1, item.get("payload_version"))
-        self.assertEqual(task_id, ((item.get("payload") or {}).get("completion_target") or {}).get("plan_item_id"))
+        completion_target = (item.get("payload") or {}).get("completion_target") or {}
+        self.assertEqual(task_id, completion_target.get("plan_item_id"))
+        self.assertEqual("stage_api", completion_target.get("stage_key"))
+        self.assertEqual("task_api", completion_target.get("task_key"))
+
+    def test_memory_artifact_endpoints_expose_queryable_payloads(self) -> None:
+        with session_scope() as session:
+            memory = Memory.create(session, description="memory-artifacts-api")
+            flowchart = Flowchart.create(session, name="memory-artifacts-api-flowchart")
+            memory_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=memory_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_MEMORY}),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=memory_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+                ref_id=memory.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{run_node.id}",
+                retention_mode="ttl",
+                request_id="req-memory-artifact-api",
+                correlation_id="corr-memory-artifact-api",
+                payload_json=json.dumps(
+                    {"action": "add", "effective_prompt": "remember this"},
+                    sort_keys=True,
+                ),
+            )
+            memory_id = memory.id
+            artifact_id = artifact.id
+            flowchart_node_id = memory_node.id
+            flowchart_run_id = run.id
+
+        list_response = self.client.get(
+            (
+                f"/memories/{memory_id}/artifacts?limit=5&offset=0"
+                f"&flowchart_node_id={flowchart_node_id}&flowchart_run_id={flowchart_run_id}"
+            ),
+            headers={
+                "X-Request-ID": "req-memory-list-1",
+                "X-Correlation-ID": "corr-memory-list-1",
+            },
+        )
+        self.assertEqual(200, list_response.status_code)
+        list_payload = list_response.get_json() or {}
+        self.assertTrue(list_payload.get("ok"))
+        self.assertEqual("req-memory-list-1", list_payload.get("request_id"))
+        self.assertEqual("corr-memory-list-1", list_payload.get("correlation_id"))
+        items = list_payload.get("items") or []
+        self.assertEqual(1, len(items))
+        self.assertEqual(NODE_ARTIFACT_TYPE_MEMORY, items[0].get("artifact_type"))
+        self.assertEqual("add", (items[0].get("payload") or {}).get("action"))
+
+        detail_response = self.client.get(
+            f"/memories/{memory_id}/artifacts/{artifact_id}",
+            headers={
+                "X-Request-ID": "req-memory-detail-1",
+                "X-Correlation-ID": "corr-memory-detail-1",
+            },
+        )
+        self.assertEqual(200, detail_response.status_code)
+        detail_payload = detail_response.get_json() or {}
+        self.assertTrue(detail_payload.get("ok"))
+        self.assertEqual("req-memory-detail-1", detail_payload.get("request_id"))
+        self.assertEqual("corr-memory-detail-1", detail_payload.get("correlation_id"))
+        item = detail_payload.get("item") or {}
+        self.assertEqual(artifact_id, item.get("id"))
+        self.assertEqual("remember this", (item.get("payload") or {}).get("effective_prompt"))
+
+    def test_milestone_artifact_endpoints_expose_queryable_payloads(self) -> None:
+        with session_scope() as session:
+            milestone = Milestone.create(session, name="milestone-artifacts-api")
+            flowchart = Flowchart.create(session, name="milestone-artifacts-api-flowchart")
+            milestone_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                ref_id=milestone.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=milestone_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_MILESTONE}),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=milestone_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                artifact_type=NODE_ARTIFACT_TYPE_MILESTONE,
+                ref_id=milestone.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{run_node.id}",
+                retention_mode="ttl",
+                request_id="req-milestone-artifact-api",
+                correlation_id="corr-milestone-artifact-api",
+                payload_json=json.dumps(
+                    {"action": "mark_complete", "milestone": {"id": milestone.id, "status": "done"}},
+                    sort_keys=True,
+                ),
+            )
+            milestone_id = milestone.id
+            artifact_id = artifact.id
+            flowchart_node_id = milestone_node.id
+            flowchart_run_id = run.id
+
+        list_response = self.client.get(
+            (
+                f"/milestones/{milestone_id}/artifacts?limit=5&offset=0"
+                f"&flowchart_node_id={flowchart_node_id}&flowchart_run_id={flowchart_run_id}"
+            ),
+            headers={
+                "X-Request-ID": "req-milestone-list-1",
+                "X-Correlation-ID": "corr-milestone-list-1",
+            },
+        )
+        self.assertEqual(200, list_response.status_code)
+        list_payload = list_response.get_json() or {}
+        self.assertTrue(list_payload.get("ok"))
+        self.assertEqual("req-milestone-list-1", list_payload.get("request_id"))
+        self.assertEqual("corr-milestone-list-1", list_payload.get("correlation_id"))
+        items = list_payload.get("items") or []
+        self.assertEqual(1, len(items))
+        self.assertEqual(NODE_ARTIFACT_TYPE_MILESTONE, items[0].get("artifact_type"))
+        self.assertEqual("mark_complete", (items[0].get("payload") or {}).get("action"))
+
+        detail_response = self.client.get(
+            f"/milestones/{milestone_id}/artifacts/{artifact_id}",
+            headers={
+                "X-Request-ID": "req-milestone-detail-1",
+                "X-Correlation-ID": "corr-milestone-detail-1",
+            },
+        )
+        self.assertEqual(200, detail_response.status_code)
+        detail_payload = detail_response.get_json() or {}
+        self.assertTrue(detail_payload.get("ok"))
+        self.assertEqual("req-milestone-detail-1", detail_payload.get("request_id"))
+        self.assertEqual("corr-milestone-detail-1", detail_payload.get("correlation_id"))
+        item = detail_payload.get("item") or {}
+        self.assertEqual(artifact_id, item.get("id"))
+        self.assertEqual("done", ((item.get("payload") or {}).get("milestone") or {}).get("status"))
+
+    def test_decision_artifact_endpoints_expose_routing_payload_contract(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="decision-artifacts-api-flowchart")
+            decision_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=decision_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_DECISION}),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=decision_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                artifact_type=NODE_ARTIFACT_TYPE_DECISION,
+                ref_id=None,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{run_node.id}",
+                retention_mode="ttl",
+                request_id="req-decision-artifact-api",
+                correlation_id="corr-decision-artifact-api",
+                payload_json=json.dumps(
+                    {
+                        "matched_connector_ids": ["approve_connector"],
+                        "evaluations": [
+                            {
+                                "connector_id": "approve_connector",
+                                "condition_text": "approved",
+                                "matched": True,
+                                "reason": "matched",
+                            }
+                        ],
+                        "no_match": False,
+                    },
+                    sort_keys=True,
+                ),
+            )
+            flowchart_id = flowchart.id
+            flowchart_node_id = decision_node.id
+            flowchart_run_id = run.id
+            artifact_id = artifact.id
+
+        list_response = self.client.get(
+            (
+                f"/flowcharts/{flowchart_id}/nodes/{flowchart_node_id}/decision-artifacts"
+                f"?limit=5&offset=0&flowchart_run_id={flowchart_run_id}"
+            ),
+            headers={
+                "X-Request-ID": "req-decision-list-1",
+                "X-Correlation-ID": "corr-decision-list-1",
+            },
+        )
+        self.assertEqual(200, list_response.status_code)
+        list_payload = list_response.get_json() or {}
+        self.assertTrue(list_payload.get("ok"))
+        self.assertEqual("req-decision-list-1", list_payload.get("request_id"))
+        self.assertEqual("corr-decision-list-1", list_payload.get("correlation_id"))
+        items = list_payload.get("items") or []
+        self.assertEqual(1, len(items))
+        self.assertEqual(NODE_ARTIFACT_TYPE_DECISION, items[0].get("artifact_type"))
+        routing_payload = items[0].get("payload") or {}
+        self.assertEqual(["approve_connector"], routing_payload.get("matched_connector_ids"))
+        self.assertFalse(routing_payload.get("no_match"))
+        self.assertEqual("approve_connector", (routing_payload.get("evaluations") or [{}])[0].get("connector_id"))
+
+        detail_response = self.client.get(
+            f"/flowcharts/{flowchart_id}/nodes/{flowchart_node_id}/decision-artifacts/{artifact_id}",
+            headers={
+                "X-Request-ID": "req-decision-detail-1",
+                "X-Correlation-ID": "corr-decision-detail-1",
+            },
+        )
+        self.assertEqual(200, detail_response.status_code)
+        detail_payload = detail_response.get_json() or {}
+        self.assertTrue(detail_payload.get("ok"))
+        self.assertEqual("req-decision-detail-1", detail_payload.get("request_id"))
+        self.assertEqual("corr-decision-detail-1", detail_payload.get("correlation_id"))
+        detail_item = detail_payload.get("item") or {}
+        self.assertEqual(artifact_id, detail_item.get("id"))
+        self.assertEqual(
+            ["approve_connector"],
+            (detail_item.get("payload") or {}).get("matched_connector_ids"),
+        )
 
     def test_plan_artifact_list_invalid_limit_uses_error_envelope(self) -> None:
         with session_scope() as session:

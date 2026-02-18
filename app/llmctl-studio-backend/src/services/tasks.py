@@ -703,6 +703,46 @@ def _emit_flowchart_node_event(
     )
 
 
+def _emit_flowchart_node_artifact_event(
+    *,
+    flowchart_id: int,
+    flowchart_run_id: int,
+    flowchart_node_id: int,
+    node_run_id: int | None,
+    node_type: str,
+    artifact: dict[str, Any],
+    runtime: dict[str, Any] | None = None,
+) -> None:
+    artifact_id = _parse_optional_int(artifact.get("id"), default=0, minimum=1)
+    artifact_type = str(artifact.get("artifact_type") or "").strip()
+    request_id = str(artifact.get("request_id") or "").strip() or None
+    correlation_id = str(artifact.get("correlation_id") or "").strip() or None
+    payload: dict[str, Any] = {
+        "flowchart_id": flowchart_id,
+        "flowchart_run_id": flowchart_run_id,
+        "flowchart_node_id": flowchart_node_id,
+        "flowchart_node_type": node_type,
+        "node_run_id": node_run_id,
+        "artifact_id": artifact_id,
+        "artifact_type": artifact_type,
+        "artifact": artifact,
+        "request_id": request_id,
+        "correlation_id": correlation_id,
+    }
+    emit_contract_event(
+        event_type="flowchart:node_artifact:persisted",
+        entity_kind="node_artifact",
+        entity_id=artifact_id,
+        room_keys=flowchart_scope_rooms(
+            flowchart_id=flowchart_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_node_id=flowchart_node_id,
+        ),
+        payload=payload,
+        runtime=runtime,
+    )
+
+
 def _emit_flowchart_run_event(
     event_type: str,
     *,
@@ -9474,8 +9514,9 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         routed_execution_request.run_metadata_payload()
                         if routed_execution_request is not None
                         else None
-                    )
+                        )
                 )
+                artifact_summary_for_event: dict[str, Any] | None = None
                 try:
                     with session_scope() as session:
                         finished_at = _utcnow()
@@ -9563,6 +9604,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                     routing_state=routing_state,
                                 )
                                 output_state["artifact"] = artifact_summary
+                                artifact_summary_for_event = artifact_summary
                             elif (
                                 str(node_spec.get("node_type") or "").strip().lower()
                                 == FLOWCHART_NODE_TYPE_MILESTONE
@@ -9583,6 +9625,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                     routing_state=routing_state,
                                 )
                                 output_state["artifact"] = artifact_summary
+                                artifact_summary_for_event = artifact_summary
                             elif (
                                 str(node_spec.get("node_type") or "").strip().lower()
                                 == FLOWCHART_NODE_TYPE_DECISION
@@ -9603,6 +9646,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                     routing_state=routing_state,
                                 )
                                 output_state["artifact"] = artifact_summary
+                                artifact_summary_for_event = artifact_summary
                             if (
                                 str(node_spec.get("node_type") or "").strip().lower()
                                 == FLOWCHART_NODE_TYPE_MEMORY
@@ -9625,6 +9669,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                     routing_state=routing_state,
                                 )
                                 output_state["artifact"] = artifact_summary
+                                artifact_summary_for_event = artifact_summary
                             succeeded_node_run.output_state_json = _json_dumps(output_state)
                             succeeded_node_run.routing_state_json = _json_dumps(routing_state)
                         _update_flowchart_node_task(
@@ -9681,6 +9726,16 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                 else None
                             ),
                             finished_at=finished_at,
+                            runtime=runtime_payload,
+                        )
+                    if artifact_summary_for_event is not None:
+                        _emit_flowchart_node_artifact_event(
+                            flowchart_id=flowchart_id,
+                            flowchart_run_id=run_id,
+                            flowchart_node_id=node_id,
+                            node_run_id=node_run_id,
+                            node_type=str(node_spec["node_type"]),
+                            artifact=artifact_summary_for_event,
                             runtime=runtime_payload,
                         )
                 except Exception as exc:

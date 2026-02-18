@@ -7,6 +7,7 @@ IMAGE_NAME="${IMAGE_NAME:-llmctl-executor-base:latest}"
 INSTALL_CLAUDE="${INSTALL_CLAUDE:-true}"
 VLLM_VERSION="${VLLM_VERSION:-0.9.0}"
 TRANSFORMERS_VERSION="${TRANSFORMERS_VERSION:-4.53.3}"
+PUSH_IMAGE="${PUSH_IMAGE:-false}"
 VERSION_TAG="${1:-}"
 
 if [[ $# -gt 1 ]]; then
@@ -28,12 +29,39 @@ if [[ "${VLLM_VERSION}" == "0.9.0" && ! "${TRANSFORMERS_VERSION}" =~ ^4\. ]]; th
   exit 1
 fi
 
+if [[ "${PUSH_IMAGE}" != "true" && "${PUSH_IMAGE}" != "false" ]]; then
+  echo "Invalid PUSH_IMAGE value '${PUSH_IMAGE}'. Expected 'true' or 'false'." >&2
+  exit 1
+fi
+
 cd "${REPO_ROOT}"
 
-docker build \
-  --build-arg INSTALL_CLAUDE="${INSTALL_CLAUDE}" \
-  --build-arg VLLM_VERSION="${VLLM_VERSION}" \
-  --build-arg TRANSFORMERS_VERSION="${TRANSFORMERS_VERSION}" \
-  -f app/llmctl-executor/Dockerfile.base \
-  -t "${IMAGE_NAME}" \
-  .
+if [[ "${PUSH_IMAGE}" == "true" ]]; then
+  if docker buildx version >/dev/null 2>&1; then
+    docker buildx build \
+      --build-arg INSTALL_CLAUDE="${INSTALL_CLAUDE}" \
+      --build-arg VLLM_VERSION="${VLLM_VERSION}" \
+      --build-arg TRANSFORMERS_VERSION="${TRANSFORMERS_VERSION}" \
+      -f app/llmctl-executor/Dockerfile.base \
+      -t "${IMAGE_NAME}" \
+      --push \
+      .
+  else
+    docker build \
+      --build-arg INSTALL_CLAUDE="${INSTALL_CLAUDE}" \
+      --build-arg VLLM_VERSION="${VLLM_VERSION}" \
+      --build-arg TRANSFORMERS_VERSION="${TRANSFORMERS_VERSION}" \
+      -f app/llmctl-executor/Dockerfile.base \
+      -t "${IMAGE_NAME}" \
+      .
+    docker push "${IMAGE_NAME}"
+  fi
+else
+  docker build \
+    --build-arg INSTALL_CLAUDE="${INSTALL_CLAUDE}" \
+    --build-arg VLLM_VERSION="${VLLM_VERSION}" \
+    --build-arg TRANSFORMERS_VERSION="${TRANSFORMERS_VERSION}" \
+    -f app/llmctl-executor/Dockerfile.base \
+    -t "${IMAGE_NAME}" \
+    .
+fi

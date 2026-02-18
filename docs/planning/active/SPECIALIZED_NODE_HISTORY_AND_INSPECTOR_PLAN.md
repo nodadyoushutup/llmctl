@@ -79,19 +79,19 @@ Git workflow constraint: execute all work directly on `main` (no feature branche
 
 ## Stage 3 - Shared Baseline API, Socket, And MCP Contract Layer (Sequential)
 
-- [ ] Add backend API endpoints for specialized artifact history list/detail with pagination/filter/sort and consistent error envelope (`code`, `message`, `details`, `request_id`).
-- [ ] Add backend serialization contract for decision routing payload (`matched_connector_ids`, `evaluations`, `no_match`) and plan item targeting metadata.
-- [ ] Add/extend realtime events for specialized artifact persistence updates after commit, including `request_id` and `correlation_id`.
-- [ ] Align MCP server CRUD contracts for specialized artifact entities (`memory`, `plan`, `milestone`, `decision`) in `app/llmctl-mcp/src/tools.py` while preserving Decision execution as MCP-free.
-- [ ] Add backend and MCP contract tests for request/response payloads and socket envelope stability.
+- [x] Add backend API endpoints for specialized artifact history list/detail with pagination/filter/sort and consistent error envelope (`code`, `message`, `details`, `request_id`).
+- [x] Add backend serialization contract for decision routing payload (`matched_connector_ids`, `evaluations`, `no_match`) and plan item targeting metadata.
+- [x] Add/extend realtime events for specialized artifact persistence updates after commit, including `request_id` and `correlation_id`.
+- [x] Align MCP server CRUD contracts for specialized artifact entities (`memory`, `plan`, `milestone`, `decision`) in `app/llmctl-mcp/src/tools.py` while preserving Decision execution as MCP-free.
+- [x] Add backend and MCP contract tests for request/response payloads and socket envelope stability.
 
 ## Stage 4 - Shared Baseline Inspector Framework And Curated Control Registry (Sequential)
 
-- [ ] Refactor flowchart inspector rendering to a specialized-node control registry in `app/llmctl-studio-frontend/src/components/FlowchartWorkspaceEditor.jsx`.
-- [ ] Enforce curated-only inspector controls for specialized nodes; hide irrelevant generic controls.
-- [ ] Implement shared specialized controls: required action selector, optional additive prompt field, retention runtime settings, and validation/error wiring.
-- [ ] Enforce hard-locked `LLMCTL MCP` selection behavior for node types that require it.
-- [ ] Add frontend tests for inspector rendering rules and locked/required input behavior.
+- [x] Refactor flowchart inspector rendering to a specialized-node control registry in `app/llmctl-studio-frontend/src/components/FlowchartWorkspaceEditor.jsx`.
+- [x] Enforce curated-only inspector controls for specialized nodes; hide irrelevant generic controls.
+- [x] Implement shared specialized controls: required action selector, optional additive prompt field, retention runtime settings, and validation/error wiring.
+- [x] Enforce hard-locked `LLMCTL MCP` selection behavior for node types that require it.
+- [x] Add frontend tests for inspector rendering rules and locked/required input behavior.
 
 ## Stage 5 - Fan-Out Readiness Gate (Sequential Stop Point)
 

@@ -30,6 +30,7 @@ from core.db import session_scope
 from sqlalchemy import select
 from core.models import (
     FLOWCHART_NODE_TYPE_DECISION,
+    FLOWCHART_NODE_TYPE_MEMORY,
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_PLAN,
     FLOWCHART_NODE_TYPE_START,
@@ -40,8 +41,11 @@ from core.models import (
     FlowchartRunNode,
     LLMModel,
     MCPServer,
+    Memory,
     Milestone,
     NodeArtifact,
+    NODE_ARTIFACT_TYPE_DECISION,
+    NODE_ARTIFACT_TYPE_MEMORY,
     NODE_ARTIFACT_TYPE_MILESTONE,
     NODE_ARTIFACT_TYPE_PLAN,
     Plan,
@@ -732,6 +736,176 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
         self.assertEqual(NODE_ARTIFACT_TYPE_PLAN, item.get("artifact_type"))
         self.assertEqual(task_id, ((item.get("payload") or {}).get("completion_target") or {}).get("plan_item_id"))
         self.assertEqual([task_id], ((item.get("payload") or {}).get("touched") or {}).get("task_ids"))
+
+    def test_mcp_memory_artifacts_are_queryable(self) -> None:
+        with session_scope() as session:
+            memory = Memory.create(session, description="artifact memory")
+            flowchart = Flowchart.create(session, name="Memory Artifact Flowchart")
+            memory_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                title="Memory",
+                ref_id=memory.id,
+                x=120,
+                y=0,
+                config_json=json.dumps({"action": "add"}, sort_keys=True),
+            )
+            run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            memory_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=memory_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps(
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "action": "add",
+                    },
+                    sort_keys=True,
+                ),
+            )
+            NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=memory_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=memory_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+                ref_id=memory.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{memory_run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps(
+                    {
+                        "action": "add",
+                        "effective_prompt": "artifact memory",
+                    },
+                    sort_keys=True,
+                ),
+            )
+            run_id = run.id
+            memory_id = memory.id
+
+        get_memory = self.mcp.tools["llmctl_get_memory"]
+        get_node_artifact = self.mcp.tools["llmctl_get_node_artifact"]
+        memory_payload = get_memory(memory_id=memory_id, include_artifacts=True)
+        self.assertTrue(memory_payload["ok"])
+        artifact_history = memory_payload.get("artifact_history") or []
+        self.assertEqual(1, len(artifact_history))
+        self.assertEqual("memory", artifact_history[0].get("artifact_type"))
+        self.assertEqual("add", (artifact_history[0].get("payload") or {}).get("action"))
+
+        artifacts_payload = get_node_artifact(
+            flowchart_run_id=run_id,
+            artifact_type="memory",
+            ref_id=memory_id,
+        )
+        self.assertTrue(artifacts_payload["ok"])
+        self.assertEqual(1, artifacts_payload.get("count"))
+
+    def test_mcp_decision_artifacts_are_queryable(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="Decision Artifact Flowchart")
+            decision_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                title="Decision",
+                x=120,
+                y=0,
+            )
+            run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            decision_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=decision_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps(
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_DECISION,
+                        "matched_connector_ids": ["approve_connector"],
+                        "evaluations": [
+                            {
+                                "connector_id": "approve_connector",
+                                "condition_text": "approved",
+                                "matched": True,
+                                "reason": "matched",
+                            }
+                        ],
+                        "no_match": False,
+                    },
+                    sort_keys=True,
+                ),
+            )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=decision_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=decision_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                artifact_type=NODE_ARTIFACT_TYPE_DECISION,
+                ref_id=None,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{decision_run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps(
+                    {
+                        "matched_connector_ids": ["approve_connector"],
+                        "evaluations": [
+                            {
+                                "connector_id": "approve_connector",
+                                "condition_text": "approved",
+                                "matched": True,
+                                "reason": "matched",
+                            }
+                        ],
+                        "no_match": False,
+                    },
+                    sort_keys=True,
+                ),
+            )
+            flowchart_id = flowchart.id
+            flowchart_node_id = decision_node.id
+            flowchart_run_id = run.id
+            artifact_id = artifact.id
+
+        get_decision_artifact = self.mcp.tools["llmctl_get_decision_artifact"]
+        list_payload = get_decision_artifact(
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+            flowchart_run_id=flowchart_run_id,
+        )
+        self.assertTrue(list_payload["ok"])
+        self.assertEqual(1, list_payload.get("count"))
+        item = (list_payload.get("items") or [])[0]
+        self.assertEqual(NODE_ARTIFACT_TYPE_DECISION, item.get("artifact_type"))
+        self.assertEqual(
+            ["approve_connector"],
+            (item.get("payload") or {}).get("matched_connector_ids") or [],
+        )
+        self.assertFalse((item.get("payload") or {}).get("no_match"))
+
+        detail_payload = get_decision_artifact(artifact_id=artifact_id)
+        self.assertTrue(detail_payload["ok"])
+        detail_item = detail_payload.get("item") or {}
+        self.assertEqual(artifact_id, detail_item.get("id"))
+        self.assertEqual(
+            ["approve_connector"],
+            (detail_item.get("payload") or {}).get("matched_connector_ids") or [],
+        )
 
 
 if __name__ == "__main__":

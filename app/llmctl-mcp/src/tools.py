@@ -48,6 +48,8 @@ from core.models import (
     NODE_ARTIFACT_RETENTION_MAX_COUNT,
     NODE_ARTIFACT_RETENTION_TTL,
     NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    NODE_ARTIFACT_TYPE_DECISION,
+    NODE_ARTIFACT_TYPE_MEMORY,
     NODE_ARTIFACT_TYPE_MILESTONE,
     NODE_ARTIFACT_TYPE_PLAN,
     Plan,
@@ -1915,6 +1917,53 @@ def register(mcp: FastMCP) -> None:
             return {"ok": True, "count": len(payload), "items": payload}
 
     @mcp.tool()
+    def llmctl_get_decision_artifact(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        artifact_id: int | None = None,
+        flowchart_id: int | None = None,
+        flowchart_node_id: int | None = None,
+        flowchart_run_id: int | None = None,
+        flowchart_run_node_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Read/list decision node artifacts (node_artifacts where artifact_type=decision)."""
+        if artifact_id is not None:
+            with session_scope() as session:
+                item = session.get(NodeArtifact, artifact_id)
+                if item is None or item.artifact_type != NODE_ARTIFACT_TYPE_DECISION:
+                    return {"ok": False, "error": f"Decision artifact {artifact_id} not found."}
+                return {"ok": True, "item": _serialize_node_artifact_item(item)}
+
+        columns = _column_map(NodeArtifact)
+        stmt = select(NodeArtifact).where(
+            NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_DECISION
+        )
+        if flowchart_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_id == flowchart_id)
+        if flowchart_node_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_node_id == flowchart_node_id)
+        if flowchart_run_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_run_id == flowchart_run_id)
+        if flowchart_run_node_id is not None:
+            stmt = stmt.where(NodeArtifact.flowchart_run_node_id == flowchart_run_node_id)
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            items = session.execute(stmt).scalars().all()
+            payload = [_serialize_node_artifact_item(item) for item in items]
+            return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
     def llmctl_set_flowchart_node_model(
         flowchart_id: int,
         node_id: int,
@@ -2416,17 +2465,42 @@ def register(mcp: FastMCP) -> None:
         order_by: str | None = "id",
         descending: bool = False,
         memory_id: int | None = None,
+        include_artifacts: bool = True,
+        artifact_limit: int | None = 50,
     ) -> dict[str, Any]:
         """Read/list LLMCTL Studio memories.
 
         Use this for memory lookups by id or for listing all saved memory notes.
         """
+        resolved_artifact_limit = _clamp_limit(
+            DEFAULT_LIMIT if artifact_limit is None else artifact_limit,
+            MAX_LIMIT,
+        )
         if memory_id is not None:
             with session_scope() as session:
                 item = session.get(Memory, memory_id)
                 if item is None:
                     return {"ok": False, "error": f"Memory {memory_id} not found."}
-                return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+                payload = _serialize_model(item, include_relationships=False)
+                artifact_history: list[dict[str, Any]] = []
+                if include_artifacts:
+                    artifact_rows = (
+                        session.execute(
+                            select(NodeArtifact)
+                            .where(
+                                NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
+                                NodeArtifact.ref_id == memory_id,
+                            )
+                            .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                            .limit(resolved_artifact_limit)
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    artifact_history = [
+                        _serialize_node_artifact_item(row) for row in artifact_rows
+                    ]
+                return {"ok": True, "item": payload, "artifact_history": artifact_history}
         columns = _column_map(Memory)
         stmt = select(Memory)
         if order_by:
@@ -2442,7 +2516,43 @@ def register(mcp: FastMCP) -> None:
         with session_scope() as session:
             items = session.execute(stmt).scalars().all()
             payload = [_serialize_model(item, include_relationships=False) for item in items]
-            return {"ok": True, "count": len(payload), "items": payload}
+            response: dict[str, Any] = {"ok": True, "count": len(payload), "items": payload}
+            if include_artifacts and payload:
+                memory_ids = [
+                    int(item.get("id") or 0)
+                    for item in payload
+                    if isinstance(item, dict) and int(item.get("id") or 0) > 0
+                ]
+                if memory_ids:
+                    artifact_rows = (
+                        session.execute(
+                            select(NodeArtifact)
+                            .where(
+                                NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
+                                NodeArtifact.ref_id.in_(memory_ids),
+                            )
+                            .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    by_ref_id: dict[int, list[dict[str, Any]]] = {}
+                    for row in artifact_rows:
+                        ref_id = int(row.ref_id or 0)
+                        if ref_id <= 0:
+                            continue
+                        bucket = by_ref_id.setdefault(ref_id, [])
+                        if (
+                            resolved_artifact_limit is not None
+                            and len(bucket) >= resolved_artifact_limit
+                        ):
+                            continue
+                        bucket.append(_serialize_node_artifact_item(row))
+                    response["artifact_history"] = {
+                        str(ref_id): items
+                        for ref_id, items in by_ref_id.items()
+                    }
+            return response
 
     @mcp.tool()
     def llmctl_create_memory(description: str) -> dict[str, Any]:
@@ -2754,8 +2864,14 @@ def register(mcp: FastMCP) -> None:
         include_stages: bool = True,
         include_tasks: bool = True,
         plan_id: int | None = None,
+        include_artifacts: bool = True,
+        artifact_limit: int | None = 50,
     ) -> dict[str, Any]:
         """Read/list plans, including stage/task hierarchy when requested."""
+        resolved_artifact_limit = _clamp_limit(
+            DEFAULT_LIMIT if artifact_limit is None else artifact_limit,
+            MAX_LIMIT,
+        )
         if plan_id is not None:
             with session_scope() as session:
                 stmt = select(Plan).where(Plan.id == plan_id)
@@ -2771,7 +2887,25 @@ def register(mcp: FastMCP) -> None:
                     include_stages=include_stages,
                     include_tasks=include_tasks,
                 )
-                return {"ok": True, "item": payload}
+                artifact_history: list[dict[str, Any]] = []
+                if include_artifacts:
+                    artifact_rows = (
+                        session.execute(
+                            select(NodeArtifact)
+                            .where(
+                                NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+                                NodeArtifact.ref_id == plan_id,
+                            )
+                            .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                            .limit(resolved_artifact_limit)
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    artifact_history = [
+                        _serialize_node_artifact_item(row) for row in artifact_rows
+                    ]
+                return {"ok": True, "item": payload, "artifact_history": artifact_history}
         columns = _column_map(Plan)
         stmt = select(Plan)
         if include_stages and include_tasks:
@@ -2798,7 +2932,43 @@ def register(mcp: FastMCP) -> None:
                 )
                 for item in items
             ]
-            return {"ok": True, "count": len(payload), "items": payload}
+            response: dict[str, Any] = {"ok": True, "count": len(payload), "items": payload}
+            if include_artifacts and payload:
+                plan_ids = [
+                    int(item.get("id") or 0)
+                    for item in payload
+                    if isinstance(item, dict) and int(item.get("id") or 0) > 0
+                ]
+                if plan_ids:
+                    artifact_rows = (
+                        session.execute(
+                            select(NodeArtifact)
+                            .where(
+                                NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+                                NodeArtifact.ref_id.in_(plan_ids),
+                            )
+                            .order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    by_ref_id: dict[int, list[dict[str, Any]]] = {}
+                    for row in artifact_rows:
+                        ref_id = int(row.ref_id or 0)
+                        if ref_id <= 0:
+                            continue
+                        bucket = by_ref_id.setdefault(ref_id, [])
+                        if (
+                            resolved_artifact_limit is not None
+                            and len(bucket) >= resolved_artifact_limit
+                        ):
+                            continue
+                        bucket.append(_serialize_node_artifact_item(row))
+                    response["artifact_history"] = {
+                        str(ref_id): items
+                        for ref_id, items in by_ref_id.items()
+                    }
+            return response
 
     @mcp.tool()
     def llmctl_create_plan(

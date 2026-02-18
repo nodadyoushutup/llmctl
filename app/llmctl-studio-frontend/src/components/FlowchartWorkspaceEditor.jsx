@@ -36,7 +36,9 @@ const TYPE_TO_REF_CATALOG_KEY = {
   milestone: 'milestones',
   memory: 'memories',
 }
-const NODE_TYPES_WITH_MODEL = new Set(['task', 'milestone', 'memory', 'rag'])
+const NODE_TYPES_WITH_MODEL = new Set(['task', 'rag'])
+const SPECIALIZED_NODE_TYPES = new Set(['milestone', 'memory', 'plan'])
+const CURATED_NODE_TYPES = new Set(['decision', 'milestone', 'memory', 'plan'])
 
 const WORLD_WIDTH = 16000
 const WORLD_HEIGHT = 12000
@@ -611,6 +613,27 @@ function normalizeMemoryAction(value) {
     return 'retrieve'
   }
   return 'add'
+}
+
+const SPECIALIZED_NODE_CONTROL_REGISTRY = {
+  milestone: {
+    actionOptions: MILESTONE_ACTION_OPTIONS,
+    normalizeAction: normalizeMilestoneAction,
+    lockLlmctlMcp: false,
+    showPlanCompletionTargetFields: false,
+  },
+  memory: {
+    actionOptions: MEMORY_ACTION_OPTIONS,
+    normalizeAction: normalizeMemoryAction,
+    lockLlmctlMcp: true,
+    showPlanCompletionTargetFields: false,
+  },
+  plan: {
+    actionOptions: PLAN_ACTION_OPTIONS,
+    normalizeAction: normalizePlanAction,
+    lockLlmctlMcp: false,
+    showPlanCompletionTargetFields: true,
+  },
 }
 
 function normalizeMilestoneRetentionMode(value) {
@@ -1398,19 +1421,17 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       })
       .filter((entry) => Boolean(entry.connectorId))
   }, [selectedNode, selectedNodeType, edges, nodesByToken])
-  const selectedMilestoneConfig = (
-    selectedNode && selectedNodeType === 'milestone'
-      ? normalizeNodeConfig(selectedNode.config, 'milestone')
-      : null
-  )
-  const selectedMemoryConfig = (
-    selectedNode && selectedNodeType === 'memory'
-      ? normalizeNodeConfig(selectedNode.config, 'memory')
+  const selectedSpecializedControls = selectedNode
+    ? SPECIALIZED_NODE_CONTROL_REGISTRY[selectedNodeType] || null
+    : null
+  const selectedSpecializedConfig = (
+    selectedNode && selectedSpecializedControls
+      ? normalizeNodeConfig(selectedNode.config, selectedNodeType)
       : null
   )
   const selectedPlanConfig = (
     selectedNode && selectedNodeType === 'plan'
-      ? normalizeNodeConfig(selectedNode.config, 'plan')
+      ? selectedSpecializedConfig
       : null
   )
   const selectedPlanNodeNeedsCompletionTarget = Boolean(
@@ -1789,7 +1810,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
         delete nextConfig.collections
         delete nextConfig.question_prompt
       }
-      if (normalizedType !== 'milestone' && normalizedType !== 'memory' && normalizedType !== 'plan') {
+      if (!SPECIALIZED_NODE_TYPES.has(normalizedType)) {
         delete nextConfig.action
         delete nextConfig.additive_prompt
         delete nextConfig.retention_mode
@@ -2345,21 +2366,22 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 />
               </label>
             ) : null}
-            {selectedNodeType === 'milestone' && selectedMilestoneConfig ? (
+            {selectedSpecializedControls && selectedSpecializedConfig ? (
               <div className="stack-sm">
                 <label className="field">
                   <span>action</span>
                   <select
-                    value={selectedMilestoneConfig.action}
+                    required
+                    value={selectedSpecializedConfig.action}
                     onChange={(event) => updateNode(selectedNode.token, (current) => ({
                       ...current,
                       config: {
                         ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        action: normalizeMilestoneAction(event.target.value),
+                        action: selectedSpecializedControls.normalizeAction(event.target.value),
                       },
                     }))}
                   >
-                    {MILESTONE_ACTION_OPTIONS.map((option) => (
+                    {selectedSpecializedControls.actionOptions.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
@@ -2369,7 +2391,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 <label className="field">
                   <span>optional additive prompt</span>
                   <textarea
-                    value={selectedMilestoneConfig.additive_prompt}
+                    value={selectedSpecializedConfig.additive_prompt}
                     onChange={(event) => updateNode(selectedNode.token, (current) => ({
                       ...current,
                       config: {
@@ -2382,7 +2404,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 <label className="field">
                   <span>artifact retention</span>
                   <select
-                    value={selectedMilestoneConfig.retention_mode}
+                    value={selectedSpecializedConfig.retention_mode}
                     onChange={(event) => updateNode(selectedNode.token, (current) => ({
                       ...current,
                       config: {
@@ -2398,14 +2420,14 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     ))}
                   </select>
                 </label>
-                {retentionModeUsesTtl(selectedMilestoneConfig.retention_mode) ? (
+                {retentionModeUsesTtl(selectedSpecializedConfig.retention_mode) ? (
                   <label className="field">
                     <span>retention ttl (seconds)</span>
                     <input
                       type="number"
                       min="1"
                       step="1"
-                      value={selectedMilestoneConfig.retention_ttl_seconds ?? ''}
+                      value={selectedSpecializedConfig.retention_ttl_seconds ?? ''}
                       onChange={(event) => updateNode(selectedNode.token, (current) => ({
                         ...current,
                         config: {
@@ -2416,14 +2438,14 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     />
                   </label>
                 ) : null}
-                {retentionModeUsesMaxCount(selectedMilestoneConfig.retention_mode) ? (
+                {retentionModeUsesMaxCount(selectedSpecializedConfig.retention_mode) ? (
                   <label className="field">
                     <span>retention max count</span>
                     <input
                       type="number"
                       min="1"
                       step="1"
-                      value={selectedMilestoneConfig.retention_max_count ?? ''}
+                      value={selectedSpecializedConfig.retention_max_count ?? ''}
                       onChange={(event) => updateNode(selectedNode.token, (current) => ({
                         ...current,
                         config: {
@@ -2434,202 +2456,8 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     />
                   </label>
                 ) : null}
-              </div>
-            ) : null}
-            {selectedNodeType === 'memory' && selectedMemoryConfig ? (
-              <div className="stack-sm">
-                <label className="field">
-                  <span>action</span>
-                  <select
-                    value={selectedMemoryConfig.action}
-                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                      ...current,
-                      config: {
-                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        action: normalizeMemoryAction(event.target.value),
-                      },
-                    }))}
-                  >
-                    {MEMORY_ACTION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>optional additive prompt</span>
-                  <textarea
-                    value={selectedMemoryConfig.additive_prompt}
-                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                      ...current,
-                      config: {
-                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        additive_prompt: event.target.value,
-                      },
-                    }))}
-                  />
-                </label>
-                <label className="field">
-                  <span>artifact retention</span>
-                  <select
-                    value={selectedMemoryConfig.retention_mode}
-                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                      ...current,
-                      config: {
-                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        retention_mode: normalizeMilestoneRetentionMode(event.target.value),
-                      },
-                    }))}
-                  >
-                    {MILESTONE_RETENTION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {retentionModeUsesTtl(selectedMemoryConfig.retention_mode) ? (
-                  <label className="field">
-                    <span>retention ttl (seconds)</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={selectedMemoryConfig.retention_ttl_seconds ?? ''}
-                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                        ...current,
-                        config: {
-                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                          retention_ttl_seconds: parseOptionalInt(event.target.value),
-                        },
-                      }))}
-                    />
-                  </label>
-                ) : null}
-                {retentionModeUsesMaxCount(selectedMemoryConfig.retention_mode) ? (
-                  <label className="field">
-                    <span>retention max count</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={selectedMemoryConfig.retention_max_count ?? ''}
-                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                        ...current,
-                        config: {
-                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                          retention_max_count: parseOptionalInt(event.target.value),
-                        },
-                      }))}
-                    />
-                  </label>
-                ) : null}
-                <label className="field">
-                  <span>LLMCTL MCP</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                    <input
-                      type="checkbox"
-                      checked={llmctlMcpServerId != null}
-                      disabled
-                      readOnly
-                      aria-label="LLMCTL MCP (required)"
-                    />
-                    <span>{llmctlMcpServerId != null ? 'llmctl-mcp (required)' : 'llmctl-mcp unavailable'}</span>
-                  </span>
-                </label>
-              </div>
-            ) : null}
-            {selectedNodeType === 'plan' && selectedPlanConfig ? (
-              <div className="stack-sm">
-                <label className="field">
-                  <span>action</span>
-                  <select
-                    value={selectedPlanConfig.action}
-                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                      ...current,
-                      config: {
-                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        action: normalizePlanAction(event.target.value),
-                      },
-                    }))}
-                  >
-                    {PLAN_ACTION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>optional additive prompt</span>
-                  <textarea
-                    value={selectedPlanConfig.additive_prompt}
-                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                      ...current,
-                      config: {
-                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        additive_prompt: event.target.value,
-                      },
-                    }))}
-                  />
-                </label>
-                <label className="field">
-                  <span>artifact retention</span>
-                  <select
-                    value={selectedPlanConfig.retention_mode}
-                    onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                      ...current,
-                      config: {
-                        ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        retention_mode: normalizeMilestoneRetentionMode(event.target.value),
-                      },
-                    }))}
-                  >
-                    {MILESTONE_RETENTION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {retentionModeUsesTtl(selectedPlanConfig.retention_mode) ? (
-                  <label className="field">
-                    <span>retention ttl (seconds)</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={selectedPlanConfig.retention_ttl_seconds ?? ''}
-                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                        ...current,
-                        config: {
-                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                          retention_ttl_seconds: parseOptionalInt(event.target.value),
-                        },
-                      }))}
-                    />
-                  </label>
-                ) : null}
-                {retentionModeUsesMaxCount(selectedPlanConfig.retention_mode) ? (
-                  <label className="field">
-                    <span>retention max count</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={selectedPlanConfig.retention_max_count ?? ''}
-                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                        ...current,
-                        config: {
-                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                          retention_max_count: parseOptionalInt(event.target.value),
-                        },
-                      }))}
-                    />
-                  </label>
-                ) : null}
-                {selectedPlanConfig.action === PLAN_ACTION_COMPLETE_PLAN_ITEM ? (
+                {selectedSpecializedControls.showPlanCompletionTargetFields
+                && selectedSpecializedConfig.action === PLAN_ACTION_COMPLETE_PLAN_ITEM ? (
                   <>
                     <label className="field">
                       <span>plan item id (preferred)</span>
@@ -2637,7 +2465,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                         type="number"
                         min="1"
                         step="1"
-                        value={selectedPlanConfig.plan_item_id ?? ''}
+                        value={selectedSpecializedConfig.plan_item_id ?? ''}
                         onChange={(event) => updateNode(selectedNode.token, (current) => ({
                           ...current,
                           config: {
@@ -2651,7 +2479,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       <span>stage key</span>
                       <input
                         type="text"
-                        value={selectedPlanConfig.stage_key || ''}
+                        value={selectedSpecializedConfig.stage_key || ''}
                         onChange={(event) => updateNode(selectedNode.token, (current) => ({
                           ...current,
                           config: {
@@ -2665,7 +2493,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       <span>task key</span>
                       <input
                         type="text"
-                        value={selectedPlanConfig.task_key || ''}
+                        value={selectedSpecializedConfig.task_key || ''}
                         onChange={(event) => updateNode(selectedNode.token, (current) => ({
                           ...current,
                           config: {
@@ -2679,7 +2507,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       <span>completion source path</span>
                       <input
                         type="text"
-                        value={selectedPlanConfig.completion_source_path || ''}
+                        value={selectedSpecializedConfig.completion_source_path || ''}
                         onChange={(event) => updateNode(selectedNode.token, (current) => ({
                           ...current,
                           config: {
@@ -2690,6 +2518,21 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       />
                     </label>
                   </>
+                ) : null}
+                {selectedSpecializedControls.lockLlmctlMcp ? (
+                  <label className="field">
+                    <span>LLMCTL MCP</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                      <input
+                        type="checkbox"
+                        checked={llmctlMcpServerId != null}
+                        disabled
+                        readOnly
+                        aria-label="LLMCTL MCP (required)"
+                      />
+                      <span>{llmctlMcpServerId != null ? 'llmctl-mcp (required)' : 'llmctl-mcp unavailable'}</span>
+                    </span>
+                  </label>
                 ) : null}
               </div>
             ) : null}
@@ -2741,7 +2584,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 ))}
               </div>
             ) : null}
-            {NODE_TYPES_WITH_MODEL.has(selectedNodeType) && selectedNodeType !== 'milestone' ? (
+            {NODE_TYPES_WITH_MODEL.has(selectedNodeType) ? (
               <label className="field">
                 <span>model</span>
                 <select
@@ -2757,7 +2600,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 </select>
               </label>
             ) : null}
-            {selectedNodeType !== 'decision' && selectedNodeType !== 'milestone' && selectedNodeType !== 'memory' && selectedNodeType !== 'plan' ? (
+            {!CURATED_NODE_TYPES.has(selectedNodeType) ? (
               <label className="field">
                 <span>agent</span>
                 <select
