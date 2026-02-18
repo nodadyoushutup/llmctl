@@ -457,6 +457,59 @@ class Stage8ApiRouteTests(unittest.TestCase):
             any("Remember to validate deployment readiness" in str(memory.get("title") or "") for memory in memories)
         )
 
+    def test_memories_api_lists_memory_nodes_with_flowchart_context(self) -> None:
+        with session_scope() as session:
+            orphan_memory = Memory.create(session, description="orphan-memory")
+            memory_primary = Memory.create(session, description="release-summary")
+            memory_secondary = Memory.create(session, description="deploy-checklist")
+            flowchart_primary = Flowchart.create(session, name="Release")
+            flowchart_secondary = Flowchart.create(session, name="Deploy")
+            node_primary = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart_primary.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory_primary.id,
+                x=0,
+                y=0,
+            )
+            node_secondary = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart_secondary.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory_secondary.id,
+                x=20,
+                y=10,
+            )
+            orphan_memory_id = orphan_memory.id
+            node_primary_id = node_primary.id
+            node_secondary_id = node_secondary.id
+            memory_primary_id = memory_primary.id
+            memory_secondary_id = memory_secondary.id
+
+        response = self.client.get("/api/memories?page=1&per_page=20")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        memories = payload.get("memories") or []
+        self.assertEqual(2, len(memories))
+
+        rows_by_node_id = {
+            int(row.get("flowchart_node_id") or 0): row
+            for row in memories
+        }
+        self.assertIn(node_primary_id, rows_by_node_id)
+        self.assertIn(node_secondary_id, rows_by_node_id)
+
+        primary_row = rows_by_node_id[node_primary_id]
+        secondary_row = rows_by_node_id[node_secondary_id]
+        self.assertEqual(memory_primary_id, int(primary_row.get("id") or 0))
+        self.assertEqual("Release", primary_row.get("flowchart_name"))
+        self.assertEqual(memory_secondary_id, int(secondary_row.get("id") or 0))
+        self.assertEqual("Deploy", secondary_row.get("flowchart_name"))
+        self.assertNotIn(
+            orphan_memory_id,
+            {int(row.get("id") or 0) for row in memories},
+        )
+
     def test_memory_history_api_returns_artifacts_with_request_and_correlation_ids(self) -> None:
         with session_scope() as session:
             memory = Memory.create(session, description="release summary")
@@ -521,6 +574,93 @@ class Stage8ApiRouteTests(unittest.TestCase):
         self.assertEqual(NODE_ARTIFACT_TYPE_MEMORY, artifacts[0].get("artifact_type"))
         self.assertEqual("req-memory-stage8", artifacts[0].get("request_id"))
         self.assertEqual("corr-memory-stage8", artifacts[0].get("correlation_id"))
+        self.assertEqual("add", (artifacts[0].get("payload") or {}).get("action"))
+
+    def test_memory_history_api_can_filter_by_flowchart_node_id(self) -> None:
+        with session_scope() as session:
+            memory = Memory.create(session, description="history node filtering")
+            flowchart = Flowchart.create(session, name="memory-history-filter")
+            first_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory.id,
+                x=0,
+                y=0,
+            )
+            second_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory.id,
+                x=200,
+                y=0,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            first_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=flowchart_run.id,
+                flowchart_node_id=first_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json="{}",
+                routing_state_json="{}",
+                input_context_json="{}",
+            )
+            second_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=flowchart_run.id,
+                flowchart_node_id=second_node.id,
+                execution_index=2,
+                status="succeeded",
+                output_state_json="{}",
+                routing_state_json="{}",
+                input_context_json="{}",
+            )
+            NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=first_node.id,
+                flowchart_run_id=flowchart_run.id,
+                flowchart_run_node_id=first_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+                ref_id=memory.id,
+                execution_index=1,
+                variant_key=f"run-{flowchart_run.id}-node-run-{first_run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps({"action": "add"}, sort_keys=True),
+            )
+            NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=second_node.id,
+                flowchart_run_id=flowchart_run.id,
+                flowchart_run_node_id=second_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+                ref_id=memory.id,
+                execution_index=2,
+                variant_key=f"run-{flowchart_run.id}-node-run-{second_run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps({"action": "retrieve"}, sort_keys=True),
+            )
+            memory_id = memory.id
+            first_node_id = first_node.id
+
+        response = self.client.get(
+            f"/api/memories/{memory_id}/history?page=1&per_page=20&flowchart_node_id={first_node_id}"
+        )
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        self.assertEqual(first_node_id, int(payload.get("flowchart_node_id") or 0))
+        artifacts = payload.get("artifacts") or []
+        self.assertEqual(1, len(artifacts))
+        self.assertEqual(first_node_id, int(artifacts[0].get("flowchart_node_id") or 0))
         self.assertEqual("add", (artifacts[0].get("payload") or {}).get("action"))
 
 

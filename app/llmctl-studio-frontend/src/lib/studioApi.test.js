@@ -613,7 +613,7 @@ describe('studioApi', () => {
     getMemories()
     getMemoryMeta()
     getMemory(4)
-    getMemoryHistory(4, { page: 2, perPage: 15 })
+    getMemoryHistory(4, { page: 2, perPage: 15, flowchartNodeId: 13 })
     getMemoryArtifacts(4, {
       limit: 25,
       offset: 5,
@@ -661,7 +661,7 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(10, '/memories?page=1&per_page=20')
     expect(requestJson).toHaveBeenNthCalledWith(11, '/memories/new')
     expect(requestJson).toHaveBeenNthCalledWith(12, '/memories/4')
-    expect(requestJson).toHaveBeenNthCalledWith(13, '/memories/4/history?page=2&per_page=15')
+    expect(requestJson).toHaveBeenNthCalledWith(13, '/memories/4/history?page=2&per_page=15&flowchart_node_id=13')
     expect(requestJson).toHaveBeenNthCalledWith(
       14,
       '/memories/4/artifacts?limit=25&offset=5&flowchart_id=9&flowchart_node_id=7&flowchart_run_id=11&flowchart_run_node_id=13&order=asc',
