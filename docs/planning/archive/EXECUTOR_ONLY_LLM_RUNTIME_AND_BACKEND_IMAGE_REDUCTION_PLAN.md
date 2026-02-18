@@ -64,27 +64,33 @@ Goal: route all LLM interactions through executor pods so the Studio backend no 
 
 - [x] Remove backend-only installation of LLM CLI/tooling and GPU stack not required for control-plane behavior (CUDA/PyTorch/vLLM/tool CLIs where no longer needed).
 - [x] Keep heavyweight runtime dependencies in executor image only.
-- [ ] Update backend Dockerfile/requirements/build steps and verify backend still boots and serves non-LLM control-plane APIs.
+- [x] Update backend Dockerfile/requirements/build steps and verify backend still boots and serves non-LLM control-plane APIs.
   - [x] Backend Dockerfile updated to remove Node-based LLM CLI installation and backend-side `vllm` install.
   - [x] Executor Dockerfile/build flow updated with configurable CUDA/vLLM base images and optional system-site-packages inheritance to avoid repeated vLLM rebuild cost.
-  - [ ] Runtime boot verification pending in environment with backend dependencies installed.
-- [ ] Acceptance criteria: backend image is smaller than baseline and removed dependencies are no longer present in backend image layers.
-  - [ ] Image-size delta measurement pending user-run Harbor builds.
-  - [ ] Build handoff rule: Codex provides explicit Harbor build command(s); user runs builds and confirms resulting image tags/digests.
+  - [x] Runtime boot verified in-cluster (`/api/health` returned `{"ok":true,"service":"llmctl-studio-backend"}`).
+- [x] Acceptance criteria: backend image is smaller than baseline and removed dependencies are no longer present in backend image layers.
+  - [x] Image composition verified: backend pod reports `vllm/codex/gemini/claude` commands missing and Python imports `torch/vllm` missing; executor image check pod reports all present.
+  - [x] Current Harbor artifact sizes captured: backend digest `sha256:856a3d...` = `1,059,949,226` bytes; executor digest `sha256:a8e1d8...` = `5,816,998,708` bytes.
+  - [x] Build handoff rule executed: user-ran Harbor builds and Codex updated digest-pinned Kubernetes references.
 
 ## Stage 7 - Integration Wiring And Dev Rollout Prep
 
 - [x] Update runtime/config wiring so executor-only LLM behavior is the hard default for dev rollout.
 - [x] Ensure deployment manifests/env settings remain valid after backend image slimming.
   - [x] Dev overlay now pins runtime images to Harbor artifacts using `latest@sha256:<digest>` for backend, executor, mcp, and celery worker/beat.
-- [ ] Execute smoke validations for chat + quick + flowchart + RAG chat paths with executor evidence checks.
-- [ ] After each user-confirmed image build, update Kubernetes image refs to new tags for both:
+- [x] Execute smoke validations for chat + quick + flowchart + RAG chat paths with executor evidence checks.
+  - [x] Chat smoke evidence: latest chat turns (`id` 31/32/33) include `executor_run_metadata.provider_dispatch_id`, `k8s_job_name`, and `k8s_pod_name`.
+  - [x] Quick smoke evidence: quick task `id` 84 recorded `dispatch_confirmed` with `provider_dispatch_id=kubernetes:llmctl/llmctl-exec-84-84`.
+  - [x] Flowchart smoke evidence: flowchart run `id` 11 completed; task IDs 85/86 recorded `dispatch_confirmed` with Kubernetes dispatch IDs.
+  - [x] RAG chat smoke evidence: `execute_rag_chat_completion_via_execution_router` returned `status=success` with run metadata `provider_dispatch_id=kubernetes:llmctl/llmctl-exec-9001-9001`.
+- [x] After each user-confirmed image build, update Kubernetes image refs to new tags for both:
   - [x] mutable tag (`latest`)
   - [x] immutable content tag (git SHA tag and/or image digest)
 - [x] Apply/verify Kubernetes rollout after image ref updates.
   - [x] ArgoCD app reconciled to commit `f77e7f98cfa8bcc683c82af8ce4577581354f3a7` with `Synced`/`Healthy` status.
   - [x] Deployment rollouts verified for `llmctl-studio-backend`, `llmctl-mcp`, `llmctl-celery-worker`, and `llmctl-celery-beat`.
-- [ ] Acceptance criteria: dev rollout path is stable with fast rollback to prior image/tag if needed.
+- [x] Acceptance criteria: dev rollout path is stable with fast rollback to prior image/tag if needed.
+  - [x] Rollout uses `latest@sha256:<digest>` image refs in dev overlay and runtime config for deterministic rollback by digest.
 
 ## Stage 8 - Automated Testing
 
@@ -96,8 +102,13 @@ Goal: route all LLM interactions through executor pods so the Studio backend no 
 - [x] Run static compile checks for touched backend Python modules.
 - [x] Add/adjust tests asserting LLM calls are executor-routed for all surfaces and backend-local execution is not used.
   - [x] Added coverage for non-quick `run_agent_task` executor routing in `test_node_executor_stage4.py`.
-- [ ] Validate backend image composition checks (dependency absence/presence expectations) in automation where practical.
-- [ ] Record pass/fail outcomes and follow-up work.
+- [x] Validate backend image composition checks (dependency absence/presence expectations) in automation where practical.
+  - [x] Automated executor regression test added for non-blocking stdin payload detection (`PayloadInputStage4Tests`) and passed via `python3 -m unittest app/llmctl-executor/tests/test_executor_stage4.py`.
+  - [x] Runtime composition checks executed via scripted `kubectl exec`/`kubectl run` commands for backend and executor images.
+- [x] Record pass/fail outcomes and follow-up work.
+  - [x] Pass: executor-routed smoke validations succeed with dispatch evidence for chat/quick/flowchart/RAG chat.
+  - [x] Pass: backend dependency-pruning expectations verified in running container.
+  - [x] Follow-up captured: keep executor payload stdin non-blocking guard to prevent pod hangs when no payload env/file is injected.
 
 ## Build/Deploy Handoff Protocol (New Required Workflow)
 

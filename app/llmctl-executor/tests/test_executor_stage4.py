@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from llmctl_executor.payload import PayloadError, load_payload_input
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXECUTOR_RUN = REPO_ROOT / "app" / "llmctl-executor" / "run.py"
@@ -161,6 +166,37 @@ class ExecutorStage4Tests(unittest.TestCase):
         error = result.get("error") or {}
         self.assertEqual("execution_error", error.get("code"))
         self.assertIn("Node execution failed", str(error.get("message") or ""))
+
+
+class PayloadInputStage4Tests(unittest.TestCase):
+    def test_load_payload_input_skips_stdin_when_not_readable(self) -> None:
+        with patch("llmctl_executor.payload.os.isatty", return_value=False), patch(
+            "llmctl_executor.payload.os.fstat",
+            return_value=SimpleNamespace(st_mode=stat.S_IFCHR),
+        ), patch(
+            "llmctl_executor.payload.select.select",
+            return_value=([], [], []),
+        ), patch(
+            "llmctl_executor.payload.os.read",
+            side_effect=AssertionError("stdin should not be read"),
+        ):
+            with self.assertRaises(PayloadError) as ctx:
+                load_payload_input()
+        self.assertIn("No payload provided", str(ctx.exception))
+
+    def test_load_payload_input_reads_stdin_when_readable(self) -> None:
+        with patch("llmctl_executor.payload.os.isatty", return_value=False), patch(
+            "llmctl_executor.payload.os.fstat",
+            return_value=SimpleNamespace(st_mode=stat.S_IFCHR),
+        ), patch(
+            "llmctl_executor.payload.select.select",
+            return_value=([0], [], []),
+        ), patch(
+            "llmctl_executor.payload.os.read",
+            return_value=b'{"contract_version":"v1","provider":"workspace","command":["echo","ok"]}',
+        ):
+            payload = load_payload_input()
+        self.assertEqual("v1", payload.get("contract_version"))
 
 
 if __name__ == "__main__":
