@@ -99,6 +99,7 @@ class RealtimeEventsStage6Tests(unittest.TestCase):
                 "provider_dispatch_id": "kubernetes:default/job-1",
                 "workspace_identity": "workspace-main",
                 "dispatch_status": "dispatch_confirmed",
+                "execution_mode": "indexing",
                 "fallback_attempted": "false",
                 "fallback_reason": "",
                 "dispatch_uncertain": "false",
@@ -115,6 +116,7 @@ class RealtimeEventsStage6Tests(unittest.TestCase):
         self.assertEqual("kubernetes", normalized["selected_provider"])
         self.assertEqual("kubernetes", normalized["final_provider"])
         self.assertEqual("kubernetes:default/job-1", normalized["provider_dispatch_id"])
+        self.assertEqual("indexing", normalized["execution_mode"])
         self.assertEqual(["task:1", "run:2", "flowchart:3"], task_scope_rooms(
             task_id=1,
             run_id=2,
@@ -281,6 +283,7 @@ class RealtimeRuntimeParityStage6Tests(unittest.TestCase):
             "k8s_terminal_reason",
             "workspace_identity",
             "dispatch_status",
+            "execution_mode",
             "fallback_attempted",
             "fallback_reason",
             "dispatch_uncertain",

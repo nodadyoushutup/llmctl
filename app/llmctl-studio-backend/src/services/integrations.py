@@ -422,6 +422,13 @@ def normalize_node_executor_api_failure_category(value: str | None) -> str:
     return ""
 
 
+def normalize_node_executor_execution_mode(value: str | None) -> str:
+    cleaned = (value or "").strip().lower()
+    if cleaned in {"query", "indexing", "delta_indexing"}:
+        return cleaned
+    return ""
+
+
 def normalize_node_executor_run_metadata(
     payload: dict[str, object] | None,
 ) -> dict[str, str]:
@@ -436,6 +443,9 @@ def normalize_node_executor_run_metadata(
     dispatch_uncertain = _as_bool_flag(
         str(payload.get("dispatch_uncertain") or ""),
         default=False,
+    )
+    execution_mode = normalize_node_executor_execution_mode(
+        str(payload.get("execution_mode") or "")
     )
     api_failure_category = normalize_node_executor_api_failure_category(
         str(payload.get("api_failure_category") or "")
@@ -459,6 +469,7 @@ def normalize_node_executor_run_metadata(
         "provider_dispatch_id": provider_dispatch_id,
         "workspace_identity": workspace_identity,
         "dispatch_status": dispatch_status,
+        "execution_mode": execution_mode,
         "fallback_attempted": _bool_string(False),
         "fallback_reason": "",
         "dispatch_uncertain": _bool_string(dispatch_uncertain),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
@@ -215,6 +216,73 @@ def _normalize_quick_rag_model_provider(value: Any) -> str:
     if cleaned == "gemini":
         return "gemini"
     return "codex"
+
+
+def _canonical_rag_execution_mode(value: Any) -> str | None:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"index", "fresh", "fresh_index", "indexing"}:
+        return "indexing"
+    if cleaned in {"delta", "delta_index", "delta_indexing"}:
+        return "delta_indexing"
+    if cleaned in {"query"}:
+        return "query"
+    return None
+
+
+def _flowchart_rag_execution_mode_from_node_config(
+    node_config: dict[str, Any] | None,
+) -> str | None:
+    if not isinstance(node_config, dict):
+        return None
+    return _canonical_rag_execution_mode(node_config.get("mode"))
+
+
+def _task_execution_mode(
+    task: AgentTask,
+    *,
+    runtime_override: dict[str, Any] | None = None,
+) -> str | None:
+    if isinstance(runtime_override, dict):
+        explicit_mode = _canonical_rag_execution_mode(runtime_override.get("execution_mode"))
+        if explicit_mode:
+            return explicit_mode
+
+    if task.kind == RAG_QUICK_INDEX_TASK_KIND:
+        return "indexing"
+    if task.kind == RAG_QUICK_DELTA_TASK_KIND:
+        return "delta_indexing"
+
+    _user_request, payload = parse_prompt_input(task.prompt)
+    if isinstance(payload, dict):
+        flowchart_node_type = str(payload.get("flowchart_node_type") or "").strip().lower()
+        if flowchart_node_type == FLOWCHART_NODE_TYPE_RAG:
+            prompt_mode = _canonical_rag_execution_mode(payload.get("flowchart_node_mode"))
+            if prompt_mode:
+                return prompt_mode
+        task_context = payload.get("task_context")
+        if isinstance(task_context, dict):
+            quick_context = task_context.get("rag_quick_run")
+            if isinstance(quick_context, dict):
+                quick_mode = _canonical_rag_execution_mode(quick_context.get("mode"))
+                if quick_mode:
+                    return quick_mode
+
+    raw_output = str(task.output or "").strip()
+    if raw_output.startswith("{"):
+        try:
+            output_payload = json.loads(raw_output)
+        except json.JSONDecodeError:
+            output_payload = {}
+        if isinstance(output_payload, dict):
+            output_mode = _canonical_rag_execution_mode(output_payload.get("mode"))
+            if output_mode:
+                return output_mode
+            quick_payload = output_payload.get("quick_rag")
+            if isinstance(quick_payload, dict):
+                quick_mode = _canonical_rag_execution_mode(quick_payload.get("mode"))
+                if quick_mode:
+                    return quick_mode
+    return None
 
 
 def _kubernetes_job_name_from_dispatch_id(provider_dispatch_id: Any) -> str:
@@ -497,21 +565,28 @@ def _task_runtime_metadata(
     *,
     runtime_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if isinstance(runtime_override, dict):
-        return dict(runtime_override)
-    return {
-        "selected_provider": task.selected_provider,
-        "final_provider": task.final_provider,
-        "provider_dispatch_id": task.provider_dispatch_id,
-        "workspace_identity": task.workspace_identity,
-        "dispatch_status": task.dispatch_status,
-        "fallback_attempted": bool(task.fallback_attempted),
-        "fallback_reason": task.fallback_reason,
-        "dispatch_uncertain": bool(task.dispatch_uncertain),
-        "api_failure_category": task.api_failure_category,
-        "cli_fallback_used": bool(task.cli_fallback_used),
-        "cli_preflight_passed": task.cli_preflight_passed,
-    }
+    runtime = (
+        dict(runtime_override)
+        if isinstance(runtime_override, dict)
+        else {
+            "selected_provider": task.selected_provider,
+            "final_provider": task.final_provider,
+            "provider_dispatch_id": task.provider_dispatch_id,
+            "workspace_identity": task.workspace_identity,
+            "dispatch_status": task.dispatch_status,
+            "fallback_attempted": bool(task.fallback_attempted),
+            "fallback_reason": task.fallback_reason,
+            "dispatch_uncertain": bool(task.dispatch_uncertain),
+            "api_failure_category": task.api_failure_category,
+            "cli_fallback_used": bool(task.cli_fallback_used),
+            "cli_preflight_passed": task.cli_preflight_passed,
+        }
+    )
+    runtime["execution_mode"] = _task_execution_mode(
+        task,
+        runtime_override=runtime_override,
+    )
+    return runtime
 
 
 def _task_event_payload(task: AgentTask) -> dict[str, Any]:
@@ -524,6 +599,7 @@ def _task_event_payload(task: AgentTask) -> dict[str, Any]:
         "flowchart_run_id": task.flowchart_run_id,
         "flowchart_node_id": task.flowchart_node_id,
         "current_stage": task.current_stage,
+        "execution_mode": _task_execution_mode(task),
         "started_at": _resolve_updated_at_version(task.started_at),
         "finished_at": _resolve_updated_at_version(task.finished_at),
         "updated_at": _resolve_updated_at_version(task.updated_at),
@@ -3796,6 +3872,7 @@ def run_quick_rag_task(self, task_id: int) -> None:
                 enabled_providers={model_provider},
                 default_model_id=None,
                 mcp_server_keys=[],
+                execution_mode=_canonical_rag_execution_mode(mode),
             )
             routed_execution_request = execution_router.route_request(execution_request)
             runtime_payload = routed_execution_request.run_metadata_payload()
@@ -5443,6 +5520,7 @@ def _flowchart_node_task_prompt(
     run_id: int,
     node_id: int,
     node_type: str,
+    node_mode: str | None,
     execution_index: int,
     input_context: dict[str, Any],
 ) -> str:
@@ -5453,6 +5531,7 @@ def _flowchart_node_task_prompt(
             "flowchart_run_id": run_id,
             "flowchart_node_id": node_id,
             "flowchart_node_type": node_type,
+            "flowchart_node_mode": node_mode or "",
             "execution_index": execution_index,
             "input_context": input_context,
         }
@@ -5528,6 +5607,7 @@ def _create_flowchart_node_task(
     node_id: int,
     node_type: str,
     node_ref_id: int | None,
+    node_config: dict[str, Any] | None = None,
     agent_id: int | None = None,
     execution_index: int,
     input_context: dict[str, Any],
@@ -5538,6 +5618,9 @@ def _create_flowchart_node_task(
     error: str | None = None,
     run_metadata: dict[str, Any] | None = None,
 ) -> AgentTask:
+    node_mode: str | None = None
+    if node_type == FLOWCHART_NODE_TYPE_RAG:
+        node_mode = _flowchart_rag_execution_mode_from_node_config(node_config)
     task = AgentTask.create(
         session,
         agent_id=agent_id,
@@ -5551,6 +5634,7 @@ def _create_flowchart_node_task(
             run_id=run_id,
             node_id=node_id,
             node_type=node_type,
+            node_mode=node_mode,
             execution_index=execution_index,
             input_context=input_context,
         ),
@@ -5651,6 +5735,128 @@ def _update_flowchart_node_task(
         task.error = None
     if finished_at is not None:
         task.finished_at = finished_at
+
+
+def _finalize_flowchart_node_failure(
+    *,
+    flowchart_id: int,
+    run_id: int,
+    node_id: int,
+    node_type: str,
+    node_run_id: int,
+    node_task_id: int | None,
+    execution_index: int,
+    failure_message: str,
+    runtime_payload: dict[str, Any] | None,
+    runtime_evidence: dict[str, Any] | None,
+) -> None:
+    finished_at = _utcnow()
+    runtime_evidence_payload = (
+        dict(runtime_evidence) if isinstance(runtime_evidence, dict) else {}
+    )
+    with session_scope() as session:
+        failed_node_run = session.get(FlowchartRunNode, node_run_id)
+        if failed_node_run is not None:
+            failed_node_run.status = "failed"
+            failed_node_run.error = failure_message
+            failed_node_run.finished_at = finished_at
+            failed_node_run.routing_state_json = _json_dumps(
+                {"runtime_evidence": runtime_evidence_payload}
+            )
+        failed_task_id = node_task_id
+        if failed_task_id is None and failed_node_run is not None:
+            failed_task_id = failed_node_run.agent_task_id
+        failed_task = (
+            session.get(AgentTask, failed_task_id) if failed_task_id is not None else None
+        )
+        if failed_task is not None:
+            failed_task.status = "failed"
+            failed_task.error = failure_message
+            failed_task.finished_at = finished_at
+            if str(failed_task.dispatch_status or "").strip().lower() == "dispatch_pending":
+                failed_task.dispatch_status = "dispatch_failed"
+            _emit_task_event(
+                "node.task.completed",
+                task=failed_task,
+                payload={
+                    "terminal_status": "failed",
+                    "failure_message": failure_message,
+                    "flowchart_node_run_id": node_run_id,
+                    "execution_index": (
+                        failed_node_run.execution_index
+                        if failed_node_run is not None
+                        else execution_index
+                    ),
+                    "runtime_evidence": runtime_evidence_payload,
+                },
+                runtime_override=runtime_payload,
+            )
+        _emit_flowchart_node_event(
+            "flowchart.node.updated",
+            flowchart_id=flowchart_id,
+            flowchart_run_id=run_id,
+            flowchart_node_id=node_id,
+            node_type=node_type,
+            status="failed",
+            execution_index=(
+                failed_node_run.execution_index
+                if failed_node_run is not None
+                else execution_index
+            ),
+            node_run_id=node_run_id,
+            agent_task_id=(
+                failed_node_run.agent_task_id
+                if failed_node_run is not None
+                else node_task_id
+            ),
+            error=failure_message,
+            started_at=failed_node_run.started_at if failed_node_run is not None else None,
+            finished_at=finished_at,
+            routing_state={"runtime_evidence": runtime_evidence_payload},
+            runtime=runtime_payload,
+        )
+        run = session.get(FlowchartRun, run_id)
+        if run is not None and run.status != "canceled":
+            run.status = "failed"
+            run.finished_at = finished_at
+            _emit_flowchart_run_event(
+                "flowchart.run.updated",
+                run=run,
+                flowchart_id=flowchart_id,
+                payload={
+                    "transition": "failed",
+                    "failure_message": failure_message,
+                },
+            )
+
+
+def _best_effort_mark_flowchart_run_failed(
+    *,
+    run_id: int,
+    node_run_id: int | None,
+    node_task_id: int | None,
+    failure_message: str,
+) -> None:
+    finished_at = _utcnow()
+    with session_scope() as session:
+        run = session.get(FlowchartRun, run_id)
+        if run is not None and run.status != "canceled":
+            run.status = "failed"
+            run.finished_at = run.finished_at or finished_at
+        if node_run_id is not None:
+            node_run = session.get(FlowchartRunNode, node_run_id)
+            if node_run is not None:
+                node_run.status = "failed"
+                node_run.error = failure_message
+                node_run.finished_at = node_run.finished_at or finished_at
+        if node_task_id is not None:
+            task = session.get(AgentTask, node_task_id)
+            if task is not None:
+                task.status = "failed"
+                task.error = failure_message
+                task.finished_at = task.finished_at or finished_at
+                if str(task.dispatch_status or "").strip().lower() == "dispatch_pending":
+                    task.dispatch_status = "dispatch_failed"
 
 
 def _flowchart_task_output_display(output_state: dict[str, Any]) -> str:
@@ -5760,6 +5966,7 @@ def _record_flowchart_guardrail_failure(
     node_id: int,
     node_type: str,
     node_ref_id: int | None = None,
+    node_config: dict[str, Any] | None = None,
     execution_index: int,
     total_execution_count: int,
     incoming_edges: list[dict[str, Any]],
@@ -5787,6 +5994,7 @@ def _record_flowchart_guardrail_failure(
             node_id=node_id,
             node_type=node_type,
             node_ref_id=node_ref_id,
+            node_config=node_config,
             execution_index=execution_index,
             input_context=input_context,
             status="failed",
@@ -7737,12 +7945,18 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
 
     if rag_precheck_failure is not None:
         failed_node_id, failure_message = rag_precheck_failure
+        failed_node_spec = node_specs.get(failed_node_id) or {}
         _record_flowchart_guardrail_failure(
             flowchart_id=flowchart_id,
             run_id=run_id,
             node_id=failed_node_id,
             node_type=FLOWCHART_NODE_TYPE_RAG,
             node_ref_id=None,
+            node_config=(
+                failed_node_spec.get("config")
+                if isinstance(failed_node_spec.get("config"), dict)
+                else None
+            ),
             execution_index=1,
             total_execution_count=0,
             incoming_edges=incoming_by_target.get(failed_node_id, []),
@@ -7820,6 +8034,11 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             next_node_spec.get("ref_id"), default=0, minimum=0
                         )
                         or None,
+                        node_config=(
+                            next_node_spec.get("config")
+                            if isinstance(next_node_spec.get("config"), dict)
+                            else None
+                        ),
                         execution_index=execution_index,
                         total_execution_count=total_execution_count,
                         incoming_edges=incoming_by_target.get(next_node_id, []),
@@ -7834,6 +8053,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
         batch: list[dict[str, Any]] = [
             ready_queue.popleft() for _ in range(batch_size)
         ]
+        activation_records: list[dict[str, Any]] = []
 
         for activation in batch:
             with session_scope() as session:
@@ -7876,6 +8096,11 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         node_spec.get("ref_id"), default=0, minimum=0
                     )
                     or None,
+                    node_config=(
+                        node_spec.get("config")
+                        if isinstance(node_spec.get("config"), dict)
+                        else None
+                    ),
                     execution_index=execution_index,
                     total_execution_count=total_execution_count,
                     incoming_edges=incoming_by_target.get(node_id, []),
@@ -7896,6 +8121,11 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         node_spec.get("ref_id"), default=0, minimum=0
                     )
                     or None,
+                    node_config=(
+                        node_spec.get("config")
+                        if isinstance(node_spec.get("config"), dict)
+                        else None
+                    ),
                     execution_index=execution_index,
                     total_execution_count=total_execution_count,
                     incoming_edges=incoming_by_target.get(node_id, []),
@@ -7947,6 +8177,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         node_spec.get("ref_id"), default=0, minimum=0
                     )
                     or None,
+                    node_config=node_config,
                     agent_id=node_agent_id,
                     execution_index=execution_index,
                     input_context=input_context,
@@ -7977,6 +8208,11 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     enabled_providers=enabled_providers,
                     default_model_id=default_model_id,
                     mcp_server_keys=list(node_spec.get("mcp_server_keys") or []),
+                    execution_mode=(
+                        _flowchart_rag_execution_mode_from_node_config(node_config)
+                        if str(node_spec["node_type"]) == FLOWCHART_NODE_TYPE_RAG
+                        else None
+                    ),
                 )
                 routed_execution_request = execution_router.route_request(execution_request)
                 _apply_flowchart_node_task_run_metadata(
@@ -8007,68 +8243,102 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     started_at=node_run_started_at,
                     runtime=runtime_payload,
                 )
+            activation_records.append(
+                {
+                    "activation": activation,
+                    "node_id": node_id,
+                    "node_spec": node_spec,
+                    "execution_index": execution_index,
+                    "node_run_id": node_run_id,
+                    "node_task_id": node_task_id,
+                    "routed_execution_request": routed_execution_request,
+                    "sequence": total_execution_count,
+                }
+            )
 
-            try:
-                if routed_execution_request is None:
-                    raise RuntimeError("Execution request routing did not initialize.")
-                execution_result = execution_router.execute_routed(
-                    routed_execution_request,
-                    _execute_flowchart_node_request,
-                )
-                runtime_payload = (
-                    execution_result.run_metadata
-                    if isinstance(execution_result.run_metadata, dict)
-                    else routed_execution_request.run_metadata_payload()
-                )
-                runtime_evidence = _runtime_evidence_payload(
-                    run_metadata=runtime_payload,
-                    provider_metadata=(
-                        execution_result.provider_metadata
-                        if isinstance(execution_result.provider_metadata, dict)
-                        else None
-                    ),
-                    error=execution_result.error if isinstance(execution_result.error, dict) else None,
-                    terminal_status=execution_result.status,
-                )
-                if execution_result.status != "success":
-                    failure_error = execution_result.error
-                    failure_message = (
-                        str(failure_error.get("message") or "").strip()
-                        if isinstance(failure_error, dict)
-                        else ""
+        if final_status in {"failed", "stopped"}:
+            break
+        if not activation_records:
+            continue
+
+        with ThreadPoolExecutor(max_workers=len(activation_records)) as executor:
+            for record in activation_records:
+                routed_execution_request = record.get("routed_execution_request")
+                if isinstance(routed_execution_request, ExecutionRequest):
+                    record["execution_future"] = executor.submit(
+                        execution_router.execute_routed,
+                        routed_execution_request,
+                        _execute_flowchart_node_request,
                     )
-                    if not failure_message:
+
+            batch_failed = False
+            pending_emissions: list[dict[str, Any]] = []
+            for record in activation_records:
+                node_id = int(record.get("node_id") or 0)
+                node_spec = dict(record.get("node_spec") or {})
+                execution_index = int(record.get("execution_index") or 0)
+                node_run_id = int(record.get("node_run_id") or 0)
+                node_task_id = int(record.get("node_task_id") or 0)
+                routed_execution_request = record.get("routed_execution_request")
+                execution_result = None
+                runtime_evidence: dict[str, Any] = {}
+
+                try:
+                    execution_future = record.get("execution_future")
+                    if routed_execution_request is None:
+                        raise RuntimeError("Execution request routing did not initialize.")
+                    if execution_future is None:
+                        raise RuntimeError("Flowchart node execution did not dispatch.")
+                    execution_result = execution_future.result()
+                    runtime_payload = (
+                        execution_result.run_metadata
+                        if isinstance(execution_result.run_metadata, dict)
+                        else routed_execution_request.run_metadata_payload()
+                    )
+                    runtime_evidence = _runtime_evidence_payload(
+                        run_metadata=runtime_payload,
+                        provider_metadata=(
+                            execution_result.provider_metadata
+                            if isinstance(execution_result.provider_metadata, dict)
+                            else None
+                        ),
+                        error=execution_result.error
+                        if isinstance(execution_result.error, dict)
+                        else None,
+                        terminal_status=execution_result.status,
+                    )
+                    if execution_result.status != "success":
+                        failure_error = execution_result.error
                         failure_message = (
-                            f"Execution failed with status '{execution_result.status}'."
+                            str(failure_error.get("message") or "").strip()
+                            if isinstance(failure_error, dict)
+                            else ""
                         )
-                    raise RuntimeError(failure_message)
-                output_state = (
-                    dict(execution_result.output_state)
-                    if isinstance(execution_result.output_state, dict)
-                    else {}
-                )
-                routing_state = (
-                    dict(execution_result.routing_state)
-                    if isinstance(execution_result.routing_state, dict)
-                    else {}
-                )
-                if runtime_evidence:
-                    routing_state["runtime_evidence"] = runtime_evidence
-                    output_state["runtime_evidence"] = runtime_evidence
-            except Exception as exc:
-                logger.exception(
-                    "Flowchart run %s failed in node %s (%s)",
-                    run_id,
-                    node_id,
-                    node_spec.get("node_type"),
-                )
-                with session_scope() as session:
-                    finished_at = _utcnow()
-                    failed_node_run = session.get(FlowchartRunNode, node_run_id)
-                    if failed_node_run is not None:
-                        failed_node_run.status = "failed"
-                        failed_node_run.error = str(exc)
-                        failed_node_run.finished_at = finished_at
+                        if not failure_message:
+                            failure_message = (
+                                f"Execution failed with status '{execution_result.status}'."
+                            )
+                        raise RuntimeError(failure_message)
+                    output_state = (
+                        dict(execution_result.output_state)
+                        if isinstance(execution_result.output_state, dict)
+                        else {}
+                    )
+                    routing_state = (
+                        dict(execution_result.routing_state)
+                        if isinstance(execution_result.routing_state, dict)
+                        else {}
+                    )
+                    if runtime_evidence:
+                        routing_state["runtime_evidence"] = runtime_evidence
+                        output_state["runtime_evidence"] = runtime_evidence
+                except Exception as exc:
+                    logger.exception(
+                        "Flowchart run %s failed in node %s (%s)",
+                        run_id,
+                        node_id,
+                        node_spec.get("node_type"),
+                    )
                     runtime_payload = (
                         execution_result.run_metadata
                         if execution_result is not None
@@ -8094,169 +8364,43 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         ),
                         terminal_status="failed",
                     )
-                    if failed_node_run is not None:
-                        failed_node_run.routing_state_json = _json_dumps(
-                            {"runtime_evidence": runtime_evidence}
-                        )
-                    _update_flowchart_node_task(
-                        session,
-                        node_run=failed_node_run,
-                        status="failed",
-                        error=str(exc),
-                        finished_at=finished_at,
-                        run_metadata=runtime_payload,
-                    )
-                    failed_task = None
-                    if (
-                        failed_node_run is not None
-                        and failed_node_run.agent_task_id is not None
-                    ):
-                        failed_task = session.get(AgentTask, failed_node_run.agent_task_id)
-                    if failed_task is not None:
-                        _emit_task_event(
-                            "node.task.completed",
-                            task=failed_task,
-                            payload={
-                                "terminal_status": "failed",
-                                "failure_message": str(exc),
-                                "flowchart_node_run_id": node_run_id,
-                                "execution_index": failed_node_run.execution_index
-                                if failed_node_run is not None
-                                else execution_index,
-                                "runtime_evidence": runtime_evidence,
-                            },
-                            runtime_override=runtime_payload,
-                        )
-                    _emit_flowchart_node_event(
-                        "flowchart.node.updated",
-                        flowchart_id=flowchart_id,
-                        flowchart_run_id=run_id,
-                        flowchart_node_id=node_id,
-                        node_type=str(node_spec["node_type"]),
-                        status="failed",
-                        execution_index=(
-                            failed_node_run.execution_index
-                            if failed_node_run is not None
-                            else execution_index
-                        ),
-                        node_run_id=node_run_id,
-                        agent_task_id=(
-                            failed_node_run.agent_task_id
-                            if failed_node_run is not None
-                            else node_task_id
-                        ),
-                        error=str(exc),
-                        started_at=(
-                            failed_node_run.started_at
-                            if failed_node_run is not None
-                            else None
-                        ),
-                        finished_at=finished_at,
-                        routing_state={"runtime_evidence": runtime_evidence},
-                        runtime=runtime_payload,
-                    )
-                    run = session.get(FlowchartRun, run_id)
-                    if run is not None and run.status != "canceled":
-                        run.status = "failed"
-                        run.finished_at = _utcnow()
-                        _emit_flowchart_run_event(
-                            "flowchart.run.updated",
-                            run=run,
+                    failure_message = str(exc)
+                    try:
+                        _finalize_flowchart_node_failure(
                             flowchart_id=flowchart_id,
-                            payload={
-                                "transition": "failed",
-                                "failure_message": str(exc),
-                            },
+                            run_id=run_id,
+                            node_id=node_id,
+                            node_type=str(node_spec["node_type"]),
+                            node_run_id=node_run_id,
+                            node_task_id=node_task_id,
+                            execution_index=execution_index,
+                            failure_message=failure_message,
+                            runtime_payload=runtime_payload,
+                            runtime_evidence=runtime_evidence,
                         )
-                return
+                    except Exception:
+                        logger.exception(
+                            "Flowchart run %s failed to finalize node failure for node_run_id=%s",
+                            run_id,
+                            node_run_id,
+                        )
+                        _best_effort_mark_flowchart_run_failed(
+                            run_id=run_id,
+                            node_run_id=node_run_id,
+                            node_task_id=node_task_id,
+                            failure_message=failure_message,
+                        )
+                    batch_failed = True
+                    continue
 
-            latest_results[node_id] = {
-                "node_type": node_spec.get("node_type"),
-                "execution_index": execution_index,
-                "sequence": total_execution_count,
-                "output_state": output_state,
-                "routing_state": routing_state,
-            }
+                latest_results[node_id] = {
+                    "node_type": node_spec.get("node_type"),
+                    "execution_index": execution_index,
+                    "sequence": int(record.get("sequence") or total_execution_count),
+                    "output_state": output_state,
+                    "routing_state": routing_state,
+                }
 
-            with session_scope() as session:
-                finished_at = _utcnow()
-                succeeded_node_run = session.get(FlowchartRunNode, node_run_id)
-                if succeeded_node_run is not None:
-                    succeeded_node_run.status = "succeeded"
-                    succeeded_node_run.output_state_json = _json_dumps(output_state)
-                    succeeded_node_run.routing_state_json = _json_dumps(routing_state)
-                    skill_ids = output_state.get("resolved_skill_ids")
-                    if isinstance(skill_ids, list):
-                        succeeded_node_run.resolved_skill_ids_json = _json_dumps(skill_ids)
-                    skill_versions = output_state.get("resolved_skill_versions")
-                    if isinstance(skill_versions, list):
-                        succeeded_node_run.resolved_skill_versions_json = _json_dumps(
-                            skill_versions
-                        )
-                    manifest_hash = output_state.get("resolved_skill_manifest_hash")
-                    if isinstance(manifest_hash, str) and manifest_hash.strip():
-                        succeeded_node_run.resolved_skill_manifest_hash = manifest_hash
-                    adapter_mode = output_state.get("skill_adapter_mode")
-                    if isinstance(adapter_mode, str) and adapter_mode.strip():
-                        succeeded_node_run.skill_adapter_mode = adapter_mode
-                    resolved_role_id = output_state.get("resolved_role_id")
-                    if isinstance(resolved_role_id, int):
-                        succeeded_node_run.resolved_role_id = resolved_role_id
-                    resolved_role_version = output_state.get("resolved_role_version")
-                    if (
-                        isinstance(resolved_role_version, str)
-                        and resolved_role_version.strip()
-                    ):
-                        succeeded_node_run.resolved_role_version = resolved_role_version
-                    resolved_agent_id = output_state.get("resolved_agent_id")
-                    if isinstance(resolved_agent_id, int):
-                        succeeded_node_run.resolved_agent_id = resolved_agent_id
-                    resolved_agent_version = output_state.get("resolved_agent_version")
-                    if (
-                        isinstance(resolved_agent_version, str)
-                        and resolved_agent_version.strip()
-                    ):
-                        succeeded_node_run.resolved_agent_version = resolved_agent_version
-                    instruction_manifest_hash = output_state.get("instruction_manifest_hash")
-                    if (
-                        isinstance(instruction_manifest_hash, str)
-                        and instruction_manifest_hash.strip()
-                    ):
-                        succeeded_node_run.resolved_instruction_manifest_hash = (
-                            instruction_manifest_hash
-                        )
-                    instruction_adapter_mode = output_state.get("instruction_adapter_mode")
-                    if (
-                        isinstance(instruction_adapter_mode, str)
-                        and instruction_adapter_mode.strip()
-                    ):
-                        succeeded_node_run.instruction_adapter_mode = (
-                            instruction_adapter_mode
-                        )
-                    instruction_materialized_paths = output_state.get(
-                        "instruction_materialized_paths"
-                    )
-                    if isinstance(instruction_materialized_paths, list):
-                        succeeded_node_run.instruction_materialized_paths_json = _json_dumps(
-                            instruction_materialized_paths
-                        )
-                    succeeded_node_run.finished_at = finished_at
-                _update_flowchart_node_task(
-                    session,
-                    node_run=succeeded_node_run,
-                    status="succeeded",
-                    output_state=output_state,
-                    finished_at=finished_at,
-                    run_metadata=(
-                        execution_result.run_metadata
-                        if execution_result is not None
-                        else (
-                            routed_execution_request.run_metadata_payload()
-                            if routed_execution_request is not None
-                            else None
-                        )
-                    ),
-                )
                 runtime_payload = (
                     execution_result.run_metadata
                     if execution_result is not None
@@ -8266,252 +8410,395 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         else None
                     )
                 )
-                succeeded_task = None
-                if (
-                    succeeded_node_run is not None
-                    and succeeded_node_run.agent_task_id is not None
-                ):
-                    succeeded_task = session.get(
-                        AgentTask, succeeded_node_run.agent_task_id
+                try:
+                    with session_scope() as session:
+                        finished_at = _utcnow()
+                        succeeded_node_run = session.get(FlowchartRunNode, node_run_id)
+                        if succeeded_node_run is not None:
+                            succeeded_node_run.status = "succeeded"
+                            succeeded_node_run.output_state_json = _json_dumps(output_state)
+                            succeeded_node_run.routing_state_json = _json_dumps(routing_state)
+                            skill_ids = output_state.get("resolved_skill_ids")
+                            if isinstance(skill_ids, list):
+                                succeeded_node_run.resolved_skill_ids_json = _json_dumps(skill_ids)
+                            skill_versions = output_state.get("resolved_skill_versions")
+                            if isinstance(skill_versions, list):
+                                succeeded_node_run.resolved_skill_versions_json = _json_dumps(
+                                    skill_versions
+                                )
+                            manifest_hash = output_state.get("resolved_skill_manifest_hash")
+                            if isinstance(manifest_hash, str) and manifest_hash.strip():
+                                succeeded_node_run.resolved_skill_manifest_hash = manifest_hash
+                            adapter_mode = output_state.get("skill_adapter_mode")
+                            if isinstance(adapter_mode, str) and adapter_mode.strip():
+                                succeeded_node_run.skill_adapter_mode = adapter_mode
+                            resolved_role_id = output_state.get("resolved_role_id")
+                            if isinstance(resolved_role_id, int):
+                                succeeded_node_run.resolved_role_id = resolved_role_id
+                            resolved_role_version = output_state.get("resolved_role_version")
+                            if (
+                                isinstance(resolved_role_version, str)
+                                and resolved_role_version.strip()
+                            ):
+                                succeeded_node_run.resolved_role_version = resolved_role_version
+                            resolved_agent_id = output_state.get("resolved_agent_id")
+                            if isinstance(resolved_agent_id, int):
+                                succeeded_node_run.resolved_agent_id = resolved_agent_id
+                            resolved_agent_version = output_state.get("resolved_agent_version")
+                            if (
+                                isinstance(resolved_agent_version, str)
+                                and resolved_agent_version.strip()
+                            ):
+                                succeeded_node_run.resolved_agent_version = resolved_agent_version
+                            instruction_manifest_hash = output_state.get(
+                                "instruction_manifest_hash"
+                            )
+                            if (
+                                isinstance(instruction_manifest_hash, str)
+                                and instruction_manifest_hash.strip()
+                            ):
+                                succeeded_node_run.resolved_instruction_manifest_hash = (
+                                    instruction_manifest_hash
+                                )
+                            instruction_adapter_mode = output_state.get("instruction_adapter_mode")
+                            if (
+                                isinstance(instruction_adapter_mode, str)
+                                and instruction_adapter_mode.strip()
+                            ):
+                                succeeded_node_run.instruction_adapter_mode = (
+                                    instruction_adapter_mode
+                                )
+                            instruction_materialized_paths = output_state.get(
+                                "instruction_materialized_paths"
+                            )
+                            if isinstance(instruction_materialized_paths, list):
+                                succeeded_node_run.instruction_materialized_paths_json = _json_dumps(
+                                    instruction_materialized_paths
+                                )
+                            succeeded_node_run.finished_at = finished_at
+                        _update_flowchart_node_task(
+                            session,
+                            node_run=succeeded_node_run,
+                            status="succeeded",
+                            output_state=output_state,
+                            finished_at=finished_at,
+                            run_metadata=runtime_payload,
+                        )
+                        succeeded_task = None
+                        if (
+                            succeeded_node_run is not None
+                            and succeeded_node_run.agent_task_id is not None
+                        ):
+                            succeeded_task = session.get(
+                                AgentTask, succeeded_node_run.agent_task_id
+                            )
+                        if succeeded_task is not None:
+                            _emit_task_event(
+                                "node.task.completed",
+                                task=succeeded_task,
+                                payload={
+                                    "terminal_status": "succeeded",
+                                    "flowchart_node_run_id": node_run_id,
+                                    "execution_index": succeeded_node_run.execution_index,
+                                    "runtime_evidence": runtime_evidence,
+                                },
+                                runtime_override=runtime_payload,
+                            )
+                        _emit_flowchart_node_event(
+                            "flowchart.node.updated",
+                            flowchart_id=flowchart_id,
+                            flowchart_run_id=run_id,
+                            flowchart_node_id=node_id,
+                            node_type=str(node_spec["node_type"]),
+                            status="succeeded",
+                            execution_index=(
+                                succeeded_node_run.execution_index
+                                if succeeded_node_run is not None
+                                else execution_index
+                            ),
+                            node_run_id=node_run_id,
+                            agent_task_id=(
+                                succeeded_node_run.agent_task_id
+                                if succeeded_node_run is not None
+                                else node_task_id
+                            ),
+                            output_state=output_state,
+                            routing_state=routing_state,
+                            started_at=(
+                                succeeded_node_run.started_at
+                                if succeeded_node_run is not None
+                                else None
+                            ),
+                            finished_at=finished_at,
+                            runtime=runtime_payload,
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "Flowchart run %s failed while persisting node %s (%s) result",
+                        run_id,
+                        node_id,
+                        node_spec.get("node_type"),
                     )
-                if succeeded_task is not None:
-                    _emit_task_event(
-                        "node.task.completed",
-                        task=succeeded_task,
-                        payload={
-                            "terminal_status": "succeeded",
-                            "flowchart_node_run_id": node_run_id,
-                            "execution_index": succeeded_node_run.execution_index,
-                            "runtime_evidence": runtime_evidence,
-                        },
-                        runtime_override=runtime_payload,
+                    failure_message = (
+                        "Flowchart node persistence failed after execution: "
+                        f"{str(exc) or 'unknown persistence error'}"
                     )
-                _emit_flowchart_node_event(
-                    "flowchart.node.updated",
-                    flowchart_id=flowchart_id,
-                    flowchart_run_id=run_id,
-                    flowchart_node_id=node_id,
-                    node_type=str(node_spec["node_type"]),
-                    status="succeeded",
-                    execution_index=(
-                        succeeded_node_run.execution_index
-                        if succeeded_node_run is not None
-                        else execution_index
-                    ),
-                    node_run_id=node_run_id,
-                    agent_task_id=(
-                        succeeded_node_run.agent_task_id
-                        if succeeded_node_run is not None
-                        else node_task_id
-                    ),
-                    output_state=output_state,
-                    routing_state=routing_state,
-                    started_at=(
-                        succeeded_node_run.started_at
-                        if succeeded_node_run is not None
-                        else None
-                    ),
-                    finished_at=finished_at,
-                    runtime=runtime_payload,
+                    try:
+                        _finalize_flowchart_node_failure(
+                            flowchart_id=flowchart_id,
+                            run_id=run_id,
+                            node_id=node_id,
+                            node_type=str(node_spec["node_type"]),
+                            node_run_id=node_run_id,
+                            node_task_id=node_task_id,
+                            execution_index=execution_index,
+                            failure_message=failure_message,
+                            runtime_payload=runtime_payload,
+                            runtime_evidence=runtime_evidence,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Flowchart run %s failed to persist fallback failure state for node_run_id=%s",
+                            run_id,
+                            node_run_id,
+                        )
+                        _best_effort_mark_flowchart_run_failed(
+                            run_id=run_id,
+                            node_run_id=node_run_id,
+                            node_task_id=node_task_id,
+                            failure_message=failure_message,
+                        )
+                    batch_failed = True
+                    continue
+
+                if _coerce_bool(routing_state.get("terminate_run")):
+                    terminate_run = True
+                    continue
+
+                try:
+                    selected_edges = _resolve_flowchart_outgoing_edges(
+                        node_type=str(node_spec["node_type"]),
+                        node_config=node_spec.get("config") or {},
+                        outgoing_edges=outgoing_by_source.get(node_id, []),
+                        routing_state=routing_state,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Flowchart route resolution failed for run %s node %s",
+                        run_id,
+                        node_id,
+                    )
+                    with session_scope() as session:
+                        run = session.get(FlowchartRun, run_id)
+                        if run is not None and run.status != "canceled":
+                            run.status = "failed"
+                            run.finished_at = _utcnow()
+                        failed_node_run = (
+                            session.execute(
+                                select(FlowchartRunNode)
+                                .where(
+                                    FlowchartRunNode.flowchart_run_id == run_id,
+                                    FlowchartRunNode.flowchart_node_id == node_id,
+                                )
+                                .order_by(FlowchartRunNode.id.desc())
+                            )
+                            .scalars()
+                            .first()
+                        )
+                        if failed_node_run is not None:
+                            failed_node_run.error = str(exc)
+                        _update_flowchart_node_task(
+                            session,
+                            node_run=failed_node_run,
+                            status=(
+                                failed_node_run.status
+                                if failed_node_run is not None
+                                else "failed"
+                            ),
+                            error=str(exc),
+                            finished_at=(
+                                failed_node_run.finished_at
+                                if failed_node_run is not None
+                                else None
+                            ),
+                        )
+                        failed_task = None
+                        if (
+                            failed_node_run is not None
+                            and failed_node_run.agent_task_id is not None
+                        ):
+                            failed_task = session.get(AgentTask, failed_node_run.agent_task_id)
+                        if failed_task is not None:
+                            _emit_task_event(
+                                "node.task.completed",
+                                task=failed_task,
+                                payload={
+                                    "terminal_status": str(failed_task.status),
+                                    "failure_message": str(exc),
+                                    "flowchart_node_run_id": failed_node_run.id
+                                    if failed_node_run is not None
+                                    else None,
+                                    "execution_index": failed_node_run.execution_index
+                                    if failed_node_run is not None
+                                    else execution_index,
+                                },
+                            )
+                        _emit_flowchart_node_event(
+                            "flowchart.node.updated",
+                            flowchart_id=flowchart_id,
+                            flowchart_run_id=run_id,
+                            flowchart_node_id=node_id,
+                            node_type=str(node_spec["node_type"]),
+                            status=(
+                                failed_node_run.status
+                                if failed_node_run is not None
+                                else "failed"
+                            ),
+                            execution_index=(
+                                failed_node_run.execution_index
+                                if failed_node_run is not None
+                                else execution_index
+                            ),
+                            node_run_id=(
+                                failed_node_run.id if failed_node_run is not None else None
+                            ),
+                            agent_task_id=(
+                                failed_node_run.agent_task_id
+                                if failed_node_run is not None
+                                else node_task_id
+                            ),
+                            error=str(exc),
+                            started_at=(
+                                failed_node_run.started_at
+                                if failed_node_run is not None
+                                else None
+                            ),
+                            finished_at=(
+                                failed_node_run.finished_at
+                                if failed_node_run is not None
+                                else None
+                            ),
+                            runtime=(
+                                _task_runtime_metadata(failed_task)
+                                if failed_task is not None
+                                else None
+                            ),
+                        )
+                        if run is not None:
+                            _emit_flowchart_run_event(
+                                "flowchart.run.updated",
+                                run=run,
+                                flowchart_id=flowchart_id,
+                                payload={
+                                    "transition": "failed",
+                                    "failure_message": str(exc),
+                                },
+                            )
+                    return
+
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Flowchart run %s node %s (%s) selected %s solid trigger edge(s): %s",
+                        run_id,
+                        node_id,
+                        node_spec.get("node_type"),
+                        len(selected_edges),
+                        [
+                            {
+                                "edge_id": int(edge.get("id") or 0),
+                                "target_node_id": int(edge.get("target_node_id") or 0),
+                                "edge_mode": _normalize_flowchart_edge_mode(edge.get("edge_mode")),
+                            }
+                            for edge in selected_edges
+                        ],
+                    )
+
+                pending_emissions.append(
+                    {
+                        "node_id": node_id,
+                        "node_type": node_spec.get("node_type"),
+                        "execution_index": execution_index,
+                        "sequence": int(record.get("sequence") or total_execution_count),
+                        "output_state": output_state,
+                        "routing_state": routing_state,
+                        "selected_edges": selected_edges,
+                    }
                 )
 
-            if _coerce_bool(routing_state.get("terminate_run")):
-                terminate_run = True
+            if batch_failed:
+                final_status = "failed"
+                break
+            if terminate_run:
+                final_status = "completed"
                 break
 
-            try:
-                selected_edges = _resolve_flowchart_outgoing_edges(
-                    node_type=str(node_spec["node_type"]),
-                    node_config=node_spec.get("config") or {},
-                    outgoing_edges=outgoing_by_source.get(node_id, []),
-                    routing_state=routing_state,
-                )
-            except Exception as exc:
-                logger.exception(
-                    "Flowchart route resolution failed for run %s node %s",
-                    run_id,
-                    node_id,
-                )
-                with session_scope() as session:
-                    run = session.get(FlowchartRun, run_id)
-                    if run is not None and run.status != "canceled":
-                        run.status = "failed"
-                        run.finished_at = _utcnow()
-                    failed_node_run = (
-                        session.execute(
-                            select(FlowchartRunNode)
-                            .where(
-                                FlowchartRunNode.flowchart_run_id == run_id,
-                                FlowchartRunNode.flowchart_node_id == node_id,
-                            )
-                            .order_by(FlowchartRunNode.id.desc())
-                        )
-                        .scalars()
-                        .first()
-                    )
-                    if failed_node_run is not None:
-                        failed_node_run.error = str(exc)
-                    _update_flowchart_node_task(
-                        session,
-                        node_run=failed_node_run,
-                        status=failed_node_run.status if failed_node_run is not None else "failed",
-                        error=str(exc),
-                        finished_at=failed_node_run.finished_at if failed_node_run is not None else None,
-                    )
-                    failed_task = None
-                    if (
-                        failed_node_run is not None
-                        and failed_node_run.agent_task_id is not None
-                    ):
-                        failed_task = session.get(AgentTask, failed_node_run.agent_task_id)
-                    if failed_task is not None:
-                        _emit_task_event(
-                            "node.task.completed",
-                            task=failed_task,
-                            payload={
-                                "terminal_status": str(failed_task.status),
-                                "failure_message": str(exc),
-                                "flowchart_node_run_id": failed_node_run.id
-                                if failed_node_run is not None
-                                else None,
-                                "execution_index": failed_node_run.execution_index
-                                if failed_node_run is not None
-                                else execution_index,
-                            },
-                        )
-                    _emit_flowchart_node_event(
-                        "flowchart.node.updated",
-                        flowchart_id=flowchart_id,
-                        flowchart_run_id=run_id,
-                        flowchart_node_id=node_id,
-                        node_type=str(node_spec["node_type"]),
-                        status=(
-                            failed_node_run.status
-                            if failed_node_run is not None
-                            else "failed"
-                        ),
-                        execution_index=(
-                            failed_node_run.execution_index
-                            if failed_node_run is not None
-                            else execution_index
-                        ),
-                        node_run_id=(
-                            failed_node_run.id if failed_node_run is not None else None
-                        ),
-                        agent_task_id=(
-                            failed_node_run.agent_task_id
-                            if failed_node_run is not None
-                            else node_task_id
-                        ),
-                        error=str(exc),
-                        started_at=(
-                            failed_node_run.started_at
-                            if failed_node_run is not None
-                            else None
-                        ),
-                        finished_at=(
-                            failed_node_run.finished_at
-                            if failed_node_run is not None
-                            else None
-                        ),
-                        runtime=(
-                            _task_runtime_metadata(failed_task)
-                            if failed_task is not None
-                            else None
-                        ),
-                    )
-                    if run is not None:
-                        _emit_flowchart_run_event(
-                            "flowchart.run.updated",
-                            run=run,
-                            flowchart_id=flowchart_id,
-                            payload={
-                                "transition": "failed",
-                                "failure_message": str(exc),
-                            },
-                        )
-                return
-
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "Flowchart run %s node %s (%s) selected %s solid trigger edge(s): %s",
-                    run_id,
-                    node_id,
-                    node_spec.get("node_type"),
-                    len(selected_edges),
-                    [
-                        {
-                            "edge_id": int(edge.get("id") or 0),
-                            "target_node_id": int(edge.get("target_node_id") or 0),
-                            "edge_mode": _normalize_flowchart_edge_mode(edge.get("edge_mode")),
-                        }
-                        for edge in selected_edges
-                    ],
-                )
-
-            emitted = {
-                "source_node_id": node_id,
-                "node_type": node_spec.get("node_type"),
-                "execution_index": execution_index,
-                "sequence": total_execution_count,
-                "output_state": output_state,
-                "routing_state": routing_state,
-            }
-            for edge in selected_edges:
-                target_node_id = int(edge["target_node_id"])
-                if target_node_id == start_node_id:
-                    next_run_id, skipped_followup = _queue_followup_flowchart_run(
-                        flowchart_id=flowchart_id,
-                        source_run_id=run_id,
-                    )
-                    if skipped_followup:
-                        logger.info(
-                            "Flowchart run %s reached Start with stop requested; skipped follow-up run.",
-                            run_id,
-                        )
-                        terminate_run = True
-                    elif next_run_id is None:
-                        failure_message = (
-                            "Flowchart reached Start node but failed to queue a follow-up run."
-                        )
-                        final_status = "failed"
-                    else:
-                        logger.info(
-                            "Flowchart run %s reached Start; queued follow-up run %s.",
-                            run_id,
-                            next_run_id,
-                        )
-                        terminate_run = True
-                    break
-                parent_ids = incoming_parent_ids.get(target_node_id, [])
-                token = {
-                    **emitted,
-                    "source_edge_id": int(edge["id"]),
-                    "condition_key": edge.get("condition_key"),
-                    "edge_mode": _normalize_flowchart_edge_mode(edge.get("edge_mode")),
+            for emission in pending_emissions:
+                source_node_id = int(emission["node_id"])
+                emitted = {
+                    "source_node_id": source_node_id,
+                    "node_type": emission["node_type"],
+                    "execution_index": emission["execution_index"],
+                    "sequence": emission["sequence"],
+                    "output_state": emission["output_state"],
+                    "routing_state": emission["routing_state"],
                 }
-                if not parent_ids:
-                    ready_queue.append(
-                        {
-                            "node_id": target_node_id,
-                            "upstream_results": [token],
-                        }
-                    )
-                    continue
-                parent_tokens = parent_tokens_by_target.setdefault(target_node_id, {})
-                for parent_id in parent_ids:
-                    parent_tokens.setdefault(parent_id, deque())
-                parent_tokens.setdefault(node_id, deque()).append(token)
-                while all(len(parent_tokens[parent_id]) > 0 for parent_id in parent_ids):
-                    upstream_results = [
-                        parent_tokens[parent_id].popleft() for parent_id in parent_ids
-                    ]
-                    ready_queue.append(
-                        {
-                            "node_id": target_node_id,
-                            "upstream_results": upstream_results,
-                        }
-                    )
+                for edge in emission["selected_edges"]:
+                    target_node_id = int(edge["target_node_id"])
+                    if target_node_id == start_node_id:
+                        next_run_id, skipped_followup = _queue_followup_flowchart_run(
+                            flowchart_id=flowchart_id,
+                            source_run_id=run_id,
+                        )
+                        if skipped_followup:
+                            logger.info(
+                                "Flowchart run %s reached Start with stop requested; skipped follow-up run.",
+                                run_id,
+                            )
+                            terminate_run = True
+                        elif next_run_id is None:
+                            failure_message = (
+                                "Flowchart reached Start node but failed to queue a follow-up run."
+                            )
+                            final_status = "failed"
+                        else:
+                            logger.info(
+                                "Flowchart run %s reached Start; queued follow-up run %s.",
+                                run_id,
+                                next_run_id,
+                            )
+                            terminate_run = True
+                        break
+                    parent_ids = incoming_parent_ids.get(target_node_id, [])
+                    token = {
+                        **emitted,
+                        "source_edge_id": int(edge["id"]),
+                        "condition_key": edge.get("condition_key"),
+                        "edge_mode": _normalize_flowchart_edge_mode(edge.get("edge_mode")),
+                    }
+                    if not parent_ids:
+                        ready_queue.append(
+                            {
+                                "node_id": target_node_id,
+                                "upstream_results": [token],
+                            }
+                        )
+                        continue
+                    parent_tokens = parent_tokens_by_target.setdefault(target_node_id, {})
+                    for parent_id in parent_ids:
+                        parent_tokens.setdefault(parent_id, deque())
+                    parent_tokens.setdefault(source_node_id, deque()).append(token)
+                    while all(len(parent_tokens[parent_id]) > 0 for parent_id in parent_ids):
+                        upstream_results = [
+                            parent_tokens[parent_id].popleft() for parent_id in parent_ids
+                        ]
+                        ready_queue.append(
+                            {
+                                "node_id": target_node_id,
+                                "upstream_results": upstream_results,
+                            }
+                        )
+                if final_status == "failed" or terminate_run:
+                    break
             if final_status == "failed" or terminate_run:
                 break
 

@@ -49,6 +49,7 @@ class ExecutionRequest:
     api_failure_category: str | None = None
     cli_fallback_used: bool = False
     cli_preflight_passed: bool | None = None
+    execution_mode: str | None = None
 
     def run_metadata_payload(self) -> dict[str, Any]:
         return {
@@ -63,6 +64,7 @@ class ExecutionRequest:
             "api_failure_category": self.api_failure_category,
             "cli_fallback_used": self.cli_fallback_used,
             "cli_preflight_passed": self.cli_preflight_passed,
+            "execution_mode": self.execution_mode,
         }
 
 

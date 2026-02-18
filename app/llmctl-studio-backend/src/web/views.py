@@ -596,6 +596,58 @@ def _sync_quick_rag_task_from_index_job(_session, _task: AgentTask) -> None:
     return
 
 
+def _canonical_rag_execution_mode(value: object) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"index", "fresh", "fresh_index", "indexing"}:
+        return "indexing"
+    if cleaned in {"delta", "delta_index", "delta_indexing"}:
+        return "delta_indexing"
+    if cleaned in {"query"}:
+        return "query"
+    return ""
+
+
+def _task_execution_mode(task: AgentTask | None) -> str:
+    if task is None:
+        return ""
+    if task.kind == RAG_QUICK_INDEX_TASK_KIND:
+        return "indexing"
+    if task.kind == RAG_QUICK_DELTA_TASK_KIND:
+        return "delta_indexing"
+
+    _prompt_text, prompt_payload = parse_prompt_input(task.prompt)
+    if isinstance(prompt_payload, dict):
+        flowchart_node_type = str(prompt_payload.get("flowchart_node_type") or "").strip().lower()
+        if flowchart_node_type == FLOWCHART_NODE_TYPE_RAG:
+            prompt_mode = _canonical_rag_execution_mode(prompt_payload.get("flowchart_node_mode"))
+            if prompt_mode:
+                return prompt_mode
+        task_context = prompt_payload.get("task_context")
+        if isinstance(task_context, dict):
+            quick_context = task_context.get("rag_quick_run")
+            if isinstance(quick_context, dict):
+                quick_mode = _canonical_rag_execution_mode(quick_context.get("mode"))
+                if quick_mode:
+                    return quick_mode
+
+    raw_output = str(task.output or "").strip()
+    if raw_output.startswith("{"):
+        try:
+            output_payload = json.loads(raw_output)
+        except json.JSONDecodeError:
+            output_payload = {}
+        if isinstance(output_payload, dict):
+            mode = _canonical_rag_execution_mode(output_payload.get("mode"))
+            if mode:
+                return mode
+            quick_payload = output_payload.get("quick_rag")
+            if isinstance(quick_payload, dict):
+                quick_mode = _canonical_rag_execution_mode(quick_payload.get("mode"))
+                if quick_mode:
+                    return quick_mode
+    return ""
+
+
 def _parse_role_details(raw_json: str) -> str:
     if not raw_json:
         return "{}"
@@ -6244,6 +6296,7 @@ def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, objec
             "selected_provider": "",
             "final_provider": "",
             "provider_dispatch_id": "",
+            "execution_mode": "",
             "workspace_identity": "",
             "dispatch_status": "",
             "fallback_attempted": False,
@@ -6261,6 +6314,7 @@ def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, objec
     selected_provider = str(task.selected_provider or "").strip()
     final_provider = str(task.final_provider or "").strip()
     provider_dispatch_id = str(task.provider_dispatch_id or "").strip()
+    execution_mode = _task_execution_mode(task)
     workspace_identity = str(task.workspace_identity or "").strip()
     dispatch_status = str(task.dispatch_status or "").strip()
     fallback_attempted = bool(task.fallback_attempted)
@@ -6309,6 +6363,7 @@ def _serialize_node_executor_metadata(task: AgentTask | None) -> dict[str, objec
         "selected_provider": selected_provider,
         "final_provider": final_provider,
         "provider_dispatch_id": provider_dispatch_id,
+        "execution_mode": execution_mode,
         "workspace_identity": workspace_identity,
         "dispatch_status": dispatch_status,
         "fallback_attempted": fallback_attempted,

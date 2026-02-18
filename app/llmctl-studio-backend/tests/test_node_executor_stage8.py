@@ -338,6 +338,7 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         self.assertEqual("job-node-1", task_payload.get("k8s_job_name"))
         self.assertEqual("pod-node-1", task_payload.get("k8s_pod_name"))
         self.assertEqual("complete", task_payload.get("k8s_terminal_reason"))
+        self.assertEqual("indexing", task_payload.get("execution_mode"))
         self.assertEqual(task_payload.get("flowchart_id"), int(flowchart.id))
         self.assertEqual(task_payload.get("flowchart_run_id"), int(flowchart_run.id))
         self.assertEqual(task_payload.get("flowchart_node_id"), int(flowchart_node.id))
@@ -380,6 +381,39 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         self.assertEqual("job-node-2", payload.get("k8s_job_name"))
         self.assertEqual("pod-node-2", payload.get("k8s_pod_name"))
         self.assertEqual("create_failed", payload.get("k8s_terminal_reason"))
+        self.assertEqual("indexing", payload.get("execution_mode"))
+
+    def test_node_detail_api_resolves_flowchart_rag_execution_mode_from_prompt(self) -> None:
+        with session_scope() as session:
+            task = AgentTask.create(
+                session,
+                status="running",
+                kind="flowchart_rag",
+                prompt=json.dumps(
+                    {
+                        "kind": "flowchart_node_activity",
+                        "flowchart_id": 9,
+                        "flowchart_run_id": 10,
+                        "flowchart_node_id": 11,
+                        "flowchart_node_type": "rag",
+                        "flowchart_node_mode": "delta_index",
+                        "execution_index": 1,
+                        "input_context": {},
+                    },
+                    sort_keys=True,
+                ),
+            )
+            task_id = int(task.id)
+
+        detail_response = self.client.get(f"/nodes/{task_id}?format=json")
+        self.assertEqual(200, detail_response.status_code)
+        detail_payload = detail_response.get_json() or {}
+        self.assertEqual("delta_indexing", (detail_payload.get("task") or {}).get("execution_mode"))
+
+        status_response = self.client.get(f"/nodes/{task_id}/status")
+        self.assertEqual(200, status_response.status_code)
+        status_payload = status_response.get_json() or {}
+        self.assertEqual("delta_indexing", status_payload.get("execution_mode"))
 
     def test_retry_node_api_queues_cloned_node(self) -> None:
         with session_scope() as session:

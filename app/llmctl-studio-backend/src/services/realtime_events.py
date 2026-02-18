@@ -119,6 +119,7 @@ def normalize_runtime_metadata(runtime: dict[str, Any] | None) -> dict[str, Any]
         "provider_dispatch_id": _clean_text(runtime.get("provider_dispatch_id")),
         "workspace_identity": _clean_text(runtime.get("workspace_identity")),
         "dispatch_status": _clean_text(runtime.get("dispatch_status")),
+        "execution_mode": _clean_text(runtime.get("execution_mode")),
         "fallback_attempted": _as_bool(runtime.get("fallback_attempted"), default=False),
         "fallback_reason": _clean_text(runtime.get("fallback_reason")),
         "dispatch_uncertain": _as_bool(runtime.get("dispatch_uncertain"), default=False),

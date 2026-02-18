@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import uuid
 from dataclasses import replace
@@ -584,6 +586,118 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             assert task is not None
             self.assertEqual(agent_id, task.agent_id)
 
+    def test_flowchart_marks_failed_when_node_success_persistence_conflicts(self) -> None:
+        conflict_dispatch_id = "kubernetes:default/job-test-conflict"
+
+        class _ConflictDispatchRouter(_LocalExecutionRouter):
+            def execute_routed(self, request, execute_callback):
+                from services.execution.contracts import (
+                    EXECUTION_CONTRACT_VERSION,
+                    EXECUTION_STATUS_SUCCESS,
+                    ExecutionResult,
+                )
+
+                output_state, routing_state = execute_callback(request)
+                now = datetime.now(timezone.utc)
+                run_metadata = request.run_metadata_payload()
+                run_metadata.update(
+                    {
+                        "provider_dispatch_id": conflict_dispatch_id,
+                        "k8s_job_name": "job-test-conflict",
+                        "k8s_pod_name": "pod-test-conflict",
+                        "k8s_terminal_reason": "complete",
+                        "dispatch_status": "dispatch_confirmed",
+                    }
+                )
+                return ExecutionResult(
+                    contract_version=EXECUTION_CONTRACT_VERSION,
+                    status=EXECUTION_STATUS_SUCCESS,
+                    exit_code=0,
+                    started_at=now,
+                    finished_at=now,
+                    stdout="",
+                    stderr="",
+                    error=None,
+                    provider_metadata={
+                        "provider_dispatch_id": conflict_dispatch_id,
+                        "k8s_job_name": "job-test-conflict",
+                        "k8s_pod_name": "pod-test-conflict",
+                        "k8s_terminal_reason": "complete",
+                    },
+                    output_state=output_state,
+                    routing_state=routing_state,
+                    run_metadata=run_metadata,
+                )
+
+        with session_scope() as session:
+            AgentTask.create(
+                session,
+                status="succeeded",
+                kind="rag_quick_index",
+                provider_dispatch_id=conflict_dispatch_id,
+                dispatch_status="dispatch_confirmed",
+            )
+            flowchart = Flowchart.create(session, name="persistence-conflict-flowchart")
+            FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+
+        with patch.object(
+            studio_tasks,
+            "ExecutionRouter",
+            _ConflictDispatchRouter,
+        ), patch.object(
+            studio_tasks,
+            "load_integration_settings",
+            return_value={},
+        ), patch.object(
+            studio_tasks,
+            "resolve_enabled_llm_providers",
+            return_value={"codex"},
+        ), patch.object(
+            studio_tasks,
+            "resolve_default_model_id",
+            return_value=None,
+        ):
+            studio_tasks.run_flowchart.run(flowchart_id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            self.assertIsNotNone(run)
+            assert run is not None
+            self.assertEqual("failed", run.status)
+            self.assertIsNotNone(run.finished_at)
+            node_run = (
+                session.query(FlowchartRunNode)
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .order_by(FlowchartRunNode.id.asc())
+                .first()
+            )
+            self.assertIsNotNone(node_run)
+            assert node_run is not None
+            self.assertEqual("failed", node_run.status)
+            self.assertIn("persistence failed", str(node_run.error or "").lower())
+            self.assertIsNotNone(node_run.finished_at)
+            self.assertIsNotNone(node_run.agent_task_id)
+            task = session.get(AgentTask, node_run.agent_task_id)
+            self.assertIsNotNone(task)
+            assert task is not None
+            self.assertEqual("failed", task.status)
+            self.assertEqual("dispatch_failed", task.dispatch_status)
+            self.assertIn("persistence failed", str(task.error or "").lower())
+            self.assertIsNotNone(task.finished_at)
+
     def test_task_node_uses_node_attachments(self) -> None:
         with session_scope() as session:
             model = LLMModel.create(
@@ -810,6 +924,81 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 [left_node_id, right_node_id],
                 sorted(node["node_id"] for node in upstream_nodes),
             )
+
+    def test_scheduler_runs_solid_fanout_children_in_parallel(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="parallel-fanout", max_parallel_nodes=2)
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            left_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=1.0,
+                y=1.0,
+            )
+            right_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=2.0,
+                y=1.0,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=left_node.id,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=right_node.id,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+            branch_node_ids = {left_node.id, right_node.id}
+
+        call_starts: dict[int, float] = {}
+        call_ends: dict[int, float] = {}
+        call_lock = threading.Lock()
+
+        class _ParallelProbeRouter(_LocalExecutionRouter):
+            def execute_routed(self, request, execute_callback):
+                if request.node_id in branch_node_ids:
+                    with call_lock:
+                        call_starts[request.node_id] = time.monotonic()
+                    time.sleep(0.25)
+                    result = super().execute_routed(request, execute_callback)
+                    with call_lock:
+                        call_ends[request.node_id] = time.monotonic()
+                    return result
+                return super().execute_routed(request, execute_callback)
+
+        with patch.object(studio_tasks, "ExecutionRouter", _ParallelProbeRouter):
+            self._invoke_flowchart_run(flowchart_id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            self.assertIsNotNone(run)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+
+        self.assertEqual(branch_node_ids, set(call_starts.keys()))
+        self.assertEqual(branch_node_ids, set(call_ends.keys()))
+        overlap_seconds = min(call_ends.values()) - max(call_starts.values())
+        self.assertGreater(overlap_seconds, 0.05)
 
     def test_dotted_edges_do_not_trigger_downstream_execution(self) -> None:
         with session_scope() as session:

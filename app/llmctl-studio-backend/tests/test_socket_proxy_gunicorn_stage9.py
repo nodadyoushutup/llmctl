@@ -477,6 +477,7 @@ class RuntimeParityStage9Tests(unittest.TestCase):
             "provider_dispatch_id",
             "workspace_identity",
             "dispatch_status",
+            "execution_mode",
             "fallback_attempted",
             "fallback_reason",
             "dispatch_uncertain",
