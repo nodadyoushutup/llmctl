@@ -99,6 +99,37 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(container.querySelector('marker#flow-ws-arrow')).toBeTruthy()
   })
 
+  test('aligns rag connectors to trapezoid edge geometry', async () => {
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'rag', x: 500, y: 220 },
+        ]}
+        initialEdges={[]}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"] .flow-ws-node-connector[data-handle-id="l1"]')).toBeTruthy()
+    })
+
+    const nodeWidth = 190
+    const leftMid = container.querySelector('.flow-ws-node[data-node-token="id:2"] .flow-ws-node-connector[data-handle-id="l1"]')
+    const topLeft = container.querySelector('.flow-ws-node[data-node-token="id:2"] .flow-ws-node-connector[data-handle-id="t1"]')
+    const bottomLeft = container.querySelector('.flow-ws-node[data-node-token="id:2"] .flow-ws-node-connector[data-handle-id="b1"]')
+    const rightMid = container.querySelector('.flow-ws-node[data-node-token="id:2"] .flow-ws-node-connector[data-handle-id="r1"]')
+
+    expect(leftMid).toBeTruthy()
+    expect(topLeft).toBeTruthy()
+    expect(bottomLeft).toBeTruthy()
+    expect(rightMid).toBeTruthy()
+    expect(parseFloat(topLeft.style.left)).toBeCloseTo(0, 1)
+    expect(parseFloat(leftMid.style.left)).toBeCloseTo(nodeWidth * 0.07, 1)
+    expect(parseFloat(bottomLeft.style.left)).toBeCloseTo(nodeWidth * 0.14, 1)
+    expect(parseFloat(rightMid.style.left)).toBeCloseTo(nodeWidth * 0.93, 1)
+  })
+
   test('supports click-to-click connector creation', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(
@@ -635,6 +666,11 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('rag mode')).toBeTruthy()
     expect(screen.getByText('collections')).toBeTruthy()
     expect(screen.getByText('query prompt')).toBeTruthy()
+    expect(screen.getByText('MCP servers')).toBeTruthy()
+    const ragMcpCheckbox = screen.getByLabelText(/LLMCTL MCP/)
+    expect(ragMcpCheckbox).not.toBeChecked()
+    expect(ragMcpCheckbox).toBeDisabled()
+    expect(screen.getByText('RAG nodes do not support MCP servers.')).toBeTruthy()
 
     const modeField = screen.getByText('rag mode').closest('label')
     const modeSelect = modeField?.querySelector('select')
@@ -645,6 +681,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
       const payload = lastGraphPayload(onGraphChange)
       const ragNode = payload?.nodes?.find((node) => node.node_type === 'rag')
       expect(ragNode?.config?.mode).toBe('delta_index')
+      expect(ragNode?.mcp_server_ids).toEqual([])
     })
     expect(screen.queryByText('query prompt')).toBeFalsy()
 
@@ -659,6 +696,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
       const payload = lastGraphPayload(onGraphChange)
       const ragNode = payload?.nodes?.find((node) => node.node_type === 'rag')
       expect(ragNode?.config?.collections).toEqual(['docs'])
+      expect(ragNode?.mcp_server_ids).toEqual([])
     })
   })
 
@@ -683,6 +721,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
             { id: 1, name: 'Embedding Model', provider: 'codex', model_name: 'text-embedding-3-small' },
             { id: 2, name: 'Chat Model', provider: 'codex', model_name: 'gpt-5' },
             { id: 3, name: 'Gemini Chat', provider: 'gemini', model_name: 'gemini-2.5-pro' },
+            { id: 4, name: 'Flagged Embedding', provider: 'codex', model_name: 'gpt-5', is_embedding: true },
           ],
           rag_collections: [
             { id: 'docs', name: 'Docs', status: 'ready' },
@@ -707,6 +746,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(modelSelect).toBeTruthy()
     const modelOptionTexts = Array.from(modelSelect.options).map((item) => String(item.textContent || '').trim())
     expect(modelOptionTexts).toContain('Embedding Model')
+    expect(modelOptionTexts).toContain('Flagged Embedding')
     expect(modelOptionTexts).not.toContain('Chat Model')
     expect(modelOptionTexts).not.toContain('Gemini Chat')
   })

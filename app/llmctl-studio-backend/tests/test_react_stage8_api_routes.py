@@ -467,11 +467,21 @@ class Stage8ApiRouteTests(unittest.TestCase):
         catalog = payload.get("catalog") or {}
         models = catalog.get("models") or []
         self.assertGreaterEqual(len(models), 1)
+        embedding_catalog_models = [
+            item for item in models if bool(item.get("is_embedding"))
+        ]
+        self.assertTrue(embedding_catalog_models)
         self.assertTrue(
             any(
                 "embed" in str(item.get("model_name") or "").lower()
                 for item in models
             )
+        )
+        self.assertTrue(
+            any(str(item.get("provider") or "").strip().lower() == "codex" for item in embedding_catalog_models)
+        )
+        self.assertTrue(
+            any(str(item.get("provider") or "").strip().lower() == "gemini" for item in embedding_catalog_models)
         )
 
         with session_scope() as session:
@@ -480,6 +490,13 @@ class Stage8ApiRouteTests(unittest.TestCase):
             any(
                 model.provider == "codex"
                 and "embed" in str(studio_views._decode_model_config(model.config_json).get("model") or "").lower()
+                for model in db_models
+            )
+        )
+        self.assertTrue(
+            any(
+                model.provider == "gemini"
+                and bool(studio_views._decode_model_config(model.config_json).get("embedding_model"))
                 for model in db_models
             )
         )

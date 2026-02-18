@@ -7054,41 +7054,71 @@ def _is_rag_embedding_model(model: LLMModel | None) -> bool:
     if not _is_rag_embedding_model_provider(model.provider):
         return False
     config = _decode_model_config(model.config_json)
+    if bool(config.get("embedding_model")):
+        return True
     model_name = str(config.get("model") or "").strip().lower()
     display_name = str(model.name or "").strip().lower()
     return "embed" in model_name or "embed" in display_name
 
 
 def _ensure_flowchart_catalog_embedding_model(session) -> None:
-    embedding_candidates = (
+    embedding_candidates: list[LLMModel] = (
         session.execute(
             select(LLMModel).where(LLMModel.provider.in_(["codex", "gemini"]))
         )
         .scalars()
         .all()
     )
-    if any(_is_rag_embedding_model(model) for model in embedding_candidates):
-        return
-
     existing_names = {
         str(name or "").strip()
         for name in session.execute(select(LLMModel.name)).scalars().all()
         if str(name or "").strip()
     }
-    base_name = "RAG Embedding Model (Auto)"
-    next_name = base_name
-    suffix = 2
-    while next_name in existing_names:
-        next_name = f"{base_name} {suffix}"
-        suffix += 1
+    existing_by_provider_and_model = {
+        (
+            str(model.provider or "").strip().lower(),
+            str(_decode_model_config(model.config_json).get("model") or "").strip().lower(),
+        )
+        for model in embedding_candidates
+        if _is_rag_embedding_model(model)
+        and str(_decode_model_config(model.config_json).get("model") or "").strip()
+    }
+    rag_config = load_rag_config()
+    desired_embedding_models: list[tuple[str, str]] = [
+        ("codex", str(rag_config.openai_embedding_model or "").strip() or "text-embedding-3-small"),
+        ("gemini", str(rag_config.gemini_embedding_model or "").strip() or "models/gemini-embedding-001"),
+    ]
 
-    LLMModel.create(
-        session,
-        name=next_name,
-        description="Auto-created embedding model for Flowchart RAG index modes.",
-        provider="codex",
-        config_json=json.dumps({"model": "text-embedding-3-small"}, sort_keys=True),
-    )
+    def _unique_auto_name(base_name: str) -> str:
+        next_name = base_name
+        suffix = 2
+        while next_name in existing_names:
+            next_name = f"{base_name} {suffix}"
+            suffix += 1
+        existing_names.add(next_name)
+        return next_name
+
+    for provider, model_name in desired_embedding_models:
+        normalized_provider = str(provider or "").strip().lower()
+        normalized_model_name = str(model_name or "").strip()
+        if not normalized_model_name:
+            continue
+        signature = (normalized_provider, normalized_model_name.lower())
+        if signature in existing_by_provider_and_model:
+            continue
+        provider_label = LLM_PROVIDER_LABELS.get(normalized_provider, normalized_provider)
+        next_name = _unique_auto_name(f"RAG Embedding Model ({provider_label}) (Auto)")
+        LLMModel.create(
+            session,
+            name=next_name,
+            description="Auto-created embedding model for Flowchart RAG index modes.",
+            provider=normalized_provider,
+            config_json=json.dumps(
+                {"model": normalized_model_name, "embedding_model": True},
+                sort_keys=True,
+            ),
+        )
+        existing_by_provider_and_model.add(signature)
 
 
 def _flowchart_catalog(session) -> dict[str, object]:
@@ -7165,6 +7195,7 @@ def _flowchart_catalog(session) -> dict[str, object]:
                 "name": model.name,
                 "provider": model.provider,
                 "model_name": _model_display_name(model),
+                "is_embedding": _is_rag_embedding_model(model),
             }
             for model in models
         ],
@@ -12878,7 +12909,9 @@ def upsert_flowchart_graph(flowchart_id: int):
                         raise ValueError(f"nodes[{index}].model_id {model_id} was not found.")
                     flowchart_node.model_id = model_id
 
-                if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+                if node_type == FLOWCHART_NODE_TYPE_RAG:
+                    flowchart_node.mcp_servers = []
+                elif node_type == FLOWCHART_NODE_TYPE_MEMORY:
                     flowchart_node.mcp_servers = [llmctl_mcp_server]
                 elif "mcp_server_ids" in raw_node:
                     mcp_server_ids_raw = raw_node.get("mcp_server_ids")

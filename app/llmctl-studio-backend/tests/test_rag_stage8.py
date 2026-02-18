@@ -22,6 +22,7 @@ from core.models import (
     Flowchart,
     FlowchartNode,
     LLMModel,
+    MCPServer,
 )
 from rag.web import views as rag_views
 from web import views as studio_views
@@ -234,6 +235,46 @@ class RagStage8FlowchartValidationTests(StudioDbTestCase):
         self.assertEqual(["docs", "ops"], loaded_config.get("collections"))
         self.assertEqual("What changed this week?", loaded_config.get("question_prompt"))
         self.assertEqual(7, loaded_config.get("top_k"))
+
+    def test_graph_sanitizes_rag_mcp_server_bindings_to_empty(self) -> None:
+        with session_scope() as session:
+            mcp_server = MCPServer.create(
+                session,
+                name="Test MCP",
+                server_key="test-rag-mcp",
+                config_json='{"command":"python3","args":["-V"]}',
+            )
+
+        payload = self._graph_payload(
+            {
+                "id": None,
+                "client_id": "new-rag",
+                "node_type": "rag",
+                "title": "RAG Query",
+                "ref_id": None,
+                "x": 140,
+                "y": 140,
+                "mcp_server_ids": [mcp_server.id],
+                "config": {
+                    "mode": "query",
+                    "collections": ["docs"],
+                    "question_prompt": "What changed this week?",
+                },
+            }
+        )
+
+        save_response = self.client.post(
+            f"/flowcharts/{self.flowchart_id}/graph",
+            json=payload,
+        )
+        self.assertEqual(200, save_response.status_code)
+        save_payload = save_response.get_json() or {}
+        saved_rag_node = next(
+            node
+            for node in (save_payload.get("nodes") or [])
+            if str(node.get("node_type") or "").strip().lower() == "rag"
+        )
+        self.assertEqual([], saved_rag_node.get("mcp_server_ids") or [])
 
     def test_flowchart_page_exposes_rag_palette_state(self) -> None:
         with patch.object(

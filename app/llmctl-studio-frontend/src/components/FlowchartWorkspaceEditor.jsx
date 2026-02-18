@@ -130,6 +130,20 @@ const MEMORY_CONNECTOR_LAYOUT = [
   { id: 'm7', side: 'bottom', x: 50, y: 100 },
   { id: 'm8', side: 'bottom', x: 100, y: 100 },
 ]
+const RAG_CONNECTOR_LAYOUT = [
+  { id: 't1', side: 'top', x: 0, y: 0 },
+  { id: 't2', side: 'top', x: 50, y: 0 },
+  { id: 't3', side: 'top', x: 100, y: 0 },
+  { id: 'l1', side: 'left', x: 7, y: 50 },
+  { id: 'l2', side: 'left', x: 3.1, y: 22 },
+  { id: 'l3', side: 'left', x: 10.9, y: 78 },
+  { id: 'r1', side: 'right', x: 93, y: 50 },
+  { id: 'r2', side: 'right', x: 96.9, y: 22 },
+  { id: 'r3', side: 'right', x: 89.1, y: 78 },
+  { id: 'b1', side: 'bottom', x: 14, y: 100 },
+  { id: 'b2', side: 'bottom', x: 50, y: 100 },
+  { id: 'b3', side: 'bottom', x: 86, y: 100 },
+]
 const DECISION_CONNECTOR_LAYOUT = [
   { id: 't2', side: 'top', x: 50, y: 0 },
   { id: 't3', side: 'decision-top-right', x: 75, y: 25 },
@@ -145,6 +159,7 @@ const CORE_CONNECTOR_BY_ID = new Map(CORE_CONNECTOR_LAYOUT.map((item) => [item.i
 const END_CONNECTOR_BY_ID = new Map(END_CONNECTOR_LAYOUT.map((item) => [item.id, item]))
 const DECISION_CONNECTOR_BY_ID = new Map(DECISION_CONNECTOR_LAYOUT.map((item) => [item.id, item]))
 const MILESTONE_CONNECTOR_BY_ID = new Map(MILESTONE_CONNECTOR_LAYOUT.map((item) => [item.id, item]))
+const RAG_CONNECTOR_BY_ID = new Map(RAG_CONNECTOR_LAYOUT.map((item) => [item.id, item]))
 const CONNECTOR_BY_ID = new Map([...CORE_CONNECTOR_LAYOUT, ...MEMORY_CONNECTOR_LAYOUT].map((item) => [item.id, item]))
 
 function parsePositiveInt(value) {
@@ -218,6 +233,9 @@ function isRagEmbeddingProvider(provider) {
 }
 
 function isEmbeddingModelOption(model) {
+  if (model && model.is_embedding === true) {
+    return isRagEmbeddingProvider(model?.provider)
+  }
   if (!isRagEmbeddingProvider(model?.provider)) {
     return false
   }
@@ -229,6 +247,11 @@ function isEmbeddingModelOption(model) {
 function nodeSupportsRuntimeBindings(nodeType) {
   const normalized = normalizeNodeType(nodeType)
   return normalized !== 'start' && normalized !== 'end'
+}
+
+function nodeSupportsMcpServerBindings(nodeType) {
+  const normalized = normalizeNodeType(nodeType)
+  return nodeSupportsRuntimeBindings(normalized) && normalized !== 'rag'
 }
 
 function normalizeMcpServerIds(value) {
@@ -258,7 +281,7 @@ function withRequiredMcpServer(value, requiredServerId) {
 }
 
 function normalizeNodeMcpServerIds(nodeType, value, llmctlMcpServerId = null) {
-  if (!nodeSupportsRuntimeBindings(nodeType)) {
+  if (!nodeSupportsMcpServerBindings(nodeType)) {
     return []
   }
   return withRequiredMcpServer(value, llmctlMcpServerId)
@@ -322,8 +345,11 @@ function connectorLayoutForNodeType(nodeType) {
   if (normalizedType === 'end') {
     return END_CONNECTOR_LAYOUT
   }
-  if (normalizedType === 'task' || normalizedType === 'plan' || normalizedType === 'rag') {
+  if (normalizedType === 'task' || normalizedType === 'plan') {
     return CORE_CONNECTOR_LAYOUT
+  }
+  if (normalizedType === 'rag') {
+    return RAG_CONNECTOR_LAYOUT
   }
   if (normalizedType === 'milestone') {
     return MILESTONE_CONNECTOR_LAYOUT
@@ -518,10 +544,12 @@ function connectorPosition(node, handleId) {
   if (!normalizedHandleId) {
     normalizedHandleId = normalizedType === 'memory' ? 'm5' : 'r1'
   }
-  const point = CONNECTOR_BY_ID.get(normalizedHandleId)
+  const point = (normalizedType === 'rag' ? RAG_CONNECTOR_BY_ID.get(normalizedHandleId) : null)
+    || CONNECTOR_BY_ID.get(normalizedHandleId)
     || END_CONNECTOR_BY_ID.get(normalizedHandleId)
     || MILESTONE_CONNECTOR_BY_ID.get(normalizedHandleId)
     || DECISION_CONNECTOR_BY_ID.get(normalizedHandleId)
+    || (normalizedType === 'rag' ? RAG_CONNECTOR_BY_ID.get('r1') : null)
     || CONNECTOR_BY_ID.get(normalizedType === 'memory' ? 'm5' : 'r1')
   return {
     x: graphToWorldX(toNumber(node.x, 0) + dimensions.width * (point?.x ?? 100) / 100),
@@ -1029,9 +1057,7 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
         nodeType,
       ),
       model_id: parseOptionalInt(raw?.model_id),
-      mcp_server_ids: nodeSupportsRuntimeBindings(nodeType)
-        ? normalizeMcpServerIds(raw?.mcp_server_ids)
-        : [],
+      mcp_server_ids: normalizeNodeMcpServerIds(nodeType, raw?.mcp_server_ids),
       script_ids: Array.isArray(raw?.script_ids) ? raw.script_ids.filter((value) => parsePositiveInt(value) != null) : [],
       attachment_ids: Array.isArray(raw?.attachment_ids) ? raw.attachment_ids.filter((value) => parsePositiveInt(value) != null) : [],
     }
@@ -2056,6 +2082,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const selectedRagModelIsEmbedding = isEmbeddingModelOption(
     selectedNode ? modelById.get(parsePositiveInt(selectedNode.model_id)) : null,
   )
+  const selectedNodeMcpBindingsLocked = selectedNodeType === 'rag' || !nodeSupportsMcpServerBindings(selectedNodeType)
   const ragCollectionRows = useMemo(() => (
     catalog && typeof catalog === 'object' && Array.isArray(catalog.rag_collections)
       ? catalog.rag_collections
@@ -2959,7 +2986,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       if (serverId == null) {
                         return null
                       }
-                      const required = llmctlMcpServerId === serverId
+                      const required = !selectedNodeMcpBindingsLocked && llmctlMcpServerId === serverId
                       const selectedNodeMcpServerIds = normalizeMcpServerIds(selectedNode.mcp_server_ids)
                       const checked = required || selectedNodeMcpServerIds.includes(serverId)
                       const serverName = String(server.name || `MCP ${server.id}`).trim()
@@ -2969,8 +2996,11 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                           <input
                             type="checkbox"
                             checked={checked}
-                            disabled={required}
+                            disabled={selectedNodeMcpBindingsLocked || required}
                             onChange={(event) => {
+                              if (selectedNodeMcpBindingsLocked) {
+                                return
+                              }
                               const nextChecked = Boolean(event.target.checked)
                               updateNode(selectedNode.token, (current) => {
                                 const currentNodeType = normalizeNodeType(current.node_type)
@@ -3008,6 +3038,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 ) : (
                   <p className="toolbar-meta">No MCP servers available.</p>
                 )}
+                {selectedNodeType === 'rag' ? (
+                  <p className="toolbar-meta">RAG nodes do not support MCP servers.</p>
+                ) : null}
               </PersistedDetails>
             ) : null}
             <div className="flow-ws-position-grid">
