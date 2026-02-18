@@ -144,7 +144,7 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
             assert server is not None
             self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
             self.assertEqual(
-                "http://llmctl-mcp-google-cloud.llmctl.svc.cluster.local:8000/mcp",
+                "http://llmctl-mcp-google-cloud.llmctl.svc.cluster.local:8000/mcp/",
                 server.config_json.get("url"),
             )
             self.assertEqual("streamable-http", server.config_json.get("transport"))
@@ -214,7 +214,7 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
             assert server is not None
             self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
             self.assertEqual(
-                "http://llmctl-mcp-google-workspace.llmctl.svc.cluster.local:8000/mcp",
+                "http://llmctl-mcp-google-workspace.llmctl.svc.cluster.local:8000/mcp/",
                 server.config_json.get("url"),
             )
             self.assertEqual("streamable-http", server.config_json.get("transport"))
@@ -256,7 +256,7 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
             )
             self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
             self.assertEqual(
-                "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
+                "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp/",
                 server.config_json.get("url"),
             )
             self.assertEqual("streamable-http", server.config_json.get("transport"))
@@ -307,7 +307,7 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
             assert atlassian is not None
             self.assertEqual("Atlassian MCP", atlassian.name)
             self.assertEqual(
-                "http://llmctl-mcp-atlassian.llmctl.svc.cluster.local:8000/mcp",
+                "http://llmctl-mcp-atlassian.llmctl.svc.cluster.local:8000/mcp/",
                 atlassian.config_json.get("url"),
             )
             self.assertEqual("streamable-http", atlassian.config_json.get("transport"))

@@ -25,7 +25,11 @@ INTEGRATED_MCP_GOOGLE_CLOUD_KEY = "google-cloud"
 INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY = "google-workspace"
 LEGACY_ATLASSIAN_KEY = "jira"
 INTEGRATED_MCP_TRANSPORT = "streamable-http"
-INTEGRATED_MCP_PATH = "/mcp"
+INTEGRATED_MCP_DEFAULT_PATH = "/mcp/"
+INTEGRATED_MCP_PATH_OVERRIDES: dict[str, str] = {
+    # GitHub MCP service is mounted at /mcp (no trailing slash); /mcp/ returns 404.
+    INTEGRATED_MCP_GITHUB_KEY: "/mcp",
+}
 INTEGRATED_MCP_SERVICE_ENDPOINTS: dict[str, tuple[str, int]] = {
     INTEGRATED_MCP_LLMCTL_KEY: ("llmctl-mcp", 9020),
     INTEGRATED_MCP_GITHUB_KEY: ("llmctl-mcp-github", 8000),
@@ -290,9 +294,10 @@ def _integrated_service_config(server_key: str) -> dict[str, Any]:
         raise KeyError(f"No integrated MCP service endpoint configured for {server_key}")
     service_name, port = endpoint
     namespace = _integrated_mcp_namespace()
+    path = INTEGRATED_MCP_PATH_OVERRIDES.get(server_key, INTEGRATED_MCP_DEFAULT_PATH)
     return {
         "url": (
-            f"http://{service_name}.{namespace}.svc.cluster.local:{port}{INTEGRATED_MCP_PATH}"
+            f"http://{service_name}.{namespace}.svc.cluster.local:{port}{path}"
         ),
         "transport": INTEGRATED_MCP_TRANSPORT,
     }

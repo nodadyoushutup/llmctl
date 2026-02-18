@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getPlanEdit, updatePlan } from '../lib/studioApi'
@@ -36,7 +37,7 @@ export default function PlanEditPage() {
   const parsedPlanId = useMemo(() => parseId(planId), [planId])
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [formError, setFormError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     name: '',
@@ -82,13 +83,13 @@ export default function PlanEditPage() {
     if (!parsedPlanId) {
       return
     }
-    setFormError('')
+    setActionError('')
     setSaving(true)
     try {
       await updatePlan(parsedPlanId, form)
       navigate(`/plans/${parsedPlanId}`)
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to update plan.'))
+      setActionError(errorMessage(error, 'Failed to update plan.'))
     } finally {
       setSaving(false)
     }
@@ -121,7 +122,6 @@ export default function PlanEditPage() {
 
         {state.loading ? <p style={{ marginTop: '20px' }}>Loading plan...</p> : null}
         {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
-        {formError ? <p className="error-text" style={{ marginTop: '12px' }}>{formError}</p> : null}
 
         {!state.loading && !state.error ? (
           <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { createRagSource, getRagSourceMeta } from '../lib/studioApi'
@@ -34,7 +35,7 @@ export default function RagSourceNewPage() {
   const navigate = useNavigate()
   const [metaState, setMetaState] = useState({ loading: true, payload: null, error: '' })
   const [form, setForm] = useState(buildInitialForm)
-  const [submitError, setSubmitError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export default function RagSourceNewPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    setSubmitError('')
+    setActionError('')
     setBusy(true)
     try {
       const result = await createRagSource(form)
@@ -69,7 +70,7 @@ export default function RagSourceNewPage() {
       }
       navigate('/rag/sources')
     } catch (error) {
-      setSubmitError(errorMessage(error, 'Failed to create source.'))
+      setActionError(errorMessage(error, 'Failed to create source.'))
     } finally {
       setBusy(false)
     }
@@ -164,7 +165,6 @@ export default function RagSourceNewPage() {
             </label>
           </div>
 
-          {submitError ? <p className="error-text">{submitError}</p> : null}
           <div className="table-actions">
             <button type="submit" className="btn-link" disabled={busy}>{busy ? 'Creating...' : 'Create Source'}</button>
           </div>

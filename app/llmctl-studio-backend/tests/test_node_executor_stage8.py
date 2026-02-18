@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from flask import Flask
@@ -28,12 +29,15 @@ from core.db import session_scope
 from core.models import (
     Agent,
     AgentTask,
+    Attachment,
     FLOWCHART_NODE_TYPE_START,
     Flowchart,
     FlowchartNode,
     FlowchartRun,
     FlowchartRunNode,
+    MCPServer,
     Run,
+    Script,
 )
 import web.views as studio_views
 
@@ -356,6 +360,106 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         self.assertEqual("job-node-2", payload.get("k8s_job_name"))
         self.assertEqual("pod-node-2", payload.get("k8s_pod_name"))
         self.assertEqual("create_failed", payload.get("k8s_terminal_reason"))
+
+    def test_retry_node_api_queues_cloned_node(self) -> None:
+        with session_scope() as session:
+            agent = Agent.create(
+                session,
+                name="Retry Agent",
+                prompt_json="{}",
+            )
+            script = Script.create(
+                session,
+                file_name="retry-init.sh",
+                content="#!/usr/bin/env bash\necho retry\n",
+                script_type="init",
+            )
+            attachment = Attachment.create(
+                session,
+                file_name="retry.txt",
+                file_path="/tmp/retry.txt",
+                content_type="text/plain",
+                size_bytes=11,
+            )
+            mcp_server = MCPServer.create(
+                session,
+                name="Retry MCP",
+                server_key=f"retry-mcp-{uuid.uuid4().hex[:10]}",
+                config_json={"command": "echo", "args": ["retry"]},
+            )
+            source_task = AgentTask.create(
+                session,
+                agent_id=agent.id,
+                status="succeeded",
+                prompt='{"message":"retry me"}',
+                kind="task",
+                integration_keys_json='["github"]',
+                run_task_id="run-task-source",
+                celery_task_id="celery-source",
+                current_stage="post_run",
+                stage_logs='{"post_run":"done"}',
+                output="source output",
+                error="source error",
+            )
+            source_task.scripts = [script]
+            source_task.attachments = [attachment]
+            source_task.mcp_servers = [mcp_server]
+            source_task_id = int(source_task.id)
+
+        class _FakeCeleryResult:
+            id = "celery-retry-123"
+
+        with patch.object(
+            studio_views.run_agent_task,
+            "delay",
+            return_value=_FakeCeleryResult(),
+        ) as delay_mock:
+            response = self.client.post(f"/nodes/{source_task_id}/retry", json={})
+
+        self.assertEqual(201, response.status_code)
+        payload = response.get_json() or {}
+        self.assertTrue(bool(payload.get("ok")))
+        self.assertEqual(source_task_id, payload.get("source_task_id"))
+        retry_task_id = int(payload.get("task_id"))
+        self.assertNotEqual(source_task_id, retry_task_id)
+        self.assertEqual("celery-retry-123", payload.get("celery_task_id"))
+        delay_mock.assert_called_once_with(retry_task_id)
+
+        with session_scope() as session:
+            source_task = session.get(AgentTask, source_task_id)
+            retry_task = session.get(AgentTask, retry_task_id)
+
+            self.assertIsNotNone(source_task)
+            self.assertIsNotNone(retry_task)
+            if source_task is None or retry_task is None:
+                return
+
+            self.assertEqual("queued", retry_task.status)
+            self.assertEqual(source_task.agent_id, retry_task.agent_id)
+            self.assertEqual(source_task.prompt, retry_task.prompt)
+            self.assertEqual(source_task.kind, retry_task.kind)
+            self.assertEqual(
+                source_task.integration_keys_json,
+                retry_task.integration_keys_json,
+            )
+            self.assertEqual("celery-retry-123", retry_task.celery_task_id)
+            self.assertIsNone(retry_task.run_task_id)
+            self.assertIsNone(retry_task.current_stage)
+            self.assertIsNone(retry_task.stage_logs)
+            self.assertIsNone(retry_task.output)
+            self.assertIsNone(retry_task.error)
+            self.assertEqual(
+                sorted(script.id for script in source_task.scripts),
+                sorted(script.id for script in retry_task.scripts),
+            )
+            self.assertEqual(
+                sorted(attachment.id for attachment in source_task.attachments),
+                sorted(attachment.id for attachment in retry_task.attachments),
+            )
+            self.assertEqual(
+                sorted(server.id for server in source_task.mcp_servers),
+                sorted(server.id for server in retry_task.mcp_servers),
+            )
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getRagSourceEdit, updateRagSource } from '../lib/studioApi'
@@ -38,7 +39,7 @@ export default function RagSourceEditPage() {
 
   const [state, setState] = useState({ loading: !invalidId, payload: null, error: '' })
   const [form, setForm] = useState(sourceFormFromPayload(null))
-  const [submitError, setSubmitError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -69,13 +70,13 @@ export default function RagSourceEditPage() {
     if (invalidId) {
       return
     }
-    setSubmitError('')
+    setActionError('')
     setBusy(true)
     try {
       await updateRagSource(parsedSourceId, form)
       navigate(`/rag/sources/${parsedSourceId}`)
     } catch (error) {
-      setSubmitError(errorMessage(error, 'Failed to update source.'))
+      setActionError(errorMessage(error, 'Failed to update source.'))
     } finally {
       setBusy(false)
     }
@@ -181,7 +182,6 @@ export default function RagSourceEditPage() {
             </label>
           </div>
 
-          {submitError ? <p className="error-text">{submitError}</p> : null}
           <div className="table-actions">
             <button type="submit" className="btn-link" disabled={busy}>{busy ? 'Saving...' : 'Save Source'}</button>
           </div>

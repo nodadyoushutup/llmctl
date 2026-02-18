@@ -1,6 +1,15 @@
 Changelog
 =========
 
+2026-02-18
+----------
+
+- Migrated Chat turn LLM execution to Kubernetes executor pods (executor-dispatched ``llm_call`` runtime path).
+- Migrated RAG web chat synthesis/completion to Kubernetes executor pods (executor-dispatched ``rag_chat_completion`` path).
+- Updated agent-task Celery execution flow to route all task kinds through Kubernetes executor dispatch (no worker-local LLM execution path).
+- Began backend image-slim cutover by removing backend-side LLM CLI installation and backend-side ``vllm`` install from the Studio backend Docker image.
+- Updated Kubernetes/operator docs to reflect executor-only LLM runtime architecture and dev rollback guidance.
+
 2026-02-17
 ----------
 

@@ -38,7 +38,12 @@ from services.integrations import (
     resolve_enabled_llm_providers,
     resolve_llm_provider,
 )
-from services.execution.contracts import ExecutionRequest
+from services.execution.contracts import (
+    EXECUTION_CONTRACT_VERSION,
+    EXECUTION_STATUS_SUCCESS,
+    ExecutionRequest,
+    ExecutionResult,
+)
 from services.execution.router import ExecutionRouter
 from services.realtime_events import (
     combine_room_keys,
@@ -164,6 +169,8 @@ QUICK_RAG_TASK_KINDS = {
     RAG_QUICK_DELTA_TASK_KIND,
 }
 EXECUTOR_NODE_TYPE_AGENT_TASK = "agent_task"
+EXECUTOR_NODE_TYPE_LLM_CALL = "llm_call"
+EXECUTOR_NODE_TYPE_RAG_CHAT_COMPLETION = "rag_chat_completion"
 
 
 def _utcnow() -> datetime:
@@ -289,6 +296,200 @@ def _agent_task_worker_compute_disabled(
     raise RuntimeError(
         "Agent task compute must execute in executor runtime; worker execution is disabled."
     )
+
+
+def _executor_only_worker_compute_disabled(
+    _request: ExecutionRequest,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    raise RuntimeError(
+        "Executor-only compute path attempted local worker execution."
+    )
+
+
+def _failed_execution_result(message: str) -> ExecutionResult:
+    now = _utcnow()
+    return ExecutionResult(
+        contract_version=EXECUTION_CONTRACT_VERSION,
+        status="failed",
+        exit_code=1,
+        started_at=now,
+        finished_at=now,
+        stdout="",
+        stderr="",
+        error={
+            "code": "dispatch_error",
+            "message": str(message or "Executor dispatch failed."),
+            "retryable": False,
+        },
+        provider_metadata={},
+        output_state={},
+        routing_state={},
+        run_metadata={},
+    )
+
+
+def execute_llm_call_via_execution_router(
+    *,
+    provider: str,
+    prompt: str | None,
+    mcp_configs: dict[str, dict[str, Any]],
+    model_config: dict[str, Any] | None = None,
+    request_id: str,
+    node_id: int,
+    execution_id: int,
+    mcp_server_keys: list[str] | None = None,
+) -> ExecutionResult:
+    try:
+        llm_settings = load_integration_settings("llm")
+        enabled_providers = resolve_enabled_llm_providers(llm_settings)
+        default_model_id = resolve_default_model_id(llm_settings)
+        execution_router = ExecutionRouter(
+            runtime_settings=load_node_executor_runtime_settings()
+        )
+        normalized_mcp_keys = (
+            [
+                str(item).strip()
+                for item in mcp_server_keys
+                if str(item).strip()
+            ]
+            if isinstance(mcp_server_keys, list)
+            else []
+        )
+        if not normalized_mcp_keys:
+            normalized_mcp_keys = sorted(
+                str(key).strip()
+                for key in (mcp_configs or {})
+                if str(key).strip()
+            )
+        execution_request = ExecutionRequest(
+            node_id=max(1, int(node_id)),
+            node_type=EXECUTOR_NODE_TYPE_LLM_CALL,
+            node_ref_id=None,
+            node_config={
+                "provider": str(provider or "").strip(),
+                "prompt": prompt if prompt is None or isinstance(prompt, str) else str(prompt),
+                "mcp_configs": mcp_configs if isinstance(mcp_configs, dict) else {},
+                "model_config": model_config if isinstance(model_config, dict) else {},
+            },
+            input_context={
+                "kind": "llm_call",
+                "request_id": str(request_id or "").strip(),
+            },
+            execution_id=max(1, int(execution_id)),
+            execution_task_id=None,
+            execution_index=1,
+            enabled_providers=set(enabled_providers),
+            default_model_id=default_model_id,
+            mcp_server_keys=normalized_mcp_keys,
+        )
+        routed = execution_router.route_request(execution_request)
+        return execution_router.execute_routed(
+            routed,
+            _executor_only_worker_compute_disabled,
+        )
+    except Exception as exc:
+        logger.exception("Executor LLM dispatch failed for provider=%s", provider)
+        return _failed_execution_result(str(exc))
+
+
+def llm_completed_process_from_execution_result(
+    *,
+    provider: str,
+    execution_result: ExecutionResult,
+) -> subprocess.CompletedProcess[str]:
+    if execution_result.status != EXECUTION_STATUS_SUCCESS:
+        error_payload = (
+            execution_result.error
+            if isinstance(execution_result.error, dict)
+            else {}
+        )
+        message = str(error_payload.get("message") or "").strip()
+        if not message:
+            message = (
+                "Executor LLM dispatch failed with status "
+                f"'{str(execution_result.status or 'failed')}'."
+            )
+        stderr_parts = [message]
+        raw_stderr = str(execution_result.stderr or "").strip()
+        if raw_stderr:
+            stderr_parts.append(raw_stderr)
+        return subprocess.CompletedProcess(
+            [f"executor:{provider}"],
+            1,
+            str(execution_result.stdout or ""),
+            "\n".join(stderr_parts).strip(),
+        )
+
+    output_state = (
+        execution_result.output_state
+        if isinstance(execution_result.output_state, dict)
+        else {}
+    )
+    raw_returncode = output_state.get("returncode")
+    try:
+        returncode = int(raw_returncode)
+    except (TypeError, ValueError):
+        returncode = 1
+    stdout = str(
+        output_state.get("stdout")
+        if output_state.get("stdout") is not None
+        else execution_result.stdout
+        or ""
+    )
+    stderr = str(
+        output_state.get("stderr")
+        if output_state.get("stderr") is not None
+        else execution_result.stderr
+        or ""
+    )
+    return subprocess.CompletedProcess(
+        [f"executor:{provider}"],
+        returncode,
+        stdout,
+        stderr,
+    )
+
+
+def execute_rag_chat_completion_via_execution_router(
+    *,
+    messages: list[dict[str, str]],
+    request_id: str,
+    node_id: int,
+    execution_id: int,
+) -> ExecutionResult:
+    try:
+        llm_settings = load_integration_settings("llm")
+        enabled_providers = resolve_enabled_llm_providers(llm_settings)
+        default_model_id = resolve_default_model_id(llm_settings)
+        execution_router = ExecutionRouter(
+            runtime_settings=load_node_executor_runtime_settings()
+        )
+        execution_request = ExecutionRequest(
+            node_id=max(1, int(node_id)),
+            node_type=EXECUTOR_NODE_TYPE_RAG_CHAT_COMPLETION,
+            node_ref_id=None,
+            node_config={
+                "messages": messages if isinstance(messages, list) else [],
+            },
+            input_context={
+                "kind": "rag_chat_completion",
+                "request_id": str(request_id or "").strip(),
+            },
+            execution_id=max(1, int(execution_id)),
+            execution_task_id=None,
+            execution_index=1,
+            enabled_providers=set(enabled_providers),
+            default_model_id=default_model_id,
+            mcp_server_keys=[],
+        )
+        routed = execution_router.route_request(execution_request)
+        return execution_router.execute_routed(
+            routed,
+            _executor_only_worker_compute_disabled,
+        )
+    except Exception as exc:
+        logger.exception("Executor RAG chat completion dispatch failed")
+        return _failed_execution_result(str(exc))
 
 
 def _task_runtime_metadata(
@@ -3715,9 +3916,7 @@ def run_quick_rag_task(self, task_id: int) -> None:
 
 @celery_app.task(bind=True)
 def run_agent_task(self, task_id: int) -> None:
-    if _execute_quick_task_via_execution_router(task_id, celery_task_id=self.request.id):
-        return
-    _execute_agent_task(task_id, celery_task_id=self.request.id)
+    _execute_quick_task_via_execution_router(task_id, celery_task_id=self.request.id)
 
 
 def _execute_quick_task_via_execution_router(
@@ -3742,8 +3941,6 @@ def _execute_quick_task_via_execution_router(
         if task is None:
             logger.warning("Task %s not found", task_id)
             return True
-        if not is_quick_task_kind(task.kind):
-            return False
         if task.status not in {"queued", "running"}:
             return True
 
@@ -3826,11 +4023,11 @@ def _execute_quick_task_via_execution_router(
             )
             if not task_error:
                 task_error = (
-                    "Quick task execution failed with status "
+                    "Agent task execution failed with status "
                     f"'{execution_result.status}'."
                 )
     except Exception as exc:
-        task_error = str(exc) or "Quick task dispatch failed."
+        task_error = str(exc) or "Agent task dispatch failed."
         terminal_status = "failed"
         provider_metadata = None
         error_payload = {"message": task_error}
@@ -7165,6 +7362,86 @@ def _execute_executor_agent_task_node(
     )
 
 
+def _execute_executor_llm_call_node(
+    *,
+    node_config: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    provider = str(node_config.get("provider") or "").strip().lower()
+    if not provider:
+        raise ValueError("Executor llm_call payload is missing provider.")
+    prompt_raw = node_config.get("prompt")
+    prompt = prompt_raw if prompt_raw is None or isinstance(prompt_raw, str) else str(prompt_raw)
+    mcp_configs_raw = node_config.get("mcp_configs")
+    if mcp_configs_raw is None:
+        mcp_configs: dict[str, dict[str, Any]] = {}
+    elif isinstance(mcp_configs_raw, dict):
+        mcp_configs = {
+            str(key): value
+            for key, value in mcp_configs_raw.items()
+            if str(key).strip() and isinstance(value, dict)
+        }
+    else:
+        raise ValueError("Executor llm_call payload has invalid mcp_configs.")
+    model_config_raw = node_config.get("model_config")
+    if model_config_raw is None:
+        model_config: dict[str, Any] = {}
+    elif isinstance(model_config_raw, dict):
+        model_config = dict(model_config_raw)
+    else:
+        raise ValueError("Executor llm_call payload has invalid model_config.")
+    llm_result = _run_llm(
+        provider,
+        prompt,
+        mcp_configs=mcp_configs,
+        model_config=model_config,
+        on_update=None,
+        on_log=None,
+    )
+    return (
+        {
+            "node_type": EXECUTOR_NODE_TYPE_LLM_CALL,
+            "provider": provider,
+            "returncode": int(llm_result.returncode),
+            "stdout": str(llm_result.stdout or ""),
+            "stderr": str(llm_result.stderr or ""),
+        },
+        {},
+    )
+
+
+def _execute_executor_rag_chat_completion_node(
+    *,
+    node_config: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    raw_messages = node_config.get("messages")
+    if not isinstance(raw_messages, list):
+        raise ValueError("Executor rag_chat_completion payload must include messages[].")
+    messages: list[dict[str, str]] = []
+    for item in raw_messages:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        messages.append({"role": role, "content": content})
+    if not messages:
+        raise ValueError("Executor rag_chat_completion payload has no valid messages.")
+    config = load_rag_config()
+    reply = rag_call_chat_completion(config, messages)
+    return (
+        {
+            "node_type": EXECUTOR_NODE_TYPE_RAG_CHAT_COMPLETION,
+            "reply": str(reply or ""),
+            "provider": rag_get_chat_provider(config),
+            "model": str(getattr(config, "chat_model", "") or ""),
+        },
+        {},
+    )
+
+
 def _execute_flowchart_node(
     *,
     node_id: int,
@@ -7215,6 +7492,14 @@ def _execute_flowchart_node(
         return _execute_executor_agent_task_node(
             node_config=node_config,
             execution_task_id=execution_task_id,
+        )
+    if node_type == EXECUTOR_NODE_TYPE_LLM_CALL:
+        return _execute_executor_llm_call_node(
+            node_config=node_config,
+        )
+    if node_type == EXECUTOR_NODE_TYPE_RAG_CHAT_COMPLETION:
+        return _execute_executor_rag_chat_completion_node(
+            node_config=node_config,
         )
     if node_type == FLOWCHART_NODE_TYPE_RAG:
         return _execute_flowchart_rag_node(

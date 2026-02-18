@@ -466,7 +466,18 @@ export function createNode({
 
 export function cancelNode(nodeId) {
   const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
-  return requestJson(`/nodes/${parsedNodeId}/cancel`, { method: 'POST' })
+  return requestJson(`/nodes/${parsedNodeId}/cancel`, {
+    method: 'POST',
+    body: {},
+  })
+}
+
+export function retryNode(nodeId) {
+  const parsedNodeId = parsePositiveId(nodeId, 'nodeId')
+  return requestJson(`/nodes/${parsedNodeId}/retry`, {
+    method: 'POST',
+    body: {},
+  })
 }
 
 export function deleteNode(nodeId) {

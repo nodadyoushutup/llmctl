@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "check:flash-notifications": "python3 ../../scripts/checks/flash_notification_guardrail.py",
     "preview": "vite preview",
     "test": "vitest run"
   },

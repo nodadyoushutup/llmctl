@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -61,7 +62,10 @@ from core.models import (
     chat_thread_mcp_servers,
 )
 from services.integrations import load_integration_settings, resolve_default_model_id
-from services.tasks import _run_llm
+from services.tasks import (
+    execute_llm_call_via_execution_router,
+    llm_completed_process_from_execution_result,
+)
 
 CHAT_CONTEXT_CHARS_PER_TOKEN = 4
 CHAT_DEFAULT_THREAD_TITLE = "New Chat"
@@ -154,6 +158,46 @@ CHAT_RESPONSE_COMPLEXITY_LABELS = {
     CHAT_RESPONSE_COMPLEXITY_HIGH: "High",
     CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH: "Extra High",
 }
+
+
+@dataclass
+class _LLMDispatchContext:
+    request_id: str
+    node_id: int
+    execution_id: int
+    mcp_server_keys: list[str]
+
+
+_llm_dispatch_context: _LLMDispatchContext | None = None
+
+
+def _run_llm(
+    provider: str,
+    prompt: str | None,
+    mcp_configs: dict[str, dict[str, Any]],
+    model_config: dict[str, Any] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    context = _llm_dispatch_context
+    request_id = context.request_id if context is not None else uuid.uuid4().hex
+    node_id = context.node_id if context is not None else 1
+    execution_id = context.execution_id if context is not None else 1
+    mcp_server_keys = context.mcp_server_keys if context is not None else []
+    execution_result = execute_llm_call_via_execution_router(
+        provider=provider,
+        prompt=prompt,
+        mcp_configs=mcp_configs,
+        model_config=model_config,
+        request_id=request_id,
+        node_id=node_id,
+        execution_id=execution_id,
+        mcp_server_keys=mcp_server_keys,
+    )
+    completed = llm_completed_process_from_execution_result(
+        provider=provider,
+        execution_result=execution_result,
+    )
+    setattr(completed, "_llmctl_execution_result", execution_result)
+    return completed
 
 
 def _now() -> datetime:
@@ -633,8 +677,8 @@ def clear_thread(thread_id: int) -> bool:
             .where(ChatActivityEvent.thread_id == thread_id)
             .values(turn_id=None)
         )
-        session.execute(delete(ChatMessage).where(ChatMessage.thread_id == thread_id))
         session.execute(delete(ChatTurn).where(ChatTurn.thread_id == thread_id))
+        session.execute(delete(ChatMessage).where(ChatMessage.thread_id == thread_id))
         thread.compaction_summary_json = _safe_json_dump({})
         thread.last_activity_at = _now()
         _record_activity(
@@ -1298,6 +1342,16 @@ def execute_turn(
             )
 
         model_config = _parse_model_config(model.config_json)
+        llm_run_metadata: dict[str, Any] = {}
+        llm_provider_metadata: dict[str, Any] = {}
+        llm_error_payload: dict[str, Any] = {}
+        global _llm_dispatch_context
+        _llm_dispatch_context = _LLMDispatchContext(
+            request_id=request_id,
+            node_id=thread.id,
+            execution_id=turn.id,
+            mcp_server_keys=selected_mcp_keys,
+        )
         try:
             llm_result = _run_llm(
                 model.provider,
@@ -1308,6 +1362,13 @@ def execute_turn(
         except Exception as exc:
             turn.reason_code = CHAT_REASON_MCP_FAILED if selected_mcp_keys else CHAT_REASON_MODEL_FAILED
             turn.error_message = str(exc)
+            turn.runtime_metadata_json = _safe_json_dump(
+                {
+                    "rag_health_state": rag_health.state,
+                    "selected_collections": selected_rag_collections,
+                    "selected_mcp_servers": selected_mcp_keys,
+                }
+            )
             _record_activity(
                 session,
                 thread_id=thread.id,
@@ -1328,11 +1389,41 @@ def execute_turn(
                 rag_health_state=rag_health.state,
                 selected_collections=selected_rag_collections,
             )
+        finally:
+            _llm_dispatch_context = None
+
+        llm_execution_result = getattr(llm_result, "_llmctl_execution_result", None)
+        if llm_execution_result is not None:
+            llm_run_metadata = (
+                llm_execution_result.run_metadata
+                if isinstance(getattr(llm_execution_result, "run_metadata", None), dict)
+                else {}
+            )
+            llm_provider_metadata = (
+                llm_execution_result.provider_metadata
+                if isinstance(getattr(llm_execution_result, "provider_metadata", None), dict)
+                else {}
+            )
+            llm_error_payload = (
+                llm_execution_result.error
+                if isinstance(getattr(llm_execution_result, "error", None), dict)
+                else {}
+            )
 
         reply = (llm_result.stdout or "").strip()
         if llm_result.returncode != 0:
             turn.reason_code = CHAT_REASON_MCP_FAILED if selected_mcp_keys else CHAT_REASON_MODEL_FAILED
             turn.error_message = (llm_result.stderr or "").strip() or f"Model exited with code {llm_result.returncode}."
+            turn.runtime_metadata_json = _safe_json_dump(
+                {
+                    "rag_health_state": rag_health.state,
+                    "selected_collections": selected_rag_collections,
+                    "selected_mcp_servers": selected_mcp_keys,
+                    "executor_run_metadata": llm_run_metadata,
+                    "executor_provider_metadata": llm_provider_metadata,
+                    "executor_error": llm_error_payload,
+                }
+            )
             _record_activity(
                 session,
                 thread_id=thread.id,
@@ -1344,6 +1435,9 @@ def execute_turn(
                 metadata={
                     "return_code": llm_result.returncode,
                     "stderr": (llm_result.stderr or "").strip(),
+                    "executor_run_metadata": llm_run_metadata,
+                    "executor_provider_metadata": llm_provider_metadata,
+                    "executor_error": llm_error_payload,
                 },
             )
             thread.last_activity_at = _now()
@@ -1393,6 +1487,9 @@ def execute_turn(
                 "selected_mcp_servers": selected_mcp_keys,
                 "response_complexity": selected_response_complexity,
                 "retrieval_stats": retrieval_stats,
+                "executor_run_metadata": llm_run_metadata,
+                "executor_provider_metadata": llm_provider_metadata,
+                "executor_error": llm_error_payload,
             }
         )
         _record_activity(

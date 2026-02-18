@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getMemoryEdit, updateMemory } from '../lib/studioApi'
@@ -26,7 +27,7 @@ export default function MemoryEditPage() {
   const { memoryId } = useParams()
   const parsedMemoryId = useMemo(() => parseId(memoryId), [memoryId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [formError, setFormError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [saving, setSaving] = useState(false)
   const [description, setDescription] = useState('')
 
@@ -66,13 +67,13 @@ export default function MemoryEditPage() {
     if (!parsedMemoryId) {
       return
     }
-    setFormError('')
+    setActionError('')
     setSaving(true)
     try {
       await updateMemory(parsedMemoryId, { description })
       navigate(`/memories/${parsedMemoryId}`)
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to update memory.'))
+      setActionError(errorMessage(error, 'Failed to update memory.'))
     } finally {
       setSaving(false)
     }
@@ -109,7 +110,6 @@ export default function MemoryEditPage() {
 
         {state.loading ? <p style={{ marginTop: '20px' }}>Loading memory...</p> : null}
         {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
-        {formError ? <p className="error-text" style={{ marginTop: '12px' }}>{formError}</p> : null}
 
         {!state.loading && !state.error ? (
           <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>

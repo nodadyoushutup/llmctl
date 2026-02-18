@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getMilestoneEdit, updateMilestone } from '../lib/studioApi'
@@ -34,7 +35,7 @@ export default function MilestoneEditPage() {
   const { milestoneId } = useParams()
   const parsedMilestoneId = useMemo(() => parseId(milestoneId), [milestoneId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [formError, setFormError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     name: '',
@@ -110,7 +111,7 @@ export default function MilestoneEditPage() {
     if (!parsedMilestoneId) {
       return
     }
-    setFormError('')
+    setActionError('')
     setSaving(true)
     try {
       await updateMilestone(parsedMilestoneId, {
@@ -119,7 +120,7 @@ export default function MilestoneEditPage() {
       })
       navigate(`/milestones/${parsedMilestoneId}`)
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to update milestone.'))
+      setActionError(errorMessage(error, 'Failed to update milestone.'))
     } finally {
       setSaving(false)
     }
@@ -156,7 +157,6 @@ export default function MilestoneEditPage() {
 
         {state.loading ? <p style={{ marginTop: '20px' }}>Loading milestone...</p> : null}
         {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}
-        {formError ? <p className="error-text" style={{ marginTop: '12px' }}>{formError}</p> : null}
 
         {!state.loading && !state.error ? (
           <form className="form-grid" style={{ marginTop: '20px' }} onSubmit={handleSubmit}>

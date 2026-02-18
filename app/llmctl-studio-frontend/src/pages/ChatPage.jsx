@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { renderChatMarkdown } from '../lib/chatMarkdown'
@@ -109,7 +110,7 @@ export default function ChatPage() {
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [refreshVersion, setRefreshVersion] = useState(0)
-  const [chatError, setChatError] = useState('')
+  const [, setChatError] = useFlashState('error')
   const [draftMessage, setDraftMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [showPendingAssistantBubble, setShowPendingAssistantBubble] = useState(false)
@@ -175,7 +176,7 @@ export default function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [refreshVersion, selectedThreadIdFromQuery, setSearchParams])
+  }, [refreshVersion, selectedThreadIdFromQuery, setChatError, setSearchParams])
 
   useEffect(() => {
     try {
@@ -415,7 +416,7 @@ export default function ChatPage() {
     } finally {
       setSavingSession(false)
     }
-  }, [payload?.chat_default_settings, selectedThreadId, sessionConfig, sessionDirty])
+  }, [payload?.chat_default_settings, selectedThreadId, sessionConfig, sessionDirty, setChatError])
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -756,7 +757,6 @@ export default function ChatPage() {
           )}
         />
 
-        {chatError ? <div className="chat-error-box">{chatError}</div> : null}
         {state.loading ? <p className="muted chat-loading-state">Loading chat runtime...</p> : null}
         {state.error ? <p className="error-text chat-loading-state">{state.error}</p> : null}
 

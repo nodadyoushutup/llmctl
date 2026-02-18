@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { createAgent, getAgentMeta } from '../lib/studioApi'
@@ -20,7 +21,8 @@ export default function AgentNewPage() {
   const navigate = useNavigate()
   const [roles, setRoles] = useState([])
   const [metaError, setMetaError] = useState('')
-  const [formError, setFormError] = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     name: '',
@@ -52,10 +54,11 @@ export default function AgentNewPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    setFormError('')
+    setValidationError('')
+    setActionError('')
     const description = String(form.description || '').trim()
     if (!description) {
-      setFormError('Description is required.')
+      setValidationError('Description is required.')
       return
     }
     const roleId = form.roleId ? Number.parseInt(form.roleId, 10) : null
@@ -73,7 +76,7 @@ export default function AgentNewPage() {
       }
       navigate('/agents')
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to create agent.'))
+      setActionError(errorMessage(error, 'Failed to create agent.'))
     } finally {
       setSaving(false)
     }
@@ -87,7 +90,7 @@ export default function AgentNewPage() {
           <Link to="/agents" className="btn-link">All Agents</Link>
         </div>
         {metaError ? <p className="error-text">{metaError}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+        {validationError ? <p className="error-text">{validationError}</p> : null}
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className="field">
             <span>Name (optional)</span>

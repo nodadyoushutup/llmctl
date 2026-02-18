@@ -89,12 +89,12 @@ Integrated MCP runtimes are deployed as first-class Kubernetes services in the s
 
 Service endpoint contract:
 
-- `http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp`
-- `http://llmctl-mcp-github.llmctl.svc.cluster.local:8000/mcp`
-- `http://llmctl-mcp-atlassian.llmctl.svc.cluster.local:8000/mcp`
-- `http://llmctl-mcp-chroma.llmctl.svc.cluster.local:8000/mcp`
-- `http://llmctl-mcp-google-cloud.llmctl.svc.cluster.local:8000/mcp`
-- `http://llmctl-mcp-google-workspace.llmctl.svc.cluster.local:8000/mcp`
+- `http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp/`
+- `http://llmctl-mcp-github.llmctl.svc.cluster.local:8000/mcp/`
+- `http://llmctl-mcp-atlassian.llmctl.svc.cluster.local:8000/mcp/`
+- `http://llmctl-mcp-chroma.llmctl.svc.cluster.local:8000/mcp/`
+- `http://llmctl-mcp-google-cloud.llmctl.svc.cluster.local:8000/mcp/`
+- `http://llmctl-mcp-google-workspace.llmctl.svc.cluster.local:8000/mcp/`
 
 Google Cloud and Google Workspace MCP deployments read service-account credentials from Studio integration-managed files under `/app/data/credentials` (shared PVC). `llmctl-mcp-secrets` remains supported as a fallback source.
 
@@ -120,9 +120,13 @@ Celery execution is decoupled from the Studio backend runtime:
 - `llmctl-studio-backend` is producer/control-plane only (enqueue + revoke + status reads).
 - `llmctl-celery-worker` consumes all task queues.
 - `llmctl-celery-beat` is the only scheduler for periodic dispatch (for example `workspace_cleanup`).
+- LLM execution is runtime-plane only: LLM calls dispatch to Kubernetes executor Jobs/Pods (`llmctl-executor` image) instead of executing in backend or Celery worker containers.
 
 This avoids duplicate beat scheduling and keeps worker scale independent of API scale.
 Do not run multiple beat deployments unless you intentionally coordinate distributed scheduling.
+
+Dev rollback note for executor-only LLM runtime:
+- If post-cutover regressions appear, roll back the Studio backend deployment to the previous known-good image tag while investigating executor dispatch logs/metadata.
 
 Current queue contract (from `services.celery_app`):
 

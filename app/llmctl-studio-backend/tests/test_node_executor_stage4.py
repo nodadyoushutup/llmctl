@@ -385,6 +385,29 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
                 task.mcp_servers.append(server)
             return int(task.id)
 
+    def _create_standard_task(
+        self,
+        *,
+        mcp_server_keys: list[str] | None = None,
+    ) -> int:
+        with session_scope() as session:
+            task = AgentTask.create(
+                session,
+                status="queued",
+                kind="task",
+                prompt=self._quick_prompt_payload(),
+            )
+            for server_key in mcp_server_keys or []:
+                server = MCPServer.create(
+                    session,
+                    name=f"MCP {server_key}",
+                    server_key=server_key,
+                    description="",
+                    config_json={"command": "python3", "args": ["-V"]},
+                )
+                task.mcp_servers.append(server)
+            return int(task.id)
+
     def test_quick_task_dispatches_via_executor_router(self) -> None:
         task_id = self._create_quick_task(mcp_server_keys=["github"])
 
@@ -475,6 +498,99 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
             self.assertEqual("kubernetes", stored.final_provider)
             self.assertEqual(
                 "kubernetes:default/job-quick-task-1",
+                stored.provider_dispatch_id,
+            )
+
+    def test_non_quick_task_dispatches_via_executor_router(self) -> None:
+        task_id = self._create_standard_task(mcp_server_keys=["github"])
+
+        class _StubRoutedRequest:
+            def run_metadata_payload(self) -> dict[str, object]:
+                return {
+                    "selected_provider": "kubernetes",
+                    "final_provider": "kubernetes",
+                    "provider_dispatch_id": "",
+                    "workspace_identity": "default",
+                    "dispatch_status": "dispatch_pending",
+                    "fallback_attempted": False,
+                    "fallback_reason": None,
+                    "dispatch_uncertain": False,
+                    "api_failure_category": None,
+                    "cli_fallback_used": False,
+                    "cli_preflight_passed": None,
+                }
+
+        class _StubExecutionRouter:
+            last_callback_name = ""
+            last_request_mcp_server_keys: list[str] = []
+
+            def __init__(self, runtime_settings=None) -> None:
+                self.runtime_settings = runtime_settings or {}
+
+            def route_request(self, _request):
+                _StubExecutionRouter.last_request_mcp_server_keys = list(
+                    _request.mcp_server_keys
+                )
+                return _StubRoutedRequest()
+
+            def execute_routed(self, _request, execute_callback):
+                _StubExecutionRouter.last_callback_name = execute_callback.__name__
+                return SimpleNamespace(
+                    status="success",
+                    output_state={},
+                    routing_state={},
+                    error=None,
+                    run_metadata={
+                        "selected_provider": "kubernetes",
+                        "final_provider": "kubernetes",
+                        "provider_dispatch_id": "kubernetes:default/job-task-1",
+                        "workspace_identity": "default",
+                        "dispatch_status": "dispatch_confirmed",
+                        "fallback_attempted": False,
+                        "fallback_reason": None,
+                        "dispatch_uncertain": False,
+                        "api_failure_category": None,
+                        "cli_fallback_used": False,
+                        "cli_preflight_passed": None,
+                    },
+                    provider_metadata={
+                        "k8s_job_name": "job-task-1",
+                        "k8s_pod_name": "pod-task-1",
+                        "k8s_terminal_reason": "complete",
+                    },
+                )
+
+        with patch.object(studio_tasks, "ExecutionRouter", _StubExecutionRouter), patch.object(
+            studio_tasks,
+            "load_node_executor_runtime_settings",
+            return_value={"provider": "kubernetes"},
+        ), patch.object(
+            studio_tasks,
+            "_execute_agent_task",
+            side_effect=AssertionError("worker compute should not run"),
+        ) as execute_task_mock, patch.object(
+            studio_tasks,
+            "emit_contract_event",
+            return_value={},
+        ):
+            studio_tasks.run_agent_task.run(task_id)
+
+        execute_task_mock.assert_not_called()
+        self.assertEqual(
+            "_agent_task_worker_compute_disabled",
+            _StubExecutionRouter.last_callback_name,
+        )
+        self.assertEqual(["github"], _StubExecutionRouter.last_request_mcp_server_keys)
+
+        with session_scope() as session:
+            stored = session.get(AgentTask, task_id)
+            assert stored is not None
+            self.assertEqual("running", stored.status)
+            self.assertEqual("dispatch_confirmed", stored.dispatch_status)
+            self.assertEqual("kubernetes", stored.selected_provider)
+            self.assertEqual("kubernetes", stored.final_provider)
+            self.assertEqual(
+                "kubernetes:default/job-task-1",
                 stored.provider_dispatch_id,
             )
 

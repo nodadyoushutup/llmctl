@@ -128,6 +128,7 @@ import {
   previewSkillImport,
   reorderFlowchartNodeScripts,
   removeNodeAttachment,
+  retryNode,
   runFlowchart,
   setFlowchartNodeModel,
   startAgent,
@@ -396,6 +397,7 @@ describe('studioApi', () => {
       scriptIds: [2],
     })
     cancelNode(8)
+    retryNode(8)
     deleteNode(8)
     removeNodeAttachment(8, 12)
 
@@ -413,9 +415,10 @@ describe('studioApi', () => {
         script_ids: [2],
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(6, '/nodes/8/cancel', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(7, '/nodes/8/delete', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(8, '/nodes/8/attachments/12/remove', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(6, '/nodes/8/cancel', { method: 'POST', body: {} })
+    expect(requestJson).toHaveBeenNthCalledWith(7, '/nodes/8/retry', { method: 'POST', body: {} })
+    expect(requestJson).toHaveBeenNthCalledWith(8, '/nodes/8/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(9, '/nodes/8/attachments/12/remove', { method: 'POST' })
   })
 
   test('stage 3 node create uses multipart payload when attachments are present', () => {

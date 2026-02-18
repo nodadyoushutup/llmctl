@@ -34,7 +34,6 @@ from rag.domain import (
 from rag.engine.config import load_config
 from rag.integrations.google_drive_sync import service_account_email, verify_folder_access
 from rag.providers.adapters import (
-    call_chat_completion,
     get_chat_model,
     get_chat_provider,
     has_chat_api_key,
@@ -63,8 +62,12 @@ from rag.web.routes import (
     RAG_PAGE_CHAT,
     RAG_PAGE_SOURCES,
 )
+from services.execution.contracts import EXECUTION_STATUS_SUCCESS
 from services.integrations import load_integration_settings
-from services.tasks import run_quick_rag_task
+from services.tasks import (
+    execute_rag_chat_completion_via_execution_router,
+    run_quick_rag_task,
+)
 
 bp = Blueprint("rag", __name__)
 
@@ -154,6 +157,49 @@ def _build_messages(
         *_sanitize_history(history, history_limit),
         {"role": "user", "content": prompt},
     ]
+
+
+def _executor_node_identity(seed: str) -> tuple[int, int]:
+    digest = abs(hash(seed or "rag-chat"))
+    node_id = int((digest % 900_000) + 100_000)
+    execution_id = int((time.time_ns() // 1_000_000) % 1_000_000_000)
+    if execution_id <= 0:
+        execution_id = 1
+    return node_id, execution_id
+
+
+def _chat_completion_via_executor(
+    *,
+    messages: list[dict[str, str]],
+    request_id: str,
+) -> str:
+    normalized_request_id = str(request_id or "").strip() or f"rag-chat-{time.time_ns()}"
+    node_id, execution_id = _executor_node_identity(normalized_request_id)
+    execution_result = execute_rag_chat_completion_via_execution_router(
+        messages=messages,
+        request_id=normalized_request_id,
+        node_id=node_id,
+        execution_id=execution_id,
+    )
+    output_state = (
+        execution_result.output_state
+        if isinstance(execution_result.output_state, dict)
+        else {}
+    )
+    if execution_result.status != EXECUTION_STATUS_SUCCESS:
+        error_payload = (
+            execution_result.error
+            if isinstance(execution_result.error, dict)
+            else {}
+        )
+        message = str(error_payload.get("message") or "").strip()
+        if not message:
+            message = (
+                "Executor RAG chat completion failed with status "
+                f"'{str(execution_result.status or 'failed')}'."
+            )
+        raise RuntimeError(message)
+    return str(output_state.get("reply") or "")
 
 
 def _to_positive_int(value: Any, default: int, *, minimum: int, maximum: int) -> int:
@@ -915,7 +961,10 @@ def api_retrieve():
             history_limit=history_limit,
             response_style=response_style,
         )
-        return call_chat_completion(config, messages)
+        return _chat_completion_via_executor(
+            messages=messages,
+            request_id=request_id or question_text,
+        )
 
     try:
         result = execute_query_contract(
@@ -968,9 +1017,8 @@ def api_chat():
                 top_k=_to_positive_int(payload.get("top_k"), 5, minimum=1, maximum=20),
                 request_id=str(payload.get("request_id") or "").strip() or None,
                 runtime_kind="chat",
-                synthesize_answer=lambda question_text, retrieval_context: call_chat_completion(
-                    load_config(),
-                    _build_messages(
+                synthesize_answer=lambda question_text, retrieval_context: _chat_completion_via_executor(
+                    messages=_build_messages(
                         question=question_text,
                         history=payload.get("history"),
                         context_text="\n\n".join(
@@ -989,6 +1037,7 @@ def api_chat():
                             load_config().chat_response_style,
                         ),
                     ),
+                    request_id=str(payload.get("request_id") or "").strip() or question_text,
                 ),
             )
         except RagContractError as exc:
@@ -1049,7 +1098,10 @@ def api_chat():
         ),
     )
     try:
-        reply = call_chat_completion(config, messages)
+        reply = _chat_completion_via_executor(
+            messages=messages,
+            request_id=str(payload.get("request_id") or "").strip() or message,
+        )
     except Exception as exc:
         return {
             "error": {

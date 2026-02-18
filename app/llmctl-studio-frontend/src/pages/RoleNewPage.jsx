@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { createRole, getRoleMeta } from '../lib/studioApi'
@@ -19,7 +20,8 @@ function errorMessage(error, fallback) {
 export default function RoleNewPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, error: '' })
-  const [formError, setFormError] = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({
     name: '',
@@ -47,10 +49,11 @@ export default function RoleNewPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    setFormError('')
+    setValidationError('')
+    setActionError('')
     const description = String(form.description || '').trim()
     if (!description) {
-      setFormError('Description is required.')
+      setValidationError('Description is required.')
       return
     }
     setBusy(true)
@@ -67,7 +70,7 @@ export default function RoleNewPage() {
       }
       navigate('/roles')
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to create role.'))
+      setActionError(errorMessage(error, 'Failed to create role.'))
     } finally {
       setBusy(false)
     }
@@ -82,7 +85,7 @@ export default function RoleNewPage() {
         </div>
         {state.loading ? <p>Loading role metadata...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+        {validationError ? <p className="error-text">{validationError}</p> : null}
         {!state.loading && !state.error ? (
           <form className="form-grid" onSubmit={handleSubmit}>
             <label className="field">

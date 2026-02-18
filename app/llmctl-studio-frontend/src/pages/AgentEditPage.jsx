@@ -39,8 +39,8 @@ export default function AgentEditPage() {
   const { agentId } = useParams()
   const parsedAgentId = useMemo(() => parseId(agentId), [agentId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [formError, setFormError] = useState('')
-  const [actionError, setActionError] = useFlashState('error')
+  const [validationError, setValidationError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [savingAgent, setSavingAgent] = useState(false)
   const [busyPriorityId, setBusyPriorityId] = useState(null)
   const [busySkillId, setBusySkillId] = useState(null)
@@ -99,11 +99,11 @@ export default function AgentEditPage() {
     if (!parsedAgentId) {
       return
     }
-    setFormError('')
+    setValidationError('')
     setActionError('')
     const description = String(agentForm.description || '').trim()
     if (!description) {
-      setFormError('Description is required.')
+      setValidationError('Description is required.')
       return
     }
     setSavingAgent(true)
@@ -116,7 +116,7 @@ export default function AgentEditPage() {
       })
       await refresh()
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to update agent.'))
+      setActionError(errorMessage(error, 'Failed to update agent.'))
     } finally {
       setSavingAgent(false)
     }
@@ -278,8 +278,7 @@ export default function AgentEditPage() {
         </div>
         {state.loading ? <p>Loading agent...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
+        {validationError ? <p className="error-text">{validationError}</p> : null}
         {agent ? (
           <form className="form-grid" onSubmit={handleAgentSave}>
             <label className="field">

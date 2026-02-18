@@ -6,8 +6,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ARG APP_UID=1000
 ARG APP_GID=1000
 ARG DOCKER_GID=999
-ARG INSTALL_VLLM=true
-ARG INSTALL_CLAUDE=true
 ENV APP_UID=$APP_UID \
     APP_GID=$APP_GID \
     DOCKER_GID=$DOCKER_GID \
@@ -25,10 +23,6 @@ RUN apt-get update \
         python3-pip \
         python3-venv \
     && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list \
     && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
         | gpg --dearmor -o /etc/apt/keyrings/google-cloud.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
@@ -41,9 +35,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         google-chrome-stable \
         google-cloud-cli \
-        nodejs \
-    && npm install -g @openai/codex@latest @google/gemini-cli@latest \
-    && if [ "${INSTALL_CLAUDE}" = "true" ]; then npm install -g @anthropic-ai/claude-code@latest; fi \
     && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium-browser \
     && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium \
     && rm -rf /var/lib/apt/lists/*
@@ -61,8 +52,7 @@ RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     LLMCTL_STUDIO_USE_GUNICORN=true
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt \
-    && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm>=0.8.5"; fi
+    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt
 
 COPY . /app
 RUN mkdir -p /app/data

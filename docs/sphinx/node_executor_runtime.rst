@@ -50,7 +50,9 @@ Runtime split:
 
 - node-like workloads (flowchart nodes, quick-RAG/index node-like paths) run
   in ephemeral Kubernetes executor pods.
-- Chat remains service-runtime execution and does not dispatch pod-per-turn.
+- chat turns dispatch LLM execution through executor ``llm_call`` payloads.
+- RAG web chat synthesis/completion dispatches through executor
+  ``rag_chat_completion`` payloads.
 
 Execution Contract
 ------------------

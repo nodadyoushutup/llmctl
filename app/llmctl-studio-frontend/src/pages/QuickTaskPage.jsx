@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
@@ -47,11 +48,11 @@ function mergeAttachments(current, incoming) {
 export default function QuickTaskPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [formError, setFormError] = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [, setActionError] = useFlashState('error')
+  const [, setActionInfo] = useFlashState('success')
   const [saving, setSaving] = useState(false)
   const [saveDefaultsBusy, setSaveDefaultsBusy] = useState(false)
-  const [saveDefaultsMessage, setSaveDefaultsMessage] = useState('')
-  const [saveDefaultsError, setSaveDefaultsError] = useState('')
   const [initialized, setInitialized] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [form, setForm] = useState({
@@ -116,8 +117,8 @@ export default function QuickTaskPage() {
   }, [defaultAgentId, defaultModelId, initialized, payload, selectedMcpServerIds])
 
   async function handleSaveDefaults() {
-    setSaveDefaultsError('')
-    setSaveDefaultsMessage('')
+    setActionError('')
+    setActionInfo('')
     setSaveDefaultsBusy(true)
     try {
       const response = await updateQuickTaskDefaults({
@@ -143,9 +144,9 @@ export default function QuickTaskPage() {
           setState((current) => ({ ...current, payload: nextPayload }))
         }
       }
-      setSaveDefaultsMessage('Quick defaults saved.')
+      setActionInfo('Quick defaults saved.')
     } catch (error) {
-      setSaveDefaultsError(errorMessage(error, 'Failed to save quick defaults.'))
+      setActionError(errorMessage(error, 'Failed to save quick defaults.'))
     } finally {
       setSaveDefaultsBusy(false)
     }
@@ -153,15 +154,16 @@ export default function QuickTaskPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    setFormError('')
+    setValidationError('')
+    setActionError('')
     const prompt = String(form.prompt || '').trim()
     if (!prompt) {
-      setFormError('Prompt is required.')
+      setValidationError('Prompt is required.')
       return
     }
     const modelId = parseOptionalId(form.modelId)
     if (!modelId) {
-      setFormError('Model is required.')
+      setValidationError('Model is required.')
       return
     }
     setSaving(true)
@@ -181,7 +183,7 @@ export default function QuickTaskPage() {
       }
       navigate('/nodes')
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to send quick task.'))
+      setActionError(errorMessage(error, 'Failed to send quick task.'))
     } finally {
       setSaving(false)
     }
@@ -216,9 +218,7 @@ export default function QuickTaskPage() {
     <section className="quick-node-shell" aria-label="Quick task">
       {state.loading ? <p className="muted">Loading quick task metadata...</p> : null}
       {state.error ? <p className="error-text">{state.error}</p> : null}
-      {formError ? <p className="error-text">{formError}</p> : null}
-      {saveDefaultsError ? <p className="error-text">{saveDefaultsError}</p> : null}
-      {saveDefaultsMessage ? <p className="muted">{saveDefaultsMessage}</p> : null}
+      {validationError ? <p className="error-text">{validationError}</p> : null}
       <form className="quick-node-form" id="quick-task-form" onSubmit={handleSubmit}>
         <article className="quick-node-panel quick-node-controls">
           <PanelHeader

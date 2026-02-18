@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
 import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
-import { cancelNode, deleteNode, getNode, getNodeStatus, removeNodeAttachment } from '../lib/studioApi'
+import { cancelNode, deleteNode, getNode, getNodeStatus, removeNodeAttachment, retryNode } from '../lib/studioApi'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -91,15 +91,38 @@ function stageEntryLabel(stage, index) {
   return `Stage ${index + 1}`
 }
 
+function isStageRunning(stage) {
+  return String(stage?.status || '').toLowerCase() === 'running'
+}
+
+function isNearBottom(element, threshold = 12) {
+  if (!element) {
+    return false
+  }
+  const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+  return distanceFromBottom <= threshold
+}
+
+function scrollElementToBottom(element) {
+  if (!element) {
+    return
+  }
+  element.scrollTop = element.scrollHeight
+}
+
 export default function NodeDetailPage() {
   const navigate = useNavigate()
   const { nodeId } = useParams()
   const parsedNodeId = useMemo(() => parseId(nodeId), [nodeId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
+  const flash = useFlash()
   const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [busyAttachmentId, setBusyAttachmentId] = useState(null)
   const [expandedStageKey, setExpandedStageKey] = useState('')
+  const [leftPanelExpanded, setLeftPanelExpanded] = useState(false)
+  const stageLogRefs = useRef(new Map())
+  const stageLogPinnedBottomRef = useRef(new Map())
 
   const refreshDetail = useCallback(async ({ silent = false } = {}) => {
     if (!parsedNodeId) {
@@ -170,6 +193,15 @@ export default function NodeDetailPage() {
     () => (payload && Array.isArray(payload.stage_entries) ? payload.stage_entries : []),
     [payload],
   )
+  const expandedStage = useMemo(() => {
+    if (!expandedStageKey) {
+      return null
+    }
+    const entry = stageEntries.find((stage, index) => stageEntryKey(stage, index) === expandedStageKey)
+    return entry || null
+  }, [expandedStageKey, stageEntries])
+  const expandedStageLogs = String(expandedStage?.logs || '')
+  const expandedStageRunning = isStageRunning(expandedStage)
   const scripts = payload && Array.isArray(payload.scripts) ? payload.scripts : []
   const attachments = payload && Array.isArray(payload.attachments) ? payload.attachments : []
   const mcpServers = payload && Array.isArray(payload.mcp_servers) ? payload.mcp_servers : []
@@ -213,6 +245,69 @@ export default function NodeDetailPage() {
     })
   }, [stageEntries, task?.current_stage])
 
+  const registerStageLogRef = useCallback((stageKey, node) => {
+    if (!stageKey) {
+      return
+    }
+    if (node) {
+      stageLogRefs.current.set(stageKey, node)
+      if (!stageLogPinnedBottomRef.current.has(stageKey)) {
+        stageLogPinnedBottomRef.current.set(stageKey, true)
+      }
+      return
+    }
+    stageLogRefs.current.delete(stageKey)
+    stageLogPinnedBottomRef.current.delete(stageKey)
+  }, [])
+
+  const handleStageLogScroll = useCallback((stageKey) => {
+    const viewport = stageLogRefs.current.get(stageKey)
+    if (!viewport) {
+      return
+    }
+    stageLogPinnedBottomRef.current.set(stageKey, isNearBottom(viewport))
+  }, [])
+
+  useEffect(() => {
+    if (!expandedStageKey) {
+      return
+    }
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const viewport = stageLogRefs.current.get(expandedStageKey)
+      if (!viewport) {
+        return
+      }
+      stageLogPinnedBottomRef.current.set(expandedStageKey, true)
+      scrollElementToBottom(viewport)
+    })
+    return () => {
+      window.cancelAnimationFrame(animationFrameId)
+    }
+  }, [expandedStageKey])
+
+  useEffect(() => {
+    if (!expandedStageKey || !expandedStageRunning) {
+      return
+    }
+    const viewport = stageLogRefs.current.get(expandedStageKey)
+    if (!viewport) {
+      return
+    }
+    if (!stageLogPinnedBottomRef.current.get(expandedStageKey)) {
+      return
+    }
+    const animationFrameId = window.requestAnimationFrame(() => {
+      const currentViewport = stageLogRefs.current.get(expandedStageKey)
+      if (!currentViewport) {
+        return
+      }
+      scrollElementToBottom(currentViewport)
+    })
+    return () => {
+      window.cancelAnimationFrame(animationFrameId)
+    }
+  }, [expandedStageKey, expandedStageLogs, expandedStageRunning])
+
   useEffect(() => {
     if (!active) {
       return
@@ -232,12 +327,37 @@ export default function NodeDetailPage() {
     setActionError('')
     setBusy(true)
     try {
-      await cancelNode(task.id)
+      const payload = await cancelNode(task.id)
+      if (payload?.already_stopped) {
+        flash.info('Node is not running.')
+      } else {
+        flash.success('Node cancel requested.')
+      }
       await refreshDetail({ silent: true })
     } catch (error) {
       setActionError(errorMessage(error, 'Failed to cancel node.'))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleRetry() {
+    if (!task) {
+      return
+    }
+    setActionError('')
+    setBusy(true)
+    try {
+      const payload = await retryNode(task.id)
+      const nextTaskId = Number.parseInt(String(payload?.task_id || ''), 10)
+      if (!Number.isInteger(nextTaskId) || nextTaskId <= 0) {
+        throw new Error('Retry response did not include a new node id.')
+      }
+      flash.success(`Node ${nextTaskId} queued.`)
+      navigate(`/nodes/${nextTaskId}`)
+    } catch (error) {
+      setBusy(false)
+      setActionError(errorMessage(error, 'Failed to retry node.'))
     }
   }
 
@@ -274,16 +394,45 @@ export default function NodeDetailPage() {
 
   return (
     <section className="node-detail-fixed-page" aria-label="Node detail">
-      <div className="node-detail-fixed-layout">
+      <div className={`node-detail-fixed-layout${leftPanelExpanded ? ' is-left-expanded' : ''}`}>
         <article className="card node-detail-panel node-detail-panel-main">
           <PanelHeader
             title={nodeTitle}
             className="node-panel-header"
             actions={(
               <>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={leftPanelExpanded ? 'Collapse left panel' : 'Expand left panel'}
+                  title={leftPanelExpanded ? 'Collapse left panel' : 'Expand left panel'}
+                  onClick={() => setLeftPanelExpanded((current) => !current)}
+                >
+                  <i className={`fa-solid ${leftPanelExpanded ? 'fa-compress' : 'fa-expand'}`} />
+                </button>
                 <Link to="/nodes" className="icon-button" aria-label="All nodes" title="All nodes">
                   <i className="fa-solid fa-list" />
                 </Link>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Cancel node"
+                  title="Cancel node"
+                  disabled={busy || !task || !active}
+                  onClick={handleCancel}
+                >
+                  <ActionIcon name="stop" />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Retry node"
+                  title="Retry node"
+                  disabled={busy || !task}
+                  onClick={handleRetry}
+                >
+                  <i className="fa-solid fa-rotate-right" />
+                </button>
                 <button
                   type="button"
                   className="icon-button icon-button-danger"
@@ -314,7 +463,7 @@ export default function NodeDetailPage() {
                 <i className="fa-solid fa-chevron-down" aria-hidden="true" />
               </summary>
               <div className="node-detail-section-body">
-                {payload?.prompt_text ? <pre>{payload.prompt_text}</pre> : <p>No prompt recorded.</p>}
+                {payload?.prompt_text ? <pre className="node-detail-code-block">{payload.prompt_text}</pre> : <p>No prompt recorded.</p>}
               </div>
             </PersistedDetails>
 
@@ -328,7 +477,7 @@ export default function NodeDetailPage() {
                 <i className="fa-solid fa-chevron-down" aria-hidden="true" />
               </summary>
               <div className="node-detail-section-body">
-                {task?.output ? <pre>{task.output}</pre> : <p>No output yet.</p>}
+                {task?.output ? <pre className="node-detail-code-block">{task.output}</pre> : <p>No output yet.</p>}
               </div>
             </PersistedDetails>
 
@@ -345,9 +494,9 @@ export default function NodeDetailPage() {
                     <i className="fa-solid fa-chevron-down" aria-hidden="true" />
                   </span>
                 </summary>
-                <div className="node-detail-section-body">
-                  <div className="table-actions">
-                    {active ? (
+                <div className="node-detail-section-body node-details-body">
+                  {active ? (
+                    <div className="table-actions node-details-actions">
                       <button
                         type="button"
                         className="icon-button"
@@ -358,54 +507,52 @@ export default function NodeDetailPage() {
                       >
                         <ActionIcon name="stop" />
                       </button>
-                    ) : null}
-                  </div>
-                  <dl className="kv-grid">
-                    <div>
+                    </div>
+                  ) : null}
+                  <dl className="node-details-list">
+                    <div className="node-details-item">
                       <dt>Kind</dt>
                       <dd>{task.kind || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Agent</dt>
                       <dd>
                         {agent ? <Link to={`/agents/${agent.id}`}>{agent.name}</Link> : (task.agent_id || '-')}
                       </dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Task template</dt>
                       <dd>{template?.name || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Model</dt>
                       <dd>{task.model_id || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Autorun node</dt>
                       <dd>{task.run_task_id || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Celery task</dt>
                       <dd>{task.celery_task_id || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Current stage</dt>
                       <dd>{task.current_stage || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Created</dt>
                       <dd>{task.created_at || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Started</dt>
                       <dd>{task.started_at || '-'}</dd>
                     </div>
-                    <div>
+                    <div className="node-details-item">
                       <dt>Finished</dt>
                       <dd>{task.finished_at || '-'}</dd>
                     </div>
                   </dl>
-                  {task.error ? <p className="error-text">{task.error}</p> : null}
-                  {active ? <p className="toolbar-meta">Realtime updates active. Polling fallback starts only if socket connectivity fails.</p> : null}
                 </div>
               </PersistedDetails>
             ) : null}
@@ -508,7 +655,17 @@ export default function NodeDetailPage() {
                       </button>
                       {isExpanded ? (
                         <div className="node-stage-content" id={contentId}>
-                          {stage.logs ? <pre>{stage.logs}</pre> : <p className="toolbar-meta">No logs yet.</p>}
+                          {stage.logs ? (
+                            <pre
+                              className="node-stage-log-block"
+                              ref={(node) => registerStageLogRef(stageKey, node)}
+                              onScroll={() => handleStageLogScroll(stageKey)}
+                            >
+                              {stage.logs}
+                            </pre>
+                          ) : (
+                            <p className="toolbar-meta node-stage-log-empty">No logs yet.</p>
+                          )}
                         </div>
                       ) : null}
                     </section>

@@ -743,10 +743,21 @@ class KubernetesExecutor:
         }
         execution_mode = "flowchart_node_in_pod"
         request_id = f"flowchart-node-{request.node_id}-run-{request.execution_id}"
-        if str(request.node_type or "").strip().lower() == "agent_task":
+        normalized_node_type = str(request.node_type or "").strip().lower()
+        if normalized_node_type == "agent_task":
             execution_mode = "agent_task_in_pod"
             task_id = int(request.execution_task_id or request.execution_id)
             request_id = f"agent-task-{task_id}"
+        elif normalized_node_type == "llm_call":
+            execution_mode = "llm_call_in_pod"
+            request_id = (
+                f"llm-call-{request.execution_id}"
+            )
+        elif normalized_node_type == "rag_chat_completion":
+            execution_mode = "rag_chat_completion_in_pod"
+            request_id = (
+                f"rag-chat-completion-{request.execution_id}"
+            )
 
         payload = {
             "contract_version": "v1",

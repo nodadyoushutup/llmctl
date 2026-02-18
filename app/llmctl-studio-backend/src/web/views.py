@@ -987,6 +987,34 @@ def _set_task_scripts(
         session.execute(agent_task_scripts.insert(), rows)
 
 
+def _clone_task_scripts(
+    session,
+    source_task_id: int,
+    target_task_id: int,
+) -> None:
+    rows = session.execute(
+        select(
+            agent_task_scripts.c.script_id,
+            agent_task_scripts.c.position,
+        )
+        .where(agent_task_scripts.c.agent_task_id == source_task_id)
+        .order_by(agent_task_scripts.c.position.asc(), agent_task_scripts.c.script_id.asc())
+    ).all()
+    if not rows:
+        return
+    session.execute(
+        agent_task_scripts.insert(),
+        [
+            {
+                "agent_task_id": target_task_id,
+                "script_id": int(script_id),
+                "position": int(position) if position is not None else None,
+            }
+            for script_id, position in rows
+        ],
+    )
+
+
 def _set_flowchart_node_scripts(
     session,
     node_id: int,
@@ -9727,6 +9755,62 @@ def cancel_node(task_id: int):
     if is_api_request:
         return {"ok": True, "already_stopped": False}
     flash("Node cancel requested.", "success")
+    return redirect(redirect_target)
+
+
+@bp.post("/nodes/<int:task_id>/retry", endpoint="retry_node")
+def retry_node(task_id: int):
+    is_api_request = _stage3_api_request()
+    next_target = request.form.get("next")
+    with session_scope() as session:
+        source_task = (
+            session.execute(
+                select(AgentTask)
+                .options(
+                    selectinload(AgentTask.attachments),
+                    selectinload(AgentTask.mcp_servers),
+                )
+                .where(AgentTask.id == task_id)
+            )
+            .scalars()
+            .first()
+        )
+        if source_task is None:
+            abort(404)
+        retry_task = AgentTask.create(
+            session,
+            agent_id=source_task.agent_id,
+            model_id=source_task.model_id,
+            status="queued",
+            prompt=source_task.prompt or "",
+            kind=source_task.kind,
+            integration_keys_json=source_task.integration_keys_json,
+        )
+        retry_task.attachments = list(source_task.attachments or [])
+        retry_task.mcp_servers = list(source_task.mcp_servers or [])
+        session.flush()
+        _clone_task_scripts(session, source_task.id, retry_task.id)
+        retry_task_id = int(retry_task.id)
+
+    celery_task = run_agent_task.delay(retry_task_id)
+
+    with session_scope() as session:
+        retry_task = session.get(AgentTask, retry_task_id)
+        if retry_task is not None:
+            retry_task.celery_task_id = celery_task.id
+
+    if is_api_request:
+        return {
+            "ok": True,
+            "task_id": retry_task_id,
+            "celery_task_id": celery_task.id,
+            "source_task_id": task_id,
+        }, 201
+    redirect_target = _safe_redirect_target(
+        next_target,
+        url_for("agents.view_node", task_id=retry_task_id),
+    )
+    flash(f"Node {retry_task_id} queued.", "success")
     return redirect(redirect_target)
 
 

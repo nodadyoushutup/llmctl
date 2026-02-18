@@ -8,10 +8,13 @@ React/Vite frontend for Studio. This is the only user-facing Studio UI runtime.
 npm install
 npm run dev
 npm run lint
+npm run check:flash-notifications
 npm test
 npm run build
 npm run preview
 ```
+
+`npm run check:flash-notifications` verifies that Studio page components using local notification-like setters (`set*Error`, `set*Message`, etc.) are wired to the shared flash message hooks (`useFlash`/`useFlashState`).
 
 ## Runtime Environment
 

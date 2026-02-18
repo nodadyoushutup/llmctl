@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { createNode, getNodeMeta } from '../lib/studioApi'
@@ -44,7 +45,8 @@ function mergeAttachments(current, incoming) {
 export default function NodeNewPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [formError, setFormError] = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [saving, setSaving] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [attachments, setAttachments] = useState([])
@@ -173,15 +175,16 @@ export default function NodeNewPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    setFormError('')
+    setValidationError('')
+    setActionError('')
     const parsedAgentId = parseId(form.agentId)
     if (!parsedAgentId) {
-      setFormError('Select an agent.')
+      setValidationError('Select an agent.')
       return
     }
     const prompt = String(form.prompt || '').trim()
     if (!prompt) {
-      setFormError('Prompt is required.')
+      setValidationError('Prompt is required.')
       return
     }
     setSaving(true)
@@ -200,7 +203,7 @@ export default function NodeNewPage() {
       }
       navigate('/nodes')
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to queue node.'))
+      setActionError(errorMessage(error, 'Failed to queue node.'))
     } finally {
       setSaving(false)
     }
@@ -237,7 +240,7 @@ export default function NodeNewPage() {
         </div>
         {state.loading ? <p>Loading node metadata...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+        {validationError ? <p className="error-text">{validationError}</p> : null}
         {!state.loading && !state.error ? (
           <form className="form-grid" onSubmit={handleSubmit}>
             <label className="field">

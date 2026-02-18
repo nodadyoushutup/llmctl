@@ -2284,6 +2284,10 @@ fieldset.field {
   gap: 12px;
 }
 
+.node-detail-fixed-layout.is-left-expanded {
+  grid-template-columns: minmax(420px, 62%) minmax(0, 1fr);
+}
+
 .node-detail-panel {
   min-height: 0;
   display: flex;
@@ -2380,6 +2384,88 @@ fieldset.field {
   margin-top: 0;
 }
 
+.node-detail-code-block {
+  margin: 0;
+  max-height: min(42vh, 360px);
+  overflow: auto;
+}
+
+.node-details-body {
+  max-height: min(42vh, 420px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 8px;
+  overscroll-behavior: contain;
+}
+
+.node-details-actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.node-details-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.node-details-grid > div {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(16, 34, 50, 0.72), rgba(12, 28, 42, 0.72));
+  border: 1px solid rgba(128, 170, 206, 0.24);
+  box-shadow: inset 0 1px 0 rgba(190, 220, 246, 0.06);
+}
+
+.node-details-grid dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #a7bfd6;
+  font-weight: 700;
+}
+
+.node-details-grid dd {
+  margin-top: 6px;
+  font-size: 15px;
+  color: #ecf4fb;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.node-details-grid dd a {
+  color: #ecf4fb;
+  text-decoration-color: rgba(162, 199, 230, 0.6);
+}
+
+.node-details-grid dd a:hover {
+  color: #ffffff;
+  text-decoration-color: rgba(255, 255, 255, 0.78);
+}
+
+.node-details-error {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 107, 107, 0.38);
+  background: linear-gradient(180deg, rgba(94, 24, 24, 0.42), rgba(72, 18, 18, 0.32));
+  color: #ffd8d8;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.node-details-live-note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed rgba(124, 170, 209, 0.34);
+  background: rgba(18, 36, 54, 0.54);
+}
+
 .node-stage-shell {
   flex: 1;
   min-height: 0;
@@ -2452,12 +2538,31 @@ fieldset.field {
 .node-stage-content {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  display: flex;
+  overflow: hidden;
   padding-right: 2px;
 }
 
 .node-stage-content pre {
   margin-top: 0;
+}
+
+.node-stage-log-block {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+}
+
+.node-stage-log-empty {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 0.8rem;
+  border-radius: 0.6rem;
+  background: rgba(3, 11, 18, 0.92);
+  border: 1px solid rgba(164, 207, 241, 0.18);
 }
 
 .flowchart-fixed-page {
@@ -3028,11 +3133,19 @@ pre {
     height: 100%;
   }
 
+  .node-detail-fixed-layout.is-left-expanded {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .node-panel-header,
   .node-detail-scroll,
   .node-stage-list,
   .node-stage-empty {
     padding: 10px;
+  }
+
+  .node-details-body {
+    max-height: min(38vh, 360px);
   }
 
   .flowchart-fixed-page {
@@ -3163,11 +3276,24 @@ pre {
     grid-template-rows: minmax(0, 1fr) minmax(200px, 44%);
   }
 
+  .node-detail-fixed-layout.is-left-expanded {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .node-panel-header,
   .node-detail-scroll,
   .node-stage-list,
   .node-stage-empty {
     padding: 8px;
+  }
+
+  .node-details-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .node-details-body {
+    max-height: min(46vh, 360px);
+    padding-right: 4px;
   }
 
   .grid-2,

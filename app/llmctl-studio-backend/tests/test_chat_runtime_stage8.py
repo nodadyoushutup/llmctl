@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from unittest.mock import patch
 
 from flask import Flask
 from sqlalchemy import func, select
+import psycopg
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
 STUDIO_APP_ROOT = REPO_ROOT / "app" / "llmctl-studio-backend"
+LEGACY_TEMPLATE_DIR = REPO_ROOT / "_legacy" / "llmctl-studio-backend" / "src" / "web" / "templates"
+if (STUDIO_SRC / "web" / "templates").exists():
+    TEMPLATE_DIR = STUDIO_SRC / "web" / "templates"
+else:
+    TEMPLATE_DIR = LEGACY_TEMPLATE_DIR
 if str(STUDIO_SRC) not in sys.path:
     sys.path.insert(0, str(STUDIO_SRC))
 if str(STUDIO_APP_ROOT) not in sys.path:
@@ -63,20 +72,32 @@ from services.integrations import save_integration_settings
 from rag.web import views as rag_views
 from web import views as studio_views
 
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
+
 
 class StudioDbTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         tmp_dir = Path(self._tmp.name)
+        self._base_db_uri = os.environ["LLMCTL_STUDIO_DATABASE_URI"]
+        self._schema_name = f"chat_runtime_stage8_{uuid.uuid4().hex}"
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
         self._orig_data_dir = Config.DATA_DIR
-        Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_dir / 'chat-runtime.sqlite3'}"
+        self._create_schema(self._schema_name)
+        Config.SQLALCHEMY_DATABASE_URI = self._with_search_path(
+            self._base_db_uri,
+            self._schema_name,
+        )
         Config.DATA_DIR = str(tmp_dir / "data")
         Path(Config.DATA_DIR).mkdir(parents=True, exist_ok=True)
         self._reset_engine()
 
     def tearDown(self) -> None:
         self._dispose_engine()
+        self._drop_schema(self._schema_name)
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
         Config.DATA_DIR = self._orig_data_dir
         self._tmp.cleanup()
@@ -92,16 +113,58 @@ class StudioDbTestCase(unittest.TestCase):
         core_db.init_engine(Config.SQLALCHEMY_DATABASE_URI)
         core_db.init_db()
 
+    @staticmethod
+    def _as_psycopg_uri(database_uri: str) -> str:
+        if database_uri.startswith("postgresql+psycopg://"):
+            return "postgresql://" + database_uri.split("://", 1)[1]
+        return database_uri
+
+    @staticmethod
+    def _with_search_path(database_uri: str, schema_name: str) -> str:
+        parts = urlsplit(database_uri)
+        query_items = parse_qsl(parts.query, keep_blank_values=True)
+        updated_items: list[tuple[str, str]] = []
+        options_value = f"-csearch_path={schema_name}"
+        options_updated = False
+        for key, value in query_items:
+            if key == "options":
+                merged = value.strip()
+                if options_value not in merged:
+                    merged = f"{merged} {options_value}".strip()
+                updated_items.append((key, merged))
+                options_updated = True
+            else:
+                updated_items.append((key, value))
+        if not options_updated:
+            updated_items.append(("options", options_value))
+        query = urlencode(updated_items, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+    def _create_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+
+    def _drop_schema(self, schema_name: str) -> None:
+        with psycopg.connect(self._as_psycopg_uri(self._base_db_uri), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+
 
 class ChatRuntimeStage8Tests(StudioDbTestCase):
     def setUp(self) -> None:
         super().setUp()
-        template_dir = STUDIO_SRC / "web" / "templates"
-        app = Flask("chat-runtime-tests", template_folder=str(template_dir))
+        app = Flask("chat-runtime-tests", template_folder=str(TEMPLATE_DIR))
         app.config["TESTING"] = True
         app.secret_key = "chat-runtime-tests"
         app.register_blueprint(studio_views.bp)
         app.register_blueprint(rag_views.bp)
+        if "agents.list_task_templates" not in app.view_functions:
+            app.add_url_rule(
+                "/_test/list-task-templates",
+                endpoint="agents.list_task_templates",
+                view_func=lambda: "",
+            )
         self.client = app.test_client()
 
     def _create_model(

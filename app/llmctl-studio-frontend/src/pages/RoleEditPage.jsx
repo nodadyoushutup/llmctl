@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { deleteRole, getRoleEdit, updateRole } from '../lib/studioApi'
@@ -26,7 +27,8 @@ export default function RoleEditPage() {
   const { roleId } = useParams()
   const parsedRoleId = useMemo(() => parseId(roleId), [roleId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [formError, setFormError] = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [form, setForm] = useState({
@@ -78,10 +80,11 @@ export default function RoleEditPage() {
     if (!parsedRoleId) {
       return
     }
-    setFormError('')
+    setValidationError('')
+    setActionError('')
     const description = String(form.description || '').trim()
     if (!description) {
-      setFormError('Description is required.')
+      setValidationError('Description is required.')
       return
     }
     setBusy(true)
@@ -102,7 +105,7 @@ export default function RoleEditPage() {
       }
       setState({ loading: false, payload, error: '' })
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to update role.'))
+      setActionError(errorMessage(error, 'Failed to update role.'))
     } finally {
       setBusy(false)
     }
@@ -115,13 +118,14 @@ export default function RoleEditPage() {
     if (!window.confirm('Delete this role? Agents using it will be unbound.')) {
       return
     }
-    setFormError('')
+    setValidationError('')
+    setActionError('')
     setDeleting(true)
     try {
       await deleteRole(parsedRoleId)
       navigate('/roles')
     } catch (error) {
-      setFormError(errorMessage(error, 'Failed to delete role.'))
+      setActionError(errorMessage(error, 'Failed to delete role.'))
       setDeleting(false)
     }
   }
@@ -138,7 +142,7 @@ export default function RoleEditPage() {
         </div>
         {parsedRoleId && state.loading ? <p>Loading role...</p> : null}
         {resolvedError ? <p className="error-text">{resolvedError}</p> : null}
-        {formError ? <p className="error-text">{formError}</p> : null}
+        {validationError ? <p className="error-text">{validationError}</p> : null}
         {!state.loading && !resolvedError && role ? (
           <form className="form-grid" onSubmit={handleSave}>
             <label className="field">
