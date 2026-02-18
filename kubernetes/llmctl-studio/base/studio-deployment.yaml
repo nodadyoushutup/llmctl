@@ -76,7 +76,7 @@ spec:
                 name: llmctl-studio-config
       containers:
         - name: studio
-          image: llmctl-studio-backend:0.0.2
+          image: llmctl-studio-backend:0.0.3
           imagePullPolicy: IfNotPresent
           command:
             - python3

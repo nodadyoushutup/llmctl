@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: celery-worker
-          image: 10.107.62.134:80/llmctl/llmctl-celery-worker:0.0.2@sha256:649470fb9bca5a50cdd6eec2f9a95cf404f058540558e4e11da7b4f2e9dc5af9
+          image: 10.107.62.134:80/llmctl/llmctl-celery-worker:0.0.3
           command:
             - python3
             - app/llmctl-celery-worker/run.py

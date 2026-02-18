@@ -447,6 +447,7 @@ def _sanitize_plan_node_config(
 def _serialize_node_artifact_item(item: NodeArtifact) -> dict[str, Any]:
     payload = _serialize_model(item, include_relationships=False)
     payload["payload"] = _parse_json_dict(item.payload_json)
+    payload["payload_version"] = int(item.payload_version or 1)
     return payload
 
 

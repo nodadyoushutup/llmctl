@@ -304,6 +304,7 @@ def _ensure_schema() -> None:
             "request_id": "VARCHAR(128)",
             "correlation_id": "VARCHAR(128)",
             "payload_json": "TEXT NOT NULL DEFAULT '{}'",
+            "payload_version": "INTEGER NOT NULL DEFAULT 1",
             "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
             "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
         }

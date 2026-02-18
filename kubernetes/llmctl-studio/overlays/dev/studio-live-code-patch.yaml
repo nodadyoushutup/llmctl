@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: studio
-          image: 10.107.62.134:80/llmctl/llmctl-studio-backend:0.0.2@sha256:f026b525b0674b8b6a6f1e39691f6b3c68f515136e3502002cd064c450fd33a8
+          image: 10.107.62.134:80/llmctl/llmctl-studio-backend:0.0.3
           command:
             - python3
             - app/llmctl-studio-backend/run.py

@@ -48,11 +48,13 @@ RUN /app/scripts/install/install-docker-cli.sh \
     && /app/app/llmctl-studio-backend/docker/scripts/setup-user-groups.sh
 
 COPY app/llmctl-studio-backend/requirements.txt /app/app/llmctl-studio-backend/requirements.txt
+COPY app/llmctl-rag/requirements.txt /app/app/llmctl-rag/requirements.txt
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     LLMCTL_STUDIO_USE_GUNICORN=true
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt
+    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-rag/requirements.txt
 
 COPY . /app
 RUN mkdir -p /app/data

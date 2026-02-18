@@ -49,6 +49,10 @@ RUN apt-get update \
     && if [ "${INSTALL_CLAUDE}" = "true" ]; then npm install -g @anthropic-ai/claude-code@latest; fi \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && if [ "${VLLM_VERSION}" = "0.9.0" ] && ! printf '%s' "${TRANSFORMERS_VERSION}" | grep -Eq '^4\.'; then \
+        echo "Unsupported dependency combination: vllm ${VLLM_VERSION} requires transformers 4.x (got ${TRANSFORMERS_VERSION})." >&2; \
+        exit 1; \
+    fi \
     && /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" "transformers==${TRANSFORMERS_VERSION}" \
     && /opt/venv/bin/python3 -c "import torch, vllm; print(torch.__version__); print(vllm.__version__)" \
     && chromium --version \

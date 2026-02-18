@@ -96,6 +96,7 @@ from core.models import (
     NODE_ARTIFACT_RETENTION_MAX_COUNT,
     NODE_ARTIFACT_RETENTION_TTL,
     NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    NODE_ARTIFACT_TYPE_DECISION,
     NODE_ARTIFACT_TYPE_MEMORY,
     NODE_ARTIFACT_TYPE_MILESTONE,
     NODE_ARTIFACT_TYPE_PLAN,
@@ -5527,6 +5528,7 @@ def _serialize_node_artifact_for_flow(node_artifact: NodeArtifact) -> dict[str, 
         "request_id": node_artifact.request_id,
         "correlation_id": node_artifact.correlation_id,
         "payload": payload,
+        "payload_version": node_artifact.payload_version,
         "created_at": _json_safe(node_artifact.created_at),
         "updated_at": _json_safe(node_artifact.updated_at),
     }
@@ -5850,6 +5852,93 @@ def _persist_plan_node_artifact(
         session,
         flowchart_node_id=flowchart_node_id,
         artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+        retention_mode=retention_mode,
+        max_count=max_count,
+    )
+    return _serialize_node_artifact_for_flow(artifact)
+
+
+def _persist_decision_node_artifact(
+    session,
+    *,
+    flowchart_id: int,
+    flowchart_node_id: int,
+    flowchart_run_id: int,
+    flowchart_run_node_id: int,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    output_state: dict[str, Any],
+    routing_state: dict[str, Any],
+) -> dict[str, Any]:
+    retention_mode, ttl_seconds, max_count = _node_artifact_retention_settings(
+        node_config
+    )
+    expires_at: datetime | None = None
+    if retention_mode in {
+        NODE_ARTIFACT_RETENTION_TTL,
+        NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    }:
+        expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
+
+    request_id = str(
+        node_config.get("request_id")
+        or input_context.get("request_id")
+        or output_state.get("request_id")
+        or ""
+    ).strip() or None
+    correlation_id = str(
+        node_config.get("correlation_id")
+        or input_context.get("correlation_id")
+        or output_state.get("correlation_id")
+        or ""
+    ).strip() or None
+
+    node_context = input_context.get("node") if isinstance(input_context.get("node"), dict) else {}
+    execution_index = _parse_optional_int(
+        node_context.get("execution_index"),
+        default=0,
+        minimum=1,
+    ) or None
+
+    evaluations = (
+        output_state.get("evaluations")
+        if isinstance(output_state.get("evaluations"), list)
+        else []
+    )
+    matched_connector_ids = [
+        str(value).strip()
+        for value in (output_state.get("matched_connector_ids") or [])
+        if str(value).strip()
+    ]
+    artifact_payload = {
+        "matched_connector_ids": matched_connector_ids,
+        "evaluations": evaluations,
+        "no_match": _coerce_bool(output_state.get("no_match")),
+        "resolved_route_key": output_state.get("resolved_route_key"),
+        "resolved_route_path": output_state.get("resolved_route_path"),
+        "routing_state": routing_state or {},
+    }
+    artifact = NodeArtifact.create(
+        session,
+        flowchart_id=flowchart_id,
+        flowchart_node_id=flowchart_node_id,
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_type=FLOWCHART_NODE_TYPE_DECISION,
+        artifact_type=NODE_ARTIFACT_TYPE_DECISION,
+        ref_id=None,
+        execution_index=execution_index,
+        variant_key=f"run-{flowchart_run_id}-node-run-{flowchart_run_node_id}",
+        retention_mode=retention_mode,
+        expires_at=expires_at,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        payload_json=_json_dumps(artifact_payload),
+    )
+    _prune_node_artifact_history(
+        session,
+        flowchart_node_id=flowchart_node_id,
+        artifact_type=NODE_ARTIFACT_TYPE_DECISION,
         retention_mode=retention_mode,
         max_count=max_count,
     )
@@ -9479,6 +9568,26 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                 == FLOWCHART_NODE_TYPE_MILESTONE
                             ):
                                 artifact_summary = _persist_milestone_node_artifact(
+                                    session,
+                                    flowchart_id=flowchart_id,
+                                    flowchart_node_id=node_id,
+                                    flowchart_run_id=run_id,
+                                    flowchart_run_node_id=node_run_id,
+                                    node_config=(
+                                        node_spec.get("config")
+                                        if isinstance(node_spec.get("config"), dict)
+                                        else {}
+                                    ),
+                                    input_context=input_context_payload,
+                                    output_state=output_state,
+                                    routing_state=routing_state,
+                                )
+                                output_state["artifact"] = artifact_summary
+                            elif (
+                                str(node_spec.get("node_type") or "").strip().lower()
+                                == FLOWCHART_NODE_TYPE_DECISION
+                            ):
+                                artifact_summary = _persist_decision_node_artifact(
                                     session,
                                     flowchart_id=flowchart_id,
                                     flowchart_node_id=node_id,

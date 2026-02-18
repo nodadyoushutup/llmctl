@@ -1,6 +1,7 @@
 # Specialized Node History And Inspector Plan
 
 Goal: design and implement durable, queryable run history plus specialized inspector behavior for `Memory`, `Plan`, `Milestone`, and `Decision` nodes, including MCP defaults, prebaked action prompts, and detail views that expose node-specific historical artifacts.
+Git workflow constraint: execute all work directly on `main` (no feature branches for this plan).
 
 ## Stage 0 - Requirements Gathering
 
@@ -65,16 +66,16 @@ Goal: design and implement durable, queryable run history plus specialized inspe
 - [x] Stage 6A-6D are parallel specialization tracks mapped to one agent per node family.
 - [x] Stage 6A = Agent A (`Memory`) and Stage 6B = Agent B (`Plan`) are Wave 1 implementation tracks.
 - [x] Stage 6C = Agent C (`Milestone`) and Stage 6D = Agent D (`Decision`) are Wave 2 implementation tracks.
-- [x] Stage 7 merges and reconciles all fan-out branches against shared contracts.
+- [x] Stage 7 merges and reconciles all fan-out workstreams on `main` against shared contracts.
 - [x] Final order is fixed: Stage 8 `Automated Testing`, then Stage 9 `Docs Updates`.
 
 ## Stage 2 - Shared Baseline Schema And Retention Runtime Settings (Sequential)
 
-- [ ] Add unified `node_artifacts` persistence model and migration with ownership links: `flowchart_id`, `flowchart_node_id`, `flowchart_run_id`, optional variant key, and `artifact_type`.
-- [ ] Add artifact payload/version metadata and timestamps to support audit history and evolution.
-- [ ] Add specialized node runtime retention settings in `FlowchartNode.config_json` contract (`retention_mode`, `retention_ttl_seconds`, `retention_max_count`) with defaults (`TTL=3600` seconds).
-- [ ] Implement retention pruning policy service with deterministic precedence when multiple constraints are enabled.
-- [ ] Add DB/service tests for create/list/prune behavior and no-backfill migration policy.
+- [x] Add unified `node_artifacts` persistence model and migration with ownership links: `flowchart_id`, `flowchart_node_id`, `flowchart_run_id`, optional variant key, and `artifact_type`.
+- [x] Add artifact payload/version metadata and timestamps to support audit history and evolution.
+- [x] Add specialized node runtime retention settings in `FlowchartNode.config_json` contract (`retention_mode`, `retention_ttl_seconds`, `retention_max_count`) with defaults (`TTL=3600` seconds).
+- [x] Implement retention pruning policy service with deterministic precedence when multiple constraints are enabled.
+- [x] Add DB/service tests for create/list/prune behavior and no-backfill migration policy.
 
 ## Stage 3 - Shared Baseline API, Socket, And MCP Contract Layer (Sequential)
 
@@ -162,7 +163,7 @@ Goal: design and implement durable, queryable run history plus specialized inspe
 
 Agent A Prompt (Memory):
 ```text
-Work in branch: feat/specialized-node-memory
+Work on `main` only. Do not create a feature branch.
 
 Goal:
 Implement Memory-node specialized behavior end-to-end on top of merged Stage 2-4 baseline.
@@ -200,7 +201,7 @@ Primary files to inspect first:
 
 Agent B Prompt (Plan):
 ```text
-Work in branch: feat/specialized-node-plan
+Work on `main` only. Do not create a feature branch.
 
 Goal:
 Implement Plan-node specialized behavior on top of merged Stage 2-4 baseline.
@@ -238,7 +239,7 @@ Primary files:
 
 Agent C Prompt (Milestone, Wave 2):
 ```text
-Work in branch: feat/specialized-node-milestone
+Work on `main` only. Do not create a feature branch.
 
 Goal:
 Implement Milestone-node specialization after Wave 2 start, on top of merged Stage 2-4 baseline.
@@ -271,7 +272,7 @@ Primary files:
 
 Agent D Prompt (Decision, Wave 2):
 ```text
-Work in branch: feat/specialized-node-decision
+Work on `main` only. Do not create a feature branch.
 
 Goal:
 Implement Decision-node specialization after Wave 2 start, on top of merged Stage 2-4 baseline.

@@ -10,7 +10,7 @@ import time
 import unittest
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -50,6 +50,7 @@ from core.models import (
     Memory,
     NodeArtifact,
     NODE_ARTIFACT_TYPE_MEMORY,
+    NODE_ARTIFACT_TYPE_DECISION,
     NODE_ARTIFACT_TYPE_MILESTONE,
     NODE_ARTIFACT_TYPE_PLAN,
     Plan,
@@ -431,6 +432,30 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 decision_routing.get("matched_connector_ids"),
             )
             self.assertFalse(decision_routing.get("no_match"))
+            decision_artifacts = (
+                session.query(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_run_id == run_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_DECISION,
+                )
+                .order_by(NodeArtifact.id.asc())
+                .all()
+            )
+            self.assertEqual(1, len(decision_artifacts))
+            decision_artifact_payload = json.loads(decision_artifacts[0].payload_json or "{}")
+            self.assertEqual(
+                ["left_connector", "right_connector"],
+                decision_artifact_payload.get("matched_connector_ids"),
+            )
+            self.assertFalse(decision_artifact_payload.get("no_match"))
+            self.assertEqual(
+                {"left_connector", "right_connector"},
+                {
+                    str(item.get("connector_id"))
+                    for item in (decision_artifact_payload.get("evaluations") or [])
+                    if isinstance(item, dict)
+                },
+            )
 
     def test_runtime_decision_no_match_stops_naturally(self) -> None:
         decision_config = {
@@ -531,6 +556,19 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             decision_routing = json.loads(decision_run.routing_state_json or "{}")
             self.assertEqual([], decision_routing.get("matched_connector_ids"))
             self.assertTrue(decision_routing.get("no_match"))
+            decision_artifacts = (
+                session.query(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_run_id == run_id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_DECISION,
+                )
+                .order_by(NodeArtifact.id.asc())
+                .all()
+            )
+            self.assertEqual(1, len(decision_artifacts))
+            decision_artifact_payload = json.loads(decision_artifacts[0].payload_json or "{}")
+            self.assertEqual([], decision_artifact_payload.get("matched_connector_ids"))
+            self.assertTrue(decision_artifact_payload.get("no_match"))
 
     def test_input_context_includes_trigger_and_pulled_source_metadata(self) -> None:
         context = studio_tasks._build_flowchart_input_context(
@@ -2170,6 +2208,7 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 routing_state={"route_key": "next"},
             )
             self.assertEqual("plan", artifact_summary.get("artifact_type"))
+            self.assertEqual(1, artifact_summary.get("payload_version"))
             self.assertEqual("req-plan-1", artifact_summary.get("request_id"))
             self.assertEqual("corr-plan-1", artifact_summary.get("correlation_id"))
             payload = artifact_summary.get("payload") or {}
@@ -2181,6 +2220,189 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             assert persisted_artifact is not None
             self.assertEqual(NODE_ARTIFACT_TYPE_PLAN, persisted_artifact.artifact_type)
             self.assertEqual(plan.id, persisted_artifact.ref_id)
+            self.assertEqual(1, persisted_artifact.payload_version)
+
+    def test_plan_node_artifact_prunes_expired_ttl_entries(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="plan-artifact-ttl-prune")
+            plan = Plan.create(session, name="artifact-plan-ttl")
+            stage = PlanStage.create(session, plan_id=plan.id, name="Stage TTL", position=1)
+            task = PlanTask.create(session, plan_stage_id=stage.id, name="Task TTL", position=1)
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            expired_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=node.id,
+                execution_index=1,
+                status="succeeded",
+                input_context_json="{}",
+                output_state_json="{}",
+            )
+            expired_artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=expired_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+                ref_id=plan.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{expired_run_node.id}",
+                retention_mode="ttl",
+                expires_at=datetime.now(timezone.utc) - timedelta(seconds=10),
+                payload_json=json.dumps({"action": "legacy"}, sort_keys=True),
+            )
+            next_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=node.id,
+                execution_index=2,
+                status="succeeded",
+                input_context_json="{}",
+                output_state_json="{}",
+            )
+            artifact_summary = studio_tasks._persist_plan_node_artifact(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=next_run_node.id,
+                node_config={
+                    "retention_mode": "ttl",
+                    "retention_ttl_seconds": 3600,
+                    "retention_max_count": 25,
+                },
+                input_context={"node": {"execution_index": 2}},
+                output_state={
+                    "action": "complete_plan_item",
+                    "completion_target": {"plan_item_id": task.id},
+                    "touched": {"stage_ids": [stage.id], "task_ids": [task.id]},
+                    "plan": studio_tasks._serialize_plan_for_node(plan),
+                },
+                routing_state={},
+            )
+            remaining = (
+                session.query(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_node_id == node.id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+                )
+                .order_by(NodeArtifact.id.asc())
+                .all()
+            )
+            self.assertEqual(1, len(remaining))
+            self.assertEqual(artifact_summary.get("id"), remaining[0].id)
+            self.assertNotEqual(expired_artifact.id, remaining[0].id)
+
+    def test_plan_node_artifact_prunes_to_max_count(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="plan-artifact-max-prune")
+            plan = Plan.create(session, name="artifact-plan-max")
+            stage = PlanStage.create(session, plan_id=plan.id, name="Stage Max", position=1)
+            task = PlanTask.create(session, plan_stage_id=stage.id, name="Task Max", position=1)
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            for execution_index in (1, 2, 3):
+                run_node = FlowchartRunNode.create(
+                    session,
+                    flowchart_run_id=run.id,
+                    flowchart_node_id=node.id,
+                    execution_index=execution_index,
+                    status="succeeded",
+                    input_context_json="{}",
+                    output_state_json="{}",
+                )
+                studio_tasks._persist_plan_node_artifact(
+                    session,
+                    flowchart_id=flowchart.id,
+                    flowchart_node_id=node.id,
+                    flowchart_run_id=run.id,
+                    flowchart_run_node_id=run_node.id,
+                    node_config={
+                        "retention_mode": "max_count",
+                        "retention_ttl_seconds": 3600,
+                        "retention_max_count": 2,
+                    },
+                    input_context={"node": {"execution_index": execution_index}},
+                    output_state={
+                        "action": "complete_plan_item",
+                        "completion_target": {"plan_item_id": task.id},
+                        "touched": {"stage_ids": [stage.id], "task_ids": [task.id]},
+                        "plan": studio_tasks._serialize_plan_for_node(plan),
+                    },
+                    routing_state={},
+                )
+            remaining = (
+                session.query(NodeArtifact)
+                .where(
+                    NodeArtifact.flowchart_node_id == node.id,
+                    NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
+                )
+                .order_by(NodeArtifact.id.asc())
+                .all()
+            )
+            self.assertEqual(2, len(remaining))
+            self.assertEqual([2, 3], [item.execution_index for item in remaining])
+
+    def test_node_artifact_migration_does_not_backfill_existing_node_runs(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="artifact-no-backfill")
+            plan = Plan.create(session, name="artifact-plan-no-backfill")
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                x=0.0,
+                y=0.0,
+            )
+            run = FlowchartRun.create(session, flowchart_id=flowchart.id, status="completed")
+            run_id = run.id
+            FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=node.id,
+                execution_index=1,
+                status="succeeded",
+                input_context_json=json.dumps({"legacy": True}, sort_keys=True),
+                output_state_json=json.dumps(
+                    {"node_type": FLOWCHART_NODE_TYPE_PLAN, "legacy": True},
+                    sort_keys=True,
+                ),
+                routing_state_json=json.dumps({"route_key": "next"}, sort_keys=True),
+            )
+            before = (
+                session.query(NodeArtifact)
+                .where(NodeArtifact.flowchart_run_id == run_id)
+                .count()
+            )
+            self.assertEqual(0, before)
+
+        core_db.init_db()
+
+        with session_scope() as session:
+            after = (
+                session.query(NodeArtifact)
+                .where(NodeArtifact.flowchart_run_id == run_id)
+                .count()
+            )
+            self.assertEqual(0, after)
 
     def test_run_llm_codex_always_includes_skip_git_repo_check(self) -> None:
         failed = subprocess.CompletedProcess(
@@ -3971,6 +4193,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         items = list_payload.get("items") or []
         self.assertEqual(1, len(items))
         self.assertEqual(NODE_ARTIFACT_TYPE_PLAN, items[0].get("artifact_type"))
+        self.assertEqual(1, items[0].get("payload_version"))
         self.assertEqual([task_id], ((items[0].get("payload") or {}).get("touched") or {}).get("task_ids"))
 
         detail_response = self.client.get(
@@ -3987,6 +4210,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual("corr-plan-detail-1", detail_payload.get("correlation_id"))
         item = detail_payload.get("item") or {}
         self.assertEqual(artifact_id, item.get("id"))
+        self.assertEqual(1, item.get("payload_version"))
         self.assertEqual(task_id, ((item.get("payload") or {}).get("completion_target") or {}).get("plan_item_id"))
 
     def test_plan_artifact_list_invalid_limit_uses_error_envelope(self) -> None:

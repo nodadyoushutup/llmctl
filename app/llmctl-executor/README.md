@@ -77,6 +77,9 @@ Build args:
 - `VLLM_VERSION=<version>` (default `0.9.0`; used when `INSTALL_VLLM=true`)
 - `TRANSFORMERS_VERSION=<version>` (default `4.53.3`; pinned for `vllm==0.9.0` compatibility)
 
+Compatibility note:
+- `vllm==0.9.0` must be paired with `transformers` 4.x (`4.53.3` default). Using `transformers` 5.x causes an `aimv2` registration conflict at import time.
+
 Examples:
 
 ```bash

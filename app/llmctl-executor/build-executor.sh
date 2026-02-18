@@ -22,6 +22,12 @@ if [[ -n "${VERSION_TAG}" ]]; then
   fi
 fi
 
+if [[ "${INSTALL_VLLM}" == "true" && "${VLLM_VERSION}" == "0.9.0" && ! "${TRANSFORMERS_VERSION}" =~ ^4\. ]]; then
+  echo "Unsupported dependency combination: vllm ${VLLM_VERSION} requires transformers 4.x (got ${TRANSFORMERS_VERSION})." >&2
+  echo "Unset TRANSFORMERS_VERSION or set it to 4.53.3 before building." >&2
+  exit 1
+fi
+
 cd "${REPO_ROOT}"
 
 docker build \

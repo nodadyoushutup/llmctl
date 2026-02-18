@@ -175,6 +175,7 @@ MILESTONE_HEALTH_CHOICES = (
 NODE_ARTIFACT_TYPE_MEMORY = "memory"
 NODE_ARTIFACT_TYPE_MILESTONE = "milestone"
 NODE_ARTIFACT_TYPE_PLAN = "plan"
+NODE_ARTIFACT_TYPE_DECISION = "decision"
 NODE_ARTIFACT_RETENTION_FOREVER = "forever"
 NODE_ARTIFACT_RETENTION_TTL = "ttl"
 NODE_ARTIFACT_RETENTION_MAX_COUNT = "max_count"
@@ -1287,6 +1288,9 @@ class NodeArtifact(BaseModel):
         String(128), nullable=True, index=True
     )
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
