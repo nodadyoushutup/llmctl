@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -601,8 +602,20 @@ class KubernetesExecutor:
         return "provider_unavailable"
 
     def _job_name(self, request: ExecutionRequest) -> str:
+        uniqueness_material = (
+            f"{request.node_type}|{request.node_id}|{request.execution_id}|"
+            f"{request.execution_task_id}|{request.execution_index}"
+        )
+        uniqueness_suffix = hashlib.sha1(
+            uniqueness_material.encode("utf-8")
+        ).hexdigest()[:10]
+        task_scope = (
+            f"task-{int(request.execution_task_id)}"
+            if request.execution_task_id is not None
+            else "task-none"
+        )
         return _sanitize_k8s_name(
-            f"llmctl-exec-{request.node_id}-{request.execution_id}"
+            f"llmctl-exec-{request.node_id}-{request.execution_id}-{task_scope}-{uniqueness_suffix}"
         )
 
     def _job_labels(self, request: ExecutionRequest) -> dict[str, str]:

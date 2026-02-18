@@ -17,22 +17,31 @@ import PanelHeader from '../components/PanelHeader'
 import PersistedDetails from '../components/PersistedDetails'
 
 const CHAT_SIDE_COLLAPSED_KEY = 'llmctl-chat-side-collapsed'
+const DETAILS_STORAGE_PREFIX = 'llmctl-ui-details:'
+const CHAT_SESSION_CONTROLS_STORAGE_KEY = 'chat:session-controls'
 
 function parseThreadId(value) {
   const parsed = Number.parseInt(String(value || '').trim(), 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
-function toTitleCase(value, fallback = '') {
-  const cleaned = String(value || '').trim()
-  if (!cleaned) {
-    return fallback
+function readPersistedDetailsOpen(storageKey, defaultOpen = false) {
+  const normalized = String(storageKey || '').trim()
+  if (!normalized) {
+    return Boolean(defaultOpen)
   }
-  return cleaned
-    .split('_')
-    .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1).toLowerCase()}` : ''))
-    .join(' ')
-    .trim()
+  try {
+    const raw = window.localStorage.getItem(`${DETAILS_STORAGE_PREFIX}${normalized}`)
+    if (raw === '1') {
+      return true
+    }
+    if (raw === '0') {
+      return false
+    }
+  } catch {
+    return Boolean(defaultOpen)
+  }
+  return Boolean(defaultOpen)
 }
 
 function threadSummaryFromThread(thread) {
@@ -127,6 +136,9 @@ export default function ChatPage() {
     mcpServerIds: [],
     ragCollections: [],
   })
+  const [isSessionControlsOpen, setIsSessionControlsOpen] = useState(() =>
+    readPersistedDetailsOpen(CHAT_SESSION_CONTROLS_STORAGE_KEY, true),
+  )
   const [isSideCollapsed, setIsSideCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(CHAT_SIDE_COLLAPSED_KEY) === '1'
@@ -247,20 +259,6 @@ export default function ChatPage() {
     setPendingUserMessages([])
     setShowPendingAssistantBubble(false)
   }, [selectedThreadId])
-
-  const sessionModelLabel = useMemo(() => {
-    const modelId = parseThreadId(sessionConfig.modelId)
-    if (!modelId) {
-      return 'default model'
-    }
-    const selectedModel = models.find((item) => Number(item?.id) === modelId)
-    return selectedModel?.name || 'default model'
-  }, [models, sessionConfig.modelId])
-
-  const sessionComplexityLabel = useMemo(
-    () => toTitleCase(sessionConfig.responseComplexity, 'Medium'),
-    [sessionConfig.responseComplexity],
-  )
 
   const usagePercentLabel = useMemo(() => {
     if (!selectedThread || typeof selectedThread !== 'object') {
@@ -595,25 +593,40 @@ export default function ChatPage() {
         />
 
         {selectedThread ? (
-          <PersistedDetails className="chat-session-drawer" storageKey="chat:session-controls" defaultOpen>
+          <PersistedDetails
+            className="chat-session-drawer"
+            storageKey={CHAT_SESSION_CONTROLS_STORAGE_KEY}
+            defaultOpen
+            onToggle={(event) => {
+              setIsSessionControlsOpen(Boolean(event.currentTarget?.open))
+            }}
+          >
             <summary>
               <span className="chat-session-title">controls</span>
               <span className="chat-session-summary">
                 <button
                   type="button"
-                  className="btn-link btn-secondary chat-session-save-header"
-                  disabled={!sessionDirty || savingSession}
+                  className="icon-button chat-session-summary-action"
+                  aria-label={isSessionControlsOpen ? 'Save session controls' : 'Expand session controls'}
+                  title={isSessionControlsOpen ? 'Save session controls' : 'Expand session controls'}
+                  disabled={savingSession || (isSessionControlsOpen && !sessionDirty)}
                   onClick={async (event) => {
                     event.preventDefault()
                     event.stopPropagation()
+                    const summary = event.currentTarget.closest('summary')
+                    const drawer = summary?.parentElement
+                    if (!summary || !drawer) {
+                      return
+                    }
+                    if (!drawer.open) {
+                      summary.click()
+                      return
+                    }
                     await saveSessionControls()
                   }}
                 >
-                  <i className="fa-solid fa-floppy-disk" />
-                  save
+                  <i className={`fa-solid ${isSessionControlsOpen ? 'fa-floppy-disk' : 'fa-angle-down'}`} />
                 </button>
-                <span className="chat-session-pill">{sessionModelLabel}</span>
-                <span className="chat-session-pill">{sessionComplexityLabel}</span>
               </span>
             </summary>
             <div className="chat-session-content">

@@ -191,6 +191,42 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             captured["image"],
         )
 
+    def test_job_name_differs_for_same_node_and_execution_across_task_domains(self) -> None:
+        executor = KubernetesExecutor({})
+        flowchart_request = ExecutionRequest(
+            node_id=1,
+            node_type="start",
+            node_ref_id=None,
+            node_config={},
+            input_context={},
+            execution_id=25,
+            execution_task_id=88,
+            execution_index=1,
+            enabled_providers=set(),
+            default_model_id=None,
+            mcp_server_keys=[],
+        )
+        quick_request = ExecutionRequest(
+            node_id=1,
+            node_type="rag",
+            node_ref_id=None,
+            node_config={},
+            input_context={},
+            execution_id=25,
+            execution_task_id=25,
+            execution_index=1,
+            enabled_providers=set(),
+            default_model_id=None,
+            mcp_server_keys=[],
+        )
+
+        flowchart_job = executor._job_name(flowchart_request)
+        quick_job = executor._job_name(quick_request)
+
+        self.assertNotEqual(flowchart_job, quick_job)
+        self.assertTrue(flowchart_job.startswith("llmctl-exec-"))
+        self.assertTrue(quick_job.startswith("llmctl-exec-"))
+
     def test_cancel_job_uses_grace_then_force(self) -> None:
         executor = KubernetesExecutor({})
         commands: list[list[str]] = []

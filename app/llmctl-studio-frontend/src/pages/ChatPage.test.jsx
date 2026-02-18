@@ -150,6 +150,23 @@ describe('ChatPage', () => {
     expect(sendChatTurn).not.toHaveBeenCalled()
   })
 
+  test('uses the session summary icon to expand when closed and save when open', async () => {
+    window.localStorage.setItem('llmctl-ui-details:chat:session-controls', '0')
+    updateChatThreadConfig.mockResolvedValue({ ok: true, thread: buildRuntimePayload().selected_thread })
+    renderPage()
+
+    const expandButton = await screen.findByRole('button', { name: /expand session controls/i })
+    fireEvent.click(expandButton)
+
+    const saveButton = await screen.findByRole('button', { name: /save session controls/i })
+    fireEvent.change(screen.getByLabelText('complexity'), { target: { value: 'high' } })
+    fireEvent.click(saveButton)
+
+    await waitFor(() => {
+      expect(updateChatThreadConfig).toHaveBeenCalled()
+    })
+  })
+
   test('renders message bubbles without role badge headers', async () => {
     const runtime = buildRuntimePayload()
     runtime.selected_thread.messages = [

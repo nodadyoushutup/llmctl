@@ -35,6 +35,11 @@ patches:
       kind: Deployment
       name: llmctl-studio-backend
       namespace: llmctl
+  - path: studio-frontend-live-code-patch.yaml
+    target:
+      kind: Deployment
+      name: llmctl-studio-frontend
+      namespace: llmctl
   - path: mcp-live-code-patch.yaml
     target:
       kind: Deployment
