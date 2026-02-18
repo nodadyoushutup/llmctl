@@ -60,29 +60,30 @@ Optional result fields (included when available): `usage`, `artifacts`, `warning
 ## Build Image
 
 ```bash
+# Build/refresh base image first (manual policy)
+app/llmctl-executor/build-executor-base.sh
+
+# Then build executor app image from the base
 app/llmctl-executor/build-executor.sh
 ```
 
 Build args:
-- `INSTALL_VLLM=true|false` (default `true`)
-- `INSTALL_CLAUDE=true|false` (default `true`)
 - `IMAGE_NAME=llmctl-executor:latest`
-- `EXECUTOR_BASE_IMAGE=nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04|ubuntu:24.04|vllm/vllm-openai:<tag>`
-- `VENV_SYSTEM_SITE_PACKAGES=true|false` (default `false`)
+- `EXECUTOR_BASE_IMAGE=llmctl-executor-base:latest|<registry>/<project>/llmctl-executor-base:<tag>`
+- `INSTALL_VLLM=true|false` (default `false`; normally `false` because base includes pinned vLLM)
 
 Examples:
 
 ```bash
-# CUDA base + pip install vLLM (default)
+# Default: consume local llmctl-executor-base:latest
 app/llmctl-executor/build-executor.sh
 
-# CPU-only base image (no CUDA libs in image)
-EXECUTOR_BASE_IMAGE=ubuntu:24.04 app/llmctl-executor/build-executor.sh
+# Consume Harbor-published immutable base tag
+EXECUTOR_BASE_IMAGE=127.0.0.1:30082/llmctl/llmctl-executor-base:sha-<gitsha> \
+app/llmctl-executor/build-executor.sh
 
-# Reuse preinstalled vLLM from vllm/vllm-openai image and skip pip install
-EXECUTOR_BASE_IMAGE=vllm/vllm-openai:v0.10.1.1 \
-INSTALL_VLLM=false \
-VENV_SYSTEM_SITE_PACKAGES=true \
+# Fallback: if latest base is unavailable, use a prior known-good base tag
+EXECUTOR_BASE_IMAGE=127.0.0.1:30082/llmctl/llmctl-executor-base:sha-<previous-sha> \
 app/llmctl-executor/build-executor.sh
 ```
 

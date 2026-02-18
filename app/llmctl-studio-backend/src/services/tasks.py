@@ -7551,7 +7551,8 @@ def _execute_flowchart_node_request(
     request: ExecutionRequest,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     init_engine(Config.SQLALCHEMY_DATABASE_URI)
-    init_db()
+    # Per-request executor pods must not run schema DDL; migrations happen in
+    # long-lived services and DDL here can block on active chat transactions.
     return _execute_flowchart_node(
         node_id=request.node_id,
         node_type=request.node_type,

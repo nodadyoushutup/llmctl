@@ -990,6 +990,8 @@ def execute_turn(
                 "selected_mcp_servers": selected_mcp_keys,
             },
         )
+        # Do not hold chat write locks while running health/retrieval/LLM calls.
+        session.commit()
 
         rag_health_error: RAGContractError | None = None
         try:
@@ -1337,9 +1339,12 @@ def execute_turn(
                 request_id=request_id,
                 reason_code=turn.reason_code,
                 error=turn.error_message,
-                rag_health_state=rag_health.state,
-                selected_collections=selected_rag_collections,
-            )
+                    rag_health_state=rag_health.state,
+                    selected_collections=selected_rag_collections,
+                )
+
+        # Close any retrieval/compaction write transaction before LLM execution.
+        session.commit()
 
         model_config = _parse_model_config(model.config_json)
         llm_run_metadata: dict[str, Any] = {}

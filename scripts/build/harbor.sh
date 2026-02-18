@@ -13,7 +13,7 @@ Usage: scripts/build/harbor.sh [options]
 Build and push llmctl images to Harbor.
 
 Defaults:
-  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-executor, llmctl-celery-worker
+  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-executor-base, llmctl-executor, llmctl-celery-worker
   - Pushes tag: latest
   - Project: llmctl
   - Harbor login user: admin
@@ -31,6 +31,7 @@ Options:
   --studio                 Build/push llmctl-studio-backend only
   --frontend               Build/push llmctl-studio-frontend only
   --mcp                    Build/push llmctl-mcp only
+  --executor-base          Build/push llmctl-executor-base only
   --executor               Build/push llmctl-executor only
   --celery-worker          Build/push llmctl-celery-worker only
   --all                    Build/push all images
@@ -104,6 +105,7 @@ DO_LOGIN=true
 SELECTED_STUDIO=false
 SELECTED_FRONTEND=false
 SELECTED_MCP=false
+SELECTED_EXECUTOR_BASE=false
 SELECTED_EXECUTOR=false
 SELECTED_CELERY_WORKER=false
 SELECTION_MADE=false
@@ -174,6 +176,11 @@ while [ $# -gt 0 ]; do
       SELECTION_MADE=true
       shift
       ;;
+    --executor-base)
+      SELECTED_EXECUTOR_BASE=true
+      SELECTION_MADE=true
+      shift
+      ;;
     --executor)
       SELECTED_EXECUTOR=true
       SELECTION_MADE=true
@@ -188,6 +195,7 @@ while [ $# -gt 0 ]; do
       SELECTED_STUDIO=true
       SELECTED_FRONTEND=true
       SELECTED_MCP=true
+      SELECTED_EXECUTOR_BASE=true
       SELECTED_EXECUTOR=true
       SELECTED_CELERY_WORKER=true
       SELECTION_MADE=true
@@ -209,6 +217,7 @@ if [ "${SELECTION_MADE}" = false ]; then
   SELECTED_STUDIO=true
   SELECTED_FRONTEND=true
   SELECTED_MCP=true
+  SELECTED_EXECUTOR_BASE=true
   SELECTED_EXECUTOR=true
   SELECTED_CELERY_WORKER=true
 fi
@@ -418,6 +427,10 @@ fi
 
 if [ "${SELECTED_MCP}" = true ]; then
   build_and_push "llmctl-mcp" "${REPO_ROOT}/app/llmctl-mcp/docker/build-llmctl-mcp.sh"
+fi
+
+if [ "${SELECTED_EXECUTOR_BASE}" = true ]; then
+  build_and_push "llmctl-executor-base" "${REPO_ROOT}/app/llmctl-executor/build-executor-base.sh"
 fi
 
 if [ "${SELECTED_EXECUTOR}" = true ]; then

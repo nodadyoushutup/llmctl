@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import select
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -259,15 +261,27 @@ def load_payload_input(
             ) from exc
 
     if not os.isatty(0):
-        stdin_text = os.read(0, 10_000_000).decode("utf-8", errors="replace").strip()
-        if stdin_text:
-            try:
-                return json.loads(stdin_text)
-            except json.JSONDecodeError as exc:
-                raise PayloadError(
-                    f"stdin payload JSON is invalid: {exc.msg}.",
-                    details={"source": "stdin"},
-                ) from exc
+        should_read_stdin = False
+        try:
+            stdin_mode = os.fstat(0).st_mode
+            if stat.S_ISREG(stdin_mode):
+                should_read_stdin = True
+            else:
+                readable, _, _ = select.select([0], [], [], 0.0)
+                should_read_stdin = bool(readable)
+        except (OSError, ValueError):
+            should_read_stdin = False
+
+        if should_read_stdin:
+            stdin_text = os.read(0, 10_000_000).decode("utf-8", errors="replace").strip()
+            if stdin_text:
+                try:
+                    return json.loads(stdin_text)
+                except json.JSONDecodeError as exc:
+                    raise PayloadError(
+                        f"stdin payload JSON is invalid: {exc.msg}.",
+                        details={"source": "stdin"},
+                    ) from exc
 
     raise PayloadError(
         "No payload provided. Set --payload-file, --payload-json, "
