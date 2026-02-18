@@ -867,6 +867,11 @@ class RagStage9AuditContractTests(StudioDbTestCase):
         self.assertIn("rank", context_row)
         self.assertNotIn("snippet", context_row)
         self.assertNotIn("path", context_row)
+        citation_row = (result.get("citation_records") or [])[0]
+        self.assertEqual("docs", citation_row.get("collection"))
+        self.assertEqual("docs/readme.md", citation_row.get("path"))
+        self.assertEqual("chunk-1", citation_row.get("chunk_id"))
+        self.assertNotIn("snippet", citation_row)
 
         with session_scope() as session:
             rows = session.query(RAGRetrievalAudit).all()

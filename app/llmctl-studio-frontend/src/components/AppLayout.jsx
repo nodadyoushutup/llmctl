@@ -117,7 +117,11 @@ export default function AppLayout({ children }) {
   const active = useMemo(() => findActive(location.pathname), [location.pathname])
   const isFlowchartDetailRoute = useMemo(() => /^\/flowcharts\/\d+\/?$/.test(location.pathname), [location.pathname])
   const isNodeDetailRoute = useMemo(() => /^\/nodes\/\d+\/?$/.test(location.pathname), [location.pathname])
-  const isFixedContentRoute = isFlowchartDetailRoute || isNodeDetailRoute
+  const isFixedListRoute = useMemo(
+    () => /^(\/nodes|\/runs|\/plans|\/milestones|\/memories)\/?$/.test(location.pathname),
+    [location.pathname],
+  )
+  const isFixedContentRoute = isFlowchartDetailRoute || isNodeDetailRoute || isFixedListRoute
   const [expandedBySection, setExpandedBySection] = useState(() => initialExpanded(location.pathname))
 
   const title = active?.item?.label || 'LLMCTL'

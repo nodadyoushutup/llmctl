@@ -301,6 +301,7 @@ def execute_query_contract(
         )
 
     context_rows: list[dict[str, Any]] = []
+    citation_rows: list[dict[str, Any]] = []
     audit_rows: list[dict[str, Any]] = []
     started = time.perf_counter()
     try:
@@ -331,6 +332,17 @@ def execute_query_contract(
                         "text": text,
                         "collection": collection_name or None,
                         "rank": retrieval_rank,
+                    }
+                )
+                citation_rows.append(
+                    {
+                        "provider": RAG_PROVIDER,
+                        "collection": collection_name or None,
+                        "source_id": metadata.get("source_id"),
+                        "path": metadata.get("path"),
+                        "chunk_id": metadata.get("chunk_id"),
+                        "score": metadata.get("score"),
+                        "retrieval_rank": retrieval_rank,
                     }
                 )
                 audit_rows.append(
@@ -383,6 +395,7 @@ def execute_query_contract(
             "retrieved_count": len(context_rows),
             "elapsed_ms": elapsed_ms,
         },
+        "citation_records": citation_rows,
         "synthesis_error": synthesis_error,
         "mode": RAG_FLOWCHART_MODE_QUERY,
         "collections": selected_collections,

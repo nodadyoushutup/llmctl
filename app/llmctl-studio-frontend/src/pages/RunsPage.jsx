@@ -154,7 +154,7 @@ export default function RunsPage() {
   }
 
   return (
-    <section className="stack" aria-label="Runs">
+    <section className="stack workflow-fixed-page" aria-label="Runs">
       <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="Autoruns"
@@ -227,7 +227,7 @@ export default function RunsPage() {
             </div>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           <p className="muted">
             Autoruns are created automatically when you enable autorun on an agent.
           </p>

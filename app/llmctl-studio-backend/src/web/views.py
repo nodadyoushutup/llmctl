@@ -5580,11 +5580,14 @@ def _load_tasks_page(
     agent_id: int | None = None,
     node_type: str | None = None,
     status: str | None = None,
+    flowchart_node_id: int | None = None,
 ) -> tuple[list[AgentTask], int, int, int]:
     with session_scope() as session:
         filters = []
         if agent_id is not None:
             filters.append(AgentTask.agent_id == agent_id)
+        if flowchart_node_id is not None:
+            filters.append(AgentTask.flowchart_node_id == flowchart_node_id)
         if node_type:
             flowchart_kind = f"flowchart_{node_type}"
             kind_filters = [AgentTask.kind == flowchart_kind]
@@ -9956,6 +9959,12 @@ def list_nodes():
         candidate = _parse_positive_int(agent_filter_raw, 0)
         if candidate in filter_agent_ids:
             agent_filter = candidate
+    flowchart_node_filter_raw = request.args.get("flowchart_node_id")
+    flowchart_node_filter = None
+    if flowchart_node_filter_raw:
+        candidate = _parse_positive_int(flowchart_node_filter_raw, 0)
+        if candidate > 0:
+            flowchart_node_filter = candidate
 
     status_order = {
         "pending": 0,
@@ -9982,6 +9991,7 @@ def list_nodes():
         agent_id=agent_filter,
         node_type=node_type_filter,
         status=status_filter,
+        flowchart_node_id=flowchart_node_filter,
     )
     pagination_items = _build_pagination_items(page, total_pages)
     agent_ids = {task.agent_id for task in tasks if task.agent_id is not None}
@@ -10083,6 +10093,7 @@ def list_nodes():
                 "agent_id": agent_filter,
                 "node_type": node_type_filter,
                 "status": status_filter,
+                "flowchart_node_id": flowchart_node_filter,
             },
         }
     return render_template(
@@ -10107,6 +10118,7 @@ def list_nodes():
         agent_filter=agent_filter,
         node_type_filter=node_type_filter,
         status_filter=status_filter,
+        flowchart_node_filter=flowchart_node_filter,
         current_url=current_url,
         summary=summary,
         human_time=_human_time,

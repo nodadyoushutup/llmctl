@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
 import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
 import {
@@ -11,6 +12,7 @@ import {
   deletePlanStage,
   deletePlanTask,
   getPlan,
+  getPlanArtifacts,
   updatePlanStage,
   updatePlanTask,
 } from '../lib/studioApi'
@@ -52,7 +54,7 @@ export default function PlanDetailPage() {
   const { planId } = useParams()
   const parsedPlanId = useMemo(() => parseId(planId), [planId])
 
-  const [state, setState] = useState({ loading: true, payload: null, error: '' })
+  const [state, setState] = useState({ loading: true, payload: null, artifactsPayload: null, error: '' })
   const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
   const [openPanels, setOpenPanels] = useState({})
@@ -63,7 +65,7 @@ export default function PlanDetailPage() {
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!parsedPlanId) {
-      setState({ loading: false, payload: null, error: 'Invalid plan id.' })
+      setState({ loading: false, payload: null, artifactsPayload: null, error: 'Invalid plan id.' })
       return
     }
     if (!silent) {
@@ -71,11 +73,18 @@ export default function PlanDetailPage() {
     }
     try {
       const payload = await getPlan(parsedPlanId)
-      setState({ loading: false, payload, error: '' })
+      let artifactsPayload = { items: [] }
+      try {
+        artifactsPayload = await getPlanArtifacts(parsedPlanId, { limit: 25 })
+      } catch {
+        artifactsPayload = { items: [] }
+      }
+      setState({ loading: false, payload, artifactsPayload, error: '' })
     } catch (error) {
       setState((current) => ({
         loading: false,
         payload: silent ? current.payload : null,
+        artifactsPayload: silent ? current.artifactsPayload : null,
         error: errorMessage(error, 'Failed to load plan detail.'),
       }))
     }
@@ -86,7 +95,11 @@ export default function PlanDetailPage() {
   }, [refresh])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
+  const artifactsPayload = state.artifactsPayload && typeof state.artifactsPayload === 'object'
+    ? state.artifactsPayload
+    : null
   const plan = payload && payload.plan && typeof payload.plan === 'object' ? payload.plan : null
+  const artifacts = artifactsPayload && Array.isArray(artifactsPayload.items) ? artifactsPayload.items : []
   const stages = plan && Array.isArray(plan.stages) ? plan.stages : []
   const summary = payload && payload.summary && typeof payload.summary === 'object' ? payload.summary : null
 
@@ -350,6 +363,15 @@ export default function PlanDetailPage() {
                 <dd>{plan.updated_at || '-'}</dd>
               </div>
             </dl>
+
+            <div className="subcard" style={{ marginTop: '20px' }}>
+              <p className="eyebrow">artifact history</p>
+              <ArtifactHistoryTable
+                artifacts={artifacts}
+                emptyMessage="No artifact history yet for this plan."
+                hrefForArtifact={(artifact) => `/plans/${plan.id}/artifacts/${artifact.id}`}
+              />
+            </div>
           </>
         ) : null}
       </article>

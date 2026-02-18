@@ -373,6 +373,7 @@ export function getNodes({
   agentId = '',
   nodeType = '',
   status = '',
+  flowchartNodeId = '',
 } = {}) {
   return requestJson(
     appendQuery('/nodes', {
@@ -381,6 +382,7 @@ export function getNodes({
       agent_id: agentId,
       node_type: nodeType,
       status,
+      flowchart_node_id: flowchartNodeId,
     }),
   )
 }
@@ -746,6 +748,51 @@ export function getMilestoneEdit(milestoneId) {
   return requestJson(`/milestones/${parsedMilestoneId}/edit`)
 }
 
+export function getMilestoneArtifacts(
+  milestoneId,
+  {
+    limit = 50,
+    offset = 0,
+    flowchartId = null,
+    flowchartNodeId = null,
+    flowchartRunId = null,
+    flowchartRunNodeId = null,
+    order = 'desc',
+  } = {},
+) {
+  const parsedMilestoneId = parsePositiveId(milestoneId, 'milestoneId')
+  const params = {}
+  if (Number.isFinite(limit) && limit > 0) {
+    params.limit = Math.floor(limit)
+  }
+  if (Number.isFinite(offset) && offset >= 0) {
+    params.offset = Math.floor(offset)
+  }
+  if (flowchartId != null && String(flowchartId).trim() !== '') {
+    params.flowchart_id = parsePositiveId(flowchartId, 'flowchartId')
+  }
+  if (flowchartNodeId != null && String(flowchartNodeId).trim() !== '') {
+    params.flowchart_node_id = parsePositiveId(flowchartNodeId, 'flowchartNodeId')
+  }
+  if (flowchartRunId != null && String(flowchartRunId).trim() !== '') {
+    params.flowchart_run_id = parsePositiveId(flowchartRunId, 'flowchartRunId')
+  }
+  if (flowchartRunNodeId != null && String(flowchartRunNodeId).trim() !== '') {
+    params.flowchart_run_node_id = parsePositiveId(flowchartRunNodeId, 'flowchartRunNodeId')
+  }
+  const normalizedOrder = String(order || 'desc').trim().toLowerCase()
+  if (normalizedOrder === 'asc' || normalizedOrder === 'desc') {
+    params.order = normalizedOrder
+  }
+  return requestJson(appendQuery(`/milestones/${parsedMilestoneId}/artifacts`, params))
+}
+
+export function getMilestoneArtifact(milestoneId, artifactId) {
+  const parsedMilestoneId = parsePositiveId(milestoneId, 'milestoneId')
+  const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
+  return requestJson(`/milestones/${parsedMilestoneId}/artifacts/${parsedArtifactId}`)
+}
+
 export function updateMilestone(
   milestoneId,
   {
@@ -816,6 +863,51 @@ export function getMemoryHistory(memoryId, { page = 1, perPage = 20 } = {}) {
       per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
     }),
   )
+}
+
+export function getMemoryArtifacts(
+  memoryId,
+  {
+    limit = 50,
+    offset = 0,
+    flowchartId = null,
+    flowchartNodeId = null,
+    flowchartRunId = null,
+    flowchartRunNodeId = null,
+    order = 'desc',
+  } = {},
+) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  const params = {}
+  if (Number.isFinite(limit) && limit > 0) {
+    params.limit = Math.floor(limit)
+  }
+  if (Number.isFinite(offset) && offset >= 0) {
+    params.offset = Math.floor(offset)
+  }
+  if (flowchartId != null && String(flowchartId).trim() !== '') {
+    params.flowchart_id = parsePositiveId(flowchartId, 'flowchartId')
+  }
+  if (flowchartNodeId != null && String(flowchartNodeId).trim() !== '') {
+    params.flowchart_node_id = parsePositiveId(flowchartNodeId, 'flowchartNodeId')
+  }
+  if (flowchartRunId != null && String(flowchartRunId).trim() !== '') {
+    params.flowchart_run_id = parsePositiveId(flowchartRunId, 'flowchartRunId')
+  }
+  if (flowchartRunNodeId != null && String(flowchartRunNodeId).trim() !== '') {
+    params.flowchart_run_node_id = parsePositiveId(flowchartRunNodeId, 'flowchartRunNodeId')
+  }
+  const normalizedOrder = String(order || 'desc').trim().toLowerCase()
+  if (normalizedOrder === 'asc' || normalizedOrder === 'desc') {
+    params.order = normalizedOrder
+  }
+  return requestJson(appendQuery(`/memories/${parsedMemoryId}/artifacts`, params))
+}
+
+export function getMemoryArtifact(memoryId, artifactId) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
+  return requestJson(`/memories/${parsedMemoryId}/artifacts/${parsedArtifactId}`)
 }
 
 export function getMemoryEdit(memoryId) {

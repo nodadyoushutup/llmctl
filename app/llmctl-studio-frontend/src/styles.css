@@ -525,12 +525,34 @@ select[size]:not([size='1']) {
   flex-direction: column;
 }
 
+.workflow-fixed-page {
+  flex: 1;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.workflow-fixed-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
 .workflow-list-table-shell {
   margin-top: 20px;
   flex: 1;
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.workflow-fixed-panel-body .workflow-list-table-shell {
+  margin-top: 0;
 }
 
 .card h2 {

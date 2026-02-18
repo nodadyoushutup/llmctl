@@ -3,7 +3,8 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import { HttpError } from '../lib/httpClient'
-import { deleteMilestone, getMilestone } from '../lib/studioApi'
+import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
+import { deleteMilestone, getMilestone, getMilestoneArtifacts } from '../lib/studioApi'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -27,7 +28,7 @@ export default function MilestoneDetailPage() {
   const navigate = useNavigate()
   const { milestoneId } = useParams()
   const parsedMilestoneId = useMemo(() => parseId(milestoneId), [milestoneId])
-  const [state, setState] = useState({ loading: true, payload: null, error: '' })
+  const [state, setState] = useState({ loading: true, payload: null, artifactsPayload: null, error: '' })
   const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
 
@@ -36,15 +37,31 @@ export default function MilestoneDetailPage() {
       return
     }
     let cancelled = false
-    getMilestone(parsedMilestoneId)
-      .then((payload) => {
+    Promise.allSettled([
+      getMilestone(parsedMilestoneId),
+      getMilestoneArtifacts(parsedMilestoneId, { limit: 25 }),
+    ])
+      .then(([payloadResult, artifactsResult]) => {
+        if (payloadResult.status !== 'fulfilled') {
+          throw payloadResult.reason
+        }
         if (!cancelled) {
-          setState({ loading: false, payload, error: '' })
+          setState({
+            loading: false,
+            payload: payloadResult.value,
+            artifactsPayload: artifactsResult.status === 'fulfilled' ? artifactsResult.value : { items: [] },
+            error: '',
+          })
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load milestone.') })
+          setState({
+            loading: false,
+            payload: null,
+            artifactsPayload: null,
+            error: errorMessage(error, 'Failed to load milestone.'),
+          })
         }
       })
     return () => {
@@ -57,6 +74,10 @@ export default function MilestoneDetailPage() {
   const milestone = payload && payload.milestone && typeof payload.milestone === 'object'
     ? payload.milestone
     : null
+  const artifactsPayload = state.artifactsPayload && typeof state.artifactsPayload === 'object'
+    ? state.artifactsPayload
+    : null
+  const artifacts = artifactsPayload && Array.isArray(artifactsPayload.items) ? artifactsPayload.items : []
 
   async function handleDelete() {
     if (!milestone || !window.confirm('Delete this milestone?')) {
@@ -176,6 +197,15 @@ export default function MilestoneDetailPage() {
                   {milestone.links || 'No links added.'}
                 </p>
               </div>
+            </div>
+
+            <div className="subcard" style={{ marginTop: '20px' }}>
+              <p className="eyebrow">artifact history</p>
+              <ArtifactHistoryTable
+                artifacts={artifacts}
+                emptyMessage="No artifact history yet for this milestone."
+                hrefForArtifact={(artifact) => `/milestones/${milestone.id}/artifacts/${artifact.id}`}
+              />
             </div>
           </>
         ) : null}

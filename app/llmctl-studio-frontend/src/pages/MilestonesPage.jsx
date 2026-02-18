@@ -80,7 +80,7 @@ export default function MilestonesPage() {
   }
 
   return (
-    <section className="stack" aria-label="Milestones">
+    <section className="stack workflow-fixed-page" aria-label="Milestones">
       <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="Milestones"
@@ -137,7 +137,7 @@ export default function MilestonesPage() {
             </nav>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           {state.loading ? <p>Loading milestones...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {!state.loading && !state.error && milestones.length === 0 ? (

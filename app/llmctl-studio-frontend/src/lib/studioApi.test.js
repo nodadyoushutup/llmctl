@@ -46,6 +46,8 @@ import {
   getAttachment,
   getAttachments,
   getMemory,
+  getMemoryArtifact,
+  getMemoryArtifacts,
   getMemoryEdit,
   getMemoryHistory,
   getMemoryMeta,
@@ -84,6 +86,8 @@ import {
   getSettingsProvider,
   getSettingsRuntime,
   getMilestone,
+  getMilestoneArtifact,
+  getMilestoneArtifacts,
   getMilestoneEdit,
   getMilestoneMeta,
   getMilestones,
@@ -390,7 +394,14 @@ describe('studioApi', () => {
 
   test('stage 3 nodes endpoints map to expected api paths', () => {
     getNodes()
-    getNodes({ page: 3, perPage: 50, agentId: 7, nodeType: 'task', status: 'running' })
+    getNodes({
+      page: 3,
+      perPage: 50,
+      agentId: 7,
+      nodeType: 'task',
+      status: 'running',
+      flowchartNodeId: 11,
+    })
     getNode(8)
     getNodeMeta()
     createNode({
@@ -406,7 +417,7 @@ describe('studioApi', () => {
     removeNodeAttachment(8, 12)
 
     expect(requestJson).toHaveBeenNthCalledWith(1, '/nodes?page=1&per_page=10')
-    expect(requestJson).toHaveBeenNthCalledWith(2, '/nodes?page=3&per_page=50&agent_id=7&node_type=task&status=running')
+    expect(requestJson).toHaveBeenNthCalledWith(2, '/nodes?page=3&per_page=50&agent_id=7&node_type=task&status=running&flowchart_node_id=11')
     expect(requestJson).toHaveBeenNthCalledWith(3, '/nodes/8')
     expect(requestJson).toHaveBeenNthCalledWith(4, '/nodes/new')
     expect(requestJson).toHaveBeenNthCalledWith(5, '/nodes/new', {
@@ -581,12 +592,32 @@ describe('studioApi', () => {
     getMilestoneMeta()
     getMilestone(3)
     getMilestoneEdit(3)
+    getMilestoneArtifacts(3, {
+      limit: 25,
+      offset: 5,
+      flowchartId: 9,
+      flowchartNodeId: 7,
+      flowchartRunId: 11,
+      flowchartRunNodeId: 13,
+      order: 'asc',
+    })
+    getMilestoneArtifact(3, 17)
     updateMilestone(3, { name: 'M', progressPercent: 10 })
     deleteMilestone(3)
     getMemories()
     getMemoryMeta()
     getMemory(4)
     getMemoryHistory(4, { page: 2, perPage: 15 })
+    getMemoryArtifacts(4, {
+      limit: 25,
+      offset: 5,
+      flowchartId: 9,
+      flowchartNodeId: 7,
+      flowchartRunId: 11,
+      flowchartRunNodeId: 13,
+      order: 'asc',
+    })
+    getMemoryArtifact(4, 18)
     getMemoryEdit(4)
     updateMemory(4, { description: 'Updated memory' })
     deleteMemory(4)
@@ -595,7 +626,12 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(2, '/milestones/new')
     expect(requestJson).toHaveBeenNthCalledWith(3, '/milestones/3')
     expect(requestJson).toHaveBeenNthCalledWith(4, '/milestones/3/edit')
-    expect(requestJson).toHaveBeenNthCalledWith(5, '/milestones/3', {
+    expect(requestJson).toHaveBeenNthCalledWith(
+      5,
+      '/milestones/3/artifacts?limit=25&offset=5&flowchart_id=9&flowchart_node_id=7&flowchart_run_id=11&flowchart_run_node_id=13&order=asc',
+    )
+    expect(requestJson).toHaveBeenNthCalledWith(6, '/milestones/3/artifacts/17')
+    expect(requestJson).toHaveBeenNthCalledWith(7, '/milestones/3', {
       method: 'POST',
       body: {
         name: 'M',
@@ -613,17 +649,22 @@ describe('studioApi', () => {
         latest_update: '',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(6, '/milestones/3/delete', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(7, '/memories?page=1&per_page=20')
-    expect(requestJson).toHaveBeenNthCalledWith(8, '/memories/new')
-    expect(requestJson).toHaveBeenNthCalledWith(9, '/memories/4')
-    expect(requestJson).toHaveBeenNthCalledWith(10, '/memories/4/history?page=2&per_page=15')
-    expect(requestJson).toHaveBeenNthCalledWith(11, '/memories/4/edit')
-    expect(requestJson).toHaveBeenNthCalledWith(12, '/memories/4', {
+    expect(requestJson).toHaveBeenNthCalledWith(8, '/milestones/3/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(9, '/memories?page=1&per_page=20')
+    expect(requestJson).toHaveBeenNthCalledWith(10, '/memories/new')
+    expect(requestJson).toHaveBeenNthCalledWith(11, '/memories/4')
+    expect(requestJson).toHaveBeenNthCalledWith(12, '/memories/4/history?page=2&per_page=15')
+    expect(requestJson).toHaveBeenNthCalledWith(
+      13,
+      '/memories/4/artifacts?limit=25&offset=5&flowchart_id=9&flowchart_node_id=7&flowchart_run_id=11&flowchart_run_node_id=13&order=asc',
+    )
+    expect(requestJson).toHaveBeenNthCalledWith(14, '/memories/4/artifacts/18')
+    expect(requestJson).toHaveBeenNthCalledWith(15, '/memories/4/edit')
+    expect(requestJson).toHaveBeenNthCalledWith(16, '/memories/4', {
       method: 'POST',
       body: { description: 'Updated memory' },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(13, '/memories/4/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(17, '/memories/4/delete', { method: 'POST' })
   })
 
   test('stage 5 flowchart endpoints map to expected api paths', () => {

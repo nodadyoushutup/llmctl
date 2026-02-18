@@ -97,6 +97,14 @@ function stageEntryLabel(stage, index) {
   return `Stage ${index + 1}`
 }
 
+export function nodeHistoryHref(task) {
+  const flowchartNodeId = Number.parseInt(String(task?.flowchart_node_id || ''), 10)
+  if (Number.isInteger(flowchartNodeId) && flowchartNodeId > 0) {
+    return `/nodes?flowchart_node_id=${flowchartNodeId}`
+  }
+  return '/nodes'
+}
+
 export function stageLogEmptyMessage(stage, index) {
   const label = stageEntryLabel(stage, index).trim().toLowerCase()
   if (label === 'rag indexing' || label === 'rag delta indexing') {
@@ -134,7 +142,7 @@ export default function NodeDetailPage() {
   const [busy, setBusy] = useState(false)
   const [busyAttachmentId, setBusyAttachmentId] = useState(null)
   const [expandedStageKey, setExpandedStageKey] = useState('')
-  const [expandedLeftSectionKey, setExpandedLeftSectionKey] = useState('prompt')
+  const [expandedLeftSectionKey, setExpandedLeftSectionKey] = useState('output')
   const [leftPanelExpanded, setLeftPanelExpanded] = useState(false)
   const stageLogRefs = useRef(new Map())
   const stageLogPinnedBottomRef = useRef(new Map())
@@ -230,6 +238,7 @@ export default function NodeDetailPage() {
   const active = canCancel(task?.status)
   const status = nodeStatusMeta(task?.status)
   const hasLeftHeaderMessage = state.loading || Boolean(state.error) || Boolean(actionError)
+  const nodeHistoryLink = nodeHistoryHref(task)
   const detailItems = useMemo(() => {
     if (!task) {
       return []
@@ -264,8 +273,8 @@ export default function NodeDetailPage() {
   }, [agent, task])
   const leftSectionEntries = useMemo(
     () => [
-      { key: 'prompt', label: 'Prompt' },
       { key: 'output', label: 'Output' },
+      { key: 'prompt', label: 'Prompt' },
       { key: 'details', label: 'Details' },
       { key: 'context', label: 'Context' },
     ],
@@ -471,7 +480,7 @@ export default function NodeDetailPage() {
                 >
                   <i className={`fa-solid ${leftPanelExpanded ? 'fa-compress' : 'fa-expand'}`} />
                 </button>
-                <Link to="/nodes" className="icon-button" aria-label="All nodes" title="All nodes">
+                <Link to={nodeHistoryLink} className="icon-button" aria-label="Node history" title="Node history">
                   <i className="fa-solid fa-list" />
                 </Link>
                 <button

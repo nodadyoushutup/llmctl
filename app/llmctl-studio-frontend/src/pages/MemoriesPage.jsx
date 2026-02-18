@@ -88,7 +88,7 @@ export default function MemoriesPage() {
   }
 
   return (
-    <section className="stack" aria-label="Memories">
+    <section className="stack workflow-fixed-page" aria-label="Memories">
       <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="Memories"
@@ -145,7 +145,7 @@ export default function MemoriesPage() {
             </nav>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           {state.loading ? <p>Loading memories...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {!state.loading && !state.error && memories.length === 0 ? (

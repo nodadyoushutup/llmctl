@@ -15,7 +15,7 @@ function renderPage(initialEntry = '/memories/7') {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/memories/:memoryId" element={<MemoryDetailPage />} />
-        <Route path="/flowcharts/runs/:runId" element={<p>Run detail</p>} />
+        <Route path="/memories/:memoryId/artifacts/:artifactId" element={<p>Artifact detail</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -62,9 +62,9 @@ describe('MemoryDetailPage', () => {
 
     const historyRow = container.querySelector('tr.table-row-link')
     expect(historyRow).toBeTruthy()
-    expect(historyRow?.getAttribute('data-href')).toBe('/flowcharts/runs/42')
+    expect(historyRow?.getAttribute('data-href')).toBe('/memories/7/artifacts/55')
 
     fireEvent.click(historyRow)
-    expect(await screen.findByText('Run detail')).toBeInTheDocument()
+    expect(await screen.findByText('Artifact detail')).toBeInTheDocument()
   })
 })

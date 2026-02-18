@@ -34,6 +34,7 @@ import MemoriesPage from './pages/MemoriesPage'
 import MemoryDetailPage from './pages/MemoryDetailPage'
 import MemoryEditPage from './pages/MemoryEditPage'
 import MemoryNewPage from './pages/MemoryNewPage'
+import ArtifactDetailPage from './pages/ArtifactDetailPage'
 import FlowchartsPage from './pages/FlowchartsPage'
 import FlowchartNewPage from './pages/FlowchartNewPage'
 import FlowchartDetailPage from './pages/FlowchartDetailPage'
@@ -111,14 +112,17 @@ export default function App() {
         <Route path="/plans" element={<AppLayout><PlansPage /></AppLayout>} />
         <Route path="/plans/new" element={<AppLayout><PlanNewPage /></AppLayout>} />
         <Route path="/plans/:planId" element={<AppLayout><PlanDetailPage /></AppLayout>} />
+        <Route path="/plans/:planId/artifacts/:artifactId" element={<AppLayout><ArtifactDetailPage /></AppLayout>} />
         <Route path="/plans/:planId/edit" element={<AppLayout><PlanEditPage /></AppLayout>} />
         <Route path="/milestones" element={<AppLayout><MilestonesPage /></AppLayout>} />
         <Route path="/milestones/new" element={<AppLayout><MilestoneNewPage /></AppLayout>} />
         <Route path="/milestones/:milestoneId" element={<AppLayout><MilestoneDetailPage /></AppLayout>} />
+        <Route path="/milestones/:milestoneId/artifacts/:artifactId" element={<AppLayout><ArtifactDetailPage /></AppLayout>} />
         <Route path="/milestones/:milestoneId/edit" element={<AppLayout><MilestoneEditPage /></AppLayout>} />
         <Route path="/memories" element={<AppLayout><MemoriesPage /></AppLayout>} />
         <Route path="/memories/new" element={<AppLayout><MemoryNewPage /></AppLayout>} />
         <Route path="/memories/:memoryId" element={<AppLayout><MemoryDetailPage /></AppLayout>} />
+        <Route path="/memories/:memoryId/artifacts/:artifactId" element={<AppLayout><ArtifactDetailPage /></AppLayout>} />
         <Route path="/memories/:memoryId/edit" element={<AppLayout><MemoryEditPage /></AppLayout>} />
         <Route path="/flowcharts" element={<AppLayout><FlowchartsPage /></AppLayout>} />
         <Route path="/flowcharts/new" element={<AppLayout><FlowchartNewPage /></AppLayout>} />

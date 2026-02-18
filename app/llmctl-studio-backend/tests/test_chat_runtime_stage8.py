@@ -479,6 +479,8 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
         self.assertTrue(result.ok)
         prompt = captured_prompt[0]
         self.assertIn("retrieved context line", prompt)
+        self.assertIn("Retrieved source map:", prompt)
+        self.assertIn("collection=docs", prompt)
         self.assertNotIn("sensitive citation snippet", prompt)
 
         with session_scope() as session:
@@ -488,6 +490,56 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
             self.assertIsNotNone(turn)
             citation_payload = json.loads(turn.citation_metadata_json or "[]") if turn else []
             self.assertEqual(1, len(citation_payload))
+
+    def test_explicit_file_hint_scopes_retrieval_context_for_selected_collection(self) -> None:
+        model = self._create_model(name="Scoped Retrieval Model")
+        thread = create_thread(
+            title="Scoped Retrieval",
+            model_id=model.id,
+            rag_collections=["drive_2"],
+        )
+        thread_id = int(thread["id"])
+
+        rag_client = StubRAGContractClient()
+        rag_client.health_result.state = RAG_HEALTH_CONFIGURED_HEALTHY
+        rag_client.retrieval_response.retrieval_context = [
+            "Context from an unrelated document.",
+            "Context for the newly indexed delta probe.",
+        ]
+        rag_client.retrieval_response.citation_records = [
+            {
+                "collection": "drive_2",
+                "path": "sample_ocr_vector_points_demo.pdf",
+                "retrieval_rank": 1,
+            },
+            {
+                "collection": "drive_2",
+                "path": "sample_delta_index_probe_20260218_062251Z.pdf",
+                "retrieval_rank": 2,
+            },
+        ]
+
+        captured_prompt: list[str] = []
+
+        def _fake_llm(*args, **kwargs):
+            captured_prompt.append(str(args[1] if len(args) > 1 else kwargs.get("prompt", "")))
+            return subprocess.CompletedProcess(["stub"], 0, "answer", "")
+
+        with patch("chat.runtime._run_llm", side_effect=_fake_llm):
+            result = execute_turn(
+                thread_id=thread_id,
+                message=(
+                    "What does sample_delta_index_probe_20260218_062251Z.pdf say?"
+                ),
+                rag_client=rag_client,
+            )
+
+        self.assertTrue(result.ok)
+        prompt = captured_prompt[0]
+        self.assertIn("Context for the newly indexed delta probe.", prompt)
+        self.assertNotIn("Context from an unrelated document.", prompt)
+        self.assertIn("sample_delta_index_probe_20260218_062251Z.pdf", prompt)
+        self.assertNotIn("sample_ocr_vector_points_demo.pdf", prompt)
 
     def test_mcp_failure_propagates_turn_failure(self) -> None:
         model = self._create_model(name="MCP Model")

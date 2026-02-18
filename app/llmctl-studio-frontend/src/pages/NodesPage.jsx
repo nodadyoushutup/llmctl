@@ -59,6 +59,8 @@ export default function NodesPage() {
   const agentId = searchParams.get('agent_id') || ''
   const nodeType = searchParams.get('node_type') || ''
   const status = searchParams.get('status') || ''
+  const flowchartNodeIdRaw = searchParams.get('flowchart_node_id') || ''
+  const flowchartNodeId = parsePositiveInt(flowchartNodeIdRaw, 0)
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [actionError, setActionError] = useFlashState('error')
@@ -75,6 +77,7 @@ export default function NodesPage() {
         agentId,
         nodeType,
         status,
+        flowchartNodeId: flowchartNodeId > 0 ? flowchartNodeId : '',
       })
       setState({ loading: false, payload, error: '' })
     } catch (error) {
@@ -84,7 +87,7 @@ export default function NodesPage() {
         error: errorMessage(error, 'Failed to load nodes.'),
       }))
     }
-  }, [agentId, nodeType, page, perPage, status])
+  }, [agentId, flowchartNodeId, nodeType, page, perPage, status])
 
   useEffect(() => {
     refresh()
@@ -104,6 +107,9 @@ export default function NodesPage() {
   const filters = payload && payload.filters && typeof payload.filters === 'object'
     ? payload.filters
     : {}
+  const resolvedFlowchartNodeId = Number.isInteger(filters.flowchart_node_id) && filters.flowchart_node_id > 0
+    ? String(filters.flowchart_node_id)
+    : (flowchartNodeId > 0 ? String(flowchartNodeId) : '')
 
   const totalPages = Number.isInteger(pagination?.total_pages) && pagination.total_pages > 0
     ? pagination.total_pages
@@ -195,7 +201,7 @@ export default function NodesPage() {
   const statusOptions = Array.isArray(filterOptions.status) ? filterOptions.status : []
 
   return (
-    <section className="stack" aria-label="Nodes">
+    <section className="stack workflow-fixed-page" aria-label="Nodes">
       <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="Nodes"
@@ -252,7 +258,7 @@ export default function NodesPage() {
             </nav>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           <p className="muted">
             Queued, running, and completed node execution records.
           </p>
@@ -315,6 +321,17 @@ export default function NodesPage() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="toolbar-group">
+              <label htmlFor="filter-flowchart-node">Flowchart node</label>
+              <input
+                id="filter-flowchart-node"
+                type="number"
+                min="1"
+                value={resolvedFlowchartNodeId}
+                onChange={(event) => updateParams({ flowchart_node_id: event.target.value, page: 1 })}
+                placeholder="Any"
+              />
             </div>
           </div>
           {!state.loading && !state.error ? (

@@ -158,6 +158,14 @@ CHAT_RESPONSE_COMPLEXITY_LABELS = {
     CHAT_RESPONSE_COMPLEXITY_HIGH: "High",
     CHAT_RESPONSE_COMPLEXITY_EXTRA_HIGH: "Extra High",
 }
+CHAT_SOURCE_HINT_FILE_PATTERN = re.compile(
+    r"\b[a-z0-9][a-z0-9._-]*\.[a-z0-9]{2,8}\b",
+    re.IGNORECASE,
+)
+CHAT_SOURCE_HINT_PROBE_PATTERN = re.compile(
+    r"\bdelta-probe-[a-z0-9-]+\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -849,10 +857,122 @@ def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
     return lines
 
 
+def _extract_source_hints(message: str) -> list[str]:
+    text = str(message or "")
+    tokens: list[str] = []
+    tokens.extend(CHAT_SOURCE_HINT_FILE_PATTERN.findall(text))
+    tokens.extend(CHAT_SOURCE_HINT_PROBE_PATTERN.findall(text))
+    lowered = [token.strip().lower() for token in tokens if token.strip()]
+    return _unique_ordered(lowered)
+
+
+def _narrow_retrieval_context(
+    *,
+    message: str,
+    retrieval_context: list[str],
+    citation_records: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
+    hints = _extract_source_hints(message)
+    if not hints:
+        return retrieval_context, citation_records, {
+            "source_hint_tokens": [],
+            "scope_applied": False,
+            "matched_ranks": [],
+        }
+
+    matched_ranks: set[int] = set()
+    for index, record in enumerate(citation_records, start=1):
+        if not isinstance(record, dict):
+            continue
+        record_parts = [
+            str(record.get("collection") or "").strip().lower(),
+            str(record.get("path") or "").strip().lower(),
+            str(record.get("source_id") or "").strip().lower(),
+            str(record.get("chunk_id") or "").strip().lower(),
+        ]
+        haystack = " ".join(part for part in record_parts if part)
+        if not haystack:
+            continue
+        if not any(token in haystack for token in hints):
+            continue
+        try:
+            rank = int(record.get("retrieval_rank"))
+        except (TypeError, ValueError):
+            rank = index
+        if rank > 0:
+            matched_ranks.add(rank)
+
+    if not matched_ranks:
+        for index, context_item in enumerate(retrieval_context, start=1):
+            lowered = str(context_item or "").strip().lower()
+            if lowered and any(token in lowered for token in hints):
+                matched_ranks.add(index)
+
+    if not matched_ranks:
+        return retrieval_context, citation_records, {
+            "source_hint_tokens": hints,
+            "scope_applied": False,
+            "matched_ranks": [],
+        }
+
+    filtered_context = [
+        item
+        for index, item in enumerate(retrieval_context, start=1)
+        if index in matched_ranks
+    ]
+    filtered_citations: list[dict[str, Any]] = []
+    for index, record in enumerate(citation_records, start=1):
+        if not isinstance(record, dict):
+            continue
+        try:
+            rank = int(record.get("retrieval_rank"))
+        except (TypeError, ValueError):
+            rank = index
+        if rank in matched_ranks:
+            filtered_citations.append(record)
+
+    return filtered_context, filtered_citations, {
+        "source_hint_tokens": hints,
+        "scope_applied": True,
+        "matched_ranks": sorted(matched_ranks),
+    }
+
+
+def _citation_source_map_lines(citation_records: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for index, record in enumerate(citation_records, start=1):
+        if not isinstance(record, dict):
+            continue
+        try:
+            rank = int(record.get("retrieval_rank"))
+        except (TypeError, ValueError):
+            rank = index
+        if rank <= 0:
+            rank = index
+        source_bits: list[str] = []
+        collection = str(record.get("collection") or "").strip()
+        if collection:
+            source_bits.append(f"collection={collection}")
+        path = str(record.get("path") or "").strip()
+        if path:
+            source_bits.append(f"path={path}")
+        source_id = str(record.get("source_id") or "").strip()
+        if source_id and not path:
+            source_bits.append(f"source_id={source_id}")
+        chunk_id = str(record.get("chunk_id") or "").strip()
+        if chunk_id:
+            source_bits.append(f"chunk_id={chunk_id}")
+        if not source_bits:
+            continue
+        lines.append(f"[{rank}] " + "; ".join(source_bits))
+    return lines
+
+
 def _build_prompt(
     *,
     history_block: str,
     retrieval_context: list[str],
+    citation_records: list[dict[str, Any]],
     selected_rag_collections: list[str],
     selected_mcp_server_keys: list[str],
     mcp_integration_context: list[str],
@@ -898,11 +1018,17 @@ def _build_prompt(
             "RAG collections are selected for this session. Use only the retrieved "
             "context for repository/file facts. Do not inspect local files, tools, "
             "or prior knowledge for those facts. If retrieved context is missing or "
-            "insufficient, say so explicitly."
+            "insufficient, say so explicitly. Treat each retrieved block as a "
+            "separate source unless the source map proves they are the same file."
+            " If the user asks about a specific file/probe identifier, only use "
+            "matching retrieved sources and state when there is no match."
         )
     if retrieval_context:
         blocks = [f"[{idx}] {text}" for idx, text in enumerate(retrieval_context, start=1)]
         sections.append("Retrieved context:\n" + "\n".join(blocks))
+    source_map_lines = _citation_source_map_lines(citation_records)
+    if source_map_lines:
+        sections.append("Retrieved source map:\n" + "\n".join(source_map_lines))
     if selected_mcp_server_keys:
         sections.append(
             "Enabled MCP servers for this session: "
@@ -1105,6 +1231,11 @@ def execute_turn(
         retrieval_context: list[str] = []
         citation_records: list[dict[str, Any]] = []
         retrieval_stats: dict[str, Any] = {}
+        retrieval_scope_metadata: dict[str, Any] = {
+            "source_hint_tokens": [],
+            "scope_applied": False,
+            "matched_ranks": [],
+        }
         if selected_rag_collections:
             try:
                 retrieval = client.retrieve(
@@ -1183,6 +1314,17 @@ def execute_turn(
             retrieval_context = [item for item in retrieval.retrieval_context if item.strip()]
             citation_records = [item for item in retrieval.citation_records if isinstance(item, dict)]
             retrieval_stats = retrieval.retrieval_stats
+            retrieval_context, citation_records, retrieval_scope_metadata = _narrow_retrieval_context(
+                message=cleaned_message,
+                retrieval_context=retrieval_context,
+                citation_records=citation_records,
+            )
+            retrieval_stats = dict(retrieval_stats) if isinstance(retrieval_stats, dict) else {}
+            retrieval_stats["scope_applied"] = bool(retrieval_scope_metadata.get("scope_applied"))
+            retrieval_stats["source_hint_tokens"] = list(
+                retrieval_scope_metadata.get("source_hint_tokens") or []
+            )
+            retrieval_stats["scoped_retrieved_count"] = len(retrieval_context)
             _record_activity(
                 session,
                 thread_id=thread.id,
@@ -1316,6 +1458,7 @@ def execute_turn(
         prompt = _build_prompt(
             history_block=history_block,
             retrieval_context=retrieval_context,
+            citation_records=citation_records,
             selected_rag_collections=selected_rag_collections,
             selected_mcp_server_keys=selected_mcp_keys,
             mcp_integration_context=_mcp_integration_context(selected_mcp_keys),
@@ -1502,6 +1645,7 @@ def execute_turn(
                 "selected_mcp_servers": selected_mcp_keys,
                 "response_complexity": selected_response_complexity,
                 "retrieval_stats": retrieval_stats,
+                "retrieval_scope": retrieval_scope_metadata,
                 "executor_run_metadata": llm_run_metadata,
                 "executor_provider_metadata": llm_provider_metadata,
                 "executor_error": llm_error_payload,

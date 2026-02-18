@@ -161,8 +161,32 @@ class HttpRAGContractClient:
                 "request_id": payload.request_id,
             },
         )
+
+        def _format_context_item(item: dict[str, Any], text: str) -> str:
+            source_bits: list[str] = []
+            collection = str(item.get("collection") or "").strip()
+            if collection:
+                source_bits.append(f"collection={collection}")
+            path = str(item.get("path") or "").strip()
+            if path:
+                source_bits.append(f"path={path}")
+            source_id = str(item.get("source_id") or "").strip()
+            if source_id and not path:
+                source_bits.append(f"source_id={source_id}")
+            rank = item.get("rank", item.get("retrieval_rank"))
+            try:
+                parsed_rank = int(rank)
+            except (TypeError, ValueError):
+                parsed_rank = None
+            if parsed_rank is not None and parsed_rank > 0:
+                source_bits.append(f"rank={parsed_rank}")
+            if not source_bits:
+                return text
+            return f"[source: {'; '.join(source_bits)}]\n{text}"
+
         retrieval_context = response.get("retrieval_context")
         normalized_context: list[str] = []
+        context_rows: list[dict[str, Any]] = []
         if isinstance(retrieval_context, list):
             for item in retrieval_context:
                 if isinstance(item, str):
@@ -172,7 +196,8 @@ class HttpRAGContractClient:
                 elif isinstance(item, dict):
                     value = str(item.get("text") or item.get("content") or "").strip()
                     if value:
-                        normalized_context.append(value)
+                        normalized_context.append(_format_context_item(item, value))
+                        context_rows.append(item)
         elif isinstance(retrieval_context, str):
             cleaned = retrieval_context.strip()
             if cleaned:
@@ -180,6 +205,28 @@ class HttpRAGContractClient:
         citation_records = response.get("citation_records")
         if not isinstance(citation_records, list):
             citation_records = []
+        normalized_citation_records = [
+            item for item in citation_records if isinstance(item, dict)
+        ]
+        if not normalized_citation_records and context_rows:
+            for row in context_rows:
+                try:
+                    rank = int(row.get("rank", row.get("retrieval_rank")))
+                except (TypeError, ValueError):
+                    rank = None
+                normalized_citation_records.append(
+                    {
+                        "collection": (
+                            str(row.get("collection") or "").strip() or None
+                        ),
+                        "source_id": (
+                            str(row.get("source_id") or "").strip() or None
+                        ),
+                        "path": str(row.get("path") or "").strip() or None,
+                        "chunk_id": str(row.get("chunk_id") or "").strip() or None,
+                        "retrieval_rank": rank,
+                    }
+                )
         return RAGRetrievalResponse(
             answer=response.get("answer")
             if isinstance(response.get("answer"), str) or response.get("answer") is None
@@ -197,9 +244,7 @@ class HttpRAGContractClient:
                 for item in (response.get("collections") or [])
                 if str(item).strip()
             ],
-            citation_records=[
-                item for item in citation_records if isinstance(item, dict)
-            ],
+            citation_records=normalized_citation_records,
         )
 
 

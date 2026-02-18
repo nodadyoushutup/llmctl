@@ -88,7 +88,7 @@ export default function PlansPage() {
   }
 
   return (
-    <section className="stack" aria-label="Plans">
+    <section className="stack workflow-fixed-page" aria-label="Plans">
       <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="Plans"
@@ -145,7 +145,7 @@ export default function PlansPage() {
             </nav>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           {state.loading ? <p>Loading plans...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {!state.loading && !state.error && plans.length === 0 ? (
