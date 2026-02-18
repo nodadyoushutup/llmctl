@@ -5649,12 +5649,8 @@ def _build_pagination(
 
 
 def _load_mcp_servers() -> list[MCPServer]:
-    # Legacy environments may contain an accidentally-created placeholder entry
-    # that should never appear as a selectable MCP server in chat/quick/settings.
-    legacy_quick_default_names = {"quick default mcp", "qucik default mcp"}
-    legacy_quick_default_keys = {"quick-default-mcp", "qucik-default-mcp"}
     with session_scope() as session:
-        servers = (
+        return (
             session.execute(
                 select(MCPServer)
                 .options(
@@ -5666,12 +5662,6 @@ def _load_mcp_servers() -> list[MCPServer]:
             .scalars()
             .all()
         )
-    return [
-        server
-        for server in servers
-        if (server.server_key or "").strip().lower() not in legacy_quick_default_keys
-        and (server.name or "").strip().lower() not in legacy_quick_default_names
-    ]
 
 
 def _coerce_chat_id_list(raw_values: list[object], *, field_name: str) -> list[int]:

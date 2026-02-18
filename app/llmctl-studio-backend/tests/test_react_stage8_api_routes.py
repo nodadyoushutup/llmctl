@@ -404,26 +404,6 @@ class Stage8ApiRouteTests(unittest.TestCase):
             any(int(item.get("id") or 0) == thread_id for item in runtime_after_archive_payload.get("threads", []))
         )
 
-    def test_chat_runtime_excludes_legacy_quick_default_mcp_placeholder(self) -> None:
-        visible_server = self._create_mcp_server(name="Visible MCP")
-        with session_scope() as session:
-            MCPServer.create(
-                session,
-                name="Qucik Default MCP",
-                server_key="qucik-default-mcp",
-                description="legacy placeholder",
-                config_json=json.dumps({"command": "python3", "args": ["-V"]}),
-                server_type="custom",
-            )
-
-        runtime = self.client.get("/api/chat/runtime")
-        self.assertEqual(200, runtime.status_code)
-        payload = runtime.get_json() or {}
-        mcp_servers = payload.get("mcp_servers") or []
-
-        self.assertTrue(any(int(item.get("id") or 0) == visible_server.id for item in mcp_servers))
-        self.assertFalse(any((item.get("name") or "").strip().lower() == "qucik default mcp" for item in mcp_servers))
-
     def test_quick_settings_defaults_roundtrip_json(self) -> None:
         model = self._create_model(name="Quick Defaults Model")
         mcp_server = self._create_mcp_server(name="Quick Defaults MCP")
