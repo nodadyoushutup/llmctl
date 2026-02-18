@@ -14,6 +14,7 @@ Technical reference for llmctl runtime surfaces.
    agent_skill_binding
    codex_host_skills
    rag_flowchart_node
+   specialized_flowchart_nodes
    changelog
 
 .. toctree::

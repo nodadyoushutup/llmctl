@@ -60,17 +60,17 @@ describe('App routing', () => {
 
   test('plans route is native react', async () => {
     renderAt('/plans')
-    expect(await screen.findByText('Track multi-stage plans and task completion with explicit completion timestamps.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Plans' })).length).toBeGreaterThan(0)
   })
 
   test('milestones route is native react', async () => {
     renderAt('/milestones')
-    expect(await screen.findByText('Track delivery checkpoints with ownership, health, and progress.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Milestones' })).length).toBeGreaterThan(0)
   })
 
   test('memories route is native react', async () => {
     renderAt('/memories')
-    expect(await screen.findByText('Capture simple facts to reuse across tasks and workflows.')).toBeInTheDocument()
+    expect((await screen.findAllByRole('heading', { name: 'Memories' })).length).toBeGreaterThan(0)
   })
 
   test('flowcharts route is native react', async () => {

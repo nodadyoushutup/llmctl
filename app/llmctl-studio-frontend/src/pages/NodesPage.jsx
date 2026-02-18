@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { cancelNode, deleteNode, getNodes } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -113,6 +114,7 @@ export default function NodesPage() {
   const perPageOptions = Array.isArray(pagination?.per_page_options) && pagination.per_page_options.length > 0
     ? pagination.per_page_options
     : [10, 25, 50]
+  const paginationItems = Array.isArray(pagination?.items) ? pagination.items : []
 
   const autoRefreshEnabled = useMemo(() => shouldAutoRefresh(tasks), [tasks])
 
@@ -194,183 +196,216 @@ export default function NodesPage() {
 
   return (
     <section className="stack" aria-label="Nodes">
-      <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Nodes</h2>
-            <p>Queued, running, and completed node execution records.</p>
-          </div>
-        </div>
-        <div className="toolbar toolbar-wrap">
-          <div className="toolbar-group">
-            <label htmlFor="filter-agent">Agent</label>
-            <select
-              id="filter-agent"
-              value={String(filters.agent_id ?? agentId)}
-              onChange={(event) => updateParams({ agent_id: event.target.value, page: 1 })}
-            >
-              <option value="">All agents</option>
-              {agentFilterOptions.map((option) => (
-                <option key={`agent-${option.value}`} value={String(option.value)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <label htmlFor="filter-node-type">Type</label>
-            <select
-              id="filter-node-type"
-              value={String(filters.node_type ?? nodeType)}
-              onChange={(event) => updateParams({ node_type: event.target.value, page: 1 })}
-            >
-              <option value="">All types</option>
-              {nodeTypeOptions.map((option) => (
-                <option key={`type-${option.value}`} value={String(option.value)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <label htmlFor="filter-status">Status</label>
-            <select
-              id="filter-status"
-              value={String(filters.status ?? status)}
-              onChange={(event) => updateParams({ status: event.target.value, page: 1 })}
-            >
-              <option value="">All statuses</option>
-              {statusOptions.map((option) => (
-                <option key={`status-${option.value}`} value={String(option.value)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <label htmlFor="nodes-per-page">Rows per page</label>
-            <select
-              id="nodes-per-page"
-              value={String(perPage)}
-              onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
-            >
-              {perPageOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="toolbar">
-          <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page <= 1}
-              onClick={() => updateParams({ page: page - 1 })}
-            >
-              Prev
-            </button>
-            <span className="toolbar-meta">
-              Page {Math.min(page, totalPages)} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => updateParams({ page: page + 1 })}
-            >
-              Next
-            </button>
-          </div>
-          <span className="toolbar-meta">Total nodes: {totalTasks}</span>
-        </div>
-        {state.loading ? <p>Loading nodes...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
-        {autoRefreshEnabled ? (
-          <p className="toolbar-meta">Active tasks detected. Refreshing every 5s.</p>
-        ) : null}
-        {!state.loading && !state.error && tasks.length === 0 ? <p>No nodes recorded yet.</p> : null}
-        {!state.loading && !state.error && tasks.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Node</th>
-                  <th>Agent</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Autorun task</th>
-                  <th>Started</th>
-                  <th>Finished</th>
-                  <th className="table-actions-cell">Cancel</th>
-                  <th className="table-actions-cell">Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map((task) => {
-                  const href = `/nodes/${task.id}`
-                  const statusMeta = nodeStatusMeta(task.status)
-                  const busy = Boolean(busyById[task.id])
-                  const allowCancel = canCancel(task.status)
+      <article className="card panel-card workflow-list-card">
+        <PanelHeader
+          title="Nodes"
+          actionsClassName="workflow-list-panel-header-actions"
+          actions={(
+            <nav className="pagination" aria-label="Nodes pages">
+              {page > 1 ? (
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => updateParams({ page: page - 1 })}
+                >
+                  Prev
+                </button>
+              ) : (
+                <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+              )}
+              <div className="pagination-pages">
+                {paginationItems.map((item, index) => {
+                  const itemType = String(item?.type || '')
+                  if (itemType === 'gap') {
+                    return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
+                  }
+                  const itemPage = Number.parseInt(String(item?.page || ''), 10)
+                  if (!Number.isInteger(itemPage) || itemPage <= 0) {
+                    return null
+                  }
+                  if (itemPage === page) {
+                    return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
+                  }
                   return (
-                    <tr
-                      key={task.id}
-                      className="table-row-link"
-                      data-href={href}
-                      onClick={(event) => handleRowClick(event, href)}
+                    <button
+                      key={itemPage}
+                      type="button"
+                      className="pagination-link"
+                      onClick={() => updateParams({ page: itemPage })}
                     >
-                      <td>
-                        <Link to={href}>{task.node_name || `Node ${task.id}`}</Link>
-                        <div className="table-note">#{task.id}</div>
-                      </td>
-                      <td>{task.agent_name || '-'}</td>
-                      <td className="muted">{task.node_type || '-'}</td>
-                      <td>
-                        <span className={statusMeta.className}>{statusMeta.label}</span>
-                      </td>
-                      <td className="muted" style={{ fontSize: '12px' }}>{task.run_task_id || '-'}</td>
-                      <td className="muted">{task.started_at || '-'}</td>
-                      <td className="muted">{task.finished_at || '-'}</td>
-                      <td className="table-actions-cell">
-                        <div className="table-actions">
-                          {allowCancel ? (
-                            <button
-                              type="button"
-                              className="icon-button"
-                              aria-label="Cancel node"
-                              title="Cancel node"
-                              disabled={busy}
-                              onClick={() => handleCancel(task.id)}
-                            >
-                              <ActionIcon name="stop" />
-                            </button>
-                          ) : <span className="muted">-</span>}
-                        </div>
-                      </td>
-                      <td className="table-actions-cell">
-                        <div className="table-actions">
-                          <button
-                            type="button"
-                            className="icon-button icon-button-danger"
-                            aria-label="Delete node"
-                            title="Delete node"
-                            disabled={busy}
-                            onClick={() => handleDelete(task.id)}
-                          >
-                            <ActionIcon name="trash" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                      {itemPage}
+                    </button>
                   )
                 })}
-              </tbody>
-            </table>
+              </div>
+              {page < totalPages ? (
+                <button
+                  type="button"
+                  className="pagination-btn"
+                  onClick={() => updateParams({ page: page + 1 })}
+                >
+                  Next
+                </button>
+              ) : (
+                <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+              )}
+            </nav>
+          )}
+        />
+        <div className="panel-card-body">
+          <p className="muted">
+            Queued, running, and completed node execution records.
+          </p>
+          <div className="toolbar toolbar-wrap">
+            <div className="toolbar-group">
+              <label htmlFor="filter-agent">Agent</label>
+              <select
+                id="filter-agent"
+                value={String(filters.agent_id ?? agentId)}
+                onChange={(event) => updateParams({ agent_id: event.target.value, page: 1 })}
+              >
+                <option value="">All agents</option>
+                {agentFilterOptions.map((option) => (
+                  <option key={`agent-${option.value}`} value={String(option.value)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="toolbar-group">
+              <label htmlFor="filter-node-type">Type</label>
+              <select
+                id="filter-node-type"
+                value={String(filters.node_type ?? nodeType)}
+                onChange={(event) => updateParams({ node_type: event.target.value, page: 1 })}
+              >
+                <option value="">All types</option>
+                {nodeTypeOptions.map((option) => (
+                  <option key={`type-${option.value}`} value={String(option.value)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="toolbar-group">
+              <label htmlFor="filter-status">Status</label>
+              <select
+                id="filter-status"
+                value={String(filters.status ?? status)}
+                onChange={(event) => updateParams({ status: event.target.value, page: 1 })}
+              >
+                <option value="">All statuses</option>
+                {statusOptions.map((option) => (
+                  <option key={`status-${option.value}`} value={String(option.value)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="toolbar-group">
+              <label htmlFor="nodes-per-page">Rows per page</label>
+              <select
+                id="nodes-per-page"
+                value={String(perPage)}
+                onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
+              >
+                {perPageOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-        ) : null}
+          {!state.loading && !state.error ? (
+            <p className="toolbar-meta">Total nodes: {totalTasks}</p>
+          ) : null}
+          {state.loading ? <p>Loading nodes...</p> : null}
+          {state.error ? <p className="error-text">{state.error}</p> : null}
+          {actionError ? <p className="error-text">{actionError}</p> : null}
+          {autoRefreshEnabled ? (
+            <p className="toolbar-meta">Active tasks detected. Refreshing every 5s.</p>
+          ) : null}
+          {!state.loading && !state.error && tasks.length === 0 ? <p>No nodes recorded yet.</p> : null}
+          {!state.loading && !state.error && tasks.length > 0 ? (
+            <div className="table-wrap workflow-list-table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Node</th>
+                    <th>Agent</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Autorun task</th>
+                    <th>Started</th>
+                    <th>Finished</th>
+                    <th className="table-actions-cell">Cancel</th>
+                    <th className="table-actions-cell">Delete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map((task) => {
+                    const href = `/nodes/${task.id}`
+                    const statusMeta = nodeStatusMeta(task.status)
+                    const busy = Boolean(busyById[task.id])
+                    const allowCancel = canCancel(task.status)
+                    return (
+                      <tr
+                        key={task.id}
+                        className="table-row-link"
+                        data-href={href}
+                        onClick={(event) => handleRowClick(event, href)}
+                      >
+                        <td>
+                          <Link to={href}>{task.node_name || `Node ${task.id}`}</Link>
+                          <div className="table-note">#{task.id}</div>
+                        </td>
+                        <td>{task.agent_name || '-'}</td>
+                        <td className="muted">{task.node_type || '-'}</td>
+                        <td>
+                          <span className={statusMeta.className}>{statusMeta.label}</span>
+                        </td>
+                        <td className="muted" style={{ fontSize: '12px' }}>{task.run_task_id || '-'}</td>
+                        <td className="muted">{task.started_at || '-'}</td>
+                        <td className="muted">{task.finished_at || '-'}</td>
+                        <td className="table-actions-cell">
+                          <div className="table-actions">
+                            {allowCancel ? (
+                              <button
+                                type="button"
+                                className="icon-button"
+                                aria-label="Cancel node"
+                                title="Cancel node"
+                                disabled={busy}
+                                onClick={() => handleCancel(task.id)}
+                              >
+                                <ActionIcon name="stop" />
+                              </button>
+                            ) : <span className="muted">-</span>}
+                          </div>
+                        </td>
+                        <td className="table-actions-cell">
+                          <div className="table-actions">
+                            <button
+                              type="button"
+                              className="icon-button icon-button-danger"
+                              aria-label="Delete node"
+                              title="Delete node"
+                              disabled={busy}
+                              onClick={() => handleDelete(task.id)}
+                            >
+                              <ActionIcon name="trash" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
       </article>
     </section>
   )

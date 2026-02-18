@@ -585,6 +585,12 @@ select[size]:not([size='1']) {
   flex: 1 1 auto;
   justify-content: flex-end;
   min-width: 0;
+  flex-wrap: wrap;
+}
+
+.workflow-list-panel-header-actions .pagination-bar-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .workflow-list-panel-header-actions .pagination {

@@ -4,6 +4,10 @@ Changelog
 2026-02-18
 ----------
 
+- Added Sphinx reference documentation for specialized flowchart nodes (Memory/Plan/Milestone/Decision), including curated inspector controls, retention settings, artifact schemas, and branchless Stage 5 operator guidance.
+- Documented specialized artifact REST contracts and socket payload schemas, including ``flowchart:node_artifact:persisted`` and ``request_id``/``correlation_id`` tracing requirements.
+- Documented MCP alignment for specialized artifact retrieval through ``llmctl_get_memory``, ``llmctl_get_plan``, ``llmctl_get_milestone``, ``llmctl_get_decision_artifact``, and ``llmctl_get_node_artifact``.
+- Recorded Wave boundaries for rollout tracking: Wave 1 specialization = Memory + Plan; Wave 2 specialization = Milestone + Decision.
 - Restored Node Detail RAG indexing visibility for ``Quick RAG`` and flowchart ``rag`` indexing runs by mapping the ``llm_query`` stage label to ``RAG Indexing``/``RAG Delta Indexing`` from canonical execution mode metadata.
 - Added RAG indexing stage-log capture plumbing so indexing log lines are persisted into task stage logs and rendered in Node Detail stage panels.
 - Added explicit execution-mode contract fields for Node Detail/status API payloads and normalized realtime runtime metadata (``query``, ``indexing``, ``delta_indexing``).

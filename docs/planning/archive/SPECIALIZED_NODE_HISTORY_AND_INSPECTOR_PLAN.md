@@ -169,10 +169,16 @@ Unresolved defects identified during Stage 8:
 
 ## Stage 9 - Docs Updates
 
-- [ ] Update Sphinx/RTD docs for specialized node behavior, inspector controls, retention settings, and artifact history APIs.
-- [ ] Document socket/MCP contracts and event payload schemas for specialized artifacts.
-- [ ] Update changelog/release notes with Wave 1 and Wave 2 rollout boundaries.
-- [ ] Include fan-out workflow guidance and operator checklist for Stage 5 parallel launch.
+- [x] Update Sphinx/RTD docs for specialized node behavior, inspector controls, retention settings, and artifact history APIs.
+- [x] Document socket/MCP contracts and event payload schemas for specialized artifacts.
+- [x] Update changelog/release notes with Wave 1 and Wave 2 rollout boundaries.
+- [x] Include fan-out workflow guidance and operator checklist for Stage 5 parallel launch.
+
+Stage 9 outcomes:
+- Added Sphinx guide: `docs/sphinx/specialized_flowchart_nodes.rst` (specialized inspector contract, retention schema, REST/socket contracts, artifact payload schemas, MCP alignment, and Stage 5 operator checklist).
+- Added guide to docs index: `docs/sphinx/index.rst`.
+- Updated release notes/changelog with specialized-node docs/contracts and Wave boundaries: `docs/sphinx/changelog.rst`.
+- Ran docs compile verification: `.venv/bin/sphinx-build -b html docs/sphinx docs/sphinx/_build/html-stage9-check-2` (build succeeded; no Stage 9 RST syntax errors in `specialized_flowchart_nodes.rst`).
 
 ## Fan-Out Alert And Agent Prompt Pack (Use At Stage 5)
 
