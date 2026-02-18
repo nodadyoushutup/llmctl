@@ -187,6 +187,7 @@ from core.quick_node import (
     build_quick_node_system_contract,
 )
 from core.vllm_models import discover_vllm_local_models
+from rag.engine.chromadb_loader import import_chromadb
 from rag.engine.config import load_config as load_rag_config
 from rag.domain import (
     RAG_FLOWCHART_MODE_CHOICES as RAG_NODE_MODE_CHOICES,
@@ -1929,8 +1930,8 @@ def _chroma_http_client(
     host, port, normalized_hint = _normalize_chroma_target(host, port)
     ssl = _as_bool(settings.get("ssl"))
     try:
-        import chromadb  # type: ignore[import-not-found]
-    except ModuleNotFoundError:
+        chromadb = import_chromadb()
+    except (ImportError, ModuleNotFoundError):
         return None, host, port, normalized_hint, "Python package 'chromadb' is not installed."
     try:
         client = chromadb.HttpClient(host=host, port=port, ssl=ssl)
@@ -7047,7 +7048,51 @@ def _flowchart_status_class(status: str | None) -> str:
     return "status-idle"
 
 
+def _is_rag_embedding_model(model: LLMModel | None) -> bool:
+    if model is None:
+        return False
+    if not _is_rag_embedding_model_provider(model.provider):
+        return False
+    config = _decode_model_config(model.config_json)
+    model_name = str(config.get("model") or "").strip().lower()
+    display_name = str(model.name or "").strip().lower()
+    return "embed" in model_name or "embed" in display_name
+
+
+def _ensure_flowchart_catalog_embedding_model(session) -> None:
+    embedding_candidates = (
+        session.execute(
+            select(LLMModel).where(LLMModel.provider.in_(["codex", "gemini"]))
+        )
+        .scalars()
+        .all()
+    )
+    if any(_is_rag_embedding_model(model) for model in embedding_candidates):
+        return
+
+    existing_names = {
+        str(name or "").strip()
+        for name in session.execute(select(LLMModel.name)).scalars().all()
+        if str(name or "").strip()
+    }
+    base_name = "RAG Embedding Model (Auto)"
+    next_name = base_name
+    suffix = 2
+    while next_name in existing_names:
+        next_name = f"{base_name} {suffix}"
+        suffix += 1
+
+    LLMModel.create(
+        session,
+        name=next_name,
+        description="Auto-created embedding model for Flowchart RAG index modes.",
+        provider="codex",
+        config_json=json.dumps({"model": "text-embedding-3-small"}, sort_keys=True),
+    )
+
+
 def _flowchart_catalog(session) -> dict[str, object]:
+    _ensure_flowchart_catalog_embedding_model(session)
     integration_overview = _integration_overview()
     rag_health = rag_domain_health_snapshot()
     rag_collections_contract = rag_list_collection_contract()

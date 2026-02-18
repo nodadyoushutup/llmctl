@@ -3072,16 +3072,30 @@ fieldset.field {
 .flow-ws-node-shape {
   position: absolute;
   inset: 0;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(19, 28, 39, 0.96);
+  --flow-ws-node-border-color: var(--line);
+  --flow-ws-node-fill: rgba(19, 28, 39, 0.96);
+  --flow-ws-node-clip-path: none;
+  --flow-ws-node-radius: 12px;
+  border: 0;
+  border-radius: var(--flow-ws-node-radius);
+  clip-path: var(--flow-ws-node-clip-path);
+  background: var(--flow-ws-node-border-color);
   box-shadow: 0 14px 28px rgba(9, 14, 21, 0.35);
   pointer-events: none;
   z-index: 0;
 }
 
+.flow-ws-node-shape::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  clip-path: var(--flow-ws-node-clip-path);
+  background: var(--flow-ws-node-fill);
+}
+
 .flow-ws-node.is-selected .flow-ws-node-shape {
-  border-color: rgba(255, 122, 24, 0.82);
+  --flow-ws-node-border-color: rgba(255, 122, 24, 0.82);
   box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.28), 0 14px 28px rgba(9, 14, 21, 0.35);
 }
 
@@ -3114,52 +3128,55 @@ fieldset.field {
 
 .flow-ws-node.is-type-start .flow-ws-node-shape,
 .flow-ws-node.is-type-flowchart .flow-ws-node-shape {
-  border-radius: 999px;
+  --flow-ws-node-radius: 999px;
 }
 
 .flow-ws-node.is-type-start .flow-ws-node-shape {
-  border-color: rgba(34, 197, 94, 0.74);
-  background: linear-gradient(140deg, rgba(16, 46, 34, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(34, 197, 94, 0.74);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(16, 46, 34, 0.94), rgba(17, 24, 33, 0.98));
 }
 
 .flow-ws-node.is-type-flowchart .flow-ws-node-shape {
-  border-color: rgba(56, 189, 248, 0.74);
-  background: linear-gradient(140deg, rgba(10, 49, 69, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(56, 189, 248, 0.74);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(10, 49, 69, 0.94), rgba(17, 24, 33, 0.98));
 }
 
 .flow-ws-node.is-type-end .flow-ws-node-shape {
-  border: 1px solid rgba(239, 68, 68, 0.82);
-  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
-  background: linear-gradient(140deg, rgba(77, 21, 21, 0.95), rgba(29, 13, 13, 0.99));
+  --flow-ws-node-border-color: rgba(239, 68, 68, 0.82);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(77, 21, 21, 0.95), rgba(29, 13, 13, 0.99));
+  --flow-ws-node-clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+  --flow-ws-node-radius: 0;
 }
 
 .flow-ws-node.is-type-task .flow-ws-node-shape {
-  border-color: rgba(59, 130, 246, 0.74);
-  background: linear-gradient(140deg, rgba(18, 37, 68, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(59, 130, 246, 0.74);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(18, 37, 68, 0.94), rgba(17, 24, 33, 0.98));
 }
 
 .flow-ws-node.is-type-plan .flow-ws-node-shape {
-  border-color: rgba(250, 204, 21, 0.78);
-  background: linear-gradient(140deg, rgba(66, 57, 16, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(250, 204, 21, 0.78);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(66, 57, 16, 0.94), rgba(17, 24, 33, 0.98));
 }
 
 .flow-ws-node.is-type-memory .flow-ws-node-shape {
-  border: 1px solid rgba(236, 72, 153, 0.74);
-  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
-  background: linear-gradient(140deg, rgba(70, 20, 54, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(236, 72, 153, 0.74);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(70, 20, 54, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
+  --flow-ws-node-radius: 0;
 }
 
 .flow-ws-node.is-type-milestone .flow-ws-node-shape {
-  border: 1px solid rgba(168, 85, 247, 0.74);
-  clip-path: polygon(16% 0, 84% 0, 100% 50%, 84% 100%, 16% 100%, 0 50%);
-  background: linear-gradient(140deg, rgba(56, 26, 84, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(168, 85, 247, 0.74);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(56, 26, 84, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-clip-path: polygon(16% 0, 84% 0, 100% 50%, 84% 100%, 16% 100%, 0 50%);
+  --flow-ws-node-radius: 0;
 }
 
 .flow-ws-node.is-type-decision .flow-ws-node-shape {
-  border: 1px solid rgba(20, 184, 166, 0.74);
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  border-radius: 0;
-  background: linear-gradient(140deg, rgba(14, 58, 58, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(20, 184, 166, 0.74);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(14, 58, 58, 0.94), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  --flow-ws-node-radius: 0;
 }
 
 .flow-ws-node.is-type-decision .flow-ws-node-content {
@@ -3167,12 +3184,14 @@ fieldset.field {
 }
 
 .flow-ws-node.is-type-rag .flow-ws-node-shape {
-  border-color: rgba(16, 185, 129, 0.78);
-  background: linear-gradient(140deg, rgba(10, 61, 44, 0.95), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-border-color: rgba(16, 185, 129, 0.78);
+  --flow-ws-node-fill: linear-gradient(140deg, rgba(10, 61, 44, 0.95), rgba(17, 24, 33, 0.98));
+  --flow-ws-node-clip-path: polygon(0 0, 100% 0, 86% 100%, 14% 100%);
+  --flow-ws-node-radius: 0;
 }
 
 .flow-ws-node.is-running .flow-ws-node-shape {
-  border-color: rgba(255, 122, 24, 0.95);
+  --flow-ws-node-border-color: rgba(255, 122, 24, 0.95);
   box-shadow: 0 0 0 2px rgba(255, 122, 24, 0.34), 0 0 0 6px rgba(255, 122, 24, 0.14), 0 14px 28px rgba(9, 14, 21, 0.35);
 }
 

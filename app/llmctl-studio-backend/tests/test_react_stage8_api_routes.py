@@ -457,6 +457,33 @@ class Stage8ApiRouteTests(unittest.TestCase):
             any("Remember to validate deployment readiness" in str(memory.get("title") or "") for memory in memories)
         )
 
+    def test_flowchart_catalog_auto_creates_embedding_model_when_missing(self) -> None:
+        with session_scope() as session:
+            session.query(LLMModel).delete()
+
+        response = self.client.get("/api/flowcharts/new")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        catalog = payload.get("catalog") or {}
+        models = catalog.get("models") or []
+        self.assertGreaterEqual(len(models), 1)
+        self.assertTrue(
+            any(
+                "embed" in str(item.get("model_name") or "").lower()
+                for item in models
+            )
+        )
+
+        with session_scope() as session:
+            db_models = session.query(LLMModel).all()
+        self.assertTrue(
+            any(
+                model.provider == "codex"
+                and "embed" in str(studio_views._decode_model_config(model.config_json).get("model") or "").lower()
+                for model in db_models
+            )
+        )
+
     def test_memories_api_lists_memory_nodes_with_flowchart_context(self) -> None:
         with session_scope() as session:
             orphan_memory = Memory.create(session, description="orphan-memory")

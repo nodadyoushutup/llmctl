@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from rag.engine.chromadb_loader import import_chromadb
 from rag.providers.adapters import build_embedding_function
 
 
 def get_collections(config, sources) -> list[dict[str, Any]]:
-    import chromadb
+    chromadb = import_chromadb()
 
     client = chromadb.HttpClient(host=config.chroma_host, port=config.chroma_port)
     embedding_fn = build_embedding_function(config)

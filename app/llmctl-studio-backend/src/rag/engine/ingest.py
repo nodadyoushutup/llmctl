@@ -11,9 +11,11 @@ from collections import deque
 from pathlib import Path
 from typing import Callable
 
+from rag.engine.chromadb_loader import import_chromadb
+
 try:
-    import chromadb
-except ImportError:  # pragma: no cover
+    chromadb = import_chromadb()
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
     chromadb = None
 
 from rag.engine.config import (

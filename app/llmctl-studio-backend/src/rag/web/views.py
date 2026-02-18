@@ -31,6 +31,7 @@ from rag.domain import (
     normalize_collection_selection,
     rag_health_snapshot,
 )
+from rag.engine.chromadb_loader import import_chromadb
 from rag.engine.config import load_config
 from rag.integrations.google_drive_sync import service_account_email, verify_folder_access
 from rag.providers.adapters import (
@@ -1205,8 +1206,8 @@ def api_chroma_test():
     host, port, hint = _normalize_chroma_target(host, parsed_port)
 
     try:
-        import chromadb  # type: ignore[import-not-found]
-    except ModuleNotFoundError:
+        chromadb = import_chromadb()
+    except (ImportError, ModuleNotFoundError):
         return {
             "ok": False,
             "error": "Python package 'chromadb' is not installed.",

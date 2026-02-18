@@ -147,6 +147,22 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
+  test('applies consecutive wheel zoom events without dropping steps', async () => {
+    const { container } = render(<FlowchartWorkspaceEditor />)
+    const viewport = container.querySelector('.flow-ws-viewport')
+    expect(viewport).toBeTruthy()
+    expect(container.querySelector('.flow-ws-zoom-label')?.textContent).toBe('100%')
+
+    act(() => {
+      fireEvent.wheel(viewport, { deltaY: -120, clientX: 300, clientY: 200 })
+      fireEvent.wheel(viewport, { deltaY: -120, clientX: 300, clientY: 200 })
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-zoom-label')?.textContent).toBe('120%')
+    })
+  })
+
   test('shows task validation hint when task node has no prompt', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(
@@ -587,5 +603,111 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
       expect(memoryNode?.config?.agent_id).toBe(5)
       expect(memoryNode?.mcp_server_ids).toEqual([11, 3])
     })
+  })
+
+  test('renders rag controls and emits rag config updates', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'rag', x: 520, y: 220, config: {} },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2 }]}
+        catalog={{
+          rag_collections: [
+            { id: 'docs', name: 'Docs', status: 'ready' },
+            { id: 'runbooks', name: 'Runbooks', status: 'ready' },
+          ],
+          mcp_servers: [
+            { id: 11, name: 'LLMCTL MCP', server_key: 'llmctl-mcp' },
+          ],
+        }}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    expect(screen.getByText('rag mode')).toBeTruthy()
+    expect(screen.getByText('collections')).toBeTruthy()
+    expect(screen.getByText('query prompt')).toBeTruthy()
+
+    const modeField = screen.getByText('rag mode').closest('label')
+    const modeSelect = modeField?.querySelector('select')
+    expect(modeSelect).toBeTruthy()
+    fireEvent.change(modeSelect, { target: { value: 'delta_index' } })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const ragNode = payload?.nodes?.find((node) => node.node_type === 'rag')
+      expect(ragNode?.config?.mode).toBe('delta_index')
+    })
+    expect(screen.queryByText('query prompt')).toBeFalsy()
+
+    const collectionsField = screen.getByText('collections').closest('label')
+    const collectionsSelect = collectionsField?.querySelector('select')
+    expect(collectionsSelect).toBeTruthy()
+    const options = Array.from(collectionsSelect.options)
+    options[0].selected = true
+    fireEvent.change(collectionsSelect)
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const ragNode = payload?.nodes?.find((node) => node.node_type === 'rag')
+      expect(ragNode?.config?.collections).toEqual(['docs'])
+    })
+  })
+
+  test('filters rag index-mode model options to embedding models only', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          {
+            id: 2,
+            node_type: 'rag',
+            x: 520,
+            y: 220,
+            model_id: 2,
+            config: { mode: 'fresh_index', collections: ['docs'] },
+          },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2 }]}
+        catalog={{
+          models: [
+            { id: 1, name: 'Embedding Model', provider: 'codex', model_name: 'text-embedding-3-small' },
+            { id: 2, name: 'Chat Model', provider: 'codex', model_name: 'gpt-5' },
+            { id: 3, name: 'Gemini Chat', provider: 'gemini', model_name: 'gemini-2.5-pro' },
+          ],
+          rag_collections: [
+            { id: 'docs', name: 'Docs', status: 'ready' },
+          ],
+          mcp_servers: [
+            { id: 11, name: 'LLMCTL MCP', server_key: 'llmctl-mcp' },
+          ],
+        }}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    expect(screen.getByText('Index modes require an embedding model selection.')).toBeTruthy()
+
+    const modelField = screen.getByText('model').closest('label')
+    const modelSelect = modelField?.querySelector('select')
+    expect(modelSelect).toBeTruthy()
+    const modelOptionTexts = Array.from(modelSelect.options).map((item) => String(item.textContent || '').trim())
+    expect(modelOptionTexts).toContain('Embedding Model')
+    expect(modelOptionTexts).not.toContain('Chat Model')
+    expect(modelOptionTexts).not.toContain('Gemini Chat')
   })
 })

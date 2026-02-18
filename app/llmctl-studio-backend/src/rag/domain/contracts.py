@@ -9,9 +9,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from rag.engine.chromadb_loader import import_chromadb
+
 try:
-    import chromadb
-except ImportError:  # pragma: no cover
+    chromadb = import_chromadb()
+except (ImportError, ModuleNotFoundError):  # pragma: no cover
     chromadb = None
 
 from core.config import Config

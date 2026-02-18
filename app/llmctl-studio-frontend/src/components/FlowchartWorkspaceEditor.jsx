@@ -40,6 +40,15 @@ const TYPE_TO_REF_CATALOG_KEY = {
 }
 const NODE_TYPES_WITH_MODEL = new Set(['task', 'rag'])
 const SPECIALIZED_NODE_TYPES = new Set(['milestone', 'memory', 'plan'])
+const RAG_MODE_QUERY = 'query'
+const RAG_MODE_FRESH_INDEX = 'fresh_index'
+const RAG_MODE_DELTA_INDEX = 'delta_index'
+const RAG_MODE_OPTIONS = [
+  { value: RAG_MODE_FRESH_INDEX, label: 'index' },
+  { value: RAG_MODE_DELTA_INDEX, label: 'delta index' },
+  { value: RAG_MODE_QUERY, label: 'query' },
+]
+const RAG_EMBEDDING_MODEL_PROVIDERS = new Set(['codex', 'gemini'])
 
 const WORLD_WIDTH = 16000
 const WORLD_HEIGHT = 12000
@@ -171,6 +180,50 @@ function normalizeZoom(value) {
 function normalizeNodeType(value) {
   const type = String(value || '').trim().toLowerCase()
   return DEFAULT_NODE_TYPES.includes(type) ? type : 'task'
+}
+
+function normalizeRagMode(value) {
+  const mode = String(value || '').trim().toLowerCase()
+  if (mode === 'index' || mode === 'fresh' || mode === 'indexing') {
+    return RAG_MODE_FRESH_INDEX
+  }
+  if (mode === 'delta' || mode === 'delta_indexing') {
+    return RAG_MODE_DELTA_INDEX
+  }
+  if (mode === RAG_MODE_QUERY || mode === RAG_MODE_FRESH_INDEX || mode === RAG_MODE_DELTA_INDEX) {
+    return mode
+  }
+  return RAG_MODE_QUERY
+}
+
+function normalizeRagCollections(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const seen = new Set()
+  const normalized = []
+  for (const item of value) {
+    const collection = String(item || '').trim()
+    if (!collection || seen.has(collection)) {
+      continue
+    }
+    seen.add(collection)
+    normalized.push(collection)
+  }
+  return normalized
+}
+
+function isRagEmbeddingProvider(provider) {
+  return RAG_EMBEDDING_MODEL_PROVIDERS.has(String(provider || '').trim().toLowerCase())
+}
+
+function isEmbeddingModelOption(model) {
+  if (!isRagEmbeddingProvider(model?.provider)) {
+    return false
+  }
+  const modelName = String(model?.model_name || '').trim().toLowerCase()
+  const name = String(model?.name || '').trim().toLowerCase()
+  return modelName.includes('embed') || name.includes('embed')
 }
 
 function nodeSupportsRuntimeBindings(nodeType) {
@@ -739,6 +792,11 @@ function normalizeNodeConfig(config, nodeType = '') {
     nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
     nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
   }
+  if (normalizedType === 'rag') {
+    nextConfig.mode = normalizeRagMode(nextConfig.mode)
+    nextConfig.collections = normalizeRagCollections(nextConfig.collections)
+    nextConfig.question_prompt = String(nextConfig.question_prompt || '')
+  }
   if (!nodeSupportsRuntimeBindings(normalizedType)) {
     delete nextConfig.agent_id
     return nextConfig
@@ -1192,6 +1250,8 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const nextClientEdgeIdRef = useRef(initialWorkspace.nextClientEdgeId)
   const connectDragRef = useRef(null)
   const viewportPanRef = useRef(null)
+  const zoomRef = useRef(1)
+  const wheelZoomFrameRef = useRef(0)
 
   const [nodes, setNodes] = useState(() => initialWorkspace.nodes)
   const [edges, setEdges] = useState(() => initialWorkspace.edges)
@@ -1206,6 +1266,18 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   useEffect(() => {
     connectDragRef.current = connectDrag
   }, [connectDrag])
+
+  useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
+
+  useEffect(() => {
+    return () => {
+      if (wheelZoomFrameRef.current) {
+        window.cancelAnimationFrame(wheelZoomFrameRef.current)
+      }
+    }
+  }, [])
 
   const runningNodeIdSet = useMemo(() => {
     const values = Array.isArray(runningNodeIds) ? runningNodeIds : []
@@ -1471,6 +1543,15 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       ? normalizeNodeConfig(selectedNode.config, selectedNodeType)
       : null
   )
+  const selectedRagConfig = (
+    selectedNode && selectedNodeType === 'rag'
+      ? normalizeNodeConfig(selectedNode.config, selectedNodeType)
+      : null
+  )
+  const selectedRagMode = normalizeRagMode(selectedRagConfig?.mode)
+  const ragModeRequiresEmbeddingModel = selectedNodeType === 'rag'
+    && (selectedRagMode === RAG_MODE_FRESH_INDEX || selectedRagMode === RAG_MODE_DELTA_INDEX)
+  const selectedRagCollectionSet = new Set(normalizeRagCollections(selectedRagConfig?.collections))
   const selectedPlanConfig = (
     selectedNode && selectedNodeType === 'plan'
       ? selectedSpecializedConfig
@@ -1947,6 +2028,51 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const modelOptions = catalog && typeof catalog === 'object' && Array.isArray(catalog.models)
     ? catalog.models
     : []
+  const modelById = useMemo(() => {
+    const map = new Map()
+    for (const model of modelOptions) {
+      const modelId = parsePositiveInt(model?.id)
+      if (modelId == null) {
+        continue
+      }
+      map.set(modelId, model)
+    }
+    return map
+  }, [modelOptions])
+  const embeddingModelOptions = useMemo(
+    () => modelOptions.filter((model) => isEmbeddingModelOption(model)),
+    [modelOptions],
+  )
+  const selectedNodeModelOptions = (
+    selectedNodeType === 'rag' && ragModeRequiresEmbeddingModel
+      ? embeddingModelOptions
+      : modelOptions
+  )
+  const selectedNodeModelProvider = selectedNode
+    ? modelById.get(parsePositiveInt(selectedNode.model_id))?.provider
+    : ''
+  const selectedRagModelIsEmbedding = isEmbeddingModelOption(
+    selectedNode ? modelById.get(parsePositiveInt(selectedNode.model_id)) : null,
+  )
+  const ragCollectionRows = catalog && typeof catalog === 'object' && Array.isArray(catalog.rag_collections)
+    ? catalog.rag_collections
+    : []
+  const ragCollectionOptions = useMemo(() => (
+    ragCollectionRows
+      .map((item) => {
+        const id = String(item?.id || '').trim()
+        if (!id) {
+          return null
+        }
+        const name = String(item?.name || '').trim() || id
+        const status = String(item?.status || '').trim()
+        return {
+          id,
+          label: status ? `${name} (${status})` : name,
+        }
+      })
+      .filter((item) => item != null)
+  ), [ragCollectionRows])
   const agentOptions = catalog && typeof catalog === 'object' && Array.isArray(catalog.agents)
     ? catalog.agents
     : []
@@ -1956,15 +2082,18 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
 
   function setZoomKeepingCenter(nextZoomValue) {
     const viewport = viewportRef.current
+    const currentZoom = zoomRef.current
     const nextZoom = normalizeZoom(nextZoomValue)
     if (!viewport) {
+      zoomRef.current = nextZoom
       setZoom(nextZoom)
       return
     }
-    if (Math.abs(nextZoom - zoom) < 0.001) {
+    if (Math.abs(nextZoom - currentZoom) < 0.001) {
       return
     }
-    const center = viewportCenterInGraph(viewport, zoom)
+    const center = viewportCenterInGraph(viewport, currentZoom)
+    zoomRef.current = nextZoom
     setZoom(nextZoom)
     window.requestAnimationFrame(() => {
       centerViewportOnGraphPoint(center.x, center.y, nextZoom)
@@ -1975,6 +2104,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     const viewport = viewportRef.current
     const focusNode = nodes.find((node) => normalizeNodeType(node.node_type) === 'start') || nodes[0] || null
     const nextZoom = 1
+    zoomRef.current = nextZoom
     setZoom(nextZoom)
     if (!viewport) {
       return
@@ -2064,20 +2194,32 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       return
     }
     event.preventDefault()
+    const currentZoom = zoomRef.current
     const direction = event.deltaY < 0 ? 1 : -1
-    const nextZoom = normalizeZoom(zoom + direction * ZOOM_STEP)
-    if (Math.abs(nextZoom - zoom) < 0.001) {
+    const nextZoom = normalizeZoom(currentZoom + direction * ZOOM_STEP)
+    if (Math.abs(nextZoom - currentZoom) < 0.001) {
       return
     }
     const rect = viewport.getBoundingClientRect()
-    const pointerWorldX = (event.clientX - rect.left + viewport.scrollLeft) / zoom
-    const pointerWorldY = (event.clientY - rect.top + viewport.scrollTop) / zoom
+    const pointerViewportX = event.clientX - rect.left
+    const pointerViewportY = event.clientY - rect.top
+    const pointerWorldX = (pointerViewportX + viewport.scrollLeft) / currentZoom
+    const pointerWorldY = (pointerViewportY + viewport.scrollTop) / currentZoom
+    zoomRef.current = nextZoom
     setZoom(nextZoom)
-    window.requestAnimationFrame(() => {
-      const maxScrollLeft = Math.max(0, WORLD_WIDTH * nextZoom - viewport.clientWidth)
-      const maxScrollTop = Math.max(0, WORLD_HEIGHT * nextZoom - viewport.clientHeight)
-      viewport.scrollLeft = clamp(pointerWorldX * nextZoom - (event.clientX - rect.left), 0, maxScrollLeft)
-      viewport.scrollTop = clamp(pointerWorldY * nextZoom - (event.clientY - rect.top), 0, maxScrollTop)
+    if (wheelZoomFrameRef.current) {
+      window.cancelAnimationFrame(wheelZoomFrameRef.current)
+    }
+    wheelZoomFrameRef.current = window.requestAnimationFrame(() => {
+      wheelZoomFrameRef.current = 0
+      const currentViewport = viewportRef.current
+      if (!currentViewport) {
+        return
+      }
+      const maxScrollLeft = Math.max(0, WORLD_WIDTH * nextZoom - currentViewport.clientWidth)
+      const maxScrollTop = Math.max(0, WORLD_HEIGHT * nextZoom - currentViewport.clientHeight)
+      currentViewport.scrollLeft = clamp(pointerWorldX * nextZoom - pointerViewportX, 0, maxScrollLeft)
+      currentViewport.scrollTop = clamp(pointerWorldY * nextZoom - pointerViewportY, 0, maxScrollTop)
     })
   }
 
@@ -2604,6 +2746,103 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
             {selectedTaskNodeNeedsPrompt ? (
               <p className="error-text">Task nodes require a non-empty task prompt before save/validate.</p>
             ) : null}
+            {selectedRagConfig ? (
+              <div className="stack-sm">
+                <label className="field">
+                  <span>rag mode</span>
+                  <select
+                    value={selectedRagMode}
+                    onChange={(event) => {
+                      const nextMode = normalizeRagMode(event.target.value)
+                      updateNode(selectedNode.token, (current) => {
+                        const nextConfig = current.config && typeof current.config === 'object'
+                          ? { ...current.config }
+                          : {}
+                        nextConfig.mode = nextMode
+                        if (nextMode !== RAG_MODE_QUERY) {
+                          delete nextConfig.question_prompt
+                        }
+                        const currentModel = modelById.get(parsePositiveInt(current.model_id))
+                        const nextModelId = (
+                          (nextMode === RAG_MODE_FRESH_INDEX || nextMode === RAG_MODE_DELTA_INDEX)
+                          && !isEmbeddingModelOption(currentModel)
+                        )
+                          ? null
+                          : current.model_id
+                        return {
+                          ...current,
+                          model_id: nextModelId,
+                          config: nextConfig,
+                        }
+                      })
+                    }}
+                  >
+                    {RAG_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {ragCollectionOptions.length > 0 ? (
+                  <label className="field">
+                    <span>collections</span>
+                    <select
+                      multiple
+                      size={Math.min(8, Math.max(3, ragCollectionOptions.length))}
+                      value={Array.from(selectedRagCollectionSet)}
+                      onChange={(event) => {
+                        const selectedValues = Array.from(event.target.selectedOptions || [])
+                          .map((option) => String(option.value || '').trim())
+                          .filter((value) => Boolean(value))
+                        updateNode(selectedNode.token, (current) => ({
+                          ...current,
+                          config: {
+                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                            collections: normalizeRagCollections(selectedValues),
+                          },
+                        }))
+                      }}
+                    >
+                      {ragCollectionOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <p className="toolbar-meta">No RAG collections available.</p>
+                )}
+                {selectedRagMode === RAG_MODE_QUERY ? (
+                  <label className="field">
+                    <span>query prompt</span>
+                    <textarea
+                      value={String(selectedRagConfig.question_prompt || '')}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          question_prompt: event.target.value,
+                        },
+                      }))}
+                    />
+                  </label>
+                ) : null}
+                {selectedRagCollectionSet.size === 0 ? (
+                  <p className="error-text">RAG nodes require at least one selected collection.</p>
+                ) : null}
+                {selectedRagMode === RAG_MODE_QUERY && !String(selectedRagConfig.question_prompt || '').trim() ? (
+                  <p className="error-text">RAG query mode requires a query prompt.</p>
+                ) : null}
+                {ragModeRequiresEmbeddingModel && embeddingModelOptions.length === 0 ? (
+                  <p className="error-text">No embedding models are available for index modes.</p>
+                ) : null}
+                {ragModeRequiresEmbeddingModel && selectedNode.model_id != null && !selectedRagModelIsEmbedding ? (
+                  <p className="error-text">Index modes require an embedding model selection.</p>
+                ) : null}
+              </div>
+            ) : null}
             {selectedPlanNodeNeedsCompletionTarget ? (
               <p className="error-text">Complete plan item requires plan item id, stage+task keys, or completion source path.</p>
             ) : null}
@@ -2657,13 +2896,16 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   onChange={(event) => updateNode(selectedNode.token, { model_id: parseOptionalInt(event.target.value) })}
                 >
                   <option value="">None</option>
-                  {modelOptions.map((model) => (
+                  {selectedNodeModelOptions.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.name || `Model ${model.id}`}
                     </option>
                   ))}
                 </select>
               </label>
+            ) : null}
+            {selectedNodeType === 'rag' && ragModeRequiresEmbeddingModel && selectedNodeModelProvider && !isRagEmbeddingProvider(selectedNodeModelProvider) ? (
+              <p className="error-text">RAG index modes require an embedding-capable model provider.</p>
             ) : null}
             {nodeSupportsRuntimeBindings(selectedNodeType) ? (
               <label className="chat-control flow-ws-binding-control">
