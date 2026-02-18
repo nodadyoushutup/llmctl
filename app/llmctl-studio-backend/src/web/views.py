@@ -10909,16 +10909,23 @@ def list_plan_artifacts(plan_id: int):
                 request_id=request_id,
                 correlation_id=correlation_id,
             ), 404
-        stmt = select(NodeArtifact).where(
+        artifact_filters = [
             NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_PLAN,
             NodeArtifact.ref_id == plan_id,
-        )
+        ]
         if flowchart_id is not None:
-            stmt = stmt.where(NodeArtifact.flowchart_id == flowchart_id)
+            artifact_filters.append(NodeArtifact.flowchart_id == flowchart_id)
         if flowchart_node_id is not None:
-            stmt = stmt.where(NodeArtifact.flowchart_node_id == flowchart_node_id)
+            artifact_filters.append(NodeArtifact.flowchart_node_id == flowchart_node_id)
         if flowchart_run_id is not None:
-            stmt = stmt.where(NodeArtifact.flowchart_run_id == flowchart_run_id)
+            artifact_filters.append(NodeArtifact.flowchart_run_id == flowchart_run_id)
+        total_count = (
+            session.execute(
+                select(func.count(NodeArtifact.id)).where(*artifact_filters)
+            )
+            .scalar_one()
+        )
+        stmt = select(NodeArtifact).where(*artifact_filters)
         if descending:
             stmt = stmt.order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
         else:
@@ -10934,6 +10941,7 @@ def list_plan_artifacts(plan_id: int):
         "ok": True,
         "plan_id": plan_id,
         "count": len(artifacts),
+        "total_count": int(total_count or 0),
         "limit": resolved_limit,
         "offset": resolved_offset,
         "items": [_serialize_node_artifact(item) for item in artifacts],
@@ -11052,22 +11060,29 @@ def list_memory_artifacts(memory_id: int):
                 request_id=request_id,
                 correlation_id=correlation_id,
             ), 404
-        stmt = select(NodeArtifact).where(
+        artifact_filters = [
             NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MEMORY,
             NodeArtifact.ref_id == memory_id,
-        )
+        ]
         flowchart_id = parsed["flowchart_id"]
         flowchart_node_id = parsed["flowchart_node_id"]
         flowchart_run_id = parsed["flowchart_run_id"]
         flowchart_run_node_id = parsed["flowchart_run_node_id"]
         if isinstance(flowchart_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_id == flowchart_id)
+            artifact_filters.append(NodeArtifact.flowchart_id == flowchart_id)
         if isinstance(flowchart_node_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_node_id == flowchart_node_id)
+            artifact_filters.append(NodeArtifact.flowchart_node_id == flowchart_node_id)
         if isinstance(flowchart_run_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_run_id == flowchart_run_id)
+            artifact_filters.append(NodeArtifact.flowchart_run_id == flowchart_run_id)
         if isinstance(flowchart_run_node_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_run_node_id == flowchart_run_node_id)
+            artifact_filters.append(NodeArtifact.flowchart_run_node_id == flowchart_run_node_id)
+        total_count = (
+            session.execute(
+                select(func.count(NodeArtifact.id)).where(*artifact_filters)
+            )
+            .scalar_one()
+        )
+        stmt = select(NodeArtifact).where(*artifact_filters)
         if parsed["descending"]:
             stmt = stmt.order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
         else:
@@ -11081,6 +11096,7 @@ def list_memory_artifacts(memory_id: int):
         "ok": True,
         "memory_id": memory_id,
         "count": len(artifacts),
+        "total_count": int(total_count or 0),
         "limit": int(parsed["limit"]),
         "offset": int(parsed["offset"]),
         "items": [_serialize_node_artifact(item) for item in artifacts],
@@ -11199,22 +11215,29 @@ def list_milestone_artifacts(milestone_id: int):
                 request_id=request_id,
                 correlation_id=correlation_id,
             ), 404
-        stmt = select(NodeArtifact).where(
+        artifact_filters = [
             NodeArtifact.artifact_type == NODE_ARTIFACT_TYPE_MILESTONE,
             NodeArtifact.ref_id == milestone_id,
-        )
+        ]
         flowchart_id = parsed["flowchart_id"]
         flowchart_node_id = parsed["flowchart_node_id"]
         flowchart_run_id = parsed["flowchart_run_id"]
         flowchart_run_node_id = parsed["flowchart_run_node_id"]
         if isinstance(flowchart_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_id == flowchart_id)
+            artifact_filters.append(NodeArtifact.flowchart_id == flowchart_id)
         if isinstance(flowchart_node_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_node_id == flowchart_node_id)
+            artifact_filters.append(NodeArtifact.flowchart_node_id == flowchart_node_id)
         if isinstance(flowchart_run_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_run_id == flowchart_run_id)
+            artifact_filters.append(NodeArtifact.flowchart_run_id == flowchart_run_id)
         if isinstance(flowchart_run_node_id, int):
-            stmt = stmt.where(NodeArtifact.flowchart_run_node_id == flowchart_run_node_id)
+            artifact_filters.append(NodeArtifact.flowchart_run_node_id == flowchart_run_node_id)
+        total_count = (
+            session.execute(
+                select(func.count(NodeArtifact.id)).where(*artifact_filters)
+            )
+            .scalar_one()
+        )
+        stmt = select(NodeArtifact).where(*artifact_filters)
         if parsed["descending"]:
             stmt = stmt.order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
         else:
@@ -11228,6 +11251,7 @@ def list_milestone_artifacts(milestone_id: int):
         "ok": True,
         "milestone_id": milestone_id,
         "count": len(artifacts),
+        "total_count": int(total_count or 0),
         "limit": int(parsed["limit"]),
         "offset": int(parsed["offset"]),
         "items": [_serialize_node_artifact(item) for item in artifacts],

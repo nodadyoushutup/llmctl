@@ -23,6 +23,11 @@ function parseId(value) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
+function parseNonNegativeInt(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
 function errorMessage(error, fallback) {
   if (error instanceof HttpError) {
     if (error.isAuthError) {
@@ -105,6 +110,9 @@ export default function PlanDetailPage() {
   const artifacts = artifactsPayload && Array.isArray(artifactsPayload.items) ? artifactsPayload.items : []
   const stages = plan && Array.isArray(plan.stages) ? plan.stages : []
   const summary = payload && payload.summary && typeof payload.summary === 'object' ? payload.summary : null
+  const totalArtifactCount = parseNonNegativeInt(artifactsPayload?.total_count) ?? artifacts.length
+  const latestArtifact = artifacts.length > 0 ? artifacts[0] : null
+  const latestArtifactAction = String(latestArtifact?.payload?.action || '').trim() || '-'
 
   const stageCount = Number.isInteger(summary?.stage_count) ? summary.stage_count : stages.length
   const taskCount = Number.isInteger(summary?.task_count)
@@ -376,8 +384,16 @@ export default function PlanDetailPage() {
             </div>
             <dl className="meta-list meta-list-compact" style={{ marginTop: '20px' }}>
               <div className="meta-span">
-                <dt>Description</dt>
-                <dd>{plan.description || '-'}</dd>
+                <dt>Artifact runs</dt>
+                <dd>{totalArtifactCount}</dd>
+              </div>
+              <div>
+                <dt>Latest action</dt>
+                <dd>{latestArtifactAction}</dd>
+              </div>
+              <div>
+                <dt>Latest artifact</dt>
+                <dd>{latestArtifact?.created_at || '-'}</dd>
               </div>
               <div>
                 <dt>Completed</dt>
@@ -402,7 +418,7 @@ export default function PlanDetailPage() {
             </dl>
 
             <div className="subcard" style={{ marginTop: '20px' }}>
-              <p className="eyebrow">artifact history</p>
+              <p className="eyebrow">{`artifact history · ${totalArtifactCount} total`}</p>
               <ArtifactHistoryTable
                 artifacts={artifacts}
                 emptyMessage="No artifact history yet for this plan."

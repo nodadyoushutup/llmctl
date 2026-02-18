@@ -11,6 +11,11 @@ function parseId(value) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
+function parseNonNegativeInt(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
 function errorMessage(error, fallback) {
   if (error instanceof HttpError) {
     if (error.isAuthError) {
@@ -80,6 +85,9 @@ export default function MilestoneDetailPage() {
     ? state.artifactsPayload
     : null
   const artifacts = artifactsPayload && Array.isArray(artifactsPayload.items) ? artifactsPayload.items : []
+  const totalArtifactCount = parseNonNegativeInt(artifactsPayload?.total_count) ?? artifacts.length
+  const latestArtifact = artifacts.length > 0 ? artifacts[0] : null
+  const latestArtifactAction = String(latestArtifact?.payload?.action || '').trim() || '-'
 
   async function handleDelete() {
     if (!milestone || !window.confirm('Delete this milestone?')) {
@@ -194,14 +202,13 @@ export default function MilestoneDetailPage() {
                 </div>
               </div>
               <div className="subcard">
-                <p className="eyebrow">description</p>
-                {milestone.description ? (
-                  <p className="muted" style={{ marginTop: '12px', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
-                    {milestone.description}
-                  </p>
-                ) : (
-                  <p className="muted" style={{ marginTop: '12px' }}>No description yet.</p>
-                )}
+                <p className="eyebrow">artifact summary</p>
+                <div className="stack" style={{ marginTop: '12px', fontSize: '12px' }}>
+                  <p className="muted">Triggered runs: {totalArtifactCount}</p>
+                  <p className="muted">Latest artifact action: {latestArtifactAction}</p>
+                  <p className="muted">Latest artifact created: {latestArtifact?.created_at || '-'}</p>
+                  <p className="muted">Canonical milestone updates are recorded per artifact.</p>
+                </div>
               </div>
             </div>
 
@@ -236,7 +243,7 @@ export default function MilestoneDetailPage() {
             </div>
 
             <div className="subcard" style={{ marginTop: '20px' }}>
-              <p className="eyebrow">artifact history</p>
+              <p className="eyebrow">{`artifact history · ${totalArtifactCount} total`}</p>
               <ArtifactHistoryTable
                 artifacts={artifacts}
                 emptyMessage="No artifact history yet for this milestone."

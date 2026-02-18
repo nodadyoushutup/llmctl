@@ -47,6 +47,9 @@ describe('MemoryDetailPage', () => {
           payload: { action: 'retrieve' },
         },
       ],
+      pagination: {
+        total_count: 3,
+      },
     })
     deleteMemory.mockResolvedValue({ ok: true })
     deleteMemoryArtifact.mockResolvedValue({ ok: true })
@@ -59,8 +62,10 @@ describe('MemoryDetailPage', () => {
       expect(getMemory).toHaveBeenCalledWith(7)
       expect(getMemoryHistory).toHaveBeenCalledWith(7)
     })
-    expect(await screen.findByText('artifact history')).toBeInTheDocument()
+    expect(await screen.findByText('artifact history · 3 total')).toBeInTheDocument()
     expect(screen.getByText('retrieve')).toBeInTheDocument()
+    expect(screen.getByText('Triggered runs: 3')).toBeInTheDocument()
+    expect(screen.getByText('Canonical memory content lives in artifacts.')).toBeInTheDocument()
 
     const historyRow = container.querySelector('tr.table-row-link')
     expect(historyRow).toBeTruthy()
@@ -97,6 +102,6 @@ describe('MemoryDetailPage', () => {
       expect(getMemory).toHaveBeenCalledWith(7)
       expect(getMemoryHistory).toHaveBeenCalledWith(7, { flowchartNodeId: 9 })
     })
-    expect(await screen.findByText('artifact history (node 9)')).toBeInTheDocument()
+    expect(await screen.findByText('artifact history (node 9) · 3 total')).toBeInTheDocument()
   })
 })

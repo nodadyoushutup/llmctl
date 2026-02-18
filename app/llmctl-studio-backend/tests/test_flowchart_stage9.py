@@ -4801,6 +4801,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual("req-plan-list-1", list_payload.get("request_id"))
         self.assertEqual("corr-plan-list-1", list_payload.get("correlation_id"))
         self.assertEqual(1, list_payload.get("count"))
+        self.assertEqual(1, list_payload.get("total_count"))
         items = list_payload.get("items") or []
         self.assertEqual(1, len(items))
         self.assertEqual(NODE_ARTIFACT_TYPE_PLAN, items[0].get("artifact_type"))
@@ -4944,6 +4945,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertTrue(list_payload.get("ok"))
         self.assertEqual("req-memory-list-1", list_payload.get("request_id"))
         self.assertEqual("corr-memory-list-1", list_payload.get("correlation_id"))
+        self.assertEqual(1, list_payload.get("total_count"))
         items = list_payload.get("items") or []
         self.assertEqual(1, len(items))
         self.assertEqual(NODE_ARTIFACT_TYPE_MEMORY, items[0].get("artifact_type"))
@@ -5082,6 +5084,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertTrue(list_payload.get("ok"))
         self.assertEqual("req-milestone-list-1", list_payload.get("request_id"))
         self.assertEqual("corr-milestone-list-1", list_payload.get("correlation_id"))
+        self.assertEqual(1, list_payload.get("total_count"))
         items = list_payload.get("items") or []
         self.assertEqual(1, len(items))
         self.assertEqual(NODE_ARTIFACT_TYPE_MILESTONE, items[0].get("artifact_type"))

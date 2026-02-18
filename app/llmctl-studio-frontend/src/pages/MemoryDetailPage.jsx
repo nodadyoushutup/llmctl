@@ -11,6 +11,11 @@ function parseId(value) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
+function parseNonNegativeInt(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null
+}
+
 function errorMessage(error, fallback) {
   if (error instanceof HttpError) {
     if (error.isAuthError) {
@@ -75,6 +80,12 @@ export default function MemoryDetailPage() {
     : null
   const memory = payload && payload.memory && typeof payload.memory === 'object' ? payload.memory : null
   const artifacts = historyPayload && Array.isArray(historyPayload.artifacts) ? historyPayload.artifacts : []
+  const pagination = historyPayload && historyPayload.pagination && typeof historyPayload.pagination === 'object'
+    ? historyPayload.pagination
+    : null
+  const totalArtifactCount = parseNonNegativeInt(pagination?.total_count) ?? artifacts.length
+  const latestArtifact = artifacts.length > 0 ? artifacts[0] : null
+  const latestArtifactAction = String(latestArtifact?.payload?.action || '').trim() || '-'
 
   async function handleDelete() {
     if (!memory || !window.confirm('Delete this memory?')) {
@@ -182,15 +193,21 @@ export default function MemoryDetailPage() {
                 </div>
               </div>
               <div className="subcard">
-                <p className="eyebrow">description</p>
-                <p className="muted" style={{ marginTop: '12px', whiteSpace: 'pre-wrap' }}>
-                  {memory.description || '-'}
-                </p>
+                <p className="eyebrow">artifact summary</p>
+                <div className="stack" style={{ marginTop: '12px', fontSize: '12px' }}>
+                  <p className="muted">Triggered runs: {totalArtifactCount}</p>
+                  <p className="muted">Latest artifact action: {latestArtifactAction}</p>
+                  <p className="muted">Latest artifact created: {latestArtifact?.created_at || '-'}</p>
+                  <p className="muted">Canonical memory content lives in artifacts.</p>
+                </div>
               </div>
             </div>
             <div className="subcard" style={{ marginTop: '20px' }}>
               <p className="eyebrow">
-                {selectedFlowchartNodeId ? `artifact history (node ${selectedFlowchartNodeId})` : 'artifact history'}
+                {selectedFlowchartNodeId
+                  ? `artifact history (node ${selectedFlowchartNodeId})`
+                  : 'artifact history'}
+                {` · ${totalArtifactCount} total`}
               </p>
               <ArtifactHistoryTable
                 artifacts={artifacts}
