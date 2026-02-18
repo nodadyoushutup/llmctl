@@ -8656,6 +8656,10 @@ def _execute_flowchart_rag_node(
         flowchart_node_run_id=execution_id,
         synthesize_answer=_synthesize_answer,
     )
+    answer_text = query_result.get("answer")
+    if isinstance(answer_text, str) and answer_text.strip():
+        query_result.setdefault("raw_output", answer_text)
+        query_result.setdefault("structured_output", {"text": answer_text})
     output_state = {
         "node_type": FLOWCHART_NODE_TYPE_RAG,
         **query_result,

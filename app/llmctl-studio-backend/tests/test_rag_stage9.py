@@ -148,6 +148,79 @@ class RagStage9RuntimeTests(StudioDbTestCase):
         self.assertLess(merged.find("base question"), merged.find("Solid connector context"))
         self.assertLess(merged.find("Solid connector context"), merged.find("Dotted connector context"))
 
+    def test_query_synthesis_prompt_includes_retrieval_source_metadata(self) -> None:
+        rag_node_id, _model_id = self._create_rag_node()
+        captured_user_prompt: dict[str, str] = {}
+
+        def _fake_chat_completion(_config, messages):
+            for message in messages:
+                if isinstance(message, dict) and message.get("role") == "user":
+                    captured_user_prompt["value"] = str(message.get("content") or "")
+                    break
+            return "Synthesized answer"
+
+        def _fake_query_contract(**kwargs):
+            synthesize_answer = kwargs.get("synthesize_answer")
+            self.assertTrue(callable(synthesize_answer))
+            answer = synthesize_answer(
+                "Which file matched?",
+                [
+                    {
+                        "text": "Probe snippet",
+                        "collection": "drive_2",
+                        "rank": 1,
+                        "path": "sample_delta_index_probe.pdf",
+                        "source_id": "src-2",
+                        "chunk_id": "chunk-1",
+                        "score": 0.123,
+                    }
+                ],
+            )
+            return {
+                "answer": answer,
+                "retrieval_context": [
+                    {
+                        "text": "Probe snippet",
+                        "collection": "drive_2",
+                        "rank": 1,
+                        "path": "sample_delta_index_probe.pdf",
+                    }
+                ],
+                "retrieval_stats": {"provider": "chroma", "top_k": 3, "retrieved_count": 1},
+                "synthesis_error": None,
+                "mode": "query",
+                "collections": ["drive_2"],
+            }
+
+        with (
+            patch.object(studio_tasks, "execute_query_contract", side_effect=_fake_query_contract),
+            patch.object(
+                studio_tasks,
+                "load_rag_config",
+                return_value=SimpleNamespace(chat_max_context_chars=12000),
+            ),
+            patch.object(studio_tasks, "rag_has_chat_api_key", return_value=True),
+            patch.object(studio_tasks, "rag_call_chat_completion", side_effect=_fake_chat_completion),
+        ):
+            output_state, _routing_state = studio_tasks._execute_flowchart_rag_node(
+                node_id=rag_node_id,
+                node_config={
+                    "mode": "query",
+                    "collections": ["drive_2"],
+                    "question_prompt": "Name one indexed file.",
+                    "top_k": 3,
+                },
+                input_context={"flowchart": {"run_id": 42}},
+                execution_id=99,
+                default_model_id=None,
+            )
+
+        self.assertEqual("Synthesized answer", output_state.get("answer"))
+        prompt = captured_user_prompt.get("value", "")
+        self.assertIn("path=sample_delta_index_probe.pdf", prompt)
+        self.assertIn("collection=drive_2", prompt)
+        self.assertIn("Probe snippet", prompt)
+
     def test_index_mode_uses_collection_index_runner(self) -> None:
         rag_node_id, _model_id = self._create_rag_node()
 
@@ -741,6 +814,9 @@ class RagStage9RuntimeTests(StudioDbTestCase):
             self.assertEqual(1, retrieval_stats.get("retrieved_count"))
             self.assertEqual(5, retrieval_stats.get("top_k"))
             self.assertEqual("detailed answer", output_state.get("answer"))
+            self.assertEqual("detailed answer", output_state.get("raw_output"))
+            structured_output = output_state.get("structured_output") or {}
+            self.assertEqual("detailed answer", structured_output.get("text"))
 
     def test_run_flowchart_fails_fast_for_unhealthy_rag(self) -> None:
         with session_scope() as session:
@@ -807,7 +883,7 @@ class RagStage9RuntimeTests(StudioDbTestCase):
 
 
 class RagStage9AuditContractTests(StudioDbTestCase):
-    def test_query_contract_keeps_citation_metadata_audit_only(self) -> None:
+    def test_query_contract_keeps_citation_metadata_without_snippet_leakage(self) -> None:
         source = SimpleNamespace(
             id=1,
             name="Docs",
@@ -865,8 +941,10 @@ class RagStage9AuditContractTests(StudioDbTestCase):
         self.assertIn("text", context_row)
         self.assertIn("collection", context_row)
         self.assertIn("rank", context_row)
+        self.assertEqual("docs/readme.md", context_row.get("path"))
+        self.assertEqual("chunk-1", context_row.get("chunk_id"))
+        self.assertEqual("src-1", context_row.get("source_id"))
         self.assertNotIn("snippet", context_row)
-        self.assertNotIn("path", context_row)
         citation_row = (result.get("citation_records") or [])[0]
         self.assertEqual("docs", citation_row.get("collection"))
         self.assertEqual("docs/readme.md", citation_row.get("path"))
@@ -879,6 +957,27 @@ class RagStage9AuditContractTests(StudioDbTestCase):
             self.assertEqual("docs", rows[0].collection)
             self.assertEqual("docs/readme.md", rows[0].path)
             self.assertEqual("retrieved snippet text", rows[0].snippet)
+
+    def test_format_retrieval_context_for_synthesis_includes_source_metadata(self) -> None:
+        rendered = rag_contracts.format_retrieval_context_for_synthesis(
+            [
+                {
+                    "text": "Primary snippet",
+                    "collection": "drive_2",
+                    "rank": 1,
+                    "source_id": "src-2",
+                    "path": "sample.pdf",
+                    "chunk_id": "chunk-a",
+                    "score": 0.42,
+                }
+            ]
+        )
+        self.assertIn("[1]", rendered)
+        self.assertIn("collection=drive_2", rendered)
+        self.assertIn("path=sample.pdf", rendered)
+        self.assertIn("chunk_id=chunk-a", rendered)
+        self.assertIn("score=0.42", rendered)
+        self.assertIn("Primary snippet", rendered)
 
 
 if __name__ == "__main__":
