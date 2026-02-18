@@ -69,6 +69,7 @@ import {
   deleteChromaCollection,
   getRagSources,
   getRagSourceMeta,
+  verifyRagGoogleDriveConnection,
   createRagSource,
   getRagSource,
   getRagSourceEdit,
@@ -1309,6 +1310,7 @@ describe('studioApi', () => {
     deleteChromaCollection('docs', { next: 'detail' })
     getRagSources()
     getRagSourceMeta()
+    verifyRagGoogleDriveConnection({ folderId: '1a2b3c' })
     createRagSource({
       name: 'docs',
       kind: 'github',
@@ -1357,7 +1359,13 @@ describe('studioApi', () => {
     })
     expect(requestJson).toHaveBeenNthCalledWith(11, '/rag/sources')
     expect(requestJson).toHaveBeenNthCalledWith(12, '/rag/sources/new')
-    expect(requestJson).toHaveBeenNthCalledWith(13, '/rag/sources', {
+    expect(requestJson).toHaveBeenNthCalledWith(13, '/rag/google-drive/verify', {
+      method: 'POST',
+      body: {
+        folder_id: '1a2b3c',
+      },
+    })
+    expect(requestJson).toHaveBeenNthCalledWith(14, '/rag/sources', {
       method: 'POST',
       body: {
         name: 'docs',
@@ -1371,9 +1379,9 @@ describe('studioApi', () => {
         index_schedule_mode: 'delta',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(14, '/rag/sources/10')
-    expect(requestJson).toHaveBeenNthCalledWith(15, '/rag/sources/10/edit')
-    expect(requestJson).toHaveBeenNthCalledWith(16, '/rag/sources/10', {
+    expect(requestJson).toHaveBeenNthCalledWith(15, '/rag/sources/10')
+    expect(requestJson).toHaveBeenNthCalledWith(16, '/rag/sources/10/edit')
+    expect(requestJson).toHaveBeenNthCalledWith(17, '/rag/sources/10', {
       method: 'POST',
       body: {
         name: 'docs-updated',
@@ -1387,9 +1395,9 @@ describe('studioApi', () => {
         index_schedule_mode: 'fresh',
       },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(17, '/rag/sources/10/quick-index', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(18, '/rag/sources/10/quick-delta-index', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(19, '/rag/sources/status?ids=10%2C11')
-    expect(requestJson).toHaveBeenNthCalledWith(20, '/rag/sources/10/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(18, '/rag/sources/10/quick-index', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(19, '/rag/sources/10/quick-delta-index', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(20, '/rag/sources/status?ids=10%2C11')
+    expect(requestJson).toHaveBeenNthCalledWith(21, '/rag/sources/10/delete', { method: 'POST' })
   })
 })

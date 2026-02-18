@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
-import { createRagSource, getRagSourceMeta } from '../lib/studioApi'
+import {
+  createRagSource,
+  getRagSourceMeta,
+  verifyRagGoogleDriveConnection,
+} from '../lib/studioApi'
 
 function errorMessage(error, fallback) {
   if (error instanceof HttpError) {
@@ -18,9 +22,12 @@ function errorMessage(error, fallback) {
 }
 
 function buildInitialForm() {
+  const search = typeof window !== 'undefined' ? window.location.search : ''
+  const initialKind = String(new URLSearchParams(search).get('kind') || '').trim().toLowerCase()
+  const kind = initialKind === 'github' || initialKind === 'google_drive' ? initialKind : 'local'
   return {
     name: '',
-    kind: 'local',
+    kind,
     localPath: '',
     gitRepo: '',
     gitBranch: 'main',
@@ -36,7 +43,9 @@ export default function RagSourceNewPage() {
   const [metaState, setMetaState] = useState({ loading: true, payload: null, error: '' })
   const [form, setForm] = useState(buildInitialForm)
   const [, setActionError] = useFlashState('error')
+  const [, setActionInfo] = useFlashState('success')
   const [busy, setBusy] = useState(false)
+  const [verifyBusy, setVerifyBusy] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -73,6 +82,35 @@ export default function RagSourceNewPage() {
       setActionError(errorMessage(error, 'Failed to create source.'))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleVerifyGoogleDrive() {
+    const folderId = String(form.driveFolderId || '').trim()
+    setActionError('')
+    setActionInfo('')
+    if (!folderId) {
+      setActionError('Google Drive folder ID is required for verification.')
+      return
+    }
+
+    setVerifyBusy(true)
+    try {
+      const payload = await verifyRagGoogleDriveConnection({ folderId })
+      const folderName = String(payload?.folder_name || '').trim()
+      const serviceAccountEmail = String(payload?.service_account_email || '').trim()
+      const segments = ['Google Drive folder access verified.']
+      if (folderName) {
+        segments.push(`Folder: ${folderName}.`)
+      }
+      if (serviceAccountEmail) {
+        segments.push(`Service account: ${serviceAccountEmail}.`)
+      }
+      setActionInfo(segments.join(' '))
+    } catch (error) {
+      setActionError(errorMessage(error, 'Failed to verify Google Drive connection.'))
+    } finally {
+      setVerifyBusy(false)
     }
   }
 
@@ -135,10 +173,22 @@ export default function RagSourceNewPage() {
           ) : null}
 
           {form.kind === 'google_drive' ? (
-            <label>
-              Google Drive folder ID
-              <input value={form.driveFolderId} onChange={(event) => setForm((current) => ({ ...current, driveFolderId: event.target.value }))} />
-            </label>
+            <>
+              <label>
+                Google Drive folder ID
+                <input value={form.driveFolderId} onChange={(event) => setForm((current) => ({ ...current, driveFolderId: event.target.value }))} />
+              </label>
+              <div className="table-actions">
+                <button
+                  type="button"
+                  className="btn-link btn-secondary"
+                  disabled={busy || verifyBusy}
+                  onClick={handleVerifyGoogleDrive}
+                >
+                  {verifyBusy ? 'Verifying...' : 'Verify Connection'}
+                </button>
+              </div>
+            </>
           ) : null}
 
           <div className="key-value-grid">

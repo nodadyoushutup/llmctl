@@ -1890,6 +1890,29 @@ export function getRagSourceMeta() {
   return requestJson('/rag/sources/new')
 }
 
+export function verifyRagGoogleDriveConnection({
+  folderId = '',
+  serviceAccountJson = '',
+} = {}) {
+  const normalizedFolderId = String(folderId || '').trim()
+  if (!normalizedFolderId) {
+    throw new Error('folderId is required.')
+  }
+  const normalizedServiceAccountJson = String(serviceAccountJson || '').trim()
+
+  const body = {
+    folder_id: normalizedFolderId,
+  }
+  if (normalizedServiceAccountJson) {
+    body.service_account_json = normalizedServiceAccountJson
+  }
+
+  return requestJson('/rag/google-drive/verify', {
+    method: 'POST',
+    body,
+  })
+}
+
 export function createRagSource({
   name = '',
   kind = 'local',
