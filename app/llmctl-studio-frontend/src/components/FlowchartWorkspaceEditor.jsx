@@ -2025,9 +2025,11 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     ? catalog[selectedNodeRefCatalogKey]
     : []
   const selectedNodeRefOptions = Array.isArray(selectedNodeRefRows) ? selectedNodeRefRows : []
-  const modelOptions = catalog && typeof catalog === 'object' && Array.isArray(catalog.models)
-    ? catalog.models
-    : []
+  const modelOptions = useMemo(() => (
+    catalog && typeof catalog === 'object' && Array.isArray(catalog.models)
+      ? catalog.models
+      : []
+  ), [catalog])
   const modelById = useMemo(() => {
     const map = new Map()
     for (const model of modelOptions) {
@@ -2054,9 +2056,11 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const selectedRagModelIsEmbedding = isEmbeddingModelOption(
     selectedNode ? modelById.get(parsePositiveInt(selectedNode.model_id)) : null,
   )
-  const ragCollectionRows = catalog && typeof catalog === 'object' && Array.isArray(catalog.rag_collections)
-    ? catalog.rag_collections
-    : []
+  const ragCollectionRows = useMemo(() => (
+    catalog && typeof catalog === 'object' && Array.isArray(catalog.rag_collections)
+      ? catalog.rag_collections
+      : []
+  ), [catalog])
   const ragCollectionOptions = useMemo(() => (
     ragCollectionRows
       .map((item) => {
