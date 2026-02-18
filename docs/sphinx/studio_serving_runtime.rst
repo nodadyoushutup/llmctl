@@ -271,6 +271,32 @@ backend-to-frontend updates.
 
 This contract is consumed by the React frontend in the split runtime.
 
+Node Detail API and Runtime Metadata Contract
+---------------------------------------------
+
+Node detail/status payloads expose stable execution-mode metadata for RAG runs:
+
+- ``task.execution_mode`` in ``GET /api/nodes/<id>``
+- ``execution_mode`` in ``GET /api/nodes/<id>/status``
+
+Canonical values:
+
+- ``query``
+- ``indexing``
+- ``delta_indexing``
+
+Realtime/runtime metadata normalization also carries ``execution_mode`` so
+frontend consumers can align stage labels consistently with API responses.
+
+Node Detail stage assembly keeps canonical stage keys and remaps only
+``llm_query`` labels for RAG runs:
+
+- ``query`` -> ``LLM Query``
+- ``indexing`` -> ``RAG Indexing``
+- ``delta_indexing`` -> ``RAG Delta Indexing``
+
+Non-RAG nodes and missing/unknown modes keep existing ``LLM Query`` behavior.
+
 Developer Workflow (React-Only Split)
 -------------------------------------
 

@@ -97,6 +97,14 @@ function stageEntryLabel(stage, index) {
   return `Stage ${index + 1}`
 }
 
+export function stageLogEmptyMessage(stage, index) {
+  const label = stageEntryLabel(stage, index).trim().toLowerCase()
+  if (label === 'rag indexing' || label === 'rag delta indexing') {
+    return 'Waiting for indexing logs...'
+  }
+  return 'No logs yet.'
+}
+
 function isStageRunning(stage) {
   return String(stage?.status || '').toLowerCase() === 'running'
 }
@@ -665,7 +673,7 @@ export default function NodeDetailPage() {
                               {stage.logs}
                             </pre>
                           ) : (
-                            <p className="toolbar-meta node-stage-log-empty">No logs yet.</p>
+                            <p className="toolbar-meta node-stage-log-empty">{stageLogEmptyMessage(stage, index)}</p>
                           )}
                         </div>
                       ) : null}

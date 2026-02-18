@@ -415,6 +415,56 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         status_payload = status_response.get_json() or {}
         self.assertEqual("delta_indexing", status_payload.get("execution_mode"))
 
+    def test_node_stage_entries_use_rag_indexing_labels_for_index_modes(self) -> None:
+        with session_scope() as session:
+            indexing_task = AgentTask.create(
+                session,
+                status="running",
+                kind="rag_quick_index",
+                current_stage="llm_query",
+                stage_logs=json.dumps({"llm_query": ""}, sort_keys=True),
+            )
+            delta_task = AgentTask.create(
+                session,
+                status="running",
+                kind="rag_quick_delta_index",
+                current_stage="llm_query",
+                stage_logs=json.dumps({"llm_query": ""}, sort_keys=True),
+            )
+            query_task = AgentTask.create(
+                session,
+                status="running",
+                kind="flowchart_rag",
+                current_stage="llm_query",
+                prompt=json.dumps(
+                    {
+                        "kind": "flowchart_node_activity",
+                        "flowchart_node_type": "rag",
+                        "flowchart_node_mode": "query",
+                    },
+                    sort_keys=True,
+                ),
+                stage_logs=json.dumps({"llm_query": ""}, sort_keys=True),
+            )
+            indexing_task_id = int(indexing_task.id)
+            delta_task_id = int(delta_task.id)
+            query_task_id = int(query_task.id)
+
+        def _llm_query_label(path: str) -> str:
+            response = self.client.get(path)
+            self.assertEqual(200, response.status_code)
+            payload = response.get_json() or {}
+            stage_entries = payload.get("stage_entries") or []
+            llm_query_entry = next(
+                (entry for entry in stage_entries if str(entry.get("key") or "") == "llm_query"),
+                {},
+            )
+            return str(llm_query_entry.get("label") or "")
+
+        self.assertEqual("RAG Indexing", _llm_query_label(f"/nodes/{indexing_task_id}?format=json"))
+        self.assertEqual("RAG Delta Indexing", _llm_query_label(f"/nodes/{delta_task_id}?format=json"))
+        self.assertEqual("LLM Query", _llm_query_label(f"/nodes/{query_task_id}?format=json"))
+
     def test_retry_node_api_queues_cloned_node(self) -> None:
         with session_scope() as session:
             agent = Agent.create(

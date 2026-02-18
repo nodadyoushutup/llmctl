@@ -7367,6 +7367,7 @@ def _execute_flowchart_rag_node(
     node_config: dict[str, Any],
     input_context: dict[str, Any],
     execution_id: int,
+    execution_task_id: int | None = None,
     default_model_id: int | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     mode = str(node_config.get("mode") or "").strip().lower()
@@ -7401,15 +7402,63 @@ def _execute_flowchart_rag_node(
     model_id = getattr(model, "id", None)
     model_name = str(getattr(model, "name", "") or "")
     if mode in {RAG_FLOWCHART_MODE_FRESH_INDEX, RAG_FLOWCHART_MODE_DELTA_INDEX}:
+        stage_key = "llm_query"
+        stage_log_chunks: list[str] = []
+        persist_interval_seconds = 0.4
+        last_persist_at = 0.0
+
+        def _serialize_stage_logs() -> dict[str, str]:
+            return {stage_key: "".join(stage_log_chunks)}
+
+        def _persist_stage_logs(*, force: bool = False) -> None:
+            nonlocal last_persist_at
+            if execution_task_id is None:
+                return
+            now = time.monotonic()
+            if not force and now - last_persist_at < persist_interval_seconds:
+                return
+            with session_scope() as session:
+                task = session.get(AgentTask, int(execution_task_id))
+                if task is None:
+                    return
+                task.current_stage = stage_key
+                stage_logs_payload: dict[str, str] = {}
+                raw_stage_logs = str(task.stage_logs or "").strip()
+                if raw_stage_logs.startswith("{"):
+                    try:
+                        parsed = json.loads(raw_stage_logs)
+                    except json.JSONDecodeError:
+                        parsed = {}
+                    if isinstance(parsed, dict):
+                        stage_logs_payload = {
+                            str(key): str(value)
+                            for key, value in parsed.items()
+                        }
+                stage_logs_payload.update(_serialize_stage_logs())
+                task.stage_logs = json.dumps(stage_logs_payload, sort_keys=True)
+            last_persist_at = now
+
+        def _on_index_log(message: str) -> None:
+            line = str(message or "").strip()
+            if not line:
+                return
+            stage_log_chunks.append(f"{line}\n")
+            _persist_stage_logs()
+
         if model_provider not in {"codex", "gemini"}:
             raise ValueError(
                 "RAG index modes require an embedding-capable model provider (codex or gemini)."
             )
+        # Mark stage as active before any indexing logs arrive so Node Detail can render waiting state.
+        _persist_stage_logs(force=True)
         index_summary = run_index_for_collections(
             mode=mode,
             collections=collections,
             model_provider=model_provider,
+            on_log=_on_index_log,
         )
+        _persist_stage_logs(force=True)
+        task_stage_logs = _serialize_stage_logs()
         output_state = {
             "node_type": FLOWCHART_NODE_TYPE_RAG,
             "answer": None,
@@ -7429,6 +7478,8 @@ def _execute_flowchart_rag_node(
             "model_id": model_id,
             "model_name": model_name,
             "model_provider": model_provider,
+            "task_current_stage": stage_key,
+            "task_stage_logs": task_stage_logs,
         }
         return output_state, {}
 
@@ -7715,6 +7766,7 @@ def _execute_flowchart_node(
             node_config=node_config,
             input_context=input_context,
             execution_id=execution_id,
+            execution_task_id=execution_task_id,
             default_model_id=default_model_id,
         )
     if node_type == FLOWCHART_NODE_TYPE_DECISION:

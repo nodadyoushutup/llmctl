@@ -648,6 +648,41 @@ def _task_execution_mode(task: AgentTask | None) -> str:
     return ""
 
 
+def _is_rag_node_task(task: AgentTask | None) -> bool:
+    if task is None:
+        return False
+    if is_quick_rag_task_kind(task.kind):
+        return True
+    _prompt_text, prompt_payload = parse_prompt_input(task.prompt)
+    if isinstance(prompt_payload, dict):
+        flowchart_node_type = str(prompt_payload.get("flowchart_node_type") or "").strip().lower()
+        if flowchart_node_type == FLOWCHART_NODE_TYPE_RAG:
+            return True
+    raw_output = str(task.output or "").strip()
+    if raw_output.startswith("{"):
+        try:
+            output_payload = json.loads(raw_output)
+        except json.JSONDecodeError:
+            output_payload = {}
+        if isinstance(output_payload, dict):
+            if str(output_payload.get("node_type") or "").strip().lower() == FLOWCHART_NODE_TYPE_RAG:
+                return True
+    return False
+
+
+def _task_stage_label(task: AgentTask, stage_key: str, default_label: str) -> str:
+    if stage_key != "llm_query":
+        return default_label
+    if not _is_rag_node_task(task):
+        return default_label
+    execution_mode = _task_execution_mode(task)
+    if execution_mode == "indexing":
+        return "RAG Indexing"
+    if execution_mode == "delta_indexing":
+        return "RAG Delta Indexing"
+    return default_label
+
+
 def _parse_role_details(raw_json: str) -> str:
     if not raw_json:
         return "{}"
@@ -1727,7 +1762,8 @@ def _build_stage_entries(task: AgentTask) -> list[dict[str, str]]:
     stage_logs = _parse_stage_logs(task.stage_logs)
     status_map = _build_stage_status_map(task.status, task.current_stage)
     entries: list[dict[str, str]] = []
-    for stage_key, label in TASK_STAGE_ORDER:
+    for stage_key, default_label in TASK_STAGE_ORDER:
+        label = _task_stage_label(task, stage_key, default_label)
         status = status_map.get(stage_key, "pending")
         entries.append(
             {

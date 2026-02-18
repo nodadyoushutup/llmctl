@@ -68,34 +68,48 @@ Goal: restore and harden RAG indexing visibility in Node Detail so `Quick RAG` a
 
 ## Stage 3 - RAG Indexing Log Capture Into Task Stage Logs
 
-- [ ] Add log callback support in RAG indexing domain contract path so indexing progress lines can be captured by callers.
-- [ ] Wire RAG indexing execution to collect log lines into `task_stage_logs["llm_query"]` for both `Quick RAG` and flowchart `RAG` node runs.
-- [ ] Ensure stage progress can represent active indexing before logs arrive (for waiting-state rendering).
-- [ ] Preserve existing query-mode output behavior and avoid changing non-RAG node logging.
+- [x] Add log callback support in RAG indexing domain contract path so indexing progress lines can be captured by callers.
+- [x] Wire RAG indexing execution to collect log lines into `task_stage_logs["llm_query"]` for both `Quick RAG` and flowchart `RAG` node runs.
+- [x] Ensure stage progress can represent active indexing before logs arrive (for waiting-state rendering).
+- [x] Preserve existing query-mode output behavior and avoid changing non-RAG node logging.
 
 ## Stage 4 - Dynamic Stage Label Mapping For Node Detail
 
-- [ ] Add stage-label override logic so `llm_query` maps to `RAG Indexing` or `RAG Delta Indexing` only for explicit indexing modes on `Quick RAG` and `RAG` runs.
-- [ ] Keep stage key ordering and status semantics unchanged.
-- [ ] Keep fallback label as `LLM Query` when mode is missing/unknown.
-- [ ] Ensure mapping applies in both initial node-detail payload and status refresh payload.
+- [x] Add stage-label override logic so `llm_query` maps to `RAG Indexing` or `RAG Delta Indexing` only for explicit indexing modes on `Quick RAG` and `RAG` runs.
+- [x] Keep stage key ordering and status semantics unchanged.
+- [x] Keep fallback label as `LLM Query` when mode is missing/unknown.
+- [x] Ensure mapping applies in both initial node-detail payload and status refresh payload.
 
 ## Stage 5 - Node Detail Empty-State And UX Wiring
 
-- [ ] Update Node Detail stage log empty-state copy for indexing-labeled stages to show a waiting message.
-- [ ] Keep generic `No logs yet.` behavior for non-indexing stages.
-- [ ] Verify behavior for both live polling updates and historical completed runs.
-- [ ] Keep UI performance stable by limiting derived state churn in stage rendering.
+- [x] Update Node Detail stage log empty-state copy for indexing-labeled stages to show a waiting message.
+- [x] Keep generic `No logs yet.` behavior for non-indexing stages.
+- [x] Verify behavior for both live polling updates and historical completed runs.
+- [x] Keep UI performance stable by limiting derived state churn in stage rendering.
 
 ## Stage 6 - Automated Testing
 
-- [ ] Run backend tests covering RAG indexing mode/log payload propagation and Node Detail stage-entry assembly.
-- [ ] Run backend tests covering API/socket execution-mode contract fields and regressions for non-RAG tasks.
-- [ ] Run frontend tests for Node Detail stage-label/empty-state behavior (or add targeted test coverage if missing).
-- [ ] Record pass/fail outcomes and any follow-up defects directly in this plan.
+- [x] Run backend tests covering RAG indexing mode/log payload propagation and Node Detail stage-entry assembly.
+- [x] Run backend tests covering API/socket execution-mode contract fields and regressions for non-RAG tasks.
+- [x] Run frontend tests for Node Detail stage-label/empty-state behavior (or add targeted test coverage if missing).
+- [x] Record pass/fail outcomes and any follow-up defects directly in this plan.
+
+Stage 6 outcomes:
+
+- [x] Backend targeted suite passed via Postgres wrapper:
+  ``~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh --python /home/nodadyoushutup/llmctl/.venv/bin/python3 -- /home/nodadyoushutup/llmctl/.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_rag_stage9.RagStage9RuntimeTests.test_index_mode_uses_collection_index_runner app.llmctl-studio-backend.tests.test_rag_stage9.RagStage9RuntimeTests.test_index_mode_captures_stage_logs_for_execution_task app.llmctl-studio-backend.tests.test_rag_stage9.RagStage9RuntimeTests.test_quick_rag_run_uses_node_config_model_provider app.llmctl-studio-backend.tests.test_node_executor_stage8 app.llmctl-studio-backend.tests.test_realtime_events_stage6 app.llmctl-studio-backend.tests.test_socket_proxy_gunicorn_stage9``.
+- [x] Added frontend coverage file ``app/llmctl-studio-frontend/src/pages/NodeDetailPage.test.jsx`` and verified:
+  ``npm run test -- src/pages/NodeDetailPage.test.jsx``.
+- [x] Follow-up note: full ``test_rag_stage9`` module contains unrelated runtime fixture failures (kubeconfig/flowchart runtime assumptions) and is outside this change scope; targeted RAG indexing tests for this feature pass.
 
 ## Stage 7 - Docs Updates
 
-- [ ] Update Sphinx/RTD documentation describing Node Detail stage behavior for RAG query vs indexing runs.
-- [ ] Document execution-mode contract fields for node APIs and realtime events.
-- [ ] Update changelog/release notes for restored RAG indexing stage logs in Node Detail.
+- [x] Update Sphinx/RTD documentation describing Node Detail stage behavior for RAG query vs indexing runs.
+- [x] Document execution-mode contract fields for node APIs and realtime events.
+- [x] Update changelog/release notes for restored RAG indexing stage logs in Node Detail.
+
+Stage 7 outcomes:
+
+- [x] Updated ``docs/sphinx/rag_flowchart_node.rst`` with Node Detail stage-label mapping and indexing log visibility behavior.
+- [x] Updated ``docs/sphinx/studio_serving_runtime.rst`` with ``execution_mode`` API/realtime contract notes for node detail/status flows.
+- [x] Updated ``docs/sphinx/changelog.rst`` with 2026-02-18 entries for restored RAG indexing logs + execution-mode contract exposure.

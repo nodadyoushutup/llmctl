@@ -19,6 +19,7 @@ from core.db import session_scope, utcnow
 from core.models import RAGRetrievalAudit, RAGSource
 from rag.engine.config import build_source_config, load_config
 from rag.engine.ingest import _iter_files, get_collection, index_paths
+from rag.engine.logging_utils import log_sink as rag_log_sink
 from rag.engine.retrieval import get_collections, query_collections
 from rag.integrations.git_sync import ensure_git_repo, git_fetch_and_reset
 from rag.integrations.google_drive_sync import sync_folder
@@ -672,7 +673,16 @@ def run_index_for_collections(
     mode: str,
     collections: list[str],
     model_provider: str,
+    on_log: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    def _emit_log(message: str) -> None:
+        if on_log is None:
+            return
+        try:
+            on_log(str(message or ""))
+        except Exception:
+            return
+
     normalized_mode = str(mode or "").strip().lower()
     if normalized_mode not in {
         RAG_FLOWCHART_MODE_FRESH_INDEX,
@@ -706,6 +716,11 @@ def run_index_for_collections(
     source_summaries: list[dict[str, Any]] = []
     total_files = 0
     total_chunks = 0
+    _emit_log(
+        "Starting RAG "
+        + ("delta indexing" if normalized_mode == RAG_FLOWCHART_MODE_DELTA_INDEX else "indexing")
+        + f" for {len(selected_collections)} collection(s)."
+    )
 
     for source in sources:
         source_config = build_source_config(base_config, source, github_settings)
@@ -724,21 +739,32 @@ def run_index_for_collections(
             )
         touched_paths: list[str] = []
         try:
+            _emit_log(
+                f"Indexing source '{source.name}' (collection '{source.collection}')."
+            )
+            source_summary: dict[str, Any]
             if normalized_mode == RAG_FLOWCHART_MODE_FRESH_INDEX:
-                summary = _run_fresh_source_index(
-                    source=source,
-                    source_config=source_config,
-                )
+                with rag_log_sink(_emit_log):
+                    source_summary = _run_fresh_source_index(
+                        source=source,
+                        source_config=source_config,
+                    )
             else:
-                summary = _run_delta_source_index(
-                    source=source,
-                    source_config=source_config,
-                )
-            touched_paths = list(summary.pop("touched_paths", []))
-            summary["collection"] = source.collection
-            source_summaries.append(summary)
-            total_files += int(summary.get("file_count") or 0)
-            total_chunks += int(summary.get("chunk_count") or 0)
+                with rag_log_sink(_emit_log):
+                    source_summary = _run_delta_source_index(
+                        source=source,
+                        source_config=source_config,
+                    )
+            touched_paths = list(source_summary.pop("touched_paths", []))
+            source_summary["collection"] = source.collection
+            source_summaries.append(source_summary)
+            total_files += int(source_summary.get("file_count") or 0)
+            total_chunks += int(source_summary.get("chunk_count") or 0)
+            _emit_log(
+                "Completed source "
+                + f"'{source.name}' with {int(source_summary.get('file_count') or 0)} files "
+                + f"and {int(source_summary.get('chunk_count') or 0)} chunks."
+            )
         except Exception as exc:
             rollback_error = _rollback_partial_source_index(
                 source=source,
@@ -752,14 +778,21 @@ def run_index_for_collections(
                 last_error=str(exc),
             )
             if rollback_error:
+                _emit_log(
+                    f"RAG indexing failed for source '{source.name}' and rollback failed."
+                )
                 raise ValueError(
                     f"RAG indexing failed for source '{source.name}' and rollback failed: "
                     f"{rollback_error}"
                 ) from exc
+            _emit_log(f"RAG indexing failed for source '{source.name}'.")
             raise ValueError(
                 f"RAG indexing failed for source '{source.name}': {exc}"
             ) from exc
 
+    _emit_log(
+        f"RAG indexing complete: {total_files} files, {total_chunks} chunks across {len(source_summaries)} source(s)."
+    )
     return {
         "mode": normalized_mode,
         "collections": selected_collections,

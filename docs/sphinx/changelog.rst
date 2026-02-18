@@ -4,6 +4,9 @@ Changelog
 2026-02-18
 ----------
 
+- Restored Node Detail RAG indexing visibility for ``Quick RAG`` and flowchart ``rag`` indexing runs by mapping the ``llm_query`` stage label to ``RAG Indexing``/``RAG Delta Indexing`` from canonical execution mode metadata.
+- Added RAG indexing stage-log capture plumbing so indexing log lines are persisted into task stage logs and rendered in Node Detail stage panels.
+- Added explicit execution-mode contract fields for Node Detail/status API payloads and normalized realtime runtime metadata (``query``, ``indexing``, ``delta_indexing``).
 - Migrated Chat turn LLM execution to Kubernetes executor pods (executor-dispatched ``llm_call`` runtime path).
 - Migrated RAG web chat synthesis/completion to Kubernetes executor pods (executor-dispatched ``rag_chat_completion`` path).
 - Updated agent-task Celery execution flow to route all task kinds through Kubernetes executor dispatch (no worker-local LLM execution path).

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ import core.db as core_db
 from core.config import Config
 from core.db import session_scope
 from core.models import (
+    AgentTask,
     FLOWCHART_NODE_TYPE_MEMORY,
     FLOWCHART_NODE_TYPE_RAG,
     FLOWCHART_NODE_TYPE_START,
@@ -38,7 +40,10 @@ class StudioDbTestCase(unittest.TestCase):
         tmp_dir = Path(self._tmp.name)
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
         self._orig_data_dir = Config.DATA_DIR
-        Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_dir / 'stage9.sqlite3'}"
+        test_db_uri = os.getenv("LLMCTL_STUDIO_DATABASE_URI", self._orig_db_uri)
+        if not str(test_db_uri or "").startswith("postgresql"):
+            self.skipTest("RAG stage9 tests require PostgreSQL test database URI.")
+        Config.SQLALCHEMY_DATABASE_URI = test_db_uri
         Config.DATA_DIR = str(tmp_dir / "data")
         Path(Config.DATA_DIR).mkdir(parents=True, exist_ok=True)
         self._reset_engine()
@@ -169,14 +174,18 @@ class RagStage9RuntimeTests(StudioDbTestCase):
                 default_model_id=None,
             )
 
-        mocked_index.assert_called_once_with(
-            mode="delta_index",
-            collections=["docs"],
-            model_provider="codex",
-        )
+        mocked_index.assert_called_once()
+        index_kwargs = mocked_index.call_args.kwargs
+        self.assertEqual("delta_index", index_kwargs.get("mode"))
+        self.assertEqual(["docs"], index_kwargs.get("collections"))
+        self.assertEqual("codex", index_kwargs.get("model_provider"))
+        self.assertTrue(callable(index_kwargs.get("on_log")))
         self.assertEqual("delta_index", output_state.get("mode"))
         self.assertEqual(["docs"], output_state.get("collections"))
         self.assertEqual(4, (output_state.get("retrieval_stats") or {}).get("total_files"))
+        self.assertEqual("llm_query", output_state.get("task_current_stage"))
+        stage_logs = output_state.get("task_stage_logs") or {}
+        self.assertIn("llm_query", stage_logs)
 
     def test_quick_rag_run_uses_node_config_model_provider(self) -> None:
         with patch.object(
@@ -206,14 +215,83 @@ class RagStage9RuntimeTests(StudioDbTestCase):
                 default_model_id=None,
             )
 
-        mocked_index.assert_called_once_with(
-            mode="fresh_index",
-            collections=["docs"],
-            model_provider="gemini",
-        )
+        mocked_index.assert_called_once()
+        index_kwargs = mocked_index.call_args.kwargs
+        self.assertEqual("fresh_index", index_kwargs.get("mode"))
+        self.assertEqual(["docs"], index_kwargs.get("collections"))
+        self.assertEqual("gemini", index_kwargs.get("model_provider"))
+        self.assertTrue(callable(index_kwargs.get("on_log")))
         self.assertEqual("gemini", output_state.get("model_provider"))
         self.assertIsNone(output_state.get("model_id"))
         self.assertEqual("", output_state.get("model_name"))
+
+    def test_index_mode_captures_stage_logs_for_execution_task(self) -> None:
+        with session_scope() as session:
+            task = AgentTask.create(
+                session,
+                status="running",
+                kind="rag_quick_index",
+                prompt=json.dumps(
+                    {
+                        "task_context": {
+                            "kind": "rag_quick_run",
+                            "rag_quick_run": {"mode": "fresh_index", "collection": "docs"},
+                        }
+                    },
+                    sort_keys=True,
+                ),
+            )
+            task_id = int(task.id)
+
+        def _index_side_effect(*, mode, collections, model_provider, on_log):
+            self.assertEqual("fresh_index", mode)
+            self.assertEqual(["docs"], collections)
+            self.assertEqual("codex", model_provider)
+            self.assertTrue(callable(on_log))
+            on_log("Index start")
+            on_log("Index finish")
+            return {
+                "mode": "fresh_index",
+                "collections": ["docs"],
+                "source_count": 1,
+                "total_files": 2,
+                "total_chunks": 3,
+                "sources": [{"source_id": 1, "source_name": "Docs"}],
+            }
+
+        with patch.object(
+            studio_tasks,
+            "run_index_for_collections",
+            side_effect=_index_side_effect,
+        ):
+            output_state, _routing_state = studio_tasks._execute_flowchart_rag_node(
+                node_id=999_991,
+                node_config={
+                    "mode": "fresh_index",
+                    "collections": ["docs"],
+                    "model_provider": "codex",
+                },
+                input_context={
+                    "kind": "rag_quick_run",
+                    "rag_quick_run": {"source_id": 1},
+                },
+                execution_id=task_id,
+                execution_task_id=task_id,
+                default_model_id=None,
+            )
+
+        self.assertEqual("llm_query", output_state.get("task_current_stage"))
+        stage_logs = output_state.get("task_stage_logs") or {}
+        llm_query_logs = str(stage_logs.get("llm_query") or "")
+        self.assertIn("Index start", llm_query_logs)
+        self.assertIn("Index finish", llm_query_logs)
+
+        with session_scope() as session:
+            updated = session.get(AgentTask, task_id)
+            assert updated is not None
+            self.assertEqual("llm_query", str(updated.current_stage or ""))
+            persisted_logs = json.loads(updated.stage_logs or "{}")
+            self.assertIn("Index start", str(persisted_logs.get("llm_query") or ""))
 
     def test_flowchart_run_executes_rag_node_in_each_mode(self) -> None:
         for mode in ("fresh_index", "delta_index", "query"):
@@ -303,11 +381,12 @@ class RagStage9RuntimeTests(StudioDbTestCase):
                         },
                     ) as mocked_index:
                         self._invoke_flowchart_run(flowchart_id, run_id)
-                    mocked_index.assert_called_once_with(
-                        mode=mode,
-                        collections=[f"{mode}-docs"],
-                        model_provider="codex",
-                    )
+                    mocked_index.assert_called_once()
+                    index_kwargs = mocked_index.call_args.kwargs
+                    self.assertEqual(mode, index_kwargs.get("mode"))
+                    self.assertEqual([f"{mode}-docs"], index_kwargs.get("collections"))
+                    self.assertEqual("codex", index_kwargs.get("model_provider"))
+                    self.assertTrue(callable(index_kwargs.get("on_log")))
 
                 with session_scope() as session:
                     updated_run = session.get(FlowchartRun, run_id)
