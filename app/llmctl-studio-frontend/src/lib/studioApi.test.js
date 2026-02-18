@@ -47,6 +47,7 @@ import {
   getAttachments,
   getMemory,
   getMemoryEdit,
+  getMemoryHistory,
   getMemoryMeta,
   getMemories,
   getMcp,
@@ -101,6 +102,8 @@ import {
   getNodes,
   getNodeStatus,
   getPlan,
+  getPlanArtifact,
+  getPlanArtifacts,
   getPlanEdit,
   getPlanMeta,
   getPlans,
@@ -520,6 +523,15 @@ describe('studioApi', () => {
     getPlan(5)
     getPlanMeta()
     getPlanEdit(5)
+    getPlanArtifacts(5, {
+      limit: 25,
+      offset: 5,
+      flowchartId: 9,
+      flowchartNodeId: 7,
+      flowchartRunId: 11,
+      order: 'asc',
+    })
+    getPlanArtifact(5, 17)
     updatePlan(5, { name: 'Plan', description: 'Desc', completedAt: '2026-02-17T10:00' })
     deletePlan(5)
     createPlanStage(5, { name: 'Stage', description: 'Desc', completedAt: '' })
@@ -533,29 +545,34 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(2, '/plans/5')
     expect(requestJson).toHaveBeenNthCalledWith(3, '/plans/new')
     expect(requestJson).toHaveBeenNthCalledWith(4, '/plans/5/edit')
-    expect(requestJson).toHaveBeenNthCalledWith(5, '/plans/5', {
+    expect(requestJson).toHaveBeenNthCalledWith(
+      5,
+      '/plans/5/artifacts?limit=25&offset=5&flowchart_id=9&flowchart_node_id=7&flowchart_run_id=11&order=asc',
+    )
+    expect(requestJson).toHaveBeenNthCalledWith(6, '/plans/5/artifacts/17')
+    expect(requestJson).toHaveBeenNthCalledWith(7, '/plans/5', {
       method: 'POST',
       body: { name: 'Plan', description: 'Desc', completed_at: '2026-02-17T10:00' },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(6, '/plans/5/delete', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(7, '/plans/5/stages', {
+    expect(requestJson).toHaveBeenNthCalledWith(8, '/plans/5/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(9, '/plans/5/stages', {
       method: 'POST',
       body: { name: 'Stage', description: 'Desc', completed_at: '' },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(8, '/plans/5/stages/7', {
+    expect(requestJson).toHaveBeenNthCalledWith(10, '/plans/5/stages/7', {
       method: 'POST',
       body: { name: 'Stage 2', description: 'D', completed_at: '' },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(9, '/plans/5/stages/7/delete', { method: 'POST' })
-    expect(requestJson).toHaveBeenNthCalledWith(10, '/plans/5/stages/7/tasks', {
+    expect(requestJson).toHaveBeenNthCalledWith(11, '/plans/5/stages/7/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(12, '/plans/5/stages/7/tasks', {
       method: 'POST',
       body: { name: 'Task', description: 'Desc', completed_at: '' },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(11, '/plans/5/stages/7/tasks/9', {
+    expect(requestJson).toHaveBeenNthCalledWith(13, '/plans/5/stages/7/tasks/9', {
       method: 'POST',
       body: { name: 'Task 2', description: 'D', completed_at: '' },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(12, '/plans/5/stages/7/tasks/9/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(14, '/plans/5/stages/7/tasks/9/delete', { method: 'POST' })
   })
 
   test('stage 4 milestones and memories endpoints map to expected api paths', () => {
@@ -568,6 +585,7 @@ describe('studioApi', () => {
     getMemories()
     getMemoryMeta()
     getMemory(4)
+    getMemoryHistory(4, { page: 2, perPage: 15 })
     getMemoryEdit(4)
     updateMemory(4, { description: 'Updated memory' })
     deleteMemory(4)
@@ -598,12 +616,13 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(7, '/memories?page=1&per_page=20')
     expect(requestJson).toHaveBeenNthCalledWith(8, '/memories/new')
     expect(requestJson).toHaveBeenNthCalledWith(9, '/memories/4')
-    expect(requestJson).toHaveBeenNthCalledWith(10, '/memories/4/edit')
-    expect(requestJson).toHaveBeenNthCalledWith(11, '/memories/4', {
+    expect(requestJson).toHaveBeenNthCalledWith(10, '/memories/4/history?page=2&per_page=15')
+    expect(requestJson).toHaveBeenNthCalledWith(11, '/memories/4/edit')
+    expect(requestJson).toHaveBeenNthCalledWith(12, '/memories/4', {
       method: 'POST',
       body: { description: 'Updated memory' },
     })
-    expect(requestJson).toHaveBeenNthCalledWith(12, '/memories/4/delete', { method: 'POST' })
+    expect(requestJson).toHaveBeenNthCalledWith(13, '/memories/4/delete', { method: 'POST' })
   })
 
   test('stage 5 flowchart endpoints map to expected api paths', () => {

@@ -7,11 +7,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 ARG INSTALL_CLAUDE=true
 ARG VLLM_VERSION=0.9.0
+ARG TRANSFORMERS_VERSION=4.53.3
 
 LABEL org.opencontainers.image.title="llmctl-executor-base" \
       org.opencontainers.image.description="Pinned CUDA + vLLM + Chromium + Node CLIs base image for llmctl executor" \
       io.llmctl.executor_base.cuda_tag="12.8.0-cudnn-runtime-ubuntu24.04" \
-      io.llmctl.executor_base.vllm_version="${VLLM_VERSION}"
+      io.llmctl.executor_base.vllm_version="${VLLM_VERSION}" \
+      io.llmctl.executor_base.transformers_version="${TRANSFORMERS_VERSION}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -47,7 +49,7 @@ RUN apt-get update \
     && if [ "${INSTALL_CLAUDE}" = "true" ]; then npm install -g @anthropic-ai/claude-code@latest; fi \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" \
+    && /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" "transformers==${TRANSFORMERS_VERSION}" \
     && /opt/venv/bin/python3 -c "import torch, vllm; print(torch.__version__); print(vllm.__version__)" \
     && chromium --version \
     && node --version \

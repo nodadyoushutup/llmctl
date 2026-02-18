@@ -65,12 +65,17 @@ app/llmctl-executor/build-executor-base.sh
 
 # Then build executor app image from the base
 app/llmctl-executor/build-executor.sh
+
+# Or pass a version tag positionally
+app/llmctl-executor/build-executor-base.sh 0.0.3
+app/llmctl-executor/build-executor.sh 0.0.4
 ```
 
 Build args:
 - `IMAGE_NAME=llmctl-executor:latest`
 - `INSTALL_VLLM=true|false` (default `false`; normally `false` because base includes pinned vLLM)
 - `VLLM_VERSION=<version>` (default `0.9.0`; used when `INSTALL_VLLM=true`)
+- `TRANSFORMERS_VERSION=<version>` (default `4.53.3`; pinned for `vllm==0.9.0` compatibility)
 
 Examples:
 

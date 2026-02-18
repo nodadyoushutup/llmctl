@@ -29,6 +29,9 @@ INTEGRATED_MCP_DEFAULT_PATH = "/mcp/"
 INTEGRATED_MCP_PATH_OVERRIDES: dict[str, str] = {
     # GitHub MCP service is mounted at /mcp (no trailing slash); /mcp/ returns 404.
     INTEGRATED_MCP_GITHUB_KEY: "/mcp",
+    # Google MCP proxies are mounted at /mcp (no trailing slash); /mcp/ returns 404.
+    INTEGRATED_MCP_GOOGLE_CLOUD_KEY: "/mcp",
+    INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY: "/mcp",
 }
 INTEGRATED_MCP_SERVICE_ENDPOINTS: dict[str, tuple[str, int]] = {
     INTEGRATED_MCP_LLMCTL_KEY: ("llmctl-mcp", 9020),

@@ -289,6 +289,25 @@ def _ensure_schema() -> None:
             "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
         }
         _ensure_columns(connection, "flowchart_run_nodes", flowchart_run_node_columns)
+        node_artifact_columns = {
+            "flowchart_id": "INTEGER NOT NULL",
+            "flowchart_node_id": "INTEGER NOT NULL",
+            "flowchart_run_id": "INTEGER NOT NULL",
+            "flowchart_run_node_id": "INTEGER",
+            "node_type": "VARCHAR(32) NOT NULL",
+            "artifact_type": "VARCHAR(64) NOT NULL",
+            "ref_id": "INTEGER",
+            "execution_index": "INTEGER",
+            "variant_key": "VARCHAR(128)",
+            "retention_mode": "VARCHAR(32) NOT NULL DEFAULT 'ttl'",
+            "expires_at": "DATETIME",
+            "request_id": "VARCHAR(128)",
+            "correlation_id": "VARCHAR(128)",
+            "payload_json": "TEXT NOT NULL DEFAULT '{}'",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        }
+        _ensure_columns(connection, "node_artifacts", node_artifact_columns)
 
         _ensure_columns(connection, "flowchart_node_scripts", {"position": "INTEGER"})
         _ensure_columns(connection, "flowchart_node_skills", {"position": "INTEGER"})
@@ -2369,6 +2388,49 @@ def _ensure_flowchart_indexes(connection) -> None:
                 "CREATE INDEX IF NOT EXISTS "
                 "ix_flowchart_node_attachments_attachment_id "
                 "ON flowchart_node_attachments (attachment_id)"
+            )
+        )
+    if "node_artifacts" in tables:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_flowchart_id "
+                "ON node_artifacts (flowchart_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_flowchart_node_id "
+                "ON node_artifacts (flowchart_node_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_flowchart_run_id "
+                "ON node_artifacts (flowchart_run_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_flowchart_run_node_id "
+                "ON node_artifacts (flowchart_run_node_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_artifact_type "
+                "ON node_artifacts (artifact_type)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_ref_id "
+                "ON node_artifacts (ref_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_created_at "
+                "ON node_artifacts (created_at DESC)"
             )
         )
 

@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 ARG INSTALL_VLLM=false
 ARG VLLM_VERSION=0.9.0
+ARG TRANSFORMERS_VERSION=4.53.3
 
 WORKDIR /app
 
@@ -24,7 +25,7 @@ RUN if [ ! -x /opt/venv/bin/python3 ]; then \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && if [ -s /app/app/llmctl-executor/requirements.txt ]; then /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-executor/requirements.txt; fi \
     && if [ -s /app/app/llmctl-studio-backend/requirements.txt ]; then /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-studio-backend/requirements.txt; fi \
-    && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}"; fi \
+    && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" "transformers==${TRANSFORMERS_VERSION}"; fi \
     && /opt/venv/bin/pip check
 
 COPY app/llmctl-executor /app/app/llmctl-executor

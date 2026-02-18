@@ -595,6 +595,55 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
         self.assertIn("port 8443", prompt)
         self.assertIn("ssl true", prompt)
 
+    def test_execute_turn_includes_google_tool_verification_guidance(self) -> None:
+        model = self._create_model(name="Google Prompt Model")
+        cloud_server = self._create_mcp_server(
+            name="Google Cloud MCP",
+            server_key="google-cloud",
+        )
+        workspace_server = self._create_mcp_server(
+            name="Google Workspace MCP",
+            server_key="google-workspace",
+        )
+        save_integration_settings(
+            "google_cloud",
+            {"google_cloud_project_id": "demo-project"},
+        )
+        save_integration_settings(
+            "google_workspace",
+            {"workspace_delegated_user_email": "user@example.com"},
+        )
+        thread = create_thread(
+            title="Google Context",
+            model_id=model.id,
+            mcp_server_ids=[cloud_server.id, workspace_server.id],
+        )
+        thread_id = int(thread["id"])
+
+        captured_prompt: list[str] = []
+
+        def _fake_llm(*args, **kwargs):
+            captured_prompt.append(
+                str(args[1] if len(args) > 1 else kwargs.get("prompt", ""))
+            )
+            return subprocess.CompletedProcess(["stub"], 0, "assistant reply", "")
+
+        with patch("chat.runtime._run_llm", side_effect=_fake_llm):
+            result = execute_turn(
+                thread_id=thread_id,
+                message="verify google mcp servers",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertTrue(captured_prompt)
+        prompt = captured_prompt[0]
+        self.assertIn("Integration defaults for enabled MCP servers", prompt)
+        self.assertIn("Google Cloud default project_id: demo-project.", prompt)
+        self.assertIn("Google Workspace delegated user: user@example.com.", prompt)
+        self.assertIn("Google Cloud MCP is tool-centric:", prompt)
+        self.assertIn("Google Workspace MCP is tool-centric:", prompt)
+        self.assertIn("Do not require resources/list.", prompt)
+
     def test_context_auto_compaction_persists_summary_and_activity(self) -> None:
         model = self._create_model(name="Compaction Model", context_window_tokens=60)
         save_chat_runtime_settings(

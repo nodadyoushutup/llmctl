@@ -583,6 +583,47 @@ export function getPlanEdit(planId) {
   return requestJson(`/plans/${parsedPlanId}/edit`)
 }
 
+export function getPlanArtifacts(
+  planId,
+  {
+    limit = 50,
+    offset = 0,
+    flowchartId = null,
+    flowchartNodeId = null,
+    flowchartRunId = null,
+    order = 'desc',
+  } = {},
+) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const params = {}
+  if (Number.isFinite(limit) && limit > 0) {
+    params.limit = Math.floor(limit)
+  }
+  if (Number.isFinite(offset) && offset >= 0) {
+    params.offset = Math.floor(offset)
+  }
+  if (flowchartId != null && String(flowchartId).trim() !== '') {
+    params.flowchart_id = parsePositiveId(flowchartId, 'flowchartId')
+  }
+  if (flowchartNodeId != null && String(flowchartNodeId).trim() !== '') {
+    params.flowchart_node_id = parsePositiveId(flowchartNodeId, 'flowchartNodeId')
+  }
+  if (flowchartRunId != null && String(flowchartRunId).trim() !== '') {
+    params.flowchart_run_id = parsePositiveId(flowchartRunId, 'flowchartRunId')
+  }
+  const normalizedOrder = String(order || 'desc').trim().toLowerCase()
+  if (normalizedOrder === 'asc' || normalizedOrder === 'desc') {
+    params.order = normalizedOrder
+  }
+  return requestJson(appendQuery(`/plans/${parsedPlanId}/artifacts`, params))
+}
+
+export function getPlanArtifact(planId, artifactId) {
+  const parsedPlanId = parsePositiveId(planId, 'planId')
+  const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
+  return requestJson(`/plans/${parsedPlanId}/artifacts/${parsedArtifactId}`)
+}
+
 export function updatePlan(planId, { name = '', description = '', completedAt = '' } = {}) {
   const parsedPlanId = parsePositiveId(planId, 'planId')
   return requestJson(`/plans/${parsedPlanId}`, {
@@ -765,6 +806,16 @@ export function getMemoryMeta() {
 export function getMemory(memoryId) {
   const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
   return requestJson(`/memories/${parsedMemoryId}`)
+}
+
+export function getMemoryHistory(memoryId, { page = 1, perPage = 20 } = {}) {
+  const parsedMemoryId = parsePositiveId(memoryId, 'memoryId')
+  return requestJson(
+    appendQuery(`/memories/${parsedMemoryId}/history`, {
+      page: Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1,
+      per_page: Number.isFinite(perPage) ? Math.max(1, Math.floor(perPage)) : 20,
+    }),
+  )
 }
 
 export function getMemoryEdit(memoryId) {

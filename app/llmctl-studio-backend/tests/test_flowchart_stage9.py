@@ -585,6 +585,78 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         self.assertEqual(2, pulled_sources[0].get("source_node_id"))
         self.assertEqual("dotted", pulled_sources[0].get("edge_mode"))
 
+    def test_memory_node_requires_system_llmctl_mcp(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="memory-mcp-required")
+            memory_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=0.0,
+                y=0.0,
+            )
+            memory_node_id = memory_node.id
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "system-managed LLMCTL MCP server",
+        ):
+            studio_tasks._execute_flowchart_memory_node(
+                node_id=memory_node_id,
+                node_ref_id=None,
+                node_config={"action": "add", "additive_prompt": "persist this"},
+                input_context={},
+                mcp_server_keys=["custom-mcp"],
+            )
+
+    def test_memory_node_infers_prompt_from_upstream_context_when_additive_prompt_blank(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="memory-infer-prompt")
+            memory = Memory.create(session, description="")
+            memory_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory.id,
+                x=0.0,
+                y=0.0,
+            )
+            memory_node_id = memory_node.id
+            memory_id = memory.id
+
+        output_state, routing_state = studio_tasks._execute_flowchart_memory_node(
+            node_id=memory_node_id,
+            node_ref_id=memory_id,
+            node_config={"action": "add"},
+            input_context={
+                "node": {"execution_index": 2},
+                "latest_upstream": {"output_state": {"message": "capture deployment readiness"}},
+                "upstream_nodes": [
+                    {"output_state": "capture deployment readiness and risks"},
+                ],
+            },
+            mcp_server_keys=["llmctl-mcp"],
+        )
+        self.assertEqual({}, routing_state)
+        self.assertEqual(FLOWCHART_NODE_TYPE_MEMORY, output_state.get("node_type"))
+        self.assertEqual("add", output_state.get("action"))
+        self.assertEqual("", output_state.get("additive_prompt"))
+        self.assertTrue(str(output_state.get("inferred_prompt") or "").strip())
+        self.assertEqual(
+            output_state.get("inferred_prompt"),
+            output_state.get("effective_prompt"),
+        )
+        self.assertEqual(["llmctl-mcp"], output_state.get("mcp_server_keys") or [])
+
+        with session_scope() as session:
+            updated_memory = session.get(Memory, memory_id)
+            self.assertIsNotNone(updated_memory)
+            assert updated_memory is not None
+            self.assertIn(
+                str(output_state.get("effective_prompt") or "").strip(),
+                str(updated_memory.description or ""),
+            )
+
     def test_script_stage_split_preserves_order(self) -> None:
         scripts = [
             Script(id=1, file_name="a.sh", content="", script_type=SCRIPT_TYPE_INIT),

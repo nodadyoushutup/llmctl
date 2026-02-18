@@ -390,6 +390,62 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
+  test('renders plan specialized controls and emits complete-plan-item config', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'plan', x: 520, y: 220, ref_id: 9, config: {} },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2 }]}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    expect(screen.getByText('Create or update plan')).toBeTruthy()
+    expect(screen.getByText('Complete plan item')).toBeTruthy()
+    expect(screen.getByText('optional additive prompt')).toBeTruthy()
+    expect(screen.queryByText('model')).toBeFalsy()
+    expect(screen.queryByText('agent')).toBeFalsy()
+
+    const actionField = screen.getByText('action').closest('label')
+    const actionSelect = actionField?.querySelector('select')
+    expect(actionSelect).toBeTruthy()
+    fireEvent.change(actionSelect, { target: { value: 'complete_plan_item' } })
+    expect(screen.getByText('Complete plan item requires plan item id, stage+task keys, or completion source path.')).toBeTruthy()
+
+    const additivePromptField = screen.getByText('optional additive prompt').closest('label')
+    const additivePromptInput = additivePromptField?.querySelector('textarea')
+    expect(additivePromptInput).toBeTruthy()
+    fireEvent.change(additivePromptInput, { target: { value: 'mark only validated item' } })
+
+    const planItemIdField = screen.getByText('plan item id (preferred)').closest('label')
+    const planItemIdInput = planItemIdField?.querySelector('input')
+    expect(planItemIdInput).toBeTruthy()
+    fireEvent.change(planItemIdInput, { target: { value: '17' } })
+
+    const retentionField = screen.getByText('artifact retention').closest('label')
+    const retentionSelect = retentionField?.querySelector('select')
+    expect(retentionSelect).toBeTruthy()
+    fireEvent.change(retentionSelect, { target: { value: 'max_count' } })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const planNode = payload?.nodes?.find((node) => node.node_type === 'plan')
+      expect(planNode).toBeTruthy()
+      expect(planNode?.config?.action).toBe('complete_plan_item')
+      expect(planNode?.config?.additive_prompt).toBe('mark only validated item')
+      expect(planNode?.config?.plan_item_id).toBe(17)
+      expect(planNode?.config?.retention_mode).toBe('max_count')
+    })
+  })
+
   test('renders memory specialized controls, locks llmctl mcp, and emits memory config', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(

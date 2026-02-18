@@ -812,6 +812,11 @@ def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
         project_id = (google_cloud.get("google_cloud_project_id") or "").strip()
         if project_id:
             lines.append(f"Google Cloud default project_id: {project_id}.")
+        lines.append(
+            "Google Cloud MCP is tool-centric: verify availability with tools/list "
+            "or by invoking a tool (for example run_gcloud_command). "
+            "Do not require resources/list."
+        )
 
     if "google-workspace" in selected_keys:
         google_workspace = load_integration_settings("google_workspace")
@@ -820,6 +825,11 @@ def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
         ).strip()
         if delegated_user:
             lines.append(f"Google Workspace delegated user: {delegated_user}.")
+        lines.append(
+            "Google Workspace MCP is tool-centric: verify availability with "
+            "tools/list or by invoking a Workspace tool. "
+            "Do not require resources/list."
+        )
 
     if "chroma" in selected_keys:
         chroma = load_integration_settings("chroma")

@@ -8044,9 +8044,12 @@ def _execute_flowchart_memory_node(
             "Memory nodes require the system-managed LLMCTL MCP server (llmctl-mcp)."
         )
 
-    action = _normalize_memory_node_action(node_config.get("action"))
+    action_value = node_config.get("action")
+    action = _normalize_memory_node_action(action_value)
     if not action:
-        raise ValueError("Memory node action is required: add or retrieve.")
+        if str(action_value or "").strip():
+            raise ValueError("Memory node action is required: add or retrieve.")
+        action = MEMORY_NODE_ACTION_ADD
     limit = _parse_optional_int(node_config.get("limit"), default=10, minimum=1)
     retrieved: list[dict[str, Any]] = []
     stored_memory: dict[str, Any] | None = None

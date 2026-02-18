@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -29,10 +30,23 @@ from core.db import session_scope
 from sqlalchemy import select
 from core.models import (
     FLOWCHART_NODE_TYPE_DECISION,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_PLAN,
     FLOWCHART_NODE_TYPE_START,
     FLOWCHART_NODE_TYPE_TASK,
+    Flowchart,
+    FlowchartNode,
+    FlowchartRun,
+    FlowchartRunNode,
     LLMModel,
     MCPServer,
+    Milestone,
+    NodeArtifact,
+    NODE_ARTIFACT_TYPE_MILESTONE,
+    NODE_ARTIFACT_TYPE_PLAN,
+    Plan,
+    PlanStage,
+    PlanTask,
     SCRIPT_TYPE_INIT,
     Script,
     flowchart_node_scripts,
@@ -520,6 +534,204 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
         self.assertTrue(
             any("supports at most 3 outgoing edges" in str(error) for error in errors)
         )
+
+    def test_mcp_milestone_artifact_history_is_exposed_across_run_and_milestone_reads(self) -> None:
+        with session_scope() as session:
+            milestone = Milestone.create(session, name="Artifact Milestone")
+            flowchart = Flowchart.create(session, name="Artifact Flowchart")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                title="Start",
+                x=0,
+                y=0,
+                config_json=json.dumps({}, sort_keys=True),
+            )
+            milestone_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                title="Milestone",
+                ref_id=milestone.id,
+                x=120,
+                y=0,
+                config_json=json.dumps({"action": "mark_complete"}, sort_keys=True),
+            )
+            run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=start_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_START}),
+            )
+            milestone_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=milestone_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps(
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
+                        "action": "mark_complete",
+                        "milestone": {
+                            "id": milestone.id,
+                            "status": "done",
+                            "completed": True,
+                        },
+                    },
+                    sort_keys=True,
+                ),
+            )
+            NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=milestone_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=milestone_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                artifact_type=NODE_ARTIFACT_TYPE_MILESTONE,
+                ref_id=milestone.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{milestone_run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps(
+                    {
+                        "action": "mark_complete",
+                        "milestone": {"id": milestone.id, "status": "done"},
+                    },
+                    sort_keys=True,
+                ),
+            )
+            run_id = run.id
+            milestone_id = milestone.id
+            milestone_node_run_id = milestone_run_node.id
+
+        get_run = self.mcp.tools["llmctl_get_flowchart_run"]
+        get_node_artifact = self.mcp.tools["llmctl_get_node_artifact"]
+        get_milestone = self.mcp.tools["llmctl_get_milestone"]
+
+        run_payload = get_run(run_id=run_id, include_node_runs=True)
+        self.assertTrue(run_payload["ok"])
+        milestone_node_run_payload = next(
+            node_run
+            for node_run in (run_payload.get("node_runs") or [])
+            if int(node_run.get("id") or 0) == milestone_node_run_id
+        )
+        artifact_history = milestone_node_run_payload.get("artifact_history") or []
+        self.assertEqual(1, len(artifact_history))
+        self.assertEqual("milestone", artifact_history[0].get("artifact_type"))
+        self.assertEqual(
+            "mark_complete",
+            (artifact_history[0].get("payload") or {}).get("action"),
+        )
+
+        artifacts_payload = get_node_artifact(
+            flowchart_run_id=run_id,
+            artifact_type="milestone",
+        )
+        self.assertTrue(artifacts_payload["ok"])
+        self.assertEqual(1, artifacts_payload.get("count"))
+
+        milestone_payload = get_milestone(
+            milestone_id=milestone_id,
+            include_artifacts=True,
+        )
+        self.assertTrue(milestone_payload["ok"])
+        milestone_history = milestone_payload.get("artifact_history") or []
+        self.assertEqual(1, len(milestone_history))
+        self.assertEqual("milestone", milestone_history[0].get("artifact_type"))
+
+    def test_mcp_plan_artifacts_are_queryable(self) -> None:
+        with session_scope() as session:
+            plan = Plan.create(session, name="Artifact Plan")
+            stage = PlanStage.create(
+                session,
+                plan_id=plan.id,
+                name="Stage MCP",
+                position=1,
+            )
+            task = PlanTask.create(
+                session,
+                plan_stage_id=stage.id,
+                name="Task MCP",
+                position=1,
+            )
+            flowchart = Flowchart.create(session, name="Plan Artifact Flowchart")
+            plan_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                title="Plan",
+                ref_id=plan.id,
+                x=120,
+                y=0,
+                config_json=json.dumps({"action": "complete_plan_item"}, sort_keys=True),
+            )
+            run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            plan_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=plan_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps(
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_PLAN,
+                        "action": "complete_plan_item",
+                        "completion_target": {"plan_item_id": task.id},
+                    },
+                    sort_keys=True,
+                ),
+            )
+            NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=plan_node.id,
+                flowchart_run_id=run.id,
+                flowchart_run_node_id=plan_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+                ref_id=plan.id,
+                execution_index=1,
+                variant_key=f"run-{run.id}-node-run-{plan_run_node.id}",
+                retention_mode="ttl",
+                payload_json=json.dumps(
+                    {
+                        "action": "complete_plan_item",
+                        "completion_target": {"plan_item_id": task.id},
+                        "touched": {"stage_ids": [stage.id], "task_ids": [task.id]},
+                    },
+                    sort_keys=True,
+                ),
+            )
+            run_id = run.id
+            plan_id = plan.id
+            task_id = task.id
+
+        get_node_artifact = self.mcp.tools["llmctl_get_node_artifact"]
+        artifacts_payload = get_node_artifact(
+            flowchart_run_id=run_id,
+            artifact_type="plan",
+            ref_id=plan_id,
+        )
+        self.assertTrue(artifacts_payload["ok"])
+        self.assertEqual(1, artifacts_payload.get("count"))
+        item = (artifacts_payload.get("items") or [])[0]
+        self.assertEqual(NODE_ARTIFACT_TYPE_PLAN, item.get("artifact_type"))
+        self.assertEqual(task_id, ((item.get("payload") or {}).get("completion_target") or {}).get("plan_item_id"))
+        self.assertEqual([task_id], ((item.get("payload") or {}).get("touched") or {}).get("task_ids"))
 
 
 if __name__ == "__main__":

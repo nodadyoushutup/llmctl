@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
+import ActionIcon from '../components/ActionIcon'
+import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
-import { deleteMemory, getMemory } from '../lib/studioApi'
+import { deleteMemory, getMemory, getMemoryHistory } from '../lib/studioApi'
+import { shouldIgnoreRowClick } from '../lib/tableRowLink'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -24,10 +26,11 @@ function errorMessage(error, fallback) {
 
 export default function MemoryDetailPage() {
   const navigate = useNavigate()
+  const flash = useFlash()
   const { memoryId } = useParams()
   const parsedMemoryId = useMemo(() => parseId(memoryId), [memoryId])
-  const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
+  const [state, setState] = useState({ loading: true, memoryPayload: null, historyPayload: null, error: '' })
+  const [, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -35,15 +38,20 @@ export default function MemoryDetailPage() {
       return
     }
     let cancelled = false
-    getMemory(parsedMemoryId)
-      .then((payload) => {
+    Promise.all([getMemory(parsedMemoryId), getMemoryHistory(parsedMemoryId)])
+      .then(([memoryPayload, historyPayload]) => {
         if (!cancelled) {
-          setState({ loading: false, payload, error: '' })
+          setState({ loading: false, memoryPayload, historyPayload, error: '' })
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load memory.') })
+          setState({
+            loading: false,
+            memoryPayload: null,
+            historyPayload: null,
+            error: errorMessage(error, 'Failed to load memory.'),
+          })
         }
       })
     return () => {
@@ -52,8 +60,12 @@ export default function MemoryDetailPage() {
   }, [parsedMemoryId])
 
   const invalidId = parsedMemoryId == null
-  const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
+  const payload = state.memoryPayload && typeof state.memoryPayload === 'object' ? state.memoryPayload : null
+  const historyPayload = state.historyPayload && typeof state.historyPayload === 'object'
+    ? state.historyPayload
+    : null
   const memory = payload && payload.memory && typeof payload.memory === 'object' ? payload.memory : null
+  const artifacts = historyPayload && Array.isArray(historyPayload.artifacts) ? historyPayload.artifacts : []
 
   async function handleDelete() {
     if (!memory || !window.confirm('Delete this memory?')) {
@@ -63,6 +75,7 @@ export default function MemoryDetailPage() {
     setBusy(true)
     try {
       await deleteMemory(memory.id)
+      flash.success('Memory deleted.')
       navigate('/memories')
     } catch (error) {
       setBusy(false)
@@ -70,30 +83,41 @@ export default function MemoryDetailPage() {
     }
   }
 
+  function handleRowClick(event, href) {
+    if (!href || shouldIgnoreRowClick(event.target)) {
+      return
+    }
+    navigate(href)
+  }
+
   return (
     <section className="stack" aria-label="Memory detail">
       <article className="card">
         <div className="title-row" style={{ marginBottom: '16px' }}>
           <div className="table-actions">
-            <Link to="/memories" className="btn btn-secondary">
+            <Link to="/memories" className="icon-button" aria-label="Back to memories" title="Back to memories">
               <i className="fa-solid fa-arrow-left" />
-              back
             </Link>
             {memory ? (
-              <Link to={`/memories/${memory.id}/edit`} className="btn btn-secondary">
-                <i className="fa-solid fa-pen-to-square" />
-                edit
+              <Link
+                to={`/memories/${memory.id}/edit`}
+                className="icon-button"
+                aria-label="Edit memory"
+                title="Edit memory"
+              >
+                <ActionIcon name="edit" />
               </Link>
             ) : null}
             {memory ? (
               <button
                 type="button"
-                className="btn btn-danger"
+                className="icon-button icon-button-danger"
                 disabled={busy}
+                aria-label="Delete memory"
+                title="Delete memory"
                 onClick={handleDelete}
               >
-                <i className="fa-solid fa-trash" />
-                delete
+                <ActionIcon name="trash" />
               </button>
             ) : null}
           </div>
@@ -103,7 +127,6 @@ export default function MemoryDetailPage() {
         {(invalidId || state.error) ? (
           <p className="error-text">{invalidId ? 'Invalid memory id.' : state.error}</p>
         ) : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
 
         {memory ? (
           <>
@@ -128,6 +151,66 @@ export default function MemoryDetailPage() {
                   {memory.description || '-'}
                 </p>
               </div>
+            </div>
+            <div className="subcard" style={{ marginTop: '20px' }}>
+              <p className="eyebrow">artifact history</p>
+              {artifacts.length === 0 ? (
+                <p className="muted" style={{ marginTop: '12px' }}>
+                  No artifact history yet for this memory.
+                </p>
+              ) : (
+                <div className="workflow-list-table-shell" style={{ marginTop: '12px' }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Action</th>
+                        <th>Run variant</th>
+                        <th>Flowchart</th>
+                        <th>Created</th>
+                        <th className="table-actions-cell">Open</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {artifacts.map((artifact) => {
+                        const flowchartRunId = Number.parseInt(String(artifact.flowchart_run_id || ''), 10)
+                        const href = Number.isInteger(flowchartRunId) && flowchartRunId > 0
+                          ? `/flowcharts/runs/${flowchartRunId}`
+                          : ''
+                        const payloadAction = String(artifact?.payload?.action || '').trim()
+                        return (
+                          <tr
+                            key={artifact.id}
+                            className={href ? 'table-row-link' : undefined}
+                            data-href={href || undefined}
+                            onClick={(event) => handleRowClick(event, href)}
+                          >
+                            <td><p>{payloadAction || '-'}</p></td>
+                            <td><p className="muted">{artifact.variant_key || '-'}</p></td>
+                            <td>
+                              <p className="muted">
+                                f{artifact.flowchart_id || '-'} / n{artifact.flowchart_node_id || '-'} / r{artifact.flowchart_run_id || '-'}
+                              </p>
+                            </td>
+                            <td><p className="muted">{artifact.created_at || '-'}</p></td>
+                            <td className="table-actions-cell">
+                              {href ? (
+                                <Link
+                                  to={href}
+                                  className="icon-button"
+                                  aria-label={`Open run ${flowchartRunId}`}
+                                  title={`Open run ${flowchartRunId}`}
+                                >
+                                  <i className="fa-solid fa-up-right-from-square" />
+                                </Link>
+                              ) : null}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </>
         ) : null}

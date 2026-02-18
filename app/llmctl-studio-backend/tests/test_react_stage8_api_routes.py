@@ -31,7 +31,18 @@ os.environ.setdefault(
 import core.db as core_db
 from core.config import Config
 from core.db import session_scope
-from core.models import LLMModel, MCPServer, Memory
+from core.models import (
+    FLOWCHART_NODE_TYPE_MEMORY,
+    Flowchart,
+    FlowchartNode,
+    FlowchartRun,
+    FlowchartRunNode,
+    LLMModel,
+    MCPServer,
+    Memory,
+    NodeArtifact,
+    NODE_ARTIFACT_TYPE_MEMORY,
+)
 from rag.web.views import bp as rag_bp
 import web.views as studio_views
 
@@ -445,6 +456,72 @@ class Stage8ApiRouteTests(unittest.TestCase):
         self.assertTrue(
             any("Remember to validate deployment readiness" in str(memory.get("title") or "") for memory in memories)
         )
+
+    def test_memory_history_api_returns_artifacts_with_request_and_correlation_ids(self) -> None:
+        with session_scope() as session:
+            memory = Memory.create(session, description="release summary")
+            flowchart = Flowchart.create(session, name="memory-history")
+            flowchart_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                ref_id=memory.id,
+                x=0,
+                y=0,
+                config_json=json.dumps({"action": "add"}, sort_keys=True),
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            flowchart_run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=flowchart_run.id,
+                flowchart_node_id=flowchart_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json="{}",
+                routing_state_json="{}",
+                input_context_json="{}",
+            )
+            NodeArtifact.create(
+                session,
+                flowchart_id=flowchart.id,
+                flowchart_node_id=flowchart_node.id,
+                flowchart_run_id=flowchart_run.id,
+                flowchart_run_node_id=flowchart_run_node.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+                ref_id=memory.id,
+                execution_index=1,
+                variant_key=f"run-{flowchart_run.id}-node-run-{flowchart_run_node.id}",
+                retention_mode="ttl",
+                request_id="req-memory-stage8",
+                correlation_id="corr-memory-stage8",
+                payload_json=json.dumps(
+                    {
+                        "action": "add",
+                        "effective_prompt": "release summary",
+                        "mcp_server_keys": ["llmctl-mcp"],
+                    },
+                    sort_keys=True,
+                ),
+            )
+            memory_id = memory.id
+
+        response = self.client.get(f"/api/memories/{memory_id}/history?page=1&per_page=20")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        self.assertEqual(memory_id, int((payload.get("memory") or {}).get("id") or 0))
+        self.assertEqual(f"memory-{memory_id}", payload.get("correlation_id"))
+        self.assertTrue(str(payload.get("request_id") or "").startswith(f"memory-history-{memory_id}-"))
+        artifacts = payload.get("artifacts") or []
+        self.assertEqual(1, len(artifacts))
+        self.assertEqual(NODE_ARTIFACT_TYPE_MEMORY, artifacts[0].get("artifact_type"))
+        self.assertEqual("req-memory-stage8", artifacts[0].get("request_id"))
+        self.assertEqual("corr-memory-stage8", artifacts[0].get("correlation_id"))
+        self.assertEqual("add", (artifacts[0].get("payload") or {}).get("action"))
 
 
 if __name__ == "__main__":

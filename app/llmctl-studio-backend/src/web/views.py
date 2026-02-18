@@ -7247,11 +7247,14 @@ def _normalize_memory_node_action(value: object) -> str:
 
 def _sanitize_memory_node_config(config_payload: dict[str, object]) -> dict[str, object]:
     sanitized = dict(config_payload)
-    action = _normalize_memory_node_action(
-        config_payload.get("action") or config_payload.get("memory_action")
-    )
+    action_value = config_payload.get("action")
+    if action_value is None:
+        action_value = config_payload.get("memory_action")
+    action = _normalize_memory_node_action(action_value)
     if not action:
-        raise ValueError("config.action is required and must be add or retrieve.")
+        if str(action_value or "").strip():
+            raise ValueError("config.action is required and must be add or retrieve.")
+        action = MEMORY_NODE_ACTION_ADD
     sanitized["action"] = action
     sanitized["additive_prompt"] = str(config_payload.get("additive_prompt") or "").strip()
 
@@ -12042,6 +12045,14 @@ def upsert_flowchart_graph(flowchart_id: int):
     raw_edges = payload.get("edges")
     if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
         return {"error": "Graph payload must contain nodes[] and edges[] arrays."}, 400
+    requires_memory_nodes = any(
+        isinstance(node, dict)
+        and str(node.get("node_type") or "").strip().lower()
+        == FLOWCHART_NODE_TYPE_MEMORY
+        for node in raw_nodes
+    )
+    if requires_memory_nodes:
+        sync_integrated_mcp_servers()
 
     try:
         with session_scope() as session:

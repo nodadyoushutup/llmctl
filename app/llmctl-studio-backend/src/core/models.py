@@ -172,6 +172,20 @@ MILESTONE_HEALTH_CHOICES = (
     MILESTONE_HEALTH_RED,
 )
 
+NODE_ARTIFACT_TYPE_MEMORY = "memory"
+NODE_ARTIFACT_TYPE_MILESTONE = "milestone"
+NODE_ARTIFACT_TYPE_PLAN = "plan"
+NODE_ARTIFACT_RETENTION_FOREVER = "forever"
+NODE_ARTIFACT_RETENTION_TTL = "ttl"
+NODE_ARTIFACT_RETENTION_MAX_COUNT = "max_count"
+NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT = "ttl_max_count"
+NODE_ARTIFACT_RETENTION_CHOICES = (
+    NODE_ARTIFACT_RETENTION_FOREVER,
+    NODE_ARTIFACT_RETENTION_TTL,
+    NODE_ARTIFACT_RETENTION_MAX_COUNT,
+    NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+)
+
 RAG_SOURCE_KIND_LOCAL = "local"
 RAG_SOURCE_KIND_GITHUB = "github"
 RAG_SOURCE_KIND_GOOGLE_DRIVE = "google_drive"
@@ -1001,6 +1015,12 @@ class Flowchart(BaseModel):
         cascade="all, delete-orphan",
         order_by="FlowchartRun.created_at.desc()",
     )
+    artifacts: Mapped[list["NodeArtifact"]] = relationship(
+        "NodeArtifact",
+        back_populates="flowchart",
+        cascade="all, delete-orphan",
+        order_by="NodeArtifact.id.asc()",
+    )
 
 
 class FlowchartNode(BaseModel):
@@ -1067,6 +1087,12 @@ class FlowchartNode(BaseModel):
         back_populates="flowchart_node",
         cascade="all, delete-orphan",
         order_by="FlowchartRunNode.id.asc()",
+    )
+    artifacts: Mapped[list["NodeArtifact"]] = relationship(
+        "NodeArtifact",
+        back_populates="flowchart_node",
+        cascade="all, delete-orphan",
+        order_by="NodeArtifact.id.asc()",
     )
 
 
@@ -1141,6 +1167,12 @@ class FlowchartRun(BaseModel):
         cascade="all, delete-orphan",
         order_by="FlowchartRunNode.id.asc()",
     )
+    artifacts: Mapped[list["NodeArtifact"]] = relationship(
+        "NodeArtifact",
+        back_populates="flowchart_run",
+        cascade="all, delete-orphan",
+        order_by="NodeArtifact.id.asc()",
+    )
 
 
 class FlowchartRunNode(BaseModel):
@@ -1201,6 +1233,77 @@ class FlowchartRunNode(BaseModel):
     )
     flowchart_node: Mapped["FlowchartNode"] = relationship(
         "FlowchartNode", back_populates="node_runs"
+    )
+    artifacts: Mapped[list["NodeArtifact"]] = relationship(
+        "NodeArtifact",
+        back_populates="flowchart_run_node",
+        cascade="all, delete-orphan",
+        order_by="NodeArtifact.id.asc()",
+    )
+
+
+class NodeArtifact(BaseModel):
+    __tablename__ = "node_artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    flowchart_id: Mapped[int] = mapped_column(
+        ForeignKey("flowcharts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flowchart_node_id: Mapped[int] = mapped_column(
+        ForeignKey("flowchart_nodes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flowchart_run_id: Mapped[int] = mapped_column(
+        ForeignKey("flowchart_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flowchart_run_node_id: Mapped[int | None] = mapped_column(
+        ForeignKey("flowchart_run_nodes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    node_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    ref_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    execution_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    variant_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    retention_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=NODE_ARTIFACT_RETENTION_TTL,
+        server_default=text("'ttl'"),
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    correlation_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    flowchart: Mapped["Flowchart"] = relationship("Flowchart", back_populates="artifacts")
+    flowchart_node: Mapped["FlowchartNode"] = relationship(
+        "FlowchartNode", back_populates="artifacts"
+    )
+    flowchart_run: Mapped["FlowchartRun"] = relationship(
+        "FlowchartRun", back_populates="artifacts"
+    )
+    flowchart_run_node: Mapped["FlowchartRunNode | None"] = relationship(
+        "FlowchartRunNode", back_populates="artifacts"
     )
 
 

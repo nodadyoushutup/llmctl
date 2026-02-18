@@ -15,6 +15,7 @@ from core.models import (
     MCPServer,
     Memory,
     Milestone,
+    NodeArtifact,
     Plan,
     PlanStage,
     PlanTask,
@@ -81,6 +82,9 @@ MODEL_REGISTRY = {
     "plan_tasks": PlanTask,
     "milestone": Milestone,
     "milestones": Milestone,
+    "nodeartifact": NodeArtifact,
+    "node_artifact": NodeArtifact,
+    "node_artifacts": NodeArtifact,
 }
 
 READONLY_COLUMNS = {"id", "created_at", "updated_at"}
