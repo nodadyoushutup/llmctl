@@ -81,7 +81,9 @@ Goal: route all LLM interactions through executor pods so the Studio backend no 
 - [ ] After each user-confirmed image build, update Kubernetes image refs to new tags for both:
   - [x] mutable tag (`latest`)
   - [x] immutable content tag (git SHA tag and/or image digest)
-- [ ] Apply/verify Kubernetes rollout after image ref updates.
+- [x] Apply/verify Kubernetes rollout after image ref updates.
+  - [x] ArgoCD app reconciled to commit `f77e7f98cfa8bcc683c82af8ce4577581354f3a7` with `Synced`/`Healthy` status.
+  - [x] Deployment rollouts verified for `llmctl-studio-backend`, `llmctl-mcp`, `llmctl-celery-worker`, and `llmctl-celery-beat`.
 - [ ] Acceptance criteria: dev rollout path is stable with fast rollback to prior image/tag if needed.
 
 ## Stage 8 - Automated Testing
@@ -99,12 +101,12 @@ Goal: route all LLM interactions through executor pods so the Studio backend no 
 
 ## Build/Deploy Handoff Protocol (New Required Workflow)
 
-- [ ] For every Docker rebuild request, Codex must provide the exact Harbor build/push command(s) instead of running long local Docker builds.
-- [ ] User runs the command(s) and replies with completion confirmation plus resulting image tag/digest.
-- [ ] Only after user confirmation, Codex updates Kubernetes manifests/values to reference:
-  - [ ] `latest`
-  - [ ] SHA/digest-pinned image reference
-- [ ] Codex then performs rollout/status checks and records outcomes in this plan.
+- [x] For every Docker rebuild request, Codex must provide the exact Harbor build/push command(s) instead of running long local Docker builds.
+- [x] User runs the command(s) and replies with completion confirmation plus resulting image tag/digest.
+- [x] Only after user confirmation, Codex updates Kubernetes manifests/values to reference:
+  - [x] `latest`
+  - [x] SHA/digest-pinned image reference
+- [x] Codex then performs rollout/status checks and records outcomes in this plan.
 
 ## Stage 9 - Docs Updates
 
