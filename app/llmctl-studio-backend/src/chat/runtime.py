@@ -1245,6 +1245,7 @@ def execute_turn(
                         top_k=settings.rag_top_k,
                         model_id=str(model.id),
                         request_id=request_id,
+                        synthesize_answer=False,
                     )
                 )
             except RAGContractError as exc:

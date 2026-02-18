@@ -159,6 +159,7 @@ class HttpRAGContractClient:
                 "top_k": payload.top_k,
                 "model_id": payload.model_id,
                 "request_id": payload.request_id,
+                "synthesize_answer": payload.synthesize_answer,
             },
         )
 

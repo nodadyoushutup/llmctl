@@ -214,6 +214,19 @@ def _to_positive_int(value: Any, default: int, *, minimum: int, maximum: int) ->
     return parsed
 
 
+def _to_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    cleaned = str(value).strip().lower()
+    if cleaned in {"1", "true", "yes", "y", "on"}:
+        return True
+    if cleaned in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 def _context_char_limit(context_budget_tokens: int, config_max_context_chars: int) -> int:
     budget_chars = max(1000, int(context_budget_tokens) * CHAT_CONTEXT_CHARS_PER_TOKEN)
     return min(max(1000, int(config_max_context_chars)), budget_chars)
@@ -936,6 +949,10 @@ def api_retrieve():
         minimum=256,
         maximum=100000,
     )
+    synthesize_answer = _to_bool(
+        payload.get("synthesize_answer"),
+        default=True,
+    )
     max_context_chars = _context_char_limit(
         context_budget_tokens,
         config.chat_max_context_chars,
@@ -973,7 +990,7 @@ def api_retrieve():
             top_k=top_k,
             request_id=request_id,
             runtime_kind="chat",
-            synthesize_answer=_synthesize,
+            synthesize_answer=_synthesize if synthesize_answer else None,
         )
     except RagContractError as exc:
         return exc.as_payload(), exc.status_code

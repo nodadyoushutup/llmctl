@@ -59,6 +59,7 @@ class RAGRetrievalRequest:
     top_k: int | None = None
     model_id: str = ""
     request_id: str = ""
+    synthesize_answer: bool = True
 
 
 @dataclass(slots=True)

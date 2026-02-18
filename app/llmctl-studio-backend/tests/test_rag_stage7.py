@@ -185,6 +185,33 @@ class RagStage7ContractApiTests(StudioDbTestCase):
         self.assertEqual([source.collection], metadata.get("selected_collections"))
         self.assertEqual("chroma", metadata.get("provider"))
 
+    def test_contract_retrieve_allows_skipping_answer_synthesis(self) -> None:
+        with patch.object(
+            rag_views,
+            "execute_query_contract",
+            return_value={
+                "answer": None,
+                "retrieval_context": [{"text": "ctx", "collection": "docs", "rank": 1}],
+                "retrieval_stats": {"provider": "chroma", "retrieved_count": 1, "top_k": 5},
+                "citation_records": [],
+                "synthesis_error": None,
+                "mode": "query",
+                "collections": ["docs"],
+            },
+        ) as mocked_execute:
+            response = self.client.post(
+                "/api/rag/contract/retrieve",
+                json={
+                    "question": "What changed?",
+                    "collections": ["docs"],
+                    "synthesize_answer": False,
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(mocked_execute.called)
+        self.assertIsNone(mocked_execute.call_args.kwargs.get("synthesize_answer"))
+
     def test_sources_page_uses_row_link_pattern_and_hides_index_jobs(self) -> None:
         self._create_local_source()
         response = self.client.get("/rag/sources")

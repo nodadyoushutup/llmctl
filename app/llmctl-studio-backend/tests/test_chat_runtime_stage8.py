@@ -414,6 +414,55 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
         )
         mocked_llm.assert_not_called()
 
+    def test_rag_retrieval_request_disables_answer_synthesis(self) -> None:
+        model = self._create_model(name="RAG Retrieval Request Model")
+        thread = create_thread(
+            title="RAG Retrieval Request",
+            model_id=model.id,
+            rag_collections=["docs"],
+        )
+        thread_id = int(thread["id"])
+        captured_payload: dict[str, object] = {}
+
+        class _CaptureRagClient:
+            def health(self):
+                return type(
+                    "Health",
+                    (),
+                    {
+                        "state": RAG_HEALTH_CONFIGURED_HEALTHY,
+                        "provider": "chroma",
+                        "error": None,
+                    },
+                )()
+
+            def retrieve(self, payload):
+                captured_payload["request"] = payload
+                return type(
+                    "RetrievalResponse",
+                    (),
+                    {
+                        "retrieval_context": ["retrieved context"],
+                        "citation_records": [],
+                        "retrieval_stats": {"provider": "chroma", "retrieved_count": 1},
+                    },
+                )()
+
+        with patch(
+            "chat.runtime._run_llm",
+            return_value=subprocess.CompletedProcess(["stub"], 0, "assistant reply", ""),
+        ):
+            result = execute_turn(
+                thread_id=thread_id,
+                message="Need retrieval",
+                rag_client=_CaptureRagClient(),
+            )
+
+        self.assertTrue(result.ok)
+        request_payload = captured_payload.get("request")
+        self.assertIsNotNone(request_payload)
+        self.assertFalse(getattr(request_payload, "synthesize_answer"))
+
     def test_rag_retrieval_unexpected_error_returns_failure_result(self) -> None:
         model = self._create_model(name="RAG Unexpected Error Model")
         thread = create_thread(
