@@ -67,6 +67,8 @@ Executor payload to pod (``v1``):
   - ``entrypoint='services.tasks:_execute_flowchart_node_request'``
   - ``python_paths`` (includes Studio backend source path)
   - full serialized node request payload.
+- transport: per-job ConfigMap (``payload.json``) mounted into executor pod and
+  passed as ``LLMCTL_EXECUTOR_PAYLOAD_FILE``.
 
 Executor result from pod (``v1``):
 
@@ -122,3 +124,6 @@ Operator Notes
   set flag, timestamp, fingerprint) and plaintext is restricted to runtime paths.
 - Terminal executor jobs use ``ttlSecondsAfterFinished`` from ``k8s_job_ttl_seconds``
   so completed/failed jobs are auto-cleaned after short retention.
+- Backend service account requires namespace-scoped permissions for ``configmaps``
+  in addition to ``jobs``/``pods`` because executor payloads are delivered via
+  per-job ConfigMaps.

@@ -287,7 +287,7 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             job_name="job-gpu",
             namespace="default",
             image="llmctl-executor:latest",
-            payload_json="{}",
+            payload_configmap_name="job-gpu-payload",
             service_account="",
             image_pull_secrets=[],
             k8s_gpu_limit=2,
@@ -306,7 +306,7 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             job_name="job-cpu",
             namespace="default",
             image="llmctl-executor:latest",
-            payload_json="{}",
+            payload_configmap_name="job-cpu-payload",
             service_account="",
             image_pull_secrets=[],
             k8s_gpu_limit=0,
@@ -328,7 +328,7 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             job_name="job-live-code",
             namespace="default",
             image="llmctl-executor:latest",
-            payload_json="{}",
+            payload_configmap_name="job-live-code-payload",
             service_account="",
             image_pull_secrets=[],
             k8s_gpu_limit=0,
@@ -339,12 +339,20 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         )
         pod_spec = manifest["spec"]["template"]["spec"]
         self.assertEqual(
+            "job-live-code-payload",
+            pod_spec["volumes"][0]["configMap"]["name"],
+        )
+        self.assertEqual(
             "/workspace/llmctl",
-            pod_spec["volumes"][0]["hostPath"]["path"],
+            pod_spec["volumes"][1]["hostPath"]["path"],
+        )
+        self.assertEqual(
+            "/tmp/llmctl/payload",
+            pod_spec["containers"][0]["volumeMounts"][0]["mountPath"],
         )
         self.assertEqual(
             "/app",
-            pod_spec["containers"][0]["volumeMounts"][0]["mountPath"],
+            pod_spec["containers"][0]["volumeMounts"][1]["mountPath"],
         )
 
     def test_build_job_manifest_includes_runtime_env_passthrough(self) -> None:
@@ -362,7 +370,7 @@ class NodeExecutorStage6Tests(unittest.TestCase):
                 job_name="job-env-pass",
                 namespace="default",
                 image="llmctl-executor:latest",
-                payload_json="{}",
+                payload_configmap_name="job-env-pass-payload",
                 service_account="",
                 image_pull_secrets=[],
                 k8s_gpu_limit=0,
@@ -371,7 +379,10 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             )
         env_entries = manifest["spec"]["template"]["spec"]["containers"][0]["env"]
         env_map = {entry.get("name"): entry.get("value") for entry in env_entries}
-        self.assertEqual("{}", env_map.get("LLMCTL_EXECUTOR_PAYLOAD_JSON"))
+        self.assertEqual(
+            "/tmp/llmctl/payload/payload.json",
+            env_map.get("LLMCTL_EXECUTOR_PAYLOAD_FILE"),
+        )
         self.assertEqual(
             "postgresql+psycopg://user:pw@db:5432/studio",
             env_map.get("LLMCTL_STUDIO_DATABASE_URI"),
@@ -385,7 +396,7 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             job_name="job-argocd",
             namespace="llmctl",
             image="llmctl-executor:latest",
-            payload_json="{}",
+            payload_configmap_name="job-argocd-payload",
             service_account="",
             image_pull_secrets=[],
             k8s_gpu_limit=0,
@@ -405,6 +416,32 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             "IgnoreExtraneous",
             annotations.get("argocd.argoproj.io/compare-options"),
         )
+
+    def test_build_payload_configmap_manifest_includes_payload_and_argocd_tracking(self) -> None:
+        executor = KubernetesExecutor({})
+        manifest = executor._build_payload_configmap_manifest(
+            request=_request(),
+            payload_configmap_name="job-argocd-payload",
+            namespace="llmctl",
+            payload_json='{"contract_version":"v1"}',
+            argocd_app_name="llmctl-studio",
+        )
+        self.assertEqual("ConfigMap", manifest.get("kind"))
+        metadata = manifest.get("metadata") or {}
+        labels = metadata.get("labels") or {}
+        annotations = metadata.get("annotations") or {}
+        data = manifest.get("data") or {}
+        self.assertEqual("true", labels.get("llmctl.payload"))
+        self.assertEqual("llmctl-studio", labels.get("app.kubernetes.io/instance"))
+        self.assertEqual(
+            "llmctl-studio:v1/ConfigMap:llmctl/job-argocd-payload",
+            annotations.get("argocd.argoproj.io/tracking-id"),
+        )
+        self.assertEqual(
+            "IgnoreExtraneous",
+            annotations.get("argocd.argoproj.io/compare-options"),
+        )
+        self.assertEqual('{"contract_version":"v1"}', data.get("payload.json"))
 
     def test_build_executor_payload_contains_full_node_request(self) -> None:
         executor = KubernetesExecutor({})

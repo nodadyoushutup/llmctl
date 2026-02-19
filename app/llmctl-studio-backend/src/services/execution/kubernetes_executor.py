@@ -41,6 +41,11 @@ _ARGOCD_INSTANCE_LABEL_KEY = "app.kubernetes.io/instance"
 _ARGOCD_TRACKING_ID_ANNOTATION_KEY = "argocd.argoproj.io/tracking-id"
 _ARGOCD_COMPARE_OPTIONS_ANNOTATION_KEY = "argocd.argoproj.io/compare-options"
 _ARGOCD_IGNORE_EXTRANEOUS_COMPARE_OPTION = "IgnoreExtraneous"
+_EXECUTOR_PAYLOAD_CONFIGMAP_KEY = "payload.json"
+_EXECUTOR_PAYLOAD_MOUNT_PATH = "/tmp/llmctl/payload"
+_EXECUTOR_PAYLOAD_FILE_PATH = (
+    f"{_EXECUTOR_PAYLOAD_MOUNT_PATH}/{_EXECUTOR_PAYLOAD_CONFIGMAP_KEY}"
+)
 _POD_ENV_ALLOWLIST = {
     "LLMCTL_STUDIO_DATABASE_URI",
     "LLMCTL_POSTGRES_HOST",
@@ -469,6 +474,7 @@ class KubernetesExecutor:
         argocd_app_name: str,
     ) -> _KubernetesDispatchOutcome:
         kubeconfig_path: str | None = None
+        payload_configmap_name: str | None = None
         try:
             kubectl_args, kubeconfig_path = self._kubectl_context_args(
                 namespace=namespace,
@@ -485,12 +491,25 @@ class KubernetesExecutor:
                 request=request,
                 execution_timeout=execution_timeout,
             )
+            payload_configmap_name = self._payload_configmap_name(job_name)
+            payload_configmap_manifest = self._build_payload_configmap_manifest(
+                request=request,
+                payload_configmap_name=payload_configmap_name,
+                namespace=namespace,
+                payload_json=payload_json,
+                argocd_app_name=argocd_app_name,
+            )
+            self._kubectl_apply_manifest(
+                kubectl_args,
+                manifest=payload_configmap_manifest,
+                timeout=dispatch_timeout,
+            )
             manifest = self._build_job_manifest(
                 request=request,
                 job_name=job_name,
                 namespace=namespace,
                 image=image,
-                payload_json=payload_json,
+                payload_configmap_name=payload_configmap_name,
                 service_account=service_account,
                 image_pull_secrets=image_pull_secrets,
                 k8s_gpu_limit=k8s_gpu_limit,
@@ -515,6 +534,11 @@ class KubernetesExecutor:
                 cancel_force_kill=cancel_force_kill,
             )
         finally:
+            if payload_configmap_name:
+                self._delete_payload_configmap(
+                    kubectl_args if "kubectl_args" in locals() else [],
+                    payload_configmap_name=payload_configmap_name,
+                )
             if kubeconfig_path:
                 try:
                     os.remove(kubeconfig_path)
@@ -631,7 +655,7 @@ class KubernetesExecutor:
     def _executor_runtime_env_entries(self) -> list[dict[str, str]]:
         env_entries: list[dict[str, str]] = []
         for key in sorted(os.environ):
-            if key == "LLMCTL_EXECUTOR_PAYLOAD_JSON":
+            if key in {"LLMCTL_EXECUTOR_PAYLOAD_JSON", "LLMCTL_EXECUTOR_PAYLOAD_FILE"}:
                 continue
             if key in _POD_ENV_ALLOWLIST or any(
                 key.startswith(prefix) for prefix in _POD_ENV_PREFIX_ALLOWLIST
@@ -640,6 +664,43 @@ class KubernetesExecutor:
                 env_entries.append({"name": key, "value": value})
         return env_entries
 
+    def _payload_configmap_name(self, job_name: str) -> str:
+        return _sanitize_k8s_name(f"{job_name}-payload")
+
+    def _build_payload_configmap_manifest(
+        self,
+        *,
+        request: ExecutionRequest,
+        payload_configmap_name: str,
+        namespace: str,
+        payload_json: str,
+        argocd_app_name: str = "",
+    ) -> dict[str, Any]:
+        labels = dict(self._job_labels(request))
+        labels["llmctl.payload"] = "true"
+        annotations: dict[str, str] = {}
+        if argocd_app_name:
+            labels[_ARGOCD_INSTANCE_LABEL_KEY] = argocd_app_name
+            annotations[_ARGOCD_TRACKING_ID_ANNOTATION_KEY] = (
+                f"{argocd_app_name}:v1/ConfigMap:{namespace}/{payload_configmap_name}"
+            )
+            annotations[_ARGOCD_COMPARE_OPTIONS_ANNOTATION_KEY] = (
+                _ARGOCD_IGNORE_EXTRANEOUS_COMPARE_OPTION
+            )
+        return {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": payload_configmap_name,
+                "namespace": namespace,
+                "labels": labels,
+                "annotations": annotations,
+            },
+            "data": {
+                _EXECUTOR_PAYLOAD_CONFIGMAP_KEY: payload_json,
+            },
+        }
+
     def _build_job_manifest(
         self,
         *,
@@ -647,7 +708,7 @@ class KubernetesExecutor:
         job_name: str,
         namespace: str,
         image: str,
-        payload_json: str,
+        payload_configmap_name: str,
         service_account: str,
         image_pull_secrets: list[dict[str, str]],
         k8s_gpu_limit: int,
@@ -679,23 +740,56 @@ class KubernetesExecutor:
             "imagePullPolicy": "IfNotPresent",
             "env": [
                 {
-                    "name": "LLMCTL_EXECUTOR_PAYLOAD_JSON",
-                    "value": payload_json,
+                    "name": "LLMCTL_EXECUTOR_PAYLOAD_FILE",
+                    "value": _EXECUTOR_PAYLOAD_FILE_PATH,
                 }
             ]
             + self._executor_runtime_env_entries(),
             "resources": resources,
+            "volumeMounts": [
+                {
+                    "name": "executor-payload",
+                    "mountPath": _EXECUTOR_PAYLOAD_MOUNT_PATH,
+                    "readOnly": True,
+                }
+            ],
         }
         template_spec: dict[str, Any] = {
             "restartPolicy": "Never",
             "containers": [container_spec],
             "activeDeadlineSeconds": max(5, min(execution_timeout, 24 * 3600)),
+            "volumes": [
+                {
+                    "name": "executor-payload",
+                    "configMap": {
+                        "name": payload_configmap_name,
+                        "items": [
+                            {
+                                "key": _EXECUTOR_PAYLOAD_CONFIGMAP_KEY,
+                                "path": _EXECUTOR_PAYLOAD_CONFIGMAP_KEY,
+                            }
+                        ],
+                    },
+                }
+            ],
         }
         if live_code_enabled and live_code_host_path:
-            container_spec["volumeMounts"] = [
-                {"name": "project-code", "mountPath": "/app"}
-            ]
-            template_spec["volumes"] = [
+            cast_mounts = container_spec.get("volumeMounts")
+            if isinstance(cast_mounts, list):
+                cast_mounts.append({"name": "project-code", "mountPath": "/app"})
+            cast_volumes = template_spec.get("volumes")
+            if isinstance(cast_volumes, list):
+                cast_volumes.append(
+                    {
+                        "name": "project-code",
+                        "hostPath": {
+                            "path": live_code_host_path,
+                            "type": "Directory",
+                        },
+                    }
+                )
+            else:
+                template_spec["volumes"] = [
                 {
                     "name": "project-code",
                     "hostPath": {
@@ -703,7 +797,7 @@ class KubernetesExecutor:
                         "type": "Directory",
                     },
                 }
-            ]
+                ]
         if service_account:
             template_spec["serviceAccountName"] = service_account
         if image_pull_secrets:
@@ -1245,6 +1339,27 @@ class KubernetesExecutor:
                 "delete",
                 "job",
                 job_name,
+                "--ignore-not-found=true",
+                "--wait=false",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _delete_payload_configmap(
+        self,
+        kubectl_args: list[str],
+        *,
+        payload_configmap_name: str,
+    ) -> None:
+        subprocess.run(
+            [
+                "kubectl",
+                *kubectl_args,
+                "delete",
+                "configmap",
+                payload_configmap_name,
                 "--ignore-not-found=true",
                 "--wait=false",
             ],
