@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useFlash } from '../lib/flashMessages'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
+import { resolveModelsListHref } from '../lib/modelsListState'
 import { getModelEdit, updateModel } from '../lib/studioApi'
 
 function parseId(value) {
@@ -35,12 +36,15 @@ function parseConfig(configText) {
 
 export default function ModelEditPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const flash = useFlash()
   const { modelId } = useParams()
   const parsedModelId = useMemo(() => parseId(modelId), [modelId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState({ name: '', configText: '' })
   const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '', configText: '{}' })
+  const listHref = useMemo(() => resolveModelsListHref(location.state?.from), [location.state])
 
   useEffect(() => {
     if (!parsedModelId) {
@@ -85,10 +89,18 @@ export default function ModelEditPage() {
     if (!parsedModelId) {
       return
     }
-    setActionError('')
     setBusy(true)
+    const nextFieldErrors = { name: '', configText: '' }
+    if (!String(form.name || '').trim()) {
+      nextFieldErrors.name = 'Name is required.'
+    }
     try {
       const config = parseConfig(form.configText)
+      setFieldErrors(nextFieldErrors)
+      if (nextFieldErrors.name) {
+        setBusy(false)
+        return
+      }
       if (form.modelName) {
         config.model = form.modelName
       }
@@ -98,9 +110,15 @@ export default function ModelEditPage() {
         provider: form.provider,
         config,
       })
-      navigate(`/models/${parsedModelId}`)
+      flash.success(`Saved model ${String(form.name || '').trim() || parsedModelId}.`)
+      navigate(`/models/${parsedModelId}`, { state: { from: listHref } })
     } catch (error) {
-      setActionError(errorMessage(error, error instanceof Error ? error.message : 'Failed to update model.'))
+      const message = errorMessage(error, error instanceof Error ? error.message : 'Failed to update model.')
+      if (message === 'Config must be a JSON object.' || message.startsWith('Unexpected token')) {
+        setFieldErrors((current) => ({ ...current, configText: message }))
+      } else {
+        flash.error(message)
+      }
       setBusy(false)
     }
   }
@@ -115,12 +133,11 @@ export default function ModelEditPage() {
           </div>
           <div className="table-actions">
             {parsedModelId ? <Link to={`/models/${parsedModelId}`} className="btn-link btn-secondary">Back to Model</Link> : null}
-            <Link to="/models" className="btn-link btn-secondary">All Models</Link>
+            <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
           </div>
         </div>
         {loading ? <p>Loading model...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
         {!loading && !error ? (
           <form className="form-grid" onSubmit={handleSubmit}>
             <label className="field">
@@ -129,8 +146,15 @@ export default function ModelEditPage() {
                 type="text"
                 required
                 value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setForm((current) => ({ ...current, name: value }))
+                  if (fieldErrors.name) {
+                    setFieldErrors((current) => ({ ...current, name: '' }))
+                  }
+                }}
               />
+              {fieldErrors.name ? <span className="error-text">{fieldErrors.name}</span> : null}
             </label>
             <label className="field">
               <span>Provider</span>
@@ -163,8 +187,15 @@ export default function ModelEditPage() {
               <span>Config JSON</span>
               <textarea
                 value={form.configText}
-                onChange={(event) => setForm((current) => ({ ...current, configText: event.target.value }))}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setForm((current) => ({ ...current, configText: value }))
+                  if (fieldErrors.configText) {
+                    setFieldErrors((current) => ({ ...current, configText: '' }))
+                  }
+                }}
               />
+              {fieldErrors.configText ? <span className="error-text">{fieldErrors.configText}</span> : null}
             </label>
             <div className="form-actions">
               <button type="submit" className="btn-link" disabled={busy}>Save Model</button>

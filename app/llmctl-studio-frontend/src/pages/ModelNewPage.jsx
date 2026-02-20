@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { useFlashState } from '../lib/flashMessages'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useFlash } from '../lib/flashMessages'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
+import { resolveModelsListHref } from '../lib/modelsListState'
 import { createModel, getModelMeta } from '../lib/studioApi'
 
 function errorMessage(error, fallback) {
@@ -30,10 +31,13 @@ function parseConfig(configText) {
 
 export default function ModelNewPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const flash = useFlash()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
-  const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState({ name: '', configText: '' })
   const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '', configText: '{}' })
+  const listHref = useMemo(() => resolveModelsListHref(location.state?.from), [location.state])
 
   useEffect(() => {
     let cancelled = false
@@ -61,10 +65,18 @@ export default function ModelNewPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    setActionError('')
     setBusy(true)
+    const nextFieldErrors = { name: '', configText: '' }
+    if (!String(form.name || '').trim()) {
+      nextFieldErrors.name = 'Name is required.'
+    }
     try {
       const config = parseConfig(form.configText)
+      setFieldErrors(nextFieldErrors)
+      if (nextFieldErrors.name) {
+        setBusy(false)
+        return
+      }
       if (form.modelName) {
         config.model = form.modelName
       }
@@ -75,13 +87,19 @@ export default function ModelNewPage() {
         config,
       })
       const modelId = payload?.model?.id
+      flash.success(`Created model ${String(form.name || '').trim() || 'profile'}.`)
       if (modelId) {
-        navigate(`/models/${modelId}`)
+        navigate(`/models/${modelId}`, { state: { from: listHref } })
       } else {
-        navigate('/models')
+        navigate(listHref)
       }
     } catch (error) {
-      setActionError(errorMessage(error, error instanceof Error ? error.message : 'Failed to create model.'))
+      const message = errorMessage(error, error instanceof Error ? error.message : 'Failed to create model.')
+      if (message === 'Config must be a JSON object.' || message.startsWith('Unexpected token')) {
+        setFieldErrors((current) => ({ ...current, configText: message }))
+      } else {
+        flash.error(message)
+      }
       setBusy(false)
     }
   }
@@ -94,11 +112,10 @@ export default function ModelNewPage() {
             <h2>New Model</h2>
             <p>Bind a provider with model and reasoning policies.</p>
           </div>
-          <Link to="/models" className="btn-link btn-secondary">All Models</Link>
+          <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
         </div>
         {state.loading ? <p>Loading model options...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
-        {actionError ? <p className="error-text">{actionError}</p> : null}
         {!state.loading && !state.error ? (
           <form className="form-grid" onSubmit={handleSubmit}>
             <label className="field">
@@ -107,8 +124,15 @@ export default function ModelNewPage() {
                 type="text"
                 required
                 value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setForm((current) => ({ ...current, name: value }))
+                  if (fieldErrors.name) {
+                    setFieldErrors((current) => ({ ...current, name: '' }))
+                  }
+                }}
               />
+              {fieldErrors.name ? <span className="error-text">{fieldErrors.name}</span> : null}
             </label>
             <label className="field">
               <span>Provider</span>
@@ -141,8 +165,15 @@ export default function ModelNewPage() {
               <span>Config JSON</span>
               <textarea
                 value={form.configText}
-                onChange={(event) => setForm((current) => ({ ...current, configText: event.target.value }))}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setForm((current) => ({ ...current, configText: value }))
+                  if (fieldErrors.configText) {
+                    setFieldErrors((current) => ({ ...current, configText: '' }))
+                  }
+                }}
               />
+              {fieldErrors.configText ? <span className="error-text">{fieldErrors.configText}</span> : null}
             </label>
             <div className="form-actions">
               <button type="submit" className="btn-link" disabled={busy}>Create Model</button>

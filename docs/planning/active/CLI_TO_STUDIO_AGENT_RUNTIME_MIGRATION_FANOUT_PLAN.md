@@ -31,10 +31,10 @@ Prerequisites:
 
 ## Stage 10 - Fan-Out D: Special Node Tool Domains (Memory/Plan/Milestone/Decision)
 
-- [ ] Implement deterministic tool-first execution handlers for memory, plan, milestone, and decision node classes.
-- [ ] Implement required domain tool operations and conflict/failure fallback semantics.
-- [ ] Persist canonical structured outputs and node-type-specific final-state artifacts.
-- [ ] Add contract and behavior tests for deterministic outputs and degraded/fallback paths.
+- [x] Implement deterministic tool-first execution handlers for memory, plan, milestone, and decision node classes.
+- [x] Implement required domain tool operations and conflict/failure fallback semantics.
+- [x] Persist canonical structured outputs and node-type-specific final-state artifacts.
+- [x] Add contract and behavior tests for deterministic outputs and degraded/fallback paths.
 
 ## Stage 11 - Fan-Out E: Workspace/Git/Command/RAG Tool Domains
 

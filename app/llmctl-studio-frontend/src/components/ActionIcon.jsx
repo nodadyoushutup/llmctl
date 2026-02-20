@@ -55,5 +55,19 @@ export default function ActionIcon({ name }) {
       </svg>
     )
   }
+  if (name === 'star') {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 1.6l1.8 3.7 4.1.6-3 2.9.7 4.2L8 11.1 4.4 13l.7-4.2-3-2.9 4.1-.6zM8 3.8 7 5.9l-2.3.3 1.7 1.6-.4 2.3L8 9l2 1-.4-2.2 1.7-1.6-2.3-.3z" />
+      </svg>
+    )
+  }
+  if (name === 'star-filled') {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 1.6l1.8 3.7 4.1.6-3 2.9.7 4.2L8 11.1 4.4 13l.7-4.2-3-2.9 4.1-.6z" />
+      </svg>
+    )
+  }
   return null
 }

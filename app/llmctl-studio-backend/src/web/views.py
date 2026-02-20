@@ -6831,12 +6831,57 @@ def _serialize_memory_node_row(
     return payload
 
 
+def _model_compatibility_contract(
+    provider: str,
+    config_payload: dict[str, object],
+) -> dict[str, object]:
+    normalized_provider = str(provider or "").strip().lower()
+    expected_keys = tuple(MODEL_COMPATIBILITY_KEYS.get(normalized_provider, tuple()))
+    provided_keys = tuple(
+        sorted(
+            {
+                str(key).strip()
+                for key in config_payload.keys()
+                if str(key).strip()
+            }
+        )
+    )
+    if not expected_keys:
+        return {
+            "contract_version": MODEL_PROVIDER_API_CONTRACT_VERSION,
+            "status": "unsupported_provider",
+            "drift_detected": False,
+            "provider": normalized_provider,
+            "expected_keys": [],
+            "provided_keys": list(provided_keys),
+            "missing_keys": [],
+            "unsupported_keys": [],
+        }
+    expected_set = set(expected_keys)
+    provided_set = set(provided_keys)
+    missing_keys = sorted(expected_set.difference(provided_set))
+    unsupported_keys = sorted(provided_set.difference(expected_set))
+    drift_detected = bool(missing_keys or unsupported_keys)
+    return {
+        "contract_version": MODEL_PROVIDER_API_CONTRACT_VERSION,
+        "status": "drift_detected" if drift_detected else "in_sync",
+        "drift_detected": drift_detected,
+        "provider": normalized_provider,
+        "expected_keys": list(expected_keys),
+        "provided_keys": list(provided_keys),
+        "missing_keys": missing_keys,
+        "unsupported_keys": unsupported_keys,
+    }
+
+
 def _serialize_model(
     model: LLMModel,
     *,
     default_model_id: int | None = None,
     include_config: bool = False,
 ) -> dict[str, object]:
+    config_payload = _decode_model_config(model.config_json)
+    compatibility = _model_compatibility_contract(model.provider, config_payload)
     payload: dict[str, object] = {
         "id": model.id,
         "name": model.name,
@@ -6845,11 +6890,12 @@ def _serialize_model(
         "provider_label": LLM_PROVIDER_LABELS.get(model.provider, model.provider),
         "model_name": _model_display_name(model),
         "is_default": default_model_id is not None and model.id == default_model_id,
+        "compatibility": compatibility,
         "created_at": _human_time(model.created_at),
         "updated_at": _human_time(model.updated_at),
     }
     if include_config:
-        payload["config"] = _decode_model_config(model.config_json)
+        payload["config"] = config_payload
         payload["config_json"] = _format_json_object_for_display(model.config_json)
     return payload
 
@@ -7916,6 +7962,69 @@ def _workflow_error_envelope(
         request_id=request_id,
         correlation_id=correlation_id,
     )
+
+
+def _workflow_success_payload(
+    *,
+    payload: dict[str, object],
+    request_id: str,
+    correlation_id: str | None,
+) -> dict[str, object]:
+    response: dict[str, object] = {
+        "ok": True,
+        "contract_version": MODEL_PROVIDER_API_CONTRACT_VERSION,
+        "request_id": request_id,
+        **payload,
+    }
+    if correlation_id:
+        response["correlation_id"] = correlation_id
+    return response
+
+
+def _workflow_api_error_response(
+    *,
+    code: str,
+    message: str,
+    status_code: int,
+    details: dict[str, object] | None = None,
+) -> tuple[dict[str, object], int]:
+    return (
+        _workflow_error_envelope(
+            code=code,
+            message=message,
+            details=details or {},
+            request_id=_workflow_request_id(),
+            correlation_id=_workflow_correlation_id(),
+        ),
+        status_code,
+    )
+
+
+def _emit_model_provider_event(
+    *,
+    event_type: str,
+    entity_kind: str,
+    entity_id: int | str | None,
+    payload: dict[str, object],
+    request_id: str,
+    correlation_id: str | None,
+) -> None:
+    try:
+        emit_contract_event(
+            event_type=event_type,
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+            payload=payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to emit model/provider event %s for %s:%s",
+            event_type,
+            entity_kind,
+            entity_id,
+        )
 
 
 def _validate_flowchart_graph_snapshot(
