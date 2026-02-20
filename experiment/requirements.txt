@@ -1,0 +1,10 @@
+# Core provider SDKs for experiment/agent.py and experiment/run.py
+openai>=1.0.0
+anthropic>=0.34.0
+google-genai>=1.0.0
+
+# Optional legacy Google Gemini SDK fallback used by experiment/agent.py
+google-generativeai>=0.8.0
+
+# Used by experiment/run.py when USE_JIRA_MCP is enabled
+openai-agents>=0.1.0

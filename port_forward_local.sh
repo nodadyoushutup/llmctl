@@ -40,11 +40,13 @@ start_forward "llmctl" "llmctl-studio-frontend" "30157" "8080"
 start_forward "argocd" "argocd-server" "30934" "80"
 start_forward "argocd" "argocd-server" "30370" "443"
 start_forward "llmctl-harbor" "harbor" "30082" "80"
+start_forward "llmctl" "llmctl-mcp-atlassian" "18000" "8000"
 
 echo "Port forwards are running. Keep this script open."
 echo "Studio: http://<host-lan-ip>:30157/flowcharts/1"
 echo "ArgoCD: http://<host-lan-ip>:30934 or https://<host-lan-ip>:30370"
 echo "Harbor: http://<host-lan-ip>:30082"
+echo "Jira MCP (Atlassian): http://<host-lan-ip>:18000/mcp"
 echo "Press Ctrl+C to stop all forwards."
 
 while true; do
