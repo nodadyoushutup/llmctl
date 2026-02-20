@@ -139,6 +139,31 @@ class GitHubCloneStage13Tests(unittest.TestCase):
         self.assertEqual("pat-secret", pat)
         self.assertEqual("", ssh_key_path)
 
+    def test_maybe_checkout_repo_skips_when_repo_not_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workspaces_root = temp_path / "workspaces"
+            workspaces_root.mkdir(parents=True, exist_ok=True)
+            logs: list[str] = []
+
+            with patch.object(
+                studio_tasks.Config,
+                "WORKSPACES_DIR",
+                str(workspaces_root),
+            ), patch(
+                "services.tasks.load_integration_settings",
+                return_value={
+                    "repo": "",
+                    "pat": "pat-secret",
+                    "ssh_key_path": "",
+                },
+            ), patch.object(studio_tasks, "_clone_github_repo") as clone_mock:
+                workspace = studio_tasks._maybe_checkout_repo(91, on_log=logs.append)
+
+        self.assertIsNone(workspace)
+        clone_mock.assert_not_called()
+        self.assertIn("GitHub integration has no repo selected; skipping checkout.", logs)
+
     def test_prepare_task_runtime_home_cleans_previous_contents(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

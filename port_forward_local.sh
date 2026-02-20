@@ -37,16 +37,32 @@ start_forward() {
 }
 
 start_forward "llmctl" "llmctl-studio-frontend" "30157" "8080"
+start_forward "ingress-nginx" "ingress-nginx-controller" "3080" "80"
+start_forward "ingress-nginx" "ingress-nginx-controller" "3443" "443"
 start_forward "argocd" "argocd-server" "30934" "80"
 start_forward "argocd" "argocd-server" "30370" "443"
 start_forward "llmctl-harbor" "harbor" "30082" "80"
+start_forward "llmctl" "llmctl-mcp" "19020" "9020"
+start_forward "llmctl" "llmctl-mcp-github" "18001" "8000"
 start_forward "llmctl" "llmctl-mcp-atlassian" "18000" "8000"
+start_forward "llmctl" "llmctl-mcp-chroma" "18002" "8000"
+start_forward "llmctl" "llmctl-mcp-google-cloud" "18003" "8000"
+start_forward "llmctl" "llmctl-mcp-google-workspace" "18004" "8000"
 
 echo "Port forwards are running. Keep this script open."
 echo "Studio: http://<host-lan-ip>:30157/flowcharts/1"
+echo "Ingress HTTP: http://<host-lan-ip>:3080"
+echo "Ingress HTTPS: https://<host-lan-ip>:3443"
+echo "MCP via ingress: http://<host-lan-ip>:3080/mcp/llmctl"
+echo "MCP via ingress: https://<host-lan-ip>:3443/mcp/llmctl"
 echo "ArgoCD: http://<host-lan-ip>:30934 or https://<host-lan-ip>:30370"
 echo "Harbor: http://<host-lan-ip>:30082"
-echo "Jira MCP (Atlassian): http://<host-lan-ip>:18000/mcp"
+echo "LLMCTL MCP: http://<host-lan-ip>:19020/mcp"
+echo "GitHub MCP: http://<host-lan-ip>:18001/mcp"
+echo "Atlassian MCP: http://<host-lan-ip>:18000/mcp/"
+echo "Chroma MCP: http://<host-lan-ip>:18002/mcp/"
+echo "Google Cloud MCP: http://<host-lan-ip>:18003/mcp"
+echo "Google Workspace MCP: http://<host-lan-ip>:18004/mcp"
 echo "Press Ctrl+C to stop all forwards."
 
 while true; do

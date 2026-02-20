@@ -1364,6 +1364,53 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                     default_model_id=None,
                 )
 
+    def test_optional_llm_transform_fails_fast_when_provider_disabled(self) -> None:
+        with session_scope() as session:
+            model = LLMModel.create(
+                session,
+                name="disabled-provider-model",
+                provider="codex",
+                config_json='{"model":"gpt-5.2-codex"}',
+            )
+            with self.assertRaisesRegex(ValueError, "Provider disabled: codex."):
+                studio_tasks._execute_optional_llm_transform(
+                    prompt="Normalize this payload.",
+                    model=model,
+                    enabled_providers=set(),
+                    mcp_configs={},
+                )
+
+    def test_deterministic_tool_retry_policy_uses_node_overrides(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_invoke_deterministic_tool(*, config, invoke, validate, artifact_hook, fallback_builder):
+            del invoke, validate, artifact_hook, fallback_builder
+            captured["max_attempts"] = config.max_attempts
+            captured["retry_backoff_seconds"] = config.retry_backoff_seconds
+            return SimpleNamespace(output_state={"ok": True}, routing_state={})
+
+        with patch.object(
+            studio_tasks,
+            "invoke_deterministic_tool",
+            side_effect=_fake_invoke_deterministic_tool,
+        ):
+            output_state, routing_state = studio_tasks._execute_deterministic_special_node_with_framework(
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                node_config={
+                    "action": "create_or_update_plan",
+                    "tool_retry_attempts": 3,
+                    "tool_retry_backoff_ms": 250,
+                },
+                input_context={},
+                execution_id=91,
+                invoke=lambda: ({}, {}),
+            )
+
+        self.assertEqual({"ok": True}, output_state)
+        self.assertEqual({}, routing_state)
+        self.assertEqual(3, captured.get("max_attempts"))
+        self.assertEqual(0.25, captured.get("retry_backoff_seconds"))
+
     def test_task_node_runs_without_template_when_inline_prompt_present(self) -> None:
         with session_scope() as session:
             model = LLMModel.create(
@@ -4565,6 +4612,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(agent_id, (task_node.get("config") or {}).get("agent_id"))
 
     def test_graph_rejects_unknown_task_agent_binding(self) -> None:
+        studio_views.sync_integrated_mcp_servers()
         flowchart_id = self._create_flowchart("Stage 9 Invalid Task Agent Binding")
         graph_response = self.client.post(
             f"/flowcharts/{flowchart_id}/graph",
@@ -4599,6 +4647,45 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(400, graph_response.status_code)
         self.assertIn(
             "nodes[1].config.agent_id 999999 was not found",
+            str((graph_response.get_json() or {}).get("error") or ""),
+        )
+
+    def test_graph_rejects_unknown_task_model_binding(self) -> None:
+        studio_views.sync_integrated_mcp_servers()
+        flowchart_id = self._create_flowchart("Stage 9 Invalid Task Model Binding")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "n-start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-task",
+                        "node_type": FLOWCHART_NODE_TYPE_TASK,
+                        "x": 160,
+                        "y": 0,
+                        "model_id": 999999,
+                        "config": {
+                            "task_prompt": "Do something useful",
+                        },
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "n-start",
+                        "target_node_id": "n-task",
+                        "edge_mode": "solid",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(400, graph_response.status_code)
+        self.assertIn(
+            "nodes[1].model_id 999999 was not found",
             str((graph_response.get_json() or {}).get("error") or ""),
         )
 
@@ -4986,6 +5073,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             self.assertIsNotNone(session.get(Memory, int(memory_node.get("ref_id") or 0)))
 
     def test_node_bound_utilities_do_not_inherit_template_bindings(self) -> None:
+        studio_views.sync_integrated_mcp_servers()
         with session_scope() as session:
             node_model = LLMModel.create(
                 session,
