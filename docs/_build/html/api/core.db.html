@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -103,150 +109,8 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-core.db">
-<span id="core-db-module"></span><h1>core.db module<a class="headerlink" href="#module-core.db" title="Link to this heading"></a></h1>
-<dl class="py function">
-<dt class="sig sig-object py" id="core.db.utcnow">
-<span class="sig-prename descclassname"><span class="pre">core.db.</span></span><span class="sig-name descname"><span class="pre">utcnow</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#utcnow"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.utcnow" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><em>datetime</em></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py class">
-<dt class="sig sig-object py" id="core.db.Base">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">core.db.</span></span><span class="sig-name descname"><span class="pre">Base</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#Base"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.Base" title="Link to this definition"></a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">DeclarativeBase</span></code></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>kwargs</strong> (<em>Any</em>)</p>
-</dd>
-</dl>
-<dl class="py attribute">
-<dt class="sig sig-object py" id="core.db.Base.metadata">
-<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ClassVar</span><span class="p"><span class="pre">[</span></span><span class="pre">MetaData</span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">MetaData()</span></em><a class="headerlink" href="#core.db.Base.metadata" title="Link to this definition"></a></dt>
-<dd><p>Refers to the <code class="xref py py-class docutils literal notranslate"><span class="pre">_schema.MetaData</span></code> collection that will be used
-for new <code class="xref py py-class docutils literal notranslate"><span class="pre">_schema.Table</span></code> objects.</p>
-<div class="admonition seealso">
-<p class="admonition-title">See also</p>
-<p><span class="xref std std-ref">orm_declarative_metadata</span></p>
-</div>
-</dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="core.db.Base.registry">
-<span class="sig-name descname"><span class="pre">registry</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ClassVar</span><span class="p"><span class="pre">[</span></span><span class="pre">_RegistryType</span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">&lt;sqlalchemy.orm.decl_api.registry</span> <span class="pre">object&gt;</span></em><a class="headerlink" href="#core.db.Base.registry" title="Link to this definition"></a></dt>
-<dd><p>Refers to the <code class="xref py py-class docutils literal notranslate"><span class="pre">_orm.registry</span></code> in use where new
-<code class="xref py py-class docutils literal notranslate"><span class="pre">_orm.Mapper</span></code> objects will be associated.</p>
-</dd></dl>
-
-</dd></dl>
-
-<dl class="py class">
-<dt class="sig sig-object py" id="core.db.BaseModel">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">core.db.</span></span><span class="sig-name descname"><span class="pre">BaseModel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#BaseModel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.BaseModel" title="Link to this definition"></a></dt>
-<dd><p>Bases: <a class="reference internal" href="#core.db.Base" title="core.db.Base"><code class="xref py py-class docutils literal notranslate"><span class="pre">Base</span></code></a></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>kwargs</strong> (<em>Any</em>)</p>
-</dd>
-</dl>
-<dl class="py method">
-<dt class="sig sig-object py" id="core.db.BaseModel.get">
-<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">item_id</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#BaseModel.get"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.BaseModel.get" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>session</strong> (<em>Session</em>)</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="core.db.BaseModel.list">
-<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">limit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offset</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#BaseModel.list"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.BaseModel.list" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>session</strong> (<em>Session</em>)</p></li>
-<li><p><strong>limit</strong> (<em>int</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>offset</strong> (<em>int</em>)</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="core.db.BaseModel.create">
-<em class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">create</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#BaseModel.create"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.BaseModel.create" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>session</strong> (<em>Session</em>)</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="core.db.BaseModel.save">
-<span class="sig-name descname"><span class="pre">save</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#BaseModel.save"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.BaseModel.save" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>session</strong> (<em>Session</em>)</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="core.db.BaseModel.delete">
-<span class="sig-name descname"><span class="pre">delete</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#BaseModel.delete"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.BaseModel.delete" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>session</strong> (<em>Session</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>None</p>
-</dd>
-</dl>
-</dd></dl>
-
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="core.db.init_engine">
-<span class="sig-prename descclassname"><span class="pre">core.db.</span></span><span class="sig-name descname"><span class="pre">init_engine</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">database_uri</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#init_engine"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.init_engine" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>database_uri</strong> (<em>str</em>)</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="core.db.init_db">
-<span class="sig-prename descclassname"><span class="pre">core.db.</span></span><span class="sig-name descname"><span class="pre">init_db</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#init_db"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.init_db" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="core.db.create_session">
-<span class="sig-prename descclassname"><span class="pre">core.db.</span></span><span class="sig-name descname"><span class="pre">create_session</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#create_session"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.create_session" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><em>Session</em></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="core.db.session_scope">
-<span class="sig-prename descclassname"><span class="pre">core.db.</span></span><span class="sig-name descname"><span class="pre">session_scope</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/db.html#session_scope"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.db.session_scope" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
+  <section id="core-db-module">
+<h1>core.db module<a class="headerlink" href="#core-db-module" title="Link to this heading"></a></h1>
 </section>
 
 

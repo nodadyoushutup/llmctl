@@ -268,6 +268,12 @@ class Config:
         "LLMCTL_NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY",
         "default",
     )
+    NODE_EXECUTOR_AGENT_RUNTIME_CUTOVER_ENABLED = (
+        os.getenv("LLMCTL_NODE_EXECUTOR_AGENT_RUNTIME_CUTOVER_ENABLED", "false")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
     NODE_EXECUTOR_K8S_NAMESPACE = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_NAMESPACE",
         "default",

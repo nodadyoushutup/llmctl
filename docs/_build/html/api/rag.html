@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -110,31 +116,18 @@
 <div class="toctree-wrapper compound">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="rag.domain.html">rag.domain package</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="rag.domain.html#rag.domain.RagContractError"><code class="docutils literal notranslate"><span class="pre">RagContractError</span></code></a><ul>
-<li class="toctree-l3"><a class="reference internal" href="rag.domain.html#rag.domain.RagContractError.as_payload"><code class="docutils literal notranslate"><span class="pre">RagContractError.as_payload()</span></code></a></li>
-</ul>
-</li>
-<li class="toctree-l2"><a class="reference internal" href="rag.domain.html#rag.domain.execute_query_contract"><code class="docutils literal notranslate"><span class="pre">execute_query_contract()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="rag.domain.html#rag.domain.list_collection_contract"><code class="docutils literal notranslate"><span class="pre">list_collection_contract()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="rag.domain.html#rag.domain.normalize_collection_selection"><code class="docutils literal notranslate"><span class="pre">normalize_collection_selection()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="rag.domain.html#rag.domain.rag_health_snapshot"><code class="docutils literal notranslate"><span class="pre">rag_health_snapshot()</span></code></a></li>
-<li class="toctree-l2"><a class="reference internal" href="rag.domain.html#rag.domain.run_index_for_collections"><code class="docutils literal notranslate"><span class="pre">run_index_for_collections()</span></code></a></li>
 <li class="toctree-l2"><a class="reference internal" href="rag.domain.html#submodules">Submodules</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="rag.domain.contracts.html">rag.domain.contracts module</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="rag.domain.contracts.html#rag.domain.contracts.RagContractError"><code class="docutils literal notranslate"><span class="pre">RagContractError</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.domain.contracts.html#rag.domain.contracts.normalize_collection_selection"><code class="docutils literal notranslate"><span class="pre">normalize_collection_selection()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.domain.contracts.html#rag.domain.contracts.rag_health_snapshot"><code class="docutils literal notranslate"><span class="pre">rag_health_snapshot()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.domain.contracts.html#rag.domain.contracts.list_collection_contract"><code class="docutils literal notranslate"><span class="pre">list_collection_contract()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.domain.contracts.html#rag.domain.contracts.execute_query_contract"><code class="docutils literal notranslate"><span class="pre">execute_query_contract()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.domain.contracts.html#rag.domain.contracts.run_index_for_collections"><code class="docutils literal notranslate"><span class="pre">run_index_for_collections()</span></code></a></li>
-</ul>
-</li>
+<li class="toctree-l3"><a class="reference internal" href="rag.domain.contracts.html">rag.domain.contracts module</a></li>
 </ul>
 </li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="rag.engine.html">rag.engine package</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="rag.engine.html#submodules">Submodules</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rag.engine.chromadb_loader.html">rag.engine.chromadb_loader module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="rag.engine.chromadb_loader.html#rag.engine.chromadb_loader.import_chromadb"><code class="docutils literal notranslate"><span class="pre">import_chromadb()</span></code></a></li>
+</ul>
+</li>
 <li class="toctree-l3"><a class="reference internal" href="rag.engine.chunkers.html">rag.engine.chunkers module</a><ul>
 <li class="toctree-l4"><a class="reference internal" href="rag.engine.chunkers.html#rag.engine.chunkers.line_chunker"><code class="docutils literal notranslate"><span class="pre">line_chunker()</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="rag.engine.chunkers.html#rag.engine.chunkers.token_chunker"><code class="docutils literal notranslate"><span class="pre">token_chunker()</span></code></a></li>
@@ -222,16 +215,7 @@
 </li>
 <li class="toctree-l1"><a class="reference internal" href="rag.integrations.html">rag.integrations package</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="rag.integrations.html#submodules">Submodules</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="rag.integrations.git_sync.html">rag.integrations.git_sync module</a><ul>
-<li class="toctree-l4"><a class="reference internal" href="rag.integrations.git_sync.html#rag.integrations.git_sync.run_git"><code class="docutils literal notranslate"><span class="pre">run_git()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.integrations.git_sync.html#rag.integrations.git_sync.git_env"><code class="docutils literal notranslate"><span class="pre">git_env()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.integrations.git_sync.html#rag.integrations.git_sync.ensure_git_repo"><code class="docutils literal notranslate"><span class="pre">ensure_git_repo()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.integrations.git_sync.html#rag.integrations.git_sync.git_fetch_and_reset"><code class="docutils literal notranslate"><span class="pre">git_fetch_and_reset()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.integrations.git_sync.html#rag.integrations.git_sync.git_rev_parse"><code class="docutils literal notranslate"><span class="pre">git_rev_parse()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.integrations.git_sync.html#rag.integrations.git_sync.git_diff_paths"><code class="docutils literal notranslate"><span class="pre">git_diff_paths()</span></code></a></li>
-<li class="toctree-l4"><a class="reference internal" href="rag.integrations.git_sync.html#rag.integrations.git_sync.safe_git_url"><code class="docutils literal notranslate"><span class="pre">safe_git_url()</span></code></a></li>
-</ul>
-</li>
+<li class="toctree-l3"><a class="reference internal" href="rag.integrations.git_sync.html">rag.integrations.git_sync module</a></li>
 <li class="toctree-l3"><a class="reference internal" href="rag.integrations.google_drive_sync.html">rag.integrations.google_drive_sync module</a><ul>
 <li class="toctree-l4"><a class="reference internal" href="rag.integrations.google_drive_sync.html#rag.integrations.google_drive_sync.DriveFolderInfo"><code class="docutils literal notranslate"><span class="pre">DriveFolderInfo</span></code></a></li>
 <li class="toctree-l4"><a class="reference internal" href="rag.integrations.google_drive_sync.html#rag.integrations.google_drive_sync.DriveSyncStats"><code class="docutils literal notranslate"><span class="pre">DriveSyncStats</span></code></a></li>

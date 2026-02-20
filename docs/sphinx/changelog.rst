@@ -1,6 +1,14 @@
 Changelog
 =========
 
+2026-02-20
+----------
+
+- Added Stage 16 runtime migration documentation set: operator/developer cutover runbook, contract reference index, rollback procedure, and known sign-off gap inventory.
+- Expanded Node Executor runtime docs with split frontier/vLLM image settings, build/release commands, and tooling/runtime ownership boundaries.
+- Added API reference pages for ``services.execution.tooling``, ``services.runtime_contracts``, and ``services.flow_migration``.
+- Linked Studio serving/runtime guide to the migration runbook for cutover operations.
+
 2026-02-18
 ----------
 

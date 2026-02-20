@@ -20410,6 +20410,11 @@ def update_node_executor_runtime_settings_route():
         "workspace_identity_key": _settings_form_value(
             request_payload, "workspace_identity_key"
         ),
+        "agent_runtime_cutover_enabled": (
+            "true"
+            if _as_bool(_settings_form_value(request_payload, "agent_runtime_cutover_enabled"))
+            else "false"
+        ),
         "k8s_namespace": _settings_form_value(request_payload, "k8s_namespace"),
         "k8s_image": _settings_form_value(request_payload, "k8s_image"),
         "k8s_image_tag": _settings_form_value(request_payload, "k8s_image_tag"),

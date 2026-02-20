@@ -39,6 +39,31 @@ Runtime contract
 Citation/source snippets are audit-only in v1 and are not emitted in runtime
 payload/context.
 
+Indexing modes (``fresh_index`` and ``delta_index``) emit normalized metadata:
+
+- ``mode``
+- ``collections``
+- ``retrieval_stats`` (includes ``total_files``/``total_chunks`` when available)
+- ``task_current_stage='llm_query'``
+- ``task_stage_logs`` with raw indexing lines under ``llm_query``
+
+Node Detail Stage Behavior
+--------------------------
+
+For ``Quick RAG`` runs and flowchart ``rag`` node runs, Node Detail stage
+rendering keeps stable stage ordering and remaps the ``llm_query`` label using
+runtime execution mode:
+
+- ``query`` -> ``LLM Query``
+- ``indexing`` -> ``RAG Indexing``
+- ``delta_indexing`` -> ``RAG Delta Indexing``
+
+If execution mode is missing or unknown, Node Detail falls back to
+``LLM Query`` for compatibility.
+
+For indexing-labeled stages with no log lines yet, Node Detail shows
+``Waiting for indexing logs...`` instead of the generic empty log message.
+
 Integration-health gating
 -------------------------
 

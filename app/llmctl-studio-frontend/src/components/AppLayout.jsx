@@ -22,7 +22,7 @@ const navSections = [
   },
   {
     id: 'workflow',
-    label: 'Workflow',
+    label: 'Artifact',
     items: [
       { id: 'plans', to: '/plans', label: 'Plans', icon: 'fa-solid fa-map' },
       { id: 'milestones', to: '/milestones', label: 'Milestones', icon: 'fa-solid fa-flag-checkered' },

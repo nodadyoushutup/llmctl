@@ -1,7 +1,7 @@
 # CLI To Studio Agent Runtime Migration - Stage 6 Deterministic Tooling Freeze
 
 Date: 2026-02-20
-Source stage: `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_SEQUENTIAL_PLAN.md` (Stage 6)
+Source stage: `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_SEQUENTIAL_PLAN.md` (Stage 6)
 
 ## Stage 6 Completion Checklist
 

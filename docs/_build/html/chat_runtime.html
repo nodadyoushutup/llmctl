@@ -56,7 +56,13 @@
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -163,11 +169,12 @@ default RAG collections)</p></li>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">low</span></code>: concise/direct</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">medium</span></code>: balanced detail</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">high</span></code>: detailed/structured</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">high</span></code>: detailed with deeper reasoning</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">extra_high</span></code>: exhaustive/completeness-focused</p></li>
 </ul>
-<p>Prompt assembly always includes Markdown formatting guidance so responses can
-return structured output (including tables) when appropriate.</p>
+<p>Prompt assembly keeps responses conversational at every complexity level and
+uses formatting only when it improves clarity. Markdown output (including
+tables) is used when appropriate, especially for high-detail requests.</p>
 </section>
 <section id="audit-and-activity">
 <h2>Audit And Activity<a class="headerlink" href="#audit-and-activity" title="Link to this heading"></a></h2>
@@ -191,7 +198,12 @@ shown in chat response UI and is not injected into model context assembly.</p>
 </ul>
 <p>JSON routes:</p>
 <ul class="simple">
+<li><p><cite>/api/chat/runtime</cite></p></li>
+<li><p><cite>/api/chat/threads</cite> (create)</p></li>
 <li><p><cite>/api/chat/threads/&lt;thread_id&gt;</cite></p></li>
+<li><p><cite>/api/chat/threads/&lt;thread_id&gt;/config</cite></p></li>
+<li><p><cite>/api/chat/threads/&lt;thread_id&gt;/archive</cite></p></li>
+<li><p><cite>/api/chat/threads/&lt;thread_id&gt;/clear</cite></p></li>
 <li><p><cite>/api/chat/threads/&lt;thread_id&gt;/turn</cite></p></li>
 <li><p><cite>/api/chat/activity</cite></p></li>
 </ul>

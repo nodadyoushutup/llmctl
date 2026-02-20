@@ -45,7 +45,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -101,20 +107,87 @@
 <li class="toctree-l2"><a class="reference internal" href="provider_runtime.html#claude-model-defaults">Claude Model Defaults</a></li>
 <li class="toctree-l2"><a class="reference internal" href="provider_runtime.html#vllm-local-huggingface-downloads">vLLM Local HuggingFace Downloads</a></li>
 <li class="toctree-l2"><a class="reference internal" href="provider_runtime.html#google-cloud-workspace-integrations">Google Cloud + Workspace Integrations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="provider_runtime.html#agent-skill-binding-compatibility-mode">Agent Skill Binding Compatibility Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="provider_runtime.html#integrated-mcp-runtime-kubernetes">Integrated MCP Runtime (Kubernetes)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="provider_runtime.html#agent-skill-binding-contract">Agent Skill Binding Contract</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#runtime-settings-contract">Runtime Settings Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#architecture">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#execution-contract">Execution Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#executor-split-images-and-build-release">Executor Split Images and Build/Release</a></li>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#dispatch-confirmation-and-state-machine">Dispatch Confirmation and State Machine</a></li>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#observability-and-run-history">Observability and Run History</a></li>
+<li class="toctree-l2"><a class="reference internal" href="node_executor_runtime.html#operator-notes">Operator Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="agent_runtime_migration_runbook.html#purpose">Purpose</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_runtime_migration_runbook.html#architecture-ownership">Architecture + Ownership</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_runtime_migration_runbook.html#executor-split-images-and-release-flow">Executor Split Images and Release Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_runtime_migration_runbook.html#contract-reference-index">Contract Reference Index</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_runtime_migration_runbook.html#cutover-procedure">Cutover Procedure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_runtime_migration_runbook.html#rollback-procedure">Rollback Procedure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_runtime_migration_runbook.html#known-sign-off-gaps-stage-15-inventory">Known Sign-Off Gaps (Stage 15 Inventory)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#database-configuration">Database Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#startup-db-health-check">Startup DB Health Check</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#local-backend-test-bootstrap">Local Backend Test Bootstrap</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#integrated-mcp-startup-gate-kubernetes">Integrated MCP Startup Gate (Kubernetes)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#sqlite-one-time-migration-utility">SQLite One-Time Migration Utility</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#gunicorn-first-serving">Gunicorn-First Serving</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#reverse-proxy-and-tls">Reverse Proxy and TLS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#studio-route-contract-web-api">Studio Route Contract (<cite>/web</cite> + <cite>/api</cite>)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#socket-io-redis-architecture">Socket.IO + Redis Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#celery-runtime-topology-decoupled">Celery Runtime Topology (Decoupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#event-contract-and-frontend-model">Event Contract and Frontend Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#node-detail-api-and-runtime-metadata-contract">Node Detail API and Runtime Metadata Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#developer-workflow-react-only-split">Developer Workflow (React-Only Split)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#agent-runtime-cutover-runbook">Agent Runtime Cutover Runbook</a></li>
+<li class="toctree-l2"><a class="reference internal" href="studio_serving_runtime.html#operational-guidance">Operational Guidance</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="agent_skill_binding.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_skill_binding.html#contract">Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_skill_binding.html#migration-notes">Migration Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="agent_skill_binding.html#see-also">See Also</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="codex_host_skills.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="codex_host_skills.html#argocd-commit-push-autosync">ArgoCD Commit Push Autosync</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="rag_flowchart_node.html#runtime-modes">Runtime modes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="rag_flowchart_node.html#node-config-schema">Node config schema</a></li>
 <li class="toctree-l2"><a class="reference internal" href="rag_flowchart_node.html#runtime-contract">Runtime contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rag_flowchart_node.html#node-detail-stage-behavior">Node Detail Stage Behavior</a></li>
 <li class="toctree-l2"><a class="reference internal" href="rag_flowchart_node.html#integration-health-gating">Integration-health gating</a></li>
 <li class="toctree-l2"><a class="reference internal" href="rag_flowchart_node.html#contract-endpoints">Contract endpoints</a></li>
 <li class="toctree-l2"><a class="reference internal" href="rag_flowchart_node.html#manual-source-quick-runs">Manual source quick runs</a></li>
 </ul>
 </li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="specialized_flowchart_nodes.html#inspector-contract">Inspector Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="specialized_flowchart_nodes.html#node-artifact-retention">Node Artifact Retention</a></li>
+<li class="toctree-l2"><a class="reference internal" href="specialized_flowchart_nodes.html#rest-api-contract">REST API Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="specialized_flowchart_nodes.html#socket-event-contract">Socket Event Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="specialized_flowchart_nodes.html#artifact-payload-schemas">Artifact Payload Schemas</a></li>
+<li class="toctree-l2"><a class="reference internal" href="specialized_flowchart_nodes.html#mcp-contract-alignment">MCP Contract Alignment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="specialized_flowchart_nodes.html#operator-workflow-guidance">Operator Workflow Guidance</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="changelog.html#id1">2026-02-16</a></li>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#id1">2026-02-20</a></li>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#id2">2026-02-18</a></li>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#id3">2026-02-17</a></li>
+<li class="toctree-l2"><a class="reference internal" href="changelog.html#id4">2026-02-16</a></li>
 </ul>
 </li>
 </ul>

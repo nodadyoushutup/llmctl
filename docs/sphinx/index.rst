@@ -10,6 +10,7 @@ Technical reference for llmctl runtime surfaces.
    chat_runtime
    provider_runtime
    node_executor_runtime
+   agent_runtime_migration_runbook
    studio_serving_runtime
    agent_skill_binding
    codex_host_skills

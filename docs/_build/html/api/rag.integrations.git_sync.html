@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -101,102 +107,8 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-rag.integrations.git_sync">
-<span id="rag-integrations-git-sync-module"></span><h1>rag.integrations.git_sync module<a class="headerlink" href="#module-rag.integrations.git_sync" title="Link to this heading"></a></h1>
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.integrations.git_sync.run_git">
-<span class="sig-prename descclassname"><span class="pre">rag.integrations.git_sync.</span></span><span class="sig-name descname"><span class="pre">run_git</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cwd</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/integrations/git_sync.html#run_git"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.integrations.git_sync.run_git" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>args</strong> (<em>list</em><em>[</em><em>str</em><em>]</em>)</p></li>
-<li><p><strong>cwd</strong> (<em>Path</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>env</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>] </em><em>| </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.integrations.git_sync.git_env">
-<span class="sig-prename descclassname"><span class="pre">rag.integrations.git_sync.</span></span><span class="sig-name descname"><span class="pre">git_env</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/integrations/git_sync.html#git_env"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.integrations.git_sync.git_env" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>dict[str, str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.integrations.git_sync.ensure_git_repo">
-<span class="sig-prename descclassname"><span class="pre">rag.integrations.git_sync.</span></span><span class="sig-name descname"><span class="pre">ensure_git_repo</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/integrations/git_sync.html#ensure_git_repo"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.integrations.git_sync.ensure_git_repo" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.integrations.git_sync.git_fetch_and_reset">
-<span class="sig-prename descclassname"><span class="pre">rag.integrations.git_sync.</span></span><span class="sig-name descname"><span class="pre">git_fetch_and_reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/integrations/git_sync.html#git_fetch_and_reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.integrations.git_sync.git_fetch_and_reset" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.integrations.git_sync.git_rev_parse">
-<span class="sig-prename descclassname"><span class="pre">rag.integrations.git_sync.</span></span><span class="sig-name descname"><span class="pre">git_rev_parse</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">repo_root</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ref</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'HEAD'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">env</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/integrations/git_sync.html#git_rev_parse"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.integrations.git_sync.git_rev_parse" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>repo_root</strong> (<em>Path</em>)</p></li>
-<li><p><strong>ref</strong> (<em>str</em>)</p></li>
-<li><p><strong>env</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>] </em><em>| </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.integrations.git_sync.git_diff_paths">
-<span class="sig-prename descclassname"><span class="pre">rag.integrations.git_sync.</span></span><span class="sig-name descname"><span class="pre">git_diff_paths</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">repo_root</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">old</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/integrations/git_sync.html#git_diff_paths"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.integrations.git_sync.git_diff_paths" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>repo_root</strong> (<em>Path</em>)</p></li>
-<li><p><strong>old</strong> (<em>str</em>)</p></li>
-<li><p><strong>new</strong> (<em>str</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>tuple[list[<em>Path</em>], list[<em>Path</em>]]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.integrations.git_sync.safe_git_url">
-<span class="sig-prename descclassname"><span class="pre">rag.integrations.git_sync.</span></span><span class="sig-name descname"><span class="pre">safe_git_url</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">url</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/integrations/git_sync.html#safe_git_url"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.integrations.git_sync.safe_git_url" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>url</strong> (<em>str</em><em> | </em><em>None</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str</p>
-</dd>
-</dl>
-</dd></dl>
-
+  <section id="rag-integrations-git-sync-module">
+<h1>rag.integrations.git_sync module<a class="headerlink" href="#rag-integrations-git-sync-module" title="Link to this heading"></a></h1>
 </section>
 
 

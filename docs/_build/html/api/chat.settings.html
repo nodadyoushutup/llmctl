@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -97,130 +103,8 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-chat.settings">
-<span id="chat-settings-module"></span><h1>chat.settings module<a class="headerlink" href="#module-chat.settings" title="Link to this heading"></a></h1>
-<dl class="py class">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">chat.settings.</span></span><span class="sig-name descname"><span class="pre">ChatRuntimeSettings</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">history_budget_percent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rag_budget_percent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mcp_budget_percent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compaction_trigger_percent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compaction_target_percent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">preserve_recent_turns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rag_top_k</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">default_context_window_tokens</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_compaction_summary_chars</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/chat/settings.html#ChatRuntimeSettings"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#chat.settings.ChatRuntimeSettings" title="Link to this definition"></a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>history_budget_percent</strong> (<em>int</em>)</p></li>
-<li><p><strong>rag_budget_percent</strong> (<em>int</em>)</p></li>
-<li><p><strong>mcp_budget_percent</strong> (<em>int</em>)</p></li>
-<li><p><strong>compaction_trigger_percent</strong> (<em>int</em>)</p></li>
-<li><p><strong>compaction_target_percent</strong> (<em>int</em>)</p></li>
-<li><p><strong>preserve_recent_turns</strong> (<em>int</em>)</p></li>
-<li><p><strong>rag_top_k</strong> (<em>int</em>)</p></li>
-<li><p><strong>default_context_window_tokens</strong> (<em>int</em>)</p></li>
-<li><p><strong>max_compaction_summary_chars</strong> (<em>int</em>)</p></li>
-</ul>
-</dd>
-</dl>
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.history_budget_percent">
-<span class="sig-name descname"><span class="pre">history_budget_percent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.history_budget_percent" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.rag_budget_percent">
-<span class="sig-name descname"><span class="pre">rag_budget_percent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.rag_budget_percent" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.mcp_budget_percent">
-<span class="sig-name descname"><span class="pre">mcp_budget_percent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.mcp_budget_percent" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.compaction_trigger_percent">
-<span class="sig-name descname"><span class="pre">compaction_trigger_percent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.compaction_trigger_percent" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.compaction_target_percent">
-<span class="sig-name descname"><span class="pre">compaction_target_percent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.compaction_target_percent" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.preserve_recent_turns">
-<span class="sig-name descname"><span class="pre">preserve_recent_turns</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.preserve_recent_turns" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.rag_top_k">
-<span class="sig-name descname"><span class="pre">rag_top_k</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.rag_top_k" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.default_context_window_tokens">
-<span class="sig-name descname"><span class="pre">default_context_window_tokens</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.default_context_window_tokens" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="chat.settings.ChatRuntimeSettings.max_compaction_summary_chars">
-<span class="sig-name descname"><span class="pre">max_compaction_summary_chars</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#chat.settings.ChatRuntimeSettings.max_compaction_summary_chars" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="chat.settings.load_chat_runtime_settings">
-<span class="sig-prename descclassname"><span class="pre">chat.settings.</span></span><span class="sig-name descname"><span class="pre">load_chat_runtime_settings</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/chat/settings.html#load_chat_runtime_settings"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#chat.settings.load_chat_runtime_settings" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference internal" href="#chat.settings.ChatRuntimeSettings" title="chat.settings.ChatRuntimeSettings"><em>ChatRuntimeSettings</em></a></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="chat.settings.load_chat_default_settings_payload">
-<span class="sig-prename descclassname"><span class="pre">chat.settings.</span></span><span class="sig-name descname"><span class="pre">load_chat_default_settings_payload</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/chat/settings.html#load_chat_default_settings_payload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#chat.settings.load_chat_default_settings_payload" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>dict[str, object]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="chat.settings.load_chat_runtime_settings_payload">
-<span class="sig-prename descclassname"><span class="pre">chat.settings.</span></span><span class="sig-name descname"><span class="pre">load_chat_runtime_settings_payload</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/chat/settings.html#load_chat_runtime_settings_payload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#chat.settings.load_chat_runtime_settings_payload" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>dict[str, str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="chat.settings.save_chat_runtime_settings">
-<span class="sig-prename descclassname"><span class="pre">chat.settings.</span></span><span class="sig-name descname"><span class="pre">save_chat_runtime_settings</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">payload</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/chat/settings.html#save_chat_runtime_settings"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#chat.settings.save_chat_runtime_settings" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>payload</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="chat.settings.save_chat_default_settings">
-<span class="sig-prename descclassname"><span class="pre">chat.settings.</span></span><span class="sig-name descname"><span class="pre">save_chat_default_settings</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">payload</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/chat/settings.html#save_chat_default_settings"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#chat.settings.save_chat_default_settings" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>payload</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>object</em><em>]</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>None</p>
-</dd>
-</dl>
-</dd></dl>
-
+  <section id="chat-settings-module">
+<h1>chat.settings module<a class="headerlink" href="#chat-settings-module" title="Link to this heading"></a></h1>
 </section>
 
 

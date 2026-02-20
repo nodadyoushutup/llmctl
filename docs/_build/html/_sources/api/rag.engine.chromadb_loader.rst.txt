@@ -1,0 +1,7 @@
+rag.engine.chromadb\_loader module
+==================================
+
+.. automodule:: rag.engine.chromadb_loader
+   :members:
+   :show-inheritance:
+   :undoc-members:

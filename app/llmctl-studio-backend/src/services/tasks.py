@@ -228,6 +228,7 @@ FLOWCHART_FAN_IN_MODE_CHOICES = (
     FLOWCHART_FAN_IN_MODE_ANY,
     FLOWCHART_FAN_IN_MODE_CUSTOM,
 )
+AGENT_RUNTIME_CUTOVER_FLAG_KEY = "__agent_runtime_cutover_enabled"
 
 
 def _utcnow() -> datetime:
@@ -424,6 +425,36 @@ def _resolve_flowchart_request_ids(
     return (request_id or None, correlation_id or None)
 
 
+def _parse_bool_flag(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _agent_runtime_cutover_enabled(node_config: dict[str, Any] | None = None) -> bool:
+    default = bool(Config.NODE_EXECUTOR_AGENT_RUNTIME_CUTOVER_ENABLED)
+    if isinstance(node_config, dict) and AGENT_RUNTIME_CUTOVER_FLAG_KEY in node_config:
+        return _parse_bool_flag(
+            node_config.get(AGENT_RUNTIME_CUTOVER_FLAG_KEY),
+            default=default,
+        )
+    return default
+
+
+def _agent_runtime_cutover_enabled_from_settings(
+    settings: dict[str, str] | None,
+) -> bool:
+    default = bool(Config.NODE_EXECUTOR_AGENT_RUNTIME_CUTOVER_ENABLED)
+    if not isinstance(settings, dict):
+        return default
+    return _parse_bool_flag(settings.get("agent_runtime_cutover_enabled"), default=default)
+
+
 def _resolve_special_node_tool_operation(
     *,
     node_type: str,
@@ -431,7 +462,14 @@ def _resolve_special_node_tool_operation(
 ) -> str | None:
     normalized_node_type = str(node_type or "").strip().lower()
     explicit_action = str(node_config.get("action") or "").strip()
+    cutover_enabled = _agent_runtime_cutover_enabled(node_config)
     if explicit_action:
+        if (
+            cutover_enabled
+            and normalized_node_type == FLOWCHART_NODE_TYPE_DECISION
+            and explicit_action.lower() == "legacy_route"
+        ):
+            return "evaluate"
         return explicit_action
     if normalized_node_type == FLOWCHART_NODE_TYPE_DECISION:
         raw_conditions = (
@@ -446,6 +484,8 @@ def _resolve_special_node_tool_operation(
             condition_text = str(item.get("condition_text") or "").strip()
             if connector_id and condition_text:
                 return "evaluate"
+        if cutover_enabled:
+            return "evaluate"
         return "legacy_route"
     return None
 
@@ -7193,6 +7233,7 @@ def _resolve_flowchart_outgoing_edges(
     route_key = str(route_key_raw).strip() if route_key_raw is not None else ""
 
     if node_type == FLOWCHART_NODE_TYPE_DECISION:
+        cutover_enabled = _agent_runtime_cutover_enabled(node_config)
         if not solid_edges:
             raise ValueError("Decision node has no solid outgoing edges.")
         available_condition_keys = {
@@ -7241,6 +7282,11 @@ def _resolve_flowchart_outgoing_edges(
                 for edge in solid_edges
                 if str(edge.get("condition_key") or "").strip() in matched_lookup
             ]
+
+        if cutover_enabled:
+            raise ValueError(
+                "Decision routing_state.matched_connector_ids is required when agent runtime cutover is enabled."
+            )
 
         # Backward compatibility for legacy route_key-only decision routing.
         if not route_key:
@@ -8243,6 +8289,10 @@ def _execute_flowchart_decision_node(
         )
 
     if not conditions:
+        if _agent_runtime_cutover_enabled(node_config):
+            raise ValueError(
+                "Decision node requires decision_conditions when agent runtime cutover is enabled."
+            )
         # Backward compatibility for legacy route_key-only decision behavior.
         route_field_path = str(node_config.get("route_field_path") or "").strip()
         if not route_field_path:
@@ -9736,6 +9786,9 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     enabled_providers = resolve_enabled_llm_providers(llm_settings)
     default_model_id = resolve_default_model_id(llm_settings)
     node_executor_runtime_settings = load_node_executor_runtime_settings()
+    agent_runtime_cutover_enabled = _agent_runtime_cutover_enabled_from_settings(
+        node_executor_runtime_settings
+    )
     execution_router = ExecutionRouter(runtime_settings=node_executor_runtime_settings)
 
     node_execution_counts: dict[int, int] = {}
@@ -10018,11 +10071,15 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     started_at=node_run_started_at,
                 )
                 node_run_id = node_run.id
+                runtime_node_config = dict(node_config)
+                runtime_node_config[AGENT_RUNTIME_CUTOVER_FLAG_KEY] = (
+                    "true" if agent_runtime_cutover_enabled else "false"
+                )
                 execution_request = ExecutionRequest(
                     node_id=node_id,
                     node_type=str(node_spec["node_type"]),
                     node_ref_id=node_spec.get("ref_id"),
-                    node_config=node_config,
+                    node_config=runtime_node_config,
                     input_context=input_context,
                     execution_id=node_run_id,
                     execution_task_id=node_task_id,

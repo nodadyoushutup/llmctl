@@ -1,7 +1,7 @@
 # CLI To Studio Agent Runtime Migration - Stage 13 Flow Migration Tooling Freeze
 
 Date: 2026-02-20
-Source stage: `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_FANOUT_PLAN.md` (Stage 13)
+Source stage: `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_FANOUT_PLAN.md` (Stage 13)
 
 ## Stage 13 Completion Checklist
 

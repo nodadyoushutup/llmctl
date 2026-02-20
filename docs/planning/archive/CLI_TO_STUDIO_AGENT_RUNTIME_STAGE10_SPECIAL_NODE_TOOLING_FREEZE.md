@@ -1,7 +1,7 @@
 # CLI To Studio Agent Runtime Migration - Stage 10 Special Node Tooling Freeze
 
 Date: 2026-02-20
-Source stage: `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` (Stage 10)
+Source stage: `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` (Stage 10)
 
 ## Stage 10 Completion Checklist
 

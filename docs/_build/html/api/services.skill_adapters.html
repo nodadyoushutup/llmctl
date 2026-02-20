@@ -20,7 +20,7 @@
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="services.skills module" href="services.skills.html" />
-    <link rel="prev" title="services.realtime_events module" href="services.realtime_events.html" /> 
+    <link rel="prev" title="services.runtime_contracts module" href="services.runtime_contracts.html" /> 
 </head>
 
 <body class="wy-body-for-nav"> 
@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -59,8 +65,10 @@
 <li class="toctree-l3"><a class="reference internal" href="services.html#subpackages">Subpackages</a></li>
 <li class="toctree-l3 current"><a class="reference internal" href="services.html#submodules">Submodules</a><ul class="current">
 <li class="toctree-l4"><a class="reference internal" href="services.celery_app.html">services.celery_app module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.flow_migration.html">services.flow_migration module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.huggingface_downloads.html">services.huggingface_downloads module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.realtime_events.html">services.realtime_events module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.runtime_contracts.html">services.runtime_contracts module</a></li>
 <li class="toctree-l4 current"><a class="current reference internal" href="#">services.skill_adapters module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.skills.html">services.skills module</a></li>
 </ul>
@@ -99,274 +107,15 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-services.skill_adapters">
-<span id="services-skill-adapters-module"></span><h1>services.skill_adapters module<a class="headerlink" href="#module-services.skill_adapters" title="Link to this heading"></a></h1>
-<dl class="py class">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillFile">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">ResolvedSkillFile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">content</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">checksum</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">size_bytes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#ResolvedSkillFile"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.ResolvedSkillFile" title="Link to this definition"></a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>path</strong> (<em>str</em>)</p></li>
-<li><p><strong>content</strong> (<em>str</em>)</p></li>
-<li><p><strong>checksum</strong> (<em>str</em>)</p></li>
-<li><p><strong>size_bytes</strong> (<em>int</em>)</p></li>
-</ul>
-</dd>
-</dl>
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillFile.path">
-<span class="sig-name descname"><span class="pre">path</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkillFile.path" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillFile.content">
-<span class="sig-name descname"><span class="pre">content</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkillFile.content" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillFile.checksum">
-<span class="sig-name descname"><span class="pre">checksum</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkillFile.checksum" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillFile.size_bytes">
-<span class="sig-name descname"><span class="pre">size_bytes</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkillFile.size_bytes" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-</dd></dl>
-
-<dl class="py class">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">ResolvedSkill</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">skill_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">display_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">description</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">version_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'int'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">version</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">manifest_hash</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'tuple[ResolvedSkillFile,</span> <span class="pre">...]'</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#ResolvedSkill"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.ResolvedSkill" title="Link to this definition"></a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>skill_id</strong> (<em>int</em>)</p></li>
-<li><p><strong>name</strong> (<em>str</em>)</p></li>
-<li><p><strong>display_name</strong> (<em>str</em>)</p></li>
-<li><p><strong>description</strong> (<em>str</em>)</p></li>
-<li><p><strong>version_id</strong> (<em>int</em>)</p></li>
-<li><p><strong>version</strong> (<em>str</em>)</p></li>
-<li><p><strong>manifest_hash</strong> (<em>str</em>)</p></li>
-<li><p><strong>files</strong> (<em>tuple</em><em>[</em><a class="reference internal" href="#services.skill_adapters.ResolvedSkillFile" title="services.skill_adapters.ResolvedSkillFile"><em>ResolvedSkillFile</em></a><em>, </em><em>...</em><em>]</em>)</p></li>
-</ul>
-</dd>
-</dl>
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.skill_id">
-<span class="sig-name descname"><span class="pre">skill_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.skill_id" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.name">
-<span class="sig-name descname"><span class="pre">name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.name" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.display_name">
-<span class="sig-name descname"><span class="pre">display_name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.display_name" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.description">
-<span class="sig-name descname"><span class="pre">description</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.description" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.version_id">
-<span class="sig-name descname"><span class="pre">version_id</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">int</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.version_id" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.version">
-<span class="sig-name descname"><span class="pre">version</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.version" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.manifest_hash">
-<span class="sig-name descname"><span class="pre">manifest_hash</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.manifest_hash" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkill.files">
-<span class="sig-name descname"><span class="pre">files</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#services.skill_adapters.ResolvedSkillFile" title="services.skill_adapters.ResolvedSkillFile"><span class="pre">ResolvedSkillFile</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkill.files" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-</dd></dl>
-
-<dl class="py class">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillSet">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">ResolvedSkillSet</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">skills</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'tuple[ResolvedSkill,</span> <span class="pre">...]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">manifest_hash</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#ResolvedSkillSet"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.ResolvedSkillSet" title="Link to this definition"></a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>skills</strong> (<em>tuple</em><em>[</em><a class="reference internal" href="#services.skill_adapters.ResolvedSkill" title="services.skill_adapters.ResolvedSkill"><em>ResolvedSkill</em></a><em>, </em><em>...</em><em>]</em>)</p></li>
-<li><p><strong>manifest_hash</strong> (<em>str</em>)</p></li>
-</ul>
-</dd>
-</dl>
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillSet.skills">
-<span class="sig-name descname"><span class="pre">skills</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#services.skill_adapters.ResolvedSkill" title="services.skill_adapters.ResolvedSkill"><span class="pre">ResolvedSkill</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkillSet.skills" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.ResolvedSkillSet.manifest_hash">
-<span class="sig-name descname"><span class="pre">manifest_hash</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.ResolvedSkillSet.manifest_hash" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-</dd></dl>
-
-<dl class="py class">
-<dt class="sig sig-object py" id="services.skill_adapters.SkillAdapterResult">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">SkillAdapterResult</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">adapter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'str'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">materialized_paths</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'tuple[str,</span> <span class="pre">...]'</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fallback_entries</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="s"><span class="pre">'tuple[dict[str,</span> <span class="pre">str],</span> <span class="pre">...]'</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#SkillAdapterResult"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.SkillAdapterResult" title="Link to this definition"></a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>mode</strong> (<em>str</em>)</p></li>
-<li><p><strong>adapter</strong> (<em>str</em>)</p></li>
-<li><p><strong>materialized_paths</strong> (<em>tuple</em><em>[</em><em>str</em><em>, </em><em>...</em><em>]</em>)</p></li>
-<li><p><strong>fallback_entries</strong> (<em>tuple</em><em>[</em><em>dict</em><em>[</em><em>str</em><em>, </em><em>str</em><em>]</em><em>, </em><em>...</em><em>]</em>)</p></li>
-</ul>
-</dd>
-</dl>
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.SkillAdapterResult.mode">
-<span class="sig-name descname"><span class="pre">mode</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.SkillAdapterResult.mode" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.SkillAdapterResult.adapter">
-<span class="sig-name descname"><span class="pre">adapter</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#services.skill_adapters.SkillAdapterResult.adapter" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.SkillAdapterResult.materialized_paths">
-<span class="sig-name descname"><span class="pre">materialized_paths</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#services.skill_adapters.SkillAdapterResult.materialized_paths" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-<dl class="py attribute">
-<dt class="sig sig-object py" id="services.skill_adapters.SkillAdapterResult.fallback_entries">
-<span class="sig-name descname"><span class="pre">fallback_entries</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#services.skill_adapters.SkillAdapterResult.fallback_entries" title="Link to this definition"></a></dt>
-<dd></dd></dl>
-
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.skill_adapters.resolve_agent_skills">
-<span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">resolve_agent_skills</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">agent_id</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#resolve_agent_skills"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.resolve_agent_skills" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>session</strong> (<em>Session</em>)</p></li>
-<li><p><strong>agent_id</strong> (<em>int</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p><a class="reference internal" href="#services.skill_adapters.ResolvedSkillSet" title="services.skill_adapters.ResolvedSkillSet"><em>ResolvedSkillSet</em></a></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.skill_adapters.resolve_flowchart_node_skills">
-<span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">resolve_flowchart_node_skills</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_node_id</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#resolve_flowchart_node_skills"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.resolve_flowchart_node_skills" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>session</strong> (<em>Session</em>)</p></li>
-<li><p><strong>flowchart_node_id</strong> (<em>int</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p><a class="reference internal" href="#services.skill_adapters.ResolvedSkillSet" title="services.skill_adapters.ResolvedSkillSet"><em>ResolvedSkillSet</em></a></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.skill_adapters.select_skill_adapter">
-<span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">select_skill_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#select_skill_adapter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.select_skill_adapter" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>provider</strong> (<em>str</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>tuple[str, str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.skill_adapters.materialize_skill_set">
-<span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">materialize_skill_set</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resolved</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">provider</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">workspace</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">runtime_home</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">codex_home</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#materialize_skill_set"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.materialize_skill_set" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>resolved</strong> (<a class="reference internal" href="#services.skill_adapters.ResolvedSkillSet" title="services.skill_adapters.ResolvedSkillSet"><em>ResolvedSkillSet</em></a>)</p></li>
-<li><p><strong>provider</strong> (<em>str</em>)</p></li>
-<li><p><strong>workspace</strong> (<em>Path</em>)</p></li>
-<li><p><strong>runtime_home</strong> (<em>Path</em>)</p></li>
-<li><p><strong>codex_home</strong> (<em>Path</em><em> | </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p><a class="reference internal" href="#services.skill_adapters.SkillAdapterResult" title="services.skill_adapters.SkillAdapterResult"><em>SkillAdapterResult</em></a></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.skill_adapters.build_skill_fallback_entries">
-<span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">build_skill_fallback_entries</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resolved</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#build_skill_fallback_entries"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.build_skill_fallback_entries" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>resolved</strong> (<a class="reference internal" href="#services.skill_adapters.ResolvedSkillSet" title="services.skill_adapters.ResolvedSkillSet"><em>ResolvedSkillSet</em></a>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[dict[str, str]]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.skill_adapters.skill_ids_payload">
-<span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">skill_ids_payload</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resolved</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#skill_ids_payload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.skill_ids_payload" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>resolved</strong> (<a class="reference internal" href="#services.skill_adapters.ResolvedSkillSet" title="services.skill_adapters.ResolvedSkillSet"><em>ResolvedSkillSet</em></a>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[int]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.skill_adapters.skill_versions_payload">
-<span class="sig-prename descclassname"><span class="pre">services.skill_adapters.</span></span><span class="sig-name descname"><span class="pre">skill_versions_payload</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resolved</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/skill_adapters.html#skill_versions_payload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.skill_adapters.skill_versions_payload" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>resolved</strong> (<a class="reference internal" href="#services.skill_adapters.ResolvedSkillSet" title="services.skill_adapters.ResolvedSkillSet"><em>ResolvedSkillSet</em></a>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[dict[str, <em>Any</em>]]</p>
-</dd>
-</dl>
-</dd></dl>
-
+  <section id="services-skill-adapters-module">
+<h1>services.skill_adapters module<a class="headerlink" href="#services-skill-adapters-module" title="Link to this heading"></a></h1>
 </section>
 
 
            </div>
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
-        <a href="services.realtime_events.html" class="btn btn-neutral float-left" title="services.realtime_events module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="services.runtime_contracts.html" class="btn btn-neutral float-left" title="services.runtime_contracts module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
         <a href="services.skills.html" class="btn btn-neutral float-right" title="services.skills module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 

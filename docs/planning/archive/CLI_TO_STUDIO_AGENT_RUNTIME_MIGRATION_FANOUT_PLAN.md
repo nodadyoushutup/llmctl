@@ -1,6 +1,6 @@
 # CLI To Studio Agent Runtime Migration - Fan-Out Plan
 
-Source of truth companion: `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md`
+Source of truth companion: `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md`
 
 Prerequisites:
 1. Stage 6 must be complete before starting fan-out work.
@@ -56,4 +56,4 @@ Prerequisites:
 - [x] Implement post-transform validation and dry-run execution checks before migration acceptance.
 - [x] Implement compatibility gate reporting for non-migratable or policy-violating flow definitions.
 - [x] Implement migration evidence artifacts and rollback-trigger metadata capture.
-- [x] Stage output locked in `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE13_FLOW_MIGRATION_FREEZE.md`.
+- [x] Stage output locked in `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE13_FLOW_MIGRATION_FREEZE.md`.

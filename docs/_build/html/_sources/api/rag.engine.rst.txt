@@ -12,6 +12,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   rag.engine.chromadb_loader
    rag.engine.chunkers
    rag.engine.code_spans
    rag.engine.config

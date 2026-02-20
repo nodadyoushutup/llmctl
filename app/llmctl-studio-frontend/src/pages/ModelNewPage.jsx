@@ -2,6 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFlash } from '../lib/flashMessages'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
+import {
+  modelFieldLabel,
+  normalizeProviderModelOptions,
+  providerAllowsBlankModelSelection,
+  providerUsesFreeformModelInput,
+  resolveProviderModelName,
+} from '../lib/modelFormOptions'
 import { resolveModelsListHref } from '../lib/modelsListState'
 import { createModel, getModelMeta } from '../lib/studioApi'
 
@@ -18,29 +25,14 @@ function errorMessage(error, fallback) {
   return fallback
 }
 
-function parseConfig(configText) {
-  if (!String(configText || '').trim()) {
-    return {}
-  }
-  const parsed = JSON.parse(configText)
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Config must be a JSON object.')
-  }
-  return parsed
-}
-
-function isConfigParseError(error, message) {
-  return error instanceof SyntaxError || message === 'Config must be a JSON object.'
-}
-
 export default function ModelNewPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const flash = useFlash()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [busy, setBusy] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState({ name: '', configText: '' })
-  const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '', configText: '{}' })
+  const [fieldErrors, setFieldErrors] = useState({ name: '' })
+  const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '' })
   const listHref = useMemo(() => resolveModelsListHref(location.state?.from), [location.state])
 
   useEffect(() => {
@@ -52,7 +44,16 @@ export default function ModelNewPage() {
         }
         const providerOptions = Array.isArray(payload?.provider_options) ? payload.provider_options : []
         const provider = providerOptions[0]?.value || 'codex'
-        setForm((current) => ({ ...current, provider }))
+        const modelOptions = normalizeProviderModelOptions(payload?.model_options)
+        setForm((current) => ({
+          ...current,
+          provider,
+          modelName: resolveProviderModelName({
+            provider,
+            currentModelName: current.modelName,
+            modelOptions,
+          }),
+        }))
         setState({ loading: false, payload, error: '' })
       })
       .catch((error) => {
@@ -66,21 +67,30 @@ export default function ModelNewPage() {
   }, [])
 
   const providerOptions = Array.isArray(state.payload?.provider_options) ? state.payload.provider_options : []
+  const modelOptions = useMemo(
+    () => normalizeProviderModelOptions(state.payload?.model_options),
+    [state.payload?.model_options],
+  )
+  const providerModelOptions = useMemo(() => {
+    const options = modelOptions[form.provider]
+    return Array.isArray(options) ? options : []
+  }, [form.provider, modelOptions])
+  const modelInputIsFreeform = providerUsesFreeformModelInput(form.provider)
 
   async function handleSubmit(event) {
     event.preventDefault()
     setBusy(true)
-    const nextFieldErrors = { name: '', configText: '' }
+    const nextFieldErrors = { name: '' }
     if (!String(form.name || '').trim()) {
       nextFieldErrors.name = 'Name is required.'
     }
     try {
-      const config = parseConfig(form.configText)
       setFieldErrors(nextFieldErrors)
       if (nextFieldErrors.name) {
         setBusy(false)
         return
       }
+      const config = {}
       if (form.modelName) {
         config.model = form.modelName
       }
@@ -99,14 +109,7 @@ export default function ModelNewPage() {
       }
     } catch (error) {
       const message = errorMessage(error, error instanceof Error ? error.message : 'Failed to create model.')
-      if (isConfigParseError(error, message)) {
-        setFieldErrors((current) => ({
-          ...current,
-          configText: error instanceof SyntaxError ? 'Config must be valid JSON.' : message,
-        }))
-      } else {
-        flash.error(message)
-      }
+      flash.error(message)
       setBusy(false)
     }
   }
@@ -145,7 +148,18 @@ export default function ModelNewPage() {
               <span>Provider</span>
               <select
                 value={form.provider}
-                onChange={(event) => setForm((current) => ({ ...current, provider: event.target.value }))}
+                onChange={(event) => {
+                  const provider = event.target.value
+                  setForm((current) => ({
+                    ...current,
+                    provider,
+                    modelName: resolveProviderModelName({
+                      provider,
+                      currentModelName: current.modelName,
+                      modelOptions,
+                    }),
+                  }))
+                }}
               >
                 {providerOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -153,12 +167,34 @@ export default function ModelNewPage() {
               </select>
             </label>
             <label className="field">
-              <span>Model name (config.model)</span>
-              <input
-                type="text"
-                value={form.modelName}
-                onChange={(event) => setForm((current) => ({ ...current, modelName: event.target.value }))}
-              />
+              <span>{modelFieldLabel(form.provider, providerOptions)}</span>
+              {modelInputIsFreeform ? (
+                <>
+                  <input
+                    type="text"
+                    value={form.modelName}
+                    list="new-model-options"
+                    onChange={(event) => setForm((current) => ({ ...current, modelName: event.target.value }))}
+                  />
+                  <datalist id="new-model-options">
+                    {providerModelOptions.map((option) => (
+                      <option key={option} value={option} />
+                    ))}
+                  </datalist>
+                </>
+              ) : (
+                <select
+                  value={form.modelName}
+                  onChange={(event) => setForm((current) => ({ ...current, modelName: event.target.value }))}
+                >
+                  {providerAllowsBlankModelSelection(form.provider) ? (
+                    <option value="">Select model</option>
+                  ) : null}
+                  {providerModelOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              )}
             </label>
             <label className="field field-span">
               <span>Description (optional)</span>
@@ -167,20 +203,6 @@ export default function ModelNewPage() {
                 value={form.description}
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               />
-            </label>
-            <label className="field field-span">
-              <span>Config JSON</span>
-              <textarea
-                value={form.configText}
-                onChange={(event) => {
-                  const value = event.target.value
-                  setForm((current) => ({ ...current, configText: value }))
-                  if (fieldErrors.configText) {
-                    setFieldErrors((current) => ({ ...current, configText: '' }))
-                  }
-                }}
-              />
-              {fieldErrors.configText ? <span className="error-text">{fieldErrors.configText}</span> : null}
             </label>
             <div className="form-actions">
               <button type="submit" className="btn-link" disabled={busy}>Create Model</button>

@@ -326,6 +326,20 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 routing_state={"matched_connector_ids": [], "no_match": True},
             )
 
+    def test_decision_route_resolution_requires_connector_matches_when_cutover_enabled(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(ValueError, "matched_connector_ids"):
+            studio_tasks._resolve_flowchart_outgoing_edges(
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                node_config={studio_tasks.AGENT_RUNTIME_CUTOVER_FLAG_KEY: "true"},
+                outgoing_edges=[
+                    {"id": 11, "edge_mode": "solid", "condition_key": "approve"},
+                    {"id": 12, "edge_mode": "solid", "condition_key": "reject"},
+                ],
+                routing_state={"route_key": "approve"},
+            )
+
     def test_decision_route_resolution_fails_for_unknown_connector_ids(self) -> None:
         with self.assertRaises(ValueError):
             studio_tasks._resolve_flowchart_outgoing_edges(
@@ -360,6 +374,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                     {"id": 2, "edge_mode": "solid", "condition_key": "retry"},
                 ],
                 routing_state={"route_key": "missing"},
+            )
+
+    def test_decision_node_requires_conditions_when_cutover_enabled(self) -> None:
+        with self.assertRaisesRegex(ValueError, "decision_conditions"):
+            studio_tasks._execute_flowchart_decision_node(
+                node_config={studio_tasks.AGENT_RUNTIME_CUTOVER_FLAG_KEY: "true"},
+                input_context={"latest_upstream": {"output_state": {"route_key": "approve"}}},
+                mcp_server_keys=["llmctl-mcp"],
             )
 
     def test_runtime_decision_multi_route_launches_all_matches(self) -> None:

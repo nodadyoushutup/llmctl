@@ -20,7 +20,7 @@
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="services.realtime_events module" href="services.realtime_events.html" />
-    <link rel="prev" title="services.celery_app module" href="services.celery_app.html" /> 
+    <link rel="prev" title="services.flow_migration module" href="services.flow_migration.html" /> 
 </head>
 
 <body class="wy-body-for-nav"> 
@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -59,8 +65,10 @@
 <li class="toctree-l3"><a class="reference internal" href="services.html#subpackages">Subpackages</a></li>
 <li class="toctree-l3 current"><a class="reference internal" href="services.html#submodules">Submodules</a><ul class="current">
 <li class="toctree-l4"><a class="reference internal" href="services.celery_app.html">services.celery_app module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.flow_migration.html">services.flow_migration module</a></li>
 <li class="toctree-l4 current"><a class="current reference internal" href="#">services.huggingface_downloads module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.realtime_events.html">services.realtime_events module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.runtime_contracts.html">services.runtime_contracts module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.skill_adapters.html">services.skill_adapters module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.skills.html">services.skills module</a></li>
 </ul>
@@ -99,98 +107,15 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-services.huggingface_downloads">
-<span id="services-huggingface-downloads-module"></span><h1>services.huggingface_downloads module<a class="headerlink" href="#module-services.huggingface_downloads" title="Link to this heading"></a></h1>
-<dl class="py function">
-<dt class="sig sig-object py" id="services.huggingface_downloads.parse_huggingface_progress_percent">
-<span class="sig-prename descclassname"><span class="pre">services.huggingface_downloads.</span></span><span class="sig-name descname"><span class="pre">parse_huggingface_progress_percent</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">output</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/huggingface_downloads.html#parse_huggingface_progress_percent"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.huggingface_downloads.parse_huggingface_progress_percent" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>output</strong> (<em>str</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>float | None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.huggingface_downloads.vllm_local_model_container_path">
-<span class="sig-prename descclassname"><span class="pre">services.huggingface_downloads.</span></span><span class="sig-name descname"><span class="pre">vllm_local_model_container_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_dir_name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/huggingface_downloads.html#vllm_local_model_container_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.huggingface_downloads.vllm_local_model_container_path" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>model_dir_name</strong> (<em>str</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.huggingface_downloads.vllm_local_model_directory">
-<span class="sig-prename descclassname"><span class="pre">services.huggingface_downloads.</span></span><span class="sig-name descname"><span class="pre">vllm_local_model_directory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_dir_name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/huggingface_downloads.html#vllm_local_model_directory"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.huggingface_downloads.vllm_local_model_directory" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>model_dir_name</strong> (<em>str</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p><em>Path</em></p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.huggingface_downloads.model_directory_has_downloaded_contents">
-<span class="sig-prename descclassname"><span class="pre">services.huggingface_downloads.</span></span><span class="sig-name descname"><span class="pre">model_directory_has_downloaded_contents</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_dir</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/huggingface_downloads.html#model_directory_has_downloaded_contents"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.huggingface_downloads.model_directory_has_downloaded_contents" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>model_dir</strong> (<em>Path</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>bool</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.huggingface_downloads.run_huggingface_model_download">
-<span class="sig-prename descclassname"><span class="pre">services.huggingface_downloads.</span></span><span class="sig-name descname"><span class="pre">run_huggingface_model_download</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_dir_name</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">token</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_container_path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">progress_callback</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/huggingface_downloads.html#run_huggingface_model_download"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.huggingface_downloads.run_huggingface_model_download" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>model_id</strong> (<em>str</em>)</p></li>
-<li><p><strong>model_dir_name</strong> (<em>str</em>)</p></li>
-<li><p><strong>token</strong> (<em>str</em>)</p></li>
-<li><p><strong>model_container_path</strong> (<em>str</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.huggingface_downloads.summarize_subprocess_error">
-<span class="sig-prename descclassname"><span class="pre">services.huggingface_downloads.</span></span><span class="sig-name descname"><span class="pre">summarize_subprocess_error</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">exc</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/huggingface_downloads.html#summarize_subprocess_error"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.huggingface_downloads.summarize_subprocess_error" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>exc</strong> (<em>CalledProcessError</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str</p>
-</dd>
-</dl>
-</dd></dl>
-
+  <section id="services-huggingface-downloads-module">
+<h1>services.huggingface_downloads module<a class="headerlink" href="#services-huggingface-downloads-module" title="Link to this heading"></a></h1>
 </section>
 
 
            </div>
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
-        <a href="services.celery_app.html" class="btn btn-neutral float-left" title="services.celery_app module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="services.flow_migration.html" class="btn btn-neutral float-left" title="services.flow_migration module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
         <a href="services.realtime_events.html" class="btn btn-neutral float-right" title="services.realtime_events module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 

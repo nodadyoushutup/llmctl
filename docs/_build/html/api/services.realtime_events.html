@@ -19,7 +19,7 @@
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="services.skill_adapters module" href="services.skill_adapters.html" />
+    <link rel="next" title="services.runtime_contracts module" href="services.runtime_contracts.html" />
     <link rel="prev" title="services.huggingface_downloads module" href="services.huggingface_downloads.html" /> 
 </head>
 
@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -59,8 +65,10 @@
 <li class="toctree-l3"><a class="reference internal" href="services.html#subpackages">Subpackages</a></li>
 <li class="toctree-l3 current"><a class="reference internal" href="services.html#submodules">Submodules</a><ul class="current">
 <li class="toctree-l4"><a class="reference internal" href="services.celery_app.html">services.celery_app module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.flow_migration.html">services.flow_migration module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.huggingface_downloads.html">services.huggingface_downloads module</a></li>
 <li class="toctree-l4 current"><a class="current reference internal" href="#">services.realtime_events module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="services.runtime_contracts.html">services.runtime_contracts module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.skill_adapters.html">services.skill_adapters module</a></li>
 <li class="toctree-l4"><a class="reference internal" href="services.skills.html">services.skills module</a></li>
 </ul>
@@ -99,153 +107,8 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-services.realtime_events">
-<span id="services-realtime-events-module"></span><h1>services.realtime_events module<a class="headerlink" href="#module-services.realtime_events" title="Link to this heading"></a></h1>
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.combine_room_keys">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">combine_room_keys</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">room_groups</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#combine_room_keys"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.combine_room_keys" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>room_groups</strong> (<em>list</em><em>[</em><em>str</em><em>] </em><em>| </em><em>tuple</em><em>[</em><em>str</em><em>, </em><em>...</em><em>] </em><em>| </em><em>None</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.room_key">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">room_key</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prefix</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#room_key"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.room_key" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>prefix</strong> (<em>str</em>)</p></li>
-<li><p><strong>value</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str | None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.task_scope_rooms">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">task_scope_rooms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">task_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">run_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_run_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_node_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#task_scope_rooms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.task_scope_rooms" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>task_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>run_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>flowchart_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>flowchart_run_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>flowchart_node_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.flowchart_scope_rooms">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">flowchart_scope_rooms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_run_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_node_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#flowchart_scope_rooms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.flowchart_scope_rooms" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>flowchart_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>flowchart_run_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>flowchart_node_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.thread_scope_rooms">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">thread_scope_rooms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">thread_id</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#thread_scope_rooms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.thread_scope_rooms" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>thread_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.download_scope_rooms">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">download_scope_rooms</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">job_id</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#download_scope_rooms"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.download_scope_rooms" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>job_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.normalize_runtime_metadata">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">normalize_runtime_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">runtime</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#normalize_runtime_metadata"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.normalize_runtime_metadata" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>runtime</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>] </em><em>| </em><em>None</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>dict[str, <em>Any</em>] | None</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.build_event_envelope">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">build_event_envelope</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">event_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">entity_kind</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">entity_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">room_keys</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">payload</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">runtime</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#build_event_envelope"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.build_event_envelope" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>event_type</strong> (<em>str</em>)</p></li>
-<li><p><strong>entity_kind</strong> (<em>str</em>)</p></li>
-<li><p><strong>entity_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>room_keys</strong> (<em>list</em><em>[</em><em>str</em><em>] </em><em>| </em><em>None</em>)</p></li>
-<li><p><strong>payload</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>] </em><em>| </em><em>None</em>)</p></li>
-<li><p><strong>runtime</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>] </em><em>| </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>dict[str, <em>Any</em>]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="services.realtime_events.emit_contract_event">
-<span class="sig-prename descclassname"><span class="pre">services.realtime_events.</span></span><span class="sig-name descname"><span class="pre">emit_contract_event</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">event_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">entity_kind</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">entity_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">room_keys</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">payload</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">runtime</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">namespace</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'/rt'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/services/realtime_events.html#emit_contract_event"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#services.realtime_events.emit_contract_event" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>event_type</strong> (<em>str</em>)</p></li>
-<li><p><strong>entity_kind</strong> (<em>str</em>)</p></li>
-<li><p><strong>entity_id</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>room_keys</strong> (<em>list</em><em>[</em><em>str</em><em>] </em><em>| </em><em>None</em>)</p></li>
-<li><p><strong>payload</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>] </em><em>| </em><em>None</em>)</p></li>
-<li><p><strong>runtime</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>] </em><em>| </em><em>None</em>)</p></li>
-<li><p><strong>namespace</strong> (<em>str</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>dict[str, <em>Any</em>]</p>
-</dd>
-</dl>
-</dd></dl>
-
+  <section id="services-realtime-events-module">
+<h1>services.realtime_events module<a class="headerlink" href="#services-realtime-events-module" title="Link to this heading"></a></h1>
 </section>
 
 
@@ -253,7 +116,7 @@
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
         <a href="services.huggingface_downloads.html" class="btn btn-neutral float-left" title="services.huggingface_downloads module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
-        <a href="services.skill_adapters.html" class="btn btn-neutral float-right" title="services.skill_adapters module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="services.runtime_contracts.html" class="btn btn-neutral float-right" title="services.runtime_contracts module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>

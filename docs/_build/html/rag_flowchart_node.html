@@ -19,8 +19,8 @@
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Changelog" href="changelog.html" />
-    <link rel="prev" title="Provider Runtime" href="provider_runtime.html" /> 
+    <link rel="next" title="Specialized Flowchart Nodes" href="specialized_flowchart_nodes.html" />
+    <link rel="prev" title="Codex Host Skills" href="codex_host_skills.html" /> 
 </head>
 
 <body class="wy-body-for-nav"> 
@@ -46,15 +46,22 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">RAG Flowchart Node</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#runtime-modes">Runtime modes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#node-config-schema">Node config schema</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#runtime-contract">Runtime contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#node-detail-stage-behavior">Node Detail Stage Behavior</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#integration-health-gating">Integration-health gating</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#contract-endpoints">Contract endpoints</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#manual-source-quick-runs">Manual source quick runs</a></li>
 </ul>
 </li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -124,6 +131,29 @@
 </ul>
 <p>Citation/source snippets are audit-only in v1 and are not emitted in runtime
 payload/context.</p>
+<p>Indexing modes (<code class="docutils literal notranslate"><span class="pre">fresh_index</span></code> and <code class="docutils literal notranslate"><span class="pre">delta_index</span></code>) emit normalized metadata:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">mode</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">collections</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">retrieval_stats</span></code> (includes <code class="docutils literal notranslate"><span class="pre">total_files</span></code>/<code class="docutils literal notranslate"><span class="pre">total_chunks</span></code> when available)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">task_current_stage='llm_query'</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">task_stage_logs</span></code> with raw indexing lines under <code class="docutils literal notranslate"><span class="pre">llm_query</span></code></p></li>
+</ul>
+</section>
+<section id="node-detail-stage-behavior">
+<h2>Node Detail Stage Behavior<a class="headerlink" href="#node-detail-stage-behavior" title="Link to this heading"></a></h2>
+<p>For <code class="docutils literal notranslate"><span class="pre">Quick</span> <span class="pre">RAG</span></code> runs and flowchart <code class="docutils literal notranslate"><span class="pre">rag</span></code> node runs, Node Detail stage
+rendering keeps stable stage ordering and remaps the <code class="docutils literal notranslate"><span class="pre">llm_query</span></code> label using
+runtime execution mode:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">query</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">LLM</span> <span class="pre">Query</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">indexing</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">RAG</span> <span class="pre">Indexing</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">delta_indexing</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">RAG</span> <span class="pre">Delta</span> <span class="pre">Indexing</span></code></p></li>
+</ul>
+<p>If execution mode is missing or unknown, Node Detail falls back to
+<code class="docutils literal notranslate"><span class="pre">LLM</span> <span class="pre">Query</span></code> for compatibility.</p>
+<p>For indexing-labeled stages with no log lines yet, Node Detail shows
+<code class="docutils literal notranslate"><span class="pre">Waiting</span> <span class="pre">for</span> <span class="pre">indexing</span> <span class="pre">logs...</span></code> instead of the generic empty log message.</p>
 </section>
 <section id="integration-health-gating">
 <h2>Integration-health gating<a class="headerlink" href="#integration-health-gating" title="Link to this heading"></a></h2>
@@ -168,8 +198,8 @@ only.</p>
            </div>
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
-        <a href="provider_runtime.html" class="btn btn-neutral float-left" title="Provider Runtime" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
-        <a href="changelog.html" class="btn btn-neutral float-right" title="Changelog" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="codex_host_skills.html" class="btn btn-neutral float-left" title="Codex Host Skills" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="specialized_flowchart_nodes.html" class="btn btn-neutral float-right" title="Specialized Flowchart Nodes" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>

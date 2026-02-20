@@ -1,7 +1,7 @@
 # CLI To Studio Agent Runtime Migration - Stage 3 Contracts + Persistence Freeze
 
 Date: 2026-02-20
-Source stage: `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_SEQUENTIAL_PLAN.md` (Stage 3)
+Source stage: `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_SEQUENTIAL_PLAN.md` (Stage 3)
 
 ## Stage 3 Completion Checklist
 

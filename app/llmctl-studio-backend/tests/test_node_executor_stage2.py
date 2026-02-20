@@ -117,6 +117,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("0", settings.get("k8s_gpu_limit"))
         self.assertEqual("1800", settings.get("k8s_job_ttl_seconds"))
         self.assertEqual("default", settings.get("workspace_identity_key"))
+        self.assertEqual("false", settings.get("agent_runtime_cutover_enabled"))
         self.assertTrue(bool(settings.get("k8s_frontier_image")))
         self.assertTrue(bool(settings.get("k8s_vllm_image")))
 
@@ -136,6 +137,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "k8s_image_tag": "release-2026-02-18",
                 "k8s_gpu_limit": "2",
                 "k8s_job_ttl_seconds": "2400",
+                "agent_runtime_cutover_enabled": "true",
             }
         )
         self.assertEqual("kubernetes", updated.get("provider"))
@@ -143,6 +145,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("release-2026-02-18", updated.get("k8s_image_tag"))
         self.assertEqual("2", updated.get("k8s_gpu_limit"))
         self.assertEqual("2400", updated.get("k8s_job_ttl_seconds"))
+        self.assertEqual("true", updated.get("agent_runtime_cutover_enabled"))
 
     def test_node_executor_settings_db_overrides_env_defaults(self) -> None:
         save_node_executor_settings({"k8s_namespace": "llmctl"})
@@ -186,6 +189,10 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertTrue(str(summary.get("k8s_kubeconfig_fingerprint") or "").startswith("sha256:"))
         settings = load_node_executor_settings(include_secrets=False)
         self.assertEqual("", settings.get("k8s_kubeconfig"))
+        self.assertEqual(
+            settings.get("agent_runtime_cutover_enabled"),
+            summary.get("agent_runtime_cutover_enabled"),
+        )
         runtime_settings = load_node_executor_runtime_settings()
         self.assertEqual("apiVersion: v1", runtime_settings.get("k8s_kubeconfig"))
         with session_scope() as session:
@@ -240,6 +247,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "cancel_grace_timeout_seconds": "20",
                 "cancel_force_kill_enabled": "true",
                 "workspace_identity_key": "default",
+                "agent_runtime_cutover_enabled": "true",
                 "k8s_namespace": "default",
                 "k8s_image": "llmctl-executor-frontier:latest",
                 "k8s_image_tag": "dev-2026-02-18",
@@ -268,6 +276,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("gpu-2026-02-18", settings.get("k8s_vllm_image_tag"))
         self.assertEqual("1", settings.get("k8s_gpu_limit"))
         self.assertEqual("900", settings.get("k8s_job_ttl_seconds"))
+        self.assertEqual("true", settings.get("agent_runtime_cutover_enabled"))
 
     def test_agent_task_node_executor_metadata_defaults(self) -> None:
         with session_scope() as session:

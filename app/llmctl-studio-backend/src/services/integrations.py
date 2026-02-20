@@ -100,6 +100,7 @@ NODE_EXECUTOR_SETTING_KEYS = (
     "cancel_grace_timeout_seconds",
     "cancel_force_kill_enabled",
     "workspace_identity_key",
+    "agent_runtime_cutover_enabled",
     "k8s_namespace",
     "k8s_image",
     "k8s_image_tag",
@@ -570,6 +571,9 @@ def node_executor_default_settings() -> dict[str, str]:
         "workspace_identity_key": normalize_workspace_identity_key(
             Config.NODE_EXECUTOR_WORKSPACE_IDENTITY_KEY
         ),
+        "agent_runtime_cutover_enabled": _bool_string(
+            Config.NODE_EXECUTOR_AGENT_RUNTIME_CUTOVER_ENABLED
+        ),
         "k8s_namespace": (Config.NODE_EXECUTOR_K8S_NAMESPACE or "").strip() or "default",
         "k8s_image": default_k8s_image,
         "k8s_image_tag": _safe_default_tag(
@@ -726,6 +730,15 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
         )
     except ValueError:
         settings["workspace_identity_key"] = defaults["workspace_identity_key"]
+    settings["agent_runtime_cutover_enabled"] = _bool_string(
+        _as_bool_flag(
+            settings.get("agent_runtime_cutover_enabled"),
+            default=_as_bool_flag(
+                defaults.get("agent_runtime_cutover_enabled"),
+                default=False,
+            ),
+        )
+    )
     settings["k8s_namespace"] = (
         (settings.get("k8s_namespace") or "").strip() or defaults["k8s_namespace"]
     )
@@ -875,6 +888,12 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         "workspace_identity_key": normalize_workspace_identity_key(
             candidate.get("workspace_identity_key")
         ),
+        "agent_runtime_cutover_enabled": _bool_string(
+            _as_bool_flag(
+                candidate.get("agent_runtime_cutover_enabled"),
+                default=False,
+            )
+        ),
         "k8s_namespace": (
             (candidate.get("k8s_namespace") or "").strip() or "default"
         ),
@@ -970,6 +989,8 @@ def node_executor_effective_config_summary() -> dict[str, str]:
         or "15",
         "cancel_force_kill_enabled": settings.get("cancel_force_kill_enabled") or "true",
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
+        "agent_runtime_cutover_enabled": settings.get("agent_runtime_cutover_enabled")
+        or "false",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
         "k8s_image": settings.get("k8s_image") or "llmctl-executor-frontier:latest",
         "k8s_image_tag": settings.get("k8s_image_tag") or "",
@@ -1016,6 +1037,8 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
         or "15",
         "cancel_force_kill_enabled": settings.get("cancel_force_kill_enabled") or "true",
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
+        "agent_runtime_cutover_enabled": settings.get("agent_runtime_cutover_enabled")
+        or "false",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
         "k8s_image": settings.get("k8s_image") or "llmctl-executor-frontier:latest",
         "k8s_image_tag": settings.get("k8s_image_tag") or "",

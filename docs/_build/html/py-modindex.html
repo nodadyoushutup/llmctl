@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -107,16 +113,6 @@
        <td>&#160;&#160;&#160;
        <a href="api/chat.rag_client.html#module-chat.rag_client"><code class="xref">chat.rag_client</code></a></td><td>
        <em></em></td></tr>
-     <tr class="cg-1">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/chat.runtime.html#module-chat.runtime"><code class="xref">chat.runtime</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-1">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/chat.settings.html#module-chat.settings"><code class="xref">chat.settings</code></a></td><td>
-       <em></em></td></tr>
      <tr>
        <td><img src="_static/minus.png" class="toggler"
               id="toggle-2" style="display: none" alt="-" /></td>
@@ -127,16 +123,6 @@
        <td></td>
        <td>&#160;&#160;&#160;
        <a href="api/core.chroma_mcp_stdio_wrapper.html#module-core.chroma_mcp_stdio_wrapper"><code class="xref">core.chroma_mcp_stdio_wrapper</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-2">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/core.config.html#module-core.config"><code class="xref">core.config</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-2">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/core.db.html#module-core.db"><code class="xref">core.db</code></a></td><td>
        <em></em></td></tr>
      <tr class="cg-2">
        <td></td>
@@ -168,11 +154,6 @@
        <td>&#160;&#160;&#160;
        <a href="api/core.task_stages.html#module-core.task_stages"><code class="xref">core.task_stages</code></a></td><td>
        <em></em></td></tr>
-     <tr class="cg-2">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/core.vllm_models.html#module-core.vllm_models"><code class="xref">core.vllm_models</code></a></td><td>
-       <em></em></td></tr>
      <tr class="pcap"><td></td><td>&#160;</td><td></td></tr>
      <tr class="cap" id="cap-r"><td></td><td>
        <strong>r</strong></td><td></td></tr>
@@ -190,17 +171,12 @@
      <tr class="cg-3">
        <td></td>
        <td>&#160;&#160;&#160;
-       <a href="api/rag.domain.html#module-rag.domain"><code class="xref">rag.domain</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-3">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/rag.domain.contracts.html#module-rag.domain.contracts"><code class="xref">rag.domain.contracts</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-3">
-       <td></td>
-       <td>&#160;&#160;&#160;
        <a href="api/rag.engine.html#module-rag.engine"><code class="xref">rag.engine</code></a></td><td>
+       <em></em></td></tr>
+     <tr class="cg-3">
+       <td></td>
+       <td>&#160;&#160;&#160;
+       <a href="api/rag.engine.chromadb_loader.html#module-rag.engine.chromadb_loader"><code class="xref">rag.engine.chromadb_loader</code></a></td><td>
        <em></em></td></tr>
      <tr class="cg-3">
        <td></td>
@@ -270,11 +246,6 @@
      <tr class="cg-3">
        <td></td>
        <td>&#160;&#160;&#160;
-       <a href="api/rag.integrations.git_sync.html#module-rag.integrations.git_sync"><code class="xref">rag.integrations.git_sync</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-3">
-       <td></td>
-       <td>&#160;&#160;&#160;
        <a href="api/rag.integrations.google_drive_sync.html#module-rag.integrations.google_drive_sync"><code class="xref">rag.integrations.google_drive_sync</code></a></td><td>
        <em></em></td></tr>
      <tr class="cg-3">
@@ -300,11 +271,6 @@
      <tr class="cg-3">
        <td></td>
        <td>&#160;&#160;&#160;
-       <a href="api/rag.worker.celery_app.html#module-rag.worker.celery_app"><code class="xref">rag.worker.celery_app</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-3">
-       <td></td>
-       <td>&#160;&#160;&#160;
        <a href="api/rag.worker.queues.html#module-rag.worker.queues"><code class="xref">rag.worker.queues</code></a></td><td>
        <em></em></td></tr>
      <tr class="pcap"><td></td><td>&#160;</td><td></td></tr>
@@ -319,47 +285,7 @@
      <tr class="cg-4">
        <td></td>
        <td>&#160;&#160;&#160;
-       <a href="api/services.celery_app.html#module-services.celery_app"><code class="xref">services.celery_app</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.execution.html#module-services.execution"><code class="xref">services.execution</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
        <a href="api/services.execution.contracts.html#module-services.execution.contracts"><code class="xref">services.execution.contracts</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.execution.docker_executor.html#module-services.execution.docker_executor"><code class="xref">services.execution.docker_executor</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.execution.idempotency.html#module-services.execution.idempotency"><code class="xref">services.execution.idempotency</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.execution.kubernetes_executor.html#module-services.execution.kubernetes_executor"><code class="xref">services.execution.kubernetes_executor</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.execution.router.html#module-services.execution.router"><code class="xref">services.execution.router</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.execution.workspace_executor.html#module-services.execution.workspace_executor"><code class="xref">services.execution.workspace_executor</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.huggingface_downloads.html#module-services.huggingface_downloads"><code class="xref">services.huggingface_downloads</code></a></td><td>
        <em></em></td></tr>
      <tr class="cg-4">
        <td></td>
@@ -406,52 +332,26 @@
        <td>&#160;&#160;&#160;
        <a href="api/services.instructions.package.html#module-services.instructions.package"><code class="xref">services.instructions.package</code></a></td><td>
        <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.realtime_events.html#module-services.realtime_events"><code class="xref">services.realtime_events</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.skill_adapters.html#module-services.skill_adapters"><code class="xref">services.skill_adapters</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-4">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/services.skills.html#module-services.skills"><code class="xref">services.skills</code></a></td><td>
-       <em></em></td></tr>
      <tr>
-       <td><img src="_static/minus.png" class="toggler"
-              id="toggle-5" style="display: none" alt="-" /></td>
+       <td></td>
        <td>
        <a href="api/storage.html#module-storage"><code class="xref">storage</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-5">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/storage.attachment_storage.html#module-storage.attachment_storage"><code class="xref">storage.attachment_storage</code></a></td><td>
-       <em></em></td></tr>
-     <tr class="cg-5">
-       <td></td>
-       <td>&#160;&#160;&#160;
-       <a href="api/storage.script_storage.html#module-storage.script_storage"><code class="xref">storage.script_storage</code></a></td><td>
        <em></em></td></tr>
      <tr class="pcap"><td></td><td>&#160;</td><td></td></tr>
      <tr class="cap" id="cap-w"><td></td><td>
        <strong>w</strong></td><td></td></tr>
      <tr>
        <td><img src="_static/minus.png" class="toggler"
-              id="toggle-6" style="display: none" alt="-" /></td>
+              id="toggle-5" style="display: none" alt="-" /></td>
        <td>
        <a href="api/web.html#module-web"><code class="xref">web</code></a></td><td>
        <em></em></td></tr>
-     <tr class="cg-6">
+     <tr class="cg-5">
        <td></td>
        <td>&#160;&#160;&#160;
        <a href="api/web.gunicorn_config.html#module-web.gunicorn_config"><code class="xref">web.gunicorn_config</code></a></td><td>
        <em></em></td></tr>
-     <tr class="cg-6">
+     <tr class="cg-5">
        <td></td>
        <td>&#160;&#160;&#160;
        <a href="api/web.realtime.html#module-web.realtime"><code class="xref">web.realtime</code></a></td><td>

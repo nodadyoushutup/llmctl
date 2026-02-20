@@ -19,7 +19,7 @@
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="RAG Flowchart Node" href="rag_flowchart_node.html" />
+    <link rel="next" title="Node Executor Runtime" href="node_executor_runtime.html" />
     <link rel="prev" title="Launch Chat Runtime" href="chat_runtime.html" /> 
 </head>
 
@@ -52,10 +52,17 @@
 <li class="toctree-l2"><a class="reference internal" href="#claude-model-defaults">Claude Model Defaults</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#vllm-local-huggingface-downloads">vLLM Local HuggingFace Downloads</a></li>
 <li class="toctree-l2"><a class="reference internal" href="#google-cloud-workspace-integrations">Google Cloud + Workspace Integrations</a></li>
-<li class="toctree-l2"><a class="reference internal" href="#agent-skill-binding-compatibility-mode">Agent Skill Binding Compatibility Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#integrated-mcp-runtime-kubernetes">Integrated MCP Runtime (Kubernetes)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#agent-skill-binding-contract">Agent Skill Binding Contract</a></li>
 </ul>
 </li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -94,6 +101,8 @@
 <p>Studio provider routing is DB-backed through integration settings
 (<code class="docutils literal notranslate"><span class="pre">provider='llm'</span></code>). Provider auth/config updates are written to the DB and
 read by runtime execution paths.</p>
+<p>For Kubernetes-only node execution routing and execution contract details, see
+<a class="reference internal" href="node_executor_runtime.html"><span class="doc">Node Executor Runtime</span></a>.</p>
 </section>
 <section id="claude-runtime-readiness">
 <h2>Claude Runtime Readiness<a class="headerlink" href="#claude-runtime-readiness" title="Link to this heading"></a></h2>
@@ -175,16 +184,51 @@ stored and surfaced in UI, but runtime integrated MCP server creation remains
 disabled until a supported Workspace MCP service-account execution path is
 finalized.</p>
 </section>
-<section id="agent-skill-binding-compatibility-mode">
-<h2>Agent Skill Binding Compatibility Mode<a class="headerlink" href="#agent-skill-binding-compatibility-mode" title="Link to this heading"></a></h2>
-<p>Runtime settings also expose <code class="docutils literal notranslate"><span class="pre">node_skill_binding_mode</span></code> for legacy client
-compatibility during Agent-only skill binding cutover:</p>
+<section id="integrated-mcp-runtime-kubernetes">
+<h2>Integrated MCP Runtime (Kubernetes)<a class="headerlink" href="#integrated-mcp-runtime-kubernetes" title="Link to this heading"></a></h2>
+<p>Integrated MCP servers are now Kubernetes service endpoints, not local
+executables inside the Studio container.</p>
+<p>Runtime synchronization is system-managed through
+<code class="docutils literal notranslate"><span class="pre">core.integrated_mcp.sync_integrated_mcp_servers()</span></code>. Integrated rows use
+<code class="docutils literal notranslate"><span class="pre">server_type='integrated'</span></code> with JSON payload shape:</p>
 <ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">warn</span></code>: ignore node-level <code class="docutils literal notranslate"><span class="pre">skill_ids</span></code> writes and emit deprecation metadata/logs.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">reject</span></code>: return explicit validation errors for node-level <code class="docutils literal notranslate"><span class="pre">skill_ids</span></code> writes.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">{&quot;url&quot;:&quot;http://&lt;service&gt;.&lt;namespace&gt;.svc.cluster.local:&lt;port&gt;/mcp&quot;,&quot;transport&quot;:&quot;streamable-http&quot;}</span></code></p></li>
 </ul>
-<p>See <span class="xref std std-doc">agent_skill_binding</span> for full Agent/node binding behavior and
-migration notes.</p>
+<p>Current endpoint contract:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl-mcp</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">http://llmctl-mcp.&lt;namespace&gt;.svc.cluster.local:9020/mcp</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">github</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">http://llmctl-mcp-github.&lt;namespace&gt;.svc.cluster.local:8000/mcp</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">atlassian</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">http://llmctl-mcp-atlassian.&lt;namespace&gt;.svc.cluster.local:8000/mcp</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">chroma</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">http://llmctl-mcp-chroma.&lt;namespace&gt;.svc.cluster.local:8000/mcp</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">google-cloud</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">http://llmctl-mcp-google-cloud.&lt;namespace&gt;.svc.cluster.local:8000/mcp</span></code></p></li>
+</ul>
+<p>Namespace comes from <code class="docutils literal notranslate"><span class="pre">LLMCTL_NODE_EXECUTOR_K8S_NAMESPACE</span></code> (fallback:
+<code class="docutils literal notranslate"><span class="pre">default</span></code>).</p>
+<p>Lifecycle/ordering:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">apply_runtime_migrations()</span></code> runs at Studio startup and synchronizes
+integrated MCP rows first (including rewriting legacy command/stdio payloads
+and normalizing legacy key <code class="docutils literal notranslate"><span class="pre">jira</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">atlassian</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">seed_defaults()</span></code> then runs and calls the integrated MCP seed hook so
+fresh databases get the same endpoint contract without overriding valid
+migrated integrated rows.</p></li>
+</ol>
+<p>Credential split:</p>
+<ul class="simple">
+<li><p>Studio integration settings remain DB-backed.</p></li>
+<li><p>Kubernetes MCP Deployments read provider credentials from Kubernetes Secrets
+(for example <code class="docutils literal notranslate"><span class="pre">llmctl-mcp-secrets</span></code>), not from Studio-local embedded MCP
+binaries.</p></li>
+</ul>
+</section>
+<section id="agent-skill-binding-contract">
+<h2>Agent Skill Binding Contract<a class="headerlink" href="#agent-skill-binding-contract" title="Link to this heading"></a></h2>
+<p>Runtime enforces Agent-level skill ownership:</p>
+<ul class="simple">
+<li><p>node-level <code class="docutils literal notranslate"><span class="pre">skill_ids</span></code> graph writes are rejected</p></li>
+<li><p>skills must be bound to Agents and resolved through node agent references</p></li>
+</ul>
+<p>See <a class="reference internal" href="agent_skill_binding.html"><span class="doc">Agent Skill Binding</span></a> for binding behavior and migration notes.</p>
 </section>
 </section>
 
@@ -193,7 +237,7 @@ migration notes.</p>
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
         <a href="chat_runtime.html" class="btn btn-neutral float-left" title="Launch Chat Runtime" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
-        <a href="rag_flowchart_node.html" class="btn btn-neutral float-right" title="RAG Flowchart Node" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="node_executor_runtime.html" class="btn btn-neutral float-right" title="Node Executor Runtime" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>

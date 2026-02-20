@@ -1,0 +1,7 @@
+web.api\_contracts module
+=========================
+
+.. automodule:: web.api_contracts
+   :members:
+   :show-inheritance:
+   :undoc-members:

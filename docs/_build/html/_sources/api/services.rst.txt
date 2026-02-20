@@ -23,7 +23,9 @@ Submodules
    :maxdepth: 4
 
    services.celery_app
+   services.flow_migration
    services.huggingface_downloads
    services.realtime_events
+   services.runtime_contracts
    services.skill_adapters
    services.skills

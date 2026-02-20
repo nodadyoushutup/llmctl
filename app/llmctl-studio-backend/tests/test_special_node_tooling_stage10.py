@@ -124,6 +124,50 @@ class SpecialNodeToolingStage10Tests(unittest.TestCase):
         self.assertEqual("evaluate", trace.get("operation"))
         self.assertEqual("deterministic.decision", trace.get("tool_name"))
 
+    def test_decision_wrapper_uses_evaluate_operation_when_cutover_enabled(self) -> None:
+        output_state, _routing_state = (
+            studio_tasks._execute_deterministic_special_node_with_framework(
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                node_config={
+                    studio_tasks.AGENT_RUNTIME_CUTOVER_FLAG_KEY: "true",
+                    "route_field_path": "latest_upstream.output_state.structured_output.route_key",
+                },
+                input_context={},
+                execution_id=9014,
+                invoke=lambda: (
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_DECISION,
+                        "matched_connector_ids": ["approve"],
+                        "evaluations": [
+                            {
+                                "connector_id": "approve",
+                                "condition_text": "ok",
+                                "matched": True,
+                                "reason": "matched",
+                            }
+                        ],
+                        "no_match": False,
+                    },
+                    {
+                        "route_key": "approve",
+                        "matched_connector_ids": ["approve"],
+                        "evaluations": [
+                            {
+                                "connector_id": "approve",
+                                "condition_text": "ok",
+                                "matched": True,
+                                "reason": "matched",
+                            }
+                        ],
+                        "no_match": False,
+                    },
+                ),
+            )
+        )
+
+        trace = output_state.get("deterministic_tooling") or {}
+        self.assertEqual("evaluate", trace.get("operation"))
+
     def test_memory_wrapper_conflict_only_fallback_handles_conflict(self) -> None:
         output_state, routing_state = (
             studio_tasks._execute_deterministic_special_node_with_framework(

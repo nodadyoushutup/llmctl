@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -107,11 +113,11 @@
 <span id="core-mcp-config-module"></span><h1>core.mcp_config module<a class="headerlink" href="#module-core.mcp_config" title="Link to this heading"></a></h1>
 <dl class="py function">
 <dt class="sig sig-object py" id="core.mcp_config.parse_mcp_config">
-<span class="sig-prename descclassname"><span class="pre">core.mcp_config.</span></span><span class="sig-name descname"><span class="pre">parse_mcp_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">raw_toml</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">server_key</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/mcp_config.html#parse_mcp_config"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.mcp_config.parse_mcp_config" title="Link to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">core.mcp_config.</span></span><span class="sig-name descname"><span class="pre">parse_mcp_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">raw_config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">server_key</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/mcp_config.html#parse_mcp_config"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.mcp_config.parse_mcp_config" title="Link to this definition"></a></dt>
 <dd><dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>raw_toml</strong> (<em>str</em>)</p></li>
+<li><p><strong>raw_config</strong> (<em>str</em><em> | </em><em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em>)</p></li>
 <li><p><strong>server_key</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
 </ul>
 </dd>
@@ -123,16 +129,16 @@
 
 <dl class="py function">
 <dt class="sig sig-object py" id="core.mcp_config.format_mcp_config">
-<span class="sig-prename descclassname"><span class="pre">core.mcp_config.</span></span><span class="sig-name descname"><span class="pre">format_mcp_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">raw_toml</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">server_key</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/mcp_config.html#format_mcp_config"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.mcp_config.format_mcp_config" title="Link to this definition"></a></dt>
+<span class="sig-prename descclassname"><span class="pre">core.mcp_config.</span></span><span class="sig-name descname"><span class="pre">format_mcp_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">raw_config</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">server_key</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/core/mcp_config.html#format_mcp_config"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#core.mcp_config.format_mcp_config" title="Link to this definition"></a></dt>
 <dd><dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>raw_toml</strong> (<em>str</em>)</p></li>
+<li><p><strong>raw_config</strong> (<em>str</em><em> | </em><em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em>)</p></li>
 <li><p><strong>server_key</strong> (<em>str</em>)</p></li>
 </ul>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str</p>
+<dd class="field-even"><p>dict[str, <em>Any</em>]</p>
 </dd>
 </dl>
 </dd></dl>
@@ -148,7 +154,7 @@
 </ul>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>str</p>
+<dd class="field-even"><p>dict[str, <em>Any</em>]</p>
 </dd>
 </dl>
 </dd></dl>

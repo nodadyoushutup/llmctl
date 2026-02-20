@@ -1,0 +1,471 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Studio Serving Runtime &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Agent Skill Binding" href="agent_skill_binding.html" />
+    <link rel="prev" title="Agent Runtime Migration Runbook" href="agent_runtime_migration_runbook.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Studio Serving Runtime</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#database-configuration">Database Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#startup-db-health-check">Startup DB Health Check</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#local-backend-test-bootstrap">Local Backend Test Bootstrap</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#integrated-mcp-startup-gate-kubernetes">Integrated MCP Startup Gate (Kubernetes)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#sqlite-one-time-migration-utility">SQLite One-Time Migration Utility</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#gunicorn-first-serving">Gunicorn-First Serving</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#reverse-proxy-and-tls">Reverse Proxy and TLS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#studio-route-contract-web-api">Studio Route Contract (<cite>/web</cite> + <cite>/api</cite>)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#socket-io-redis-architecture">Socket.IO + Redis Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#celery-runtime-topology-decoupled">Celery Runtime Topology (Decoupled)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#event-contract-and-frontend-model">Event Contract and Frontend Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#node-detail-api-and-runtime-metadata-contract">Node Detail API and Runtime Metadata Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#developer-workflow-react-only-split">Developer Workflow (React-Only Split)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#agent-runtime-cutover-runbook">Agent Runtime Cutover Runbook</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#operational-guidance">Operational Guidance</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Studio Serving Runtime</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/studio_serving_runtime.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="studio-serving-runtime">
+<h1>Studio Serving Runtime<a class="headerlink" href="#studio-serving-runtime" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Studio now runs with a Gunicorn-first serving model and Socket.IO-first
+backend-to-frontend updates. The runtime is designed for:</p>
+<ul class="simple">
+<li><p>direct HTTP development</p></li>
+<li><p>HTTPS and reverse-proxy deployments</p></li>
+<li><p>multi-worker Gunicorn with Redis-backed Socket.IO fan-out</p></li>
+<li><p>PostgreSQL-backed persistent metadata (SQLite is not supported)</p></li>
+<li><p>React-only Studio UI served by <code class="docutils literal notranslate"><span class="pre">llmctl-studio-frontend</span></code></p></li>
+</ul>
+</section>
+<section id="database-configuration">
+<h2>Database Configuration<a class="headerlink" href="#database-configuration" title="Link to this heading"></a></h2>
+<p>Studio requires PostgreSQL for all runtime database access.</p>
+<p>Set one of the following:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_DATABASE_URI</span></code> (full PostgreSQL SQLAlchemy URI)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_POSTGRES_HOST</span></code>, <code class="docutils literal notranslate"><span class="pre">LLMCTL_POSTGRES_PORT</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LLMCTL_POSTGRES_DB</span></code>, <code class="docutils literal notranslate"><span class="pre">LLMCTL_POSTGRES_USER</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LLMCTL_POSTGRES_PASSWORD</span></code></p></li>
+</ul>
+</section>
+<section id="startup-db-health-check">
+<h2>Startup DB Health Check<a class="headerlink" href="#startup-db-health-check" title="Link to this heading"></a></h2>
+<p>Studio performs DB preflight checks before web/API startup. The preflight verifies:</p>
+<ul class="simple">
+<li><p>database connectivity (<code class="docutils literal notranslate"><span class="pre">SELECT</span> <span class="pre">1</span></code>)</p></li>
+<li><p>schema readiness by creating/migrating tables</p></li>
+<li><p>presence of required core tables</p></li>
+</ul>
+<p>Optional controls:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_DB_HEALTHCHECK_ENABLED</span></code> (default <code class="docutils literal notranslate"><span class="pre">true</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_DB_HEALTHCHECK_TIMEOUT_SECONDS</span></code> (default <code class="docutils literal notranslate"><span class="pre">60</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_DB_HEALTHCHECK_INTERVAL_SECONDS</span></code> (default <code class="docutils literal notranslate"><span class="pre">2</span></code>)</p></li>
+</ul>
+<p>Standalone CLI check:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python3<span class="w"> </span>app/llmctl-studio-backend/scripts/check_database_health.py
+</pre></div>
+</div>
+</section>
+<section id="local-backend-test-bootstrap">
+<h2>Local Backend Test Bootstrap<a class="headerlink" href="#local-backend-test-bootstrap" title="Link to this heading"></a></h2>
+<p>To avoid local test runs failing when PostgreSQL wiring is missing, use the
+test wrapper script. It starts a disposable local PostgreSQL container,
+exports <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_DATABASE_URI</span></code>, and runs your test command.</p>
+<p>Run a targeted backend test:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>bash<span class="w"> </span>app/llmctl-studio-backend/scripts/with_test_postgres.sh<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>.venv/bin/python3<span class="w"> </span>-m<span class="w"> </span>unittest<span class="w"> </span>app/llmctl-studio-backend/tests/test_node_executor_stage4.py
+</pre></div>
+</div>
+<p>Run full backend test discovery:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>bash<span class="w"> </span>app/llmctl-studio-backend/scripts/with_test_postgres.sh
+</pre></div>
+</div>
+<p>Useful options:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">--keep-container</span></code>: keep the test PostgreSQL container running after tests.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--skip-dep-check</span></code>: skip Python dependency import preflight.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--python</span> <span class="pre">&lt;path&gt;</span></code>: use a specific Python binary.</p></li>
+<li><p>default local DB port is <code class="docutils literal notranslate"><span class="pre">15432</span></code>; if busy, the script auto-selects a free port.</p></li>
+</ul>
+</section>
+<section id="integrated-mcp-startup-gate-kubernetes">
+<h2>Integrated MCP Startup Gate (Kubernetes)<a class="headerlink" href="#integrated-mcp-startup-gate-kubernetes" title="Link to this heading"></a></h2>
+<p>In Kubernetes deployments, Studio backend startup is guarded by init-container
+<code class="docutils literal notranslate"><span class="pre">wait-for-integrated-mcp</span></code> in <code class="docutils literal notranslate"><span class="pre">kubernetes/llmctl-studio/base/studio-deployment.yaml</span></code>.</p>
+<p>Purpose:</p>
+<ul class="simple">
+<li><p>enforce MCP-first startup ordering during one-release cutover</p></li>
+<li><p>prevent Studio migration/seed sync from racing unavailable MCP services</p></li>
+</ul>
+<p>Controls (<code class="docutils literal notranslate"><span class="pre">kubernetes/llmctl-studio/base/studio-configmap.yaml</span></code>):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_MCP_WAIT_ENABLED</span></code> (default <code class="docutils literal notranslate"><span class="pre">true</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_MCP_WAIT_TIMEOUT_SECONDS</span></code> (default <code class="docutils literal notranslate"><span class="pre">240</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_MCP_REQUIRED_ENDPOINTS</span></code> (comma-separated URL list; default
+includes <code class="docutils literal notranslate"><span class="pre">http://llmctl-mcp.&lt;namespace&gt;.svc.cluster.local:9020/mcp</span></code>)</p></li>
+</ul>
+<p>If the gate times out, Studio pod startup fails fast. For rollback/debug
+scenarios, set <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_MCP_WAIT_ENABLED=false</span></code> to bypass the wait.</p>
+</section>
+<section id="sqlite-one-time-migration-utility">
+<h2>SQLite One-Time Migration Utility<a class="headerlink" href="#sqlite-one-time-migration-utility" title="Link to this heading"></a></h2>
+<p>For existing local SQLite data, use the one-time copy tool:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python3<span class="w"> </span>app/llmctl-studio-backend/scripts/migrate_sqlite_to_postgres.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--sqlite-path<span class="w"> </span>data/llmctl-studio.sqlite3<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--truncate-target
+</pre></div>
+</div>
+</section>
+<section id="gunicorn-first-serving">
+<h2>Gunicorn-First Serving<a class="headerlink" href="#gunicorn-first-serving" title="Link to this heading"></a></h2>
+<p>Container runtime defaults to Gunicorn via <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_USE_GUNICORN=true</span></code>.
+Flask debug server remains available for local debug paths.</p>
+<p>Primary Gunicorn controls are optional and read from environment variables:</p>
+<ul class="simple">
+<li><p>bind/listen: <code class="docutils literal notranslate"><span class="pre">GUNICORN_BIND</span></code></p></li>
+<li><p>concurrency: <code class="docutils literal notranslate"><span class="pre">GUNICORN_WORKERS</span></code>, <code class="docutils literal notranslate"><span class="pre">GUNICORN_THREADS</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GUNICORN_WORKER_CLASS</span></code>, <code class="docutils literal notranslate"><span class="pre">GUNICORN_WORKER_CONNECTIONS</span></code></p></li>
+<li><p>lifecycle/timeouts: <code class="docutils literal notranslate"><span class="pre">GUNICORN_TIMEOUT</span></code>, <code class="docutils literal notranslate"><span class="pre">GUNICORN_GRACEFUL_TIMEOUT</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GUNICORN_KEEPALIVE</span></code></p></li>
+<li><p>logging: <code class="docutils literal notranslate"><span class="pre">GUNICORN_LOG_LEVEL</span></code>, <code class="docutils literal notranslate"><span class="pre">GUNICORN_ACCESS_LOG</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GUNICORN_ERROR_LOG</span></code></p></li>
+<li><p>recycle controls: <code class="docutils literal notranslate"><span class="pre">GUNICORN_MAX_REQUESTS</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GUNICORN_MAX_REQUESTS_JITTER</span></code></p></li>
+<li><p>optional upstream TLS: <code class="docutils literal notranslate"><span class="pre">GUNICORN_CERTFILE</span></code>, <code class="docutils literal notranslate"><span class="pre">GUNICORN_KEYFILE</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GUNICORN_CA_CERTS</span></code></p></li>
+<li><p>control socket: <code class="docutils literal notranslate"><span class="pre">GUNICORN_CONTROL_SOCKET</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GUNICORN_CONTROL_SOCKET_MODE</span></code>, <code class="docutils literal notranslate"><span class="pre">GUNICORN_CONTROL_SOCKET_DISABLE</span></code></p></li>
+</ul>
+<p>All controls have sane defaults, so zero-override startup remains operational.</p>
+</section>
+<section id="reverse-proxy-and-tls">
+<h2>Reverse Proxy and TLS<a class="headerlink" href="#reverse-proxy-and-tls" title="Link to this heading"></a></h2>
+<p>Proxy header trust is controlled by <code class="docutils literal notranslate"><span class="pre">ProxyFix</span></code> settings:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_PROXY_FIX_ENABLED</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_PROXY_FIX_X_FOR</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_PROXY_FIX_X_PROTO</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_PROXY_FIX_X_HOST</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_PROXY_FIX_X_PORT</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_PROXY_FIX_X_PREFIX</span></code></p></li>
+</ul>
+<p>Required forwarded headers:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">X-Forwarded-For</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">X-Forwarded-Proto</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">X-Forwarded-Host</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">X-Forwarded-Port</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">X-Forwarded-Prefix</span></code> (only when path-prefix mounting is used)</p></li>
+</ul>
+<p>WebSocket proxy requirements:</p>
+<ul class="simple">
+<li><p>preserve upstream <code class="docutils literal notranslate"><span class="pre">Host</span></code></p></li>
+<li><p>forward <code class="docutils literal notranslate"><span class="pre">Upgrade:</span> <span class="pre">websocket</span></code> and <code class="docutils literal notranslate"><span class="pre">Connection:</span> <span class="pre">upgrade</span></code></p></li>
+<li><p>configure proxy timeouts for long-lived WebSocket connections</p></li>
+</ul>
+<p>Supported TLS models:</p>
+<ul class="simple">
+<li><p>TLS terminated at proxy, HTTP upstream to Studio</p></li>
+<li><p>TLS terminated at proxy, HTTPS upstream to Studio (optional)</p></li>
+<li><p>direct HTTP for local development</p></li>
+</ul>
+</section>
+<section id="studio-route-contract-web-api">
+<h2>Studio Route Contract (<cite>/web</cite> + <cite>/api</cite>)<a class="headerlink" href="#studio-route-contract-web-api" title="Link to this heading"></a></h2>
+<p>Studio is split into two services on one host:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">/web/*</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">llmctl-studio-frontend</span></code> (React SPA)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">/api/*</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">llmctl-studio-backend</span></code> (Flask API + Socket.IO)</p></li>
+</ul>
+<p>Backend policy:</p>
+<ul class="simple">
+<li><p>Flask no longer serves Jinja templates for user-facing pages.</p></li>
+<li><p>Legacy backend static/template GUI assets are removed.</p></li>
+<li><p>Legacy GUI assets are retained for reference under <code class="docutils literal notranslate"><span class="pre">_legacy/llmctl-studio-backend/src/web/</span></code>.</p></li>
+<li><p>Non-API GUI routes are blocked in React-only runtime mode.</p></li>
+</ul>
+<p>Frontend nginx policy:</p>
+<ul class="simple">
+<li><p>Proxy only <code class="docutils literal notranslate"><span class="pre">/api/*</span></code> to the backend service.</p></li>
+<li><p>No legacy catch-all proxy fallback to backend GUI routes.</p></li>
+</ul>
+</section>
+<section id="socket-io-redis-architecture">
+<h2>Socket.IO + Redis Architecture<a class="headerlink" href="#socket-io-redis-architecture" title="Link to this heading"></a></h2>
+<p>Socket.IO runs on namespace <code class="docutils literal notranslate"><span class="pre">/rt</span></code> and defaults to path <code class="docutils literal notranslate"><span class="pre">/socket.io</span></code>.
+Message fan-out uses Redis, reusing the same Redis deployment used by Celery.</p>
+<p>Socket.IO controls:</p>
+<ul class="simple">
+<li><p>queue/path/origins: <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_MESSAGE_QUEUE</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_PATH</span></code>, <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_CORS_ALLOWED_ORIGINS</span></code></p></li>
+<li><p>transport/health: <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_TRANSPORTS</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_PING_INTERVAL</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_PING_TIMEOUT</span></code></p></li>
+<li><p>diagnostics: <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_MONITOR_CLIENTS</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_LOGGER</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_ENGINEIO_LOGGER</span></code></p></li>
+</ul>
+<p>Multi-worker expectations:</p>
+<ul class="simple">
+<li><p>Redis message queue is required for cross-worker event propagation.</p></li>
+<li><p>WebSocket transport is preferred.</p></li>
+<li><p>Polling fallback is supported, but production proxies/load balancers should
+provide sticky sessions when polling may be used.</p></li>
+<li><p>If sticky sessions are not available, prefer <code class="docutils literal notranslate"><span class="pre">websocket</span></code>-only transport.</p></li>
+</ul>
+</section>
+<section id="celery-runtime-topology-decoupled">
+<h2>Celery Runtime Topology (Decoupled)<a class="headerlink" href="#celery-runtime-topology-decoupled" title="Link to this heading"></a></h2>
+<p>Celery execution is intentionally split from Studio backend web serving.</p>
+<p>Runtime responsibilities:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl-studio-backend</span></code>: Celery producer/control-plane only (enqueue,
+revoke, status polling); no local Celery worker or beat subprocesses.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl-celery-worker</span></code>: consumes all Studio task queues.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl-celery-beat</span></code>: single scheduler deployment for periodic tasks.</p></li>
+</ul>
+<p>Execution split:</p>
+<ul class="simple">
+<li><p>node-like workloads are dispatched to Kubernetes executor Jobs/Pods
+(see <a class="reference internal" href="node_executor_runtime.html"><span class="doc">Node Executor Runtime</span></a>).</p></li>
+<li><p>chat turns are not pod-dispatched and continue on service runtime.</p></li>
+</ul>
+<p>Active queue contract:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_studio</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_studio.downloads.huggingface</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_studio.rag.index</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_studio.rag.drive</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_studio.rag.git</span></code></p></li>
+</ul>
+<p>Scaling model:</p>
+<ul class="simple">
+<li><p>worker slots = <code class="docutils literal notranslate"><span class="pre">replicas</span> <span class="pre">x</span> <span class="pre">concurrency</span></code></p></li>
+<li><p>current Kubernetes baseline: <code class="docutils literal notranslate"><span class="pre">4</span> <span class="pre">replicas</span> <span class="pre">x</span> <span class="pre">concurrency</span> <span class="pre">1</span> <span class="pre">=</span> <span class="pre">4</span></code> worker slots</p></li>
+</ul>
+<p>Operational guidance:</p>
+<ul class="simple">
+<li><p>keep beat at one replica unless explicit scheduler coordination is introduced
+(to avoid duplicate periodic dispatch).</p></li>
+<li><p>scale worker replicas/concurrency independently from Studio backend API
+replicas.</p></li>
+<li><p>if task latency grows, increase worker slots before scaling Studio API pods.</p></li>
+</ul>
+</section>
+<section id="event-contract-and-frontend-model">
+<h2>Event Contract and Frontend Model<a class="headerlink" href="#event-contract-and-frontend-model" title="Link to this heading"></a></h2>
+<p>Backend emits use a shared envelope contract with key fields:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">contract_version</span></code>, <code class="docutils literal notranslate"><span class="pre">event_id</span></code>, <code class="docutils literal notranslate"><span class="pre">idempotency_key</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sequence</span></code>, <code class="docutils literal notranslate"><span class="pre">sequence_stream</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">emitted_at</span></code>, <code class="docutils literal notranslate"><span class="pre">event_type</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">entity_kind</span></code>, <code class="docutils literal notranslate"><span class="pre">entity_id</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">room_keys</span></code>, <code class="docutils literal notranslate"><span class="pre">runtime</span></code>, <code class="docutils literal notranslate"><span class="pre">payload</span></code></p></li>
+</ul>
+<p>Room conventions include:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">task:&lt;task_id&gt;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">run:&lt;run_id&gt;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flowchart:&lt;flowchart_id&gt;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flowchart_run:&lt;flowchart_run_id&gt;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">thread:&lt;thread_id&gt;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">download_job:&lt;job_id&gt;</span></code></p></li>
+</ul>
+<p>POST remains the write ingress path for user actions (for example turn submit,
+run/cancel actions, settings actions). Socket.IO is the primary push path for
+backend-to-frontend updates.</p>
+<p>This contract is consumed by the React frontend in the split runtime.</p>
+</section>
+<section id="node-detail-api-and-runtime-metadata-contract">
+<h2>Node Detail API and Runtime Metadata Contract<a class="headerlink" href="#node-detail-api-and-runtime-metadata-contract" title="Link to this heading"></a></h2>
+<p>Node detail/status payloads expose stable execution-mode metadata for RAG runs:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">task.execution_mode</span></code> in <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/api/nodes/&lt;id&gt;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">execution_mode</span></code> in <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/api/nodes/&lt;id&gt;/status</span></code></p></li>
+</ul>
+<p>Canonical values:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">query</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">indexing</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">delta_indexing</span></code></p></li>
+</ul>
+<p>Realtime/runtime metadata normalization also carries <code class="docutils literal notranslate"><span class="pre">execution_mode</span></code> so
+frontend consumers can align stage labels consistently with API responses.</p>
+<p>Node Detail stage assembly keeps canonical stage keys and remaps only
+<code class="docutils literal notranslate"><span class="pre">llm_query</span></code> labels for RAG runs:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">query</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">LLM</span> <span class="pre">Query</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">indexing</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">RAG</span> <span class="pre">Indexing</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">delta_indexing</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">RAG</span> <span class="pre">Delta</span> <span class="pre">Indexing</span></code></p></li>
+</ul>
+<p>Non-RAG nodes and missing/unknown modes keep existing <code class="docutils literal notranslate"><span class="pre">LLM</span> <span class="pre">Query</span></code> behavior.</p>
+</section>
+<section id="developer-workflow-react-only-split">
+<h2>Developer Workflow (React-Only Split)<a class="headerlink" href="#developer-workflow-react-only-split" title="Link to this heading"></a></h2>
+<p>Local split development:</p>
+<ol class="arabic">
+<li><p>Start backend:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python3<span class="w"> </span>app/llmctl-studio-backend/run.py
+</pre></div>
+</div>
+</li>
+<li><p>Start frontend:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span>app/llmctl-studio-frontend
+npm<span class="w"> </span>run<span class="w"> </span>dev
+</pre></div>
+</div>
+</li>
+<li><p>Ensure frontend API base path is <code class="docutils literal notranslate"><span class="pre">/api</span></code> and Socket.IO path is <code class="docutils literal notranslate"><span class="pre">/api/socket.io</span></code>.</p></li>
+</ol>
+<p>Kubernetes split rollout:</p>
+<ul class="simple">
+<li><p>frontend deployment: <code class="docutils literal notranslate"><span class="pre">llmctl-studio-frontend</span></code></p></li>
+<li><p>backend deployment: <code class="docutils literal notranslate"><span class="pre">llmctl-studio-backend</span></code></p></li>
+<li><p>ingress paths: <code class="docutils literal notranslate"><span class="pre">/web</span></code> and <code class="docutils literal notranslate"><span class="pre">/api</span></code></p></li>
+<li><p>Minikube <code class="docutils literal notranslate"><span class="pre">overlays/dev</span></code> frontend runs Vite dev server with polling file watch,
+so edits in <code class="docutils literal notranslate"><span class="pre">app/llmctl-studio-frontend/src</span></code> hot-reload without restarting the
+frontend deployment.</p></li>
+</ul>
+</section>
+<section id="agent-runtime-cutover-runbook">
+<h2>Agent Runtime Cutover Runbook<a class="headerlink" href="#agent-runtime-cutover-runbook" title="Link to this heading"></a></h2>
+<p>For Stage 13-16 migration sequencing, compatibility-gate checks, contract
+reference index, and cutover/rollback procedures, see
+<a class="reference internal" href="agent_runtime_migration_runbook.html"><span class="doc">Agent Runtime Migration Runbook</span></a>.</p>
+</section>
+<section id="operational-guidance">
+<h2>Operational Guidance<a class="headerlink" href="#operational-guidance" title="Link to this heading"></a></h2>
+<p>If realtime updates appear delayed or missing:</p>
+<ol class="arabic simple">
+<li><p>verify Redis connectivity and queue URL configuration</p></li>
+<li><p>verify proxy upgrade headers and timeout settings</p></li>
+<li><p>confirm Socket.IO path/origin values match external routing</p></li>
+<li><p>check whether clients are in fallback polling mode</p></li>
+</ol>
+<p>Polling fallback behavior is intentionally failure-gated:</p>
+<ul class="simple">
+<li><p>fallback starts after verified socket connect timeout, or</p></li>
+<li><p>after sustained disconnect from an already-ready socket</p></li>
+</ul>
+<p>This avoids premature polling during transient connect events.</p>
+<p>CORS hardening follow-up:</p>
+<ul class="simple">
+<li><p>current compatibility default may be wide open (<code class="docutils literal notranslate"><span class="pre">*</span></code>)</p></li>
+<li><p>production should set <code class="docutils literal notranslate"><span class="pre">LLMCTL_STUDIO_SOCKETIO_CORS_ALLOWED_ORIGINS</span></code> to an
+explicit allowlist for deployed Studio frontend origin(s)</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="agent_runtime_migration_runbook.html" class="btn btn-neutral float-left" title="Agent Runtime Migration Runbook" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="agent_skill_binding.html" class="btn btn-neutral float-right" title="Agent Skill Binding" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

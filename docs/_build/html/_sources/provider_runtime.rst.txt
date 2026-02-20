@@ -8,6 +8,9 @@ Studio provider routing is DB-backed through integration settings
 (``provider='llm'``). Provider auth/config updates are written to the DB and
 read by runtime execution paths.
 
+For Kubernetes-only node execution routing and execution contract details, see
+:doc:`node_executor_runtime`.
+
 Claude Runtime Readiness
 ------------------------
 
@@ -93,14 +96,51 @@ stored and surfaced in UI, but runtime integrated MCP server creation remains
 disabled until a supported Workspace MCP service-account execution path is
 finalized.
 
-Agent Skill Binding Compatibility Mode
---------------------------------------
+Integrated MCP Runtime (Kubernetes)
+-----------------------------------
 
-Runtime settings also expose ``node_skill_binding_mode`` for legacy client
-compatibility during Agent-only skill binding cutover:
+Integrated MCP servers are now Kubernetes service endpoints, not local
+executables inside the Studio container.
 
-- ``warn``: ignore node-level ``skill_ids`` writes and emit deprecation metadata/logs.
-- ``reject``: return explicit validation errors for node-level ``skill_ids`` writes.
+Runtime synchronization is system-managed through
+``core.integrated_mcp.sync_integrated_mcp_servers()``. Integrated rows use
+``server_type='integrated'`` with JSON payload shape:
 
-See :doc:`agent_skill_binding` for full Agent/node binding behavior and
-migration notes.
+- ``{"url":"http://<service>.<namespace>.svc.cluster.local:<port>/mcp","transport":"streamable-http"}``
+
+Current endpoint contract:
+
+- ``llmctl-mcp`` -> ``http://llmctl-mcp.<namespace>.svc.cluster.local:9020/mcp``
+- ``github`` -> ``http://llmctl-mcp-github.<namespace>.svc.cluster.local:8000/mcp``
+- ``atlassian`` -> ``http://llmctl-mcp-atlassian.<namespace>.svc.cluster.local:8000/mcp``
+- ``chroma`` -> ``http://llmctl-mcp-chroma.<namespace>.svc.cluster.local:8000/mcp``
+- ``google-cloud`` -> ``http://llmctl-mcp-google-cloud.<namespace>.svc.cluster.local:8000/mcp``
+
+Namespace comes from ``LLMCTL_NODE_EXECUTOR_K8S_NAMESPACE`` (fallback:
+``default``).
+
+Lifecycle/ordering:
+
+1. ``apply_runtime_migrations()`` runs at Studio startup and synchronizes
+   integrated MCP rows first (including rewriting legacy command/stdio payloads
+   and normalizing legacy key ``jira`` -> ``atlassian``).
+2. ``seed_defaults()`` then runs and calls the integrated MCP seed hook so
+   fresh databases get the same endpoint contract without overriding valid
+   migrated integrated rows.
+
+Credential split:
+
+- Studio integration settings remain DB-backed.
+- Kubernetes MCP Deployments read provider credentials from Kubernetes Secrets
+  (for example ``llmctl-mcp-secrets``), not from Studio-local embedded MCP
+  binaries.
+
+Agent Skill Binding Contract
+----------------------------
+
+Runtime enforces Agent-level skill ownership:
+
+- node-level ``skill_ids`` graph writes are rejected
+- skills must be bound to Agents and resolved through node agent references
+
+See :doc:`agent_skill_binding` for binding behavior and migration notes.

@@ -5,9 +5,9 @@ Date: 2026-02-20
 Status: Locked
 
 Related plans:
-- `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md`
-- `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_SEQUENTIAL_PLAN.md`
-- `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_FANOUT_PLAN.md`
+- `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md`
+- `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_SEQUENTIAL_PLAN.md`
+- `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_FANOUT_PLAN.md`
 
 ## Stage 2 Completion Checklist
 

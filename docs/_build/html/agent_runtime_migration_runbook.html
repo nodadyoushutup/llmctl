@@ -1,0 +1,283 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Runtime Migration Runbook &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Studio Serving Runtime" href="studio_serving_runtime.html" />
+    <link rel="prev" title="Node Executor Runtime" href="node_executor_runtime.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Agent Runtime Migration Runbook</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#purpose">Purpose</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#architecture-ownership">Architecture + Ownership</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#executor-split-images-and-release-flow">Executor Split Images and Release Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#contract-reference-index">Contract Reference Index</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cutover-procedure">Cutover Procedure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#rollback-procedure">Rollback Procedure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#known-sign-off-gaps-stage-15-inventory">Known Sign-Off Gaps (Stage 15 Inventory)</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Agent Runtime Migration Runbook</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/agent_runtime_migration_runbook.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="agent-runtime-migration-runbook">
+<h1>Agent Runtime Migration Runbook<a class="headerlink" href="#agent-runtime-migration-runbook" title="Link to this heading"></a></h1>
+<section id="purpose">
+<h2>Purpose<a class="headerlink" href="#purpose" title="Link to this heading"></a></h2>
+<p>This runbook is the operator/developer guide for the Stage 13-16 migration
+cutover from legacy flow execution behavior to the unified agent runtime.</p>
+<p>Use this document for:</p>
+<ul class="simple">
+<li><p>migration preflight and cutover sequencing,</p></li>
+<li><p>rollback and containment steps,</p></li>
+<li><p>API/socket/tool contract references,</p></li>
+<li><p>executor split image build/release flow,</p></li>
+<li><p>tool-domain ownership boundaries.</p></li>
+</ul>
+</section>
+<section id="architecture-ownership">
+<h2>Architecture + Ownership<a class="headerlink" href="#architecture-ownership" title="Link to this heading"></a></h2>
+<p>Core ownership boundaries:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">services/tasks.py</span></code>: flowchart run orchestration, node execution dispatch,
+artifact persistence, and run/node status propagation.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/execution/router.py</span></code>: provider/image-class routing for executor
+dispatch requests.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/execution/kubernetes_executor.py</span></code>: Kubernetes Job/Pod lifecycle,
+payload delivery, dispatch confirmation, and result collection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/execution/tooling.py</span></code>: deterministic tool invocation framework
+(schema enforcement, idempotency/retry controls, fallback envelope).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/runtime_contracts.py</span></code>: canonical contract validation, including
+<code class="docutils literal notranslate"><span class="pre">domain:entity:action</span></code> socket event normalization.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/flow_migration.py</span></code>: one-time schema transform, compatibility
+gate, rollback trigger metadata, and migration evidence snapshots.</p></li>
+</ul>
+<p>Tool-domain ownership (runtime side):</p>
+<ul class="simple">
+<li><p>Stage 10 domains: Memory, Plan, Milestone, Decision.</p></li>
+<li><p>Stage 11 domains: Workspace/File, Git, Command Execution, RAG.</p></li>
+<li><p>Stage 12 domains: Observability/introspection and workflow control actions.</p></li>
+</ul>
+</section>
+<section id="executor-split-images-and-release-flow">
+<h2>Executor Split Images and Release Flow<a class="headerlink" href="#executor-split-images-and-release-flow" title="Link to this heading"></a></h2>
+<p>Runtime classes:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">frontier</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">llmctl-executor-frontier</span></code> image family</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">vllm</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">llmctl-executor-vllm</span></code> image family</p></li>
+</ul>
+<p>Node executor runtime settings support independent image/tag control per class:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_frontier_image</span></code> / <code class="docutils literal notranslate"><span class="pre">k8s_frontier_image_tag</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_vllm_image</span></code> / <code class="docutils literal notranslate"><span class="pre">k8s_vllm_image_tag</span></code></p></li>
+</ul>
+<p>Build/push commands (Harbor-first policy):</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>scripts/build/harbor.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-frontier<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tag<span class="w"> </span>&lt;tag&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--registry<span class="w"> </span>&lt;registry-host:port&gt;
+
+scripts/build/harbor.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tag<span class="w"> </span>&lt;tag&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--registry<span class="w"> </span>&lt;registry-host:port&gt;
+
+scripts/build/harbor.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-frontier<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tag<span class="w"> </span>&lt;tag&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--registry<span class="w"> </span>&lt;registry-host:port&gt;
+</pre></div>
+</div>
+</section>
+<section id="contract-reference-index">
+<h2>Contract Reference Index<a class="headerlink" href="#contract-reference-index" title="Link to this heading"></a></h2>
+<p>Runtime contract references:</p>
+<ul class="simple">
+<li><p>Node executor runtime and payload/result contracts:
+<a class="reference internal" href="node_executor_runtime.html"><span class="doc">Node Executor Runtime</span></a></p></li>
+<li><p>Studio serving/runtime event model and envelope fields:
+<a class="reference internal" href="studio_serving_runtime.html"><span class="doc">Studio Serving Runtime</span></a></p></li>
+<li><p>Specialized node REST/socket/artifact contracts:
+<a class="reference internal" href="specialized_flowchart_nodes.html"><span class="doc">Specialized Flowchart Nodes</span></a></p></li>
+<li><p>API module references:
+<a class="reference internal" href="api/services.execution.contracts.html"><span class="doc">services.execution.contracts module</span></a>,
+<a class="reference internal" href="api/services.execution.tooling.html"><span class="doc">services.execution.tooling module</span></a>,
+<a class="reference internal" href="api/services.realtime_events.html"><span class="doc">services.realtime_events module</span></a>,
+<a class="reference internal" href="api/services.runtime_contracts.html"><span class="doc">services.runtime_contracts module</span></a>,
+<a class="reference internal" href="api/services.flow_migration.html"><span class="doc">services.flow_migration module</span></a></p></li>
+</ul>
+<p>Migration artifacts and compatibility gate fields:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">compatibility_gate.status</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">compatibility_gate.blocking_issue_codes</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">rollback.required</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">rollback.trigger_codes</span></code></p></li>
+</ul>
+</section>
+<section id="cutover-procedure">
+<h2>Cutover Procedure<a class="headerlink" href="#cutover-procedure" title="Link to this heading"></a></h2>
+<ol class="arabic">
+<li><p>Confirm baseline health:
+- PostgreSQL available for Studio runtime.
+- Integrated system MCP row exists for <code class="docutils literal notranslate"><span class="pre">llmctl-mcp</span></code>.
+- Redis connectivity available for Socket.IO fan-out.</p></li>
+<li><p>Run flow-migration dry-run and export evidence:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./.venv/bin/python3<span class="w"> </span>app/llmctl-studio-backend/scripts/migrate_flowchart_runtime_schema.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--export-json<span class="w"> </span>data/flow_migration_report.json
+</pre></div>
+</div>
+</li>
+<li><p>Apply migration when compatibility gate is <code class="docutils literal notranslate"><span class="pre">ready</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./.venv/bin/python3<span class="w"> </span>app/llmctl-studio-backend/scripts/migrate_flowchart_runtime_schema.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--apply<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--export-json<span class="w"> </span>data/flow_migration_apply_report.json
+</pre></div>
+</div>
+</li>
+<li><p>Enable runtime cutover gate by setting
+<code class="docutils literal notranslate"><span class="pre">agent_runtime_cutover_enabled=true</span></code> through runtime settings
+(<code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/api/settings/runtime/node-executor</span></code>).</p></li>
+<li><p>Run Stage 15 automated suites used for cutover sign-off:
+- backend contract/integration targeted suite,
+- frontend model + routing tests,
+- migration/execution regression suite.</p></li>
+</ol>
+</section>
+<section id="rollback-procedure">
+<h2>Rollback Procedure<a class="headerlink" href="#rollback-procedure" title="Link to this heading"></a></h2>
+<ol class="arabic simple">
+<li><p>Disable runtime cutover gate immediately
+(<code class="docutils literal notranslate"><span class="pre">agent_runtime_cutover_enabled=false</span></code>).</p></li>
+<li><p>Use migration evidence <code class="docutils literal notranslate"><span class="pre">rollback.trigger_codes</span></code> and pre/post snapshot hashes
+to identify the affected flowcharts.</p></li>
+<li><p>Re-run migration script in dry-run mode for scoped IDs
+(<code class="docutils literal notranslate"><span class="pre">--flowchart-id</span> <span class="pre">&lt;id&gt;</span></code>) before any re-apply attempt.</p></li>
+<li><p>Keep strict policy mode enabled unless policy-only warnings are explicitly
+accepted for emergency continuity.</p></li>
+</ol>
+</section>
+<section id="known-sign-off-gaps-stage-15-inventory">
+<h2>Known Sign-Off Gaps (Stage 15 Inventory)<a class="headerlink" href="#known-sign-off-gaps-stage-15-inventory" title="Link to this heading"></a></h2>
+<p>From Stage 15 automated testing evidence, unresolved environment-coupled
+failures remain in the full Stage 9 suite and must be accounted for in
+production cutover readiness checks:</p>
+<ul class="simple">
+<li><p>system-managed MCP prerequisite failures,</p></li>
+<li><p>missing legacy template route dependency in one API view path,</p></li>
+<li><p>route-key mismatch case in a node-type behavior test,</p></li>
+<li><p>missing Redis broker in local test harness producing publish warnings.</p></li>
+</ul>
+<p>Authoritative references:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE14_RECONVERGENCE_FREEZE.md</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE15_AUTOMATED_TESTING_FREEZE.md</span></code></p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="node_executor_runtime.html" class="btn btn-neutral float-left" title="Node Executor Runtime" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="studio_serving_runtime.html" class="btn btn-neutral float-right" title="Studio Serving Runtime" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

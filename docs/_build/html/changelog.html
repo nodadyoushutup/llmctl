@@ -20,7 +20,7 @@
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
     <link rel="next" title="Studio API Packages" href="api/modules.html" />
-    <link rel="prev" title="RAG Flowchart Node" href="rag_flowchart_node.html" /> 
+    <link rel="prev" title="Specialized Flowchart Nodes" href="specialized_flowchart_nodes.html" /> 
 </head>
 
 <body class="wy-body-for-nav"> 
@@ -46,9 +46,18 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Changelog</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="#id1">2026-02-16</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#id1">2026-02-20</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#id2">2026-02-18</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#id3">2026-02-17</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#id4">2026-02-16</a></li>
 </ul>
 </li>
 </ul>
@@ -84,7 +93,51 @@
   <section id="changelog">
 <h1>Changelog<a class="headerlink" href="#changelog" title="Link to this heading"></a></h1>
 <section id="id1">
-<h2>2026-02-16<a class="headerlink" href="#id1" title="Link to this heading"></a></h2>
+<h2>2026-02-20<a class="headerlink" href="#id1" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Added Stage 16 runtime migration documentation set: operator/developer cutover runbook, contract reference index, rollback procedure, and known sign-off gap inventory.</p></li>
+<li><p>Expanded Node Executor runtime docs with split frontier/vLLM image settings, build/release commands, and tooling/runtime ownership boundaries.</p></li>
+<li><p>Added API reference pages for <code class="docutils literal notranslate"><span class="pre">services.execution.tooling</span></code>, <code class="docutils literal notranslate"><span class="pre">services.runtime_contracts</span></code>, and <code class="docutils literal notranslate"><span class="pre">services.flow_migration</span></code>.</p></li>
+<li><p>Linked Studio serving/runtime guide to the migration runbook for cutover operations.</p></li>
+</ul>
+</section>
+<section id="id2">
+<h2>2026-02-18<a class="headerlink" href="#id2" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Added Sphinx reference documentation for specialized flowchart nodes (Memory/Plan/Milestone/Decision), including curated inspector controls, retention settings, artifact schemas, and branchless Stage 5 operator guidance.</p></li>
+<li><p>Documented specialized artifact REST contracts and socket payload schemas, including <code class="docutils literal notranslate"><span class="pre">flowchart:node_artifact:persisted</span></code> and <code class="docutils literal notranslate"><span class="pre">request_id</span></code>/<code class="docutils literal notranslate"><span class="pre">correlation_id</span></code> tracing requirements.</p></li>
+<li><p>Documented MCP alignment for specialized artifact retrieval through <code class="docutils literal notranslate"><span class="pre">llmctl_get_memory</span></code>, <code class="docutils literal notranslate"><span class="pre">llmctl_get_plan</span></code>, <code class="docutils literal notranslate"><span class="pre">llmctl_get_milestone</span></code>, <code class="docutils literal notranslate"><span class="pre">llmctl_get_decision_artifact</span></code>, and <code class="docutils literal notranslate"><span class="pre">llmctl_get_node_artifact</span></code>.</p></li>
+<li><p>Recorded Wave boundaries for rollout tracking: Wave 1 specialization = Memory + Plan; Wave 2 specialization = Milestone + Decision.</p></li>
+<li><p>Restored Node Detail RAG indexing visibility for <code class="docutils literal notranslate"><span class="pre">Quick</span> <span class="pre">RAG</span></code> and flowchart <code class="docutils literal notranslate"><span class="pre">rag</span></code> indexing runs by mapping the <code class="docutils literal notranslate"><span class="pre">llm_query</span></code> stage label to <code class="docutils literal notranslate"><span class="pre">RAG</span> <span class="pre">Indexing</span></code>/<code class="docutils literal notranslate"><span class="pre">RAG</span> <span class="pre">Delta</span> <span class="pre">Indexing</span></code> from canonical execution mode metadata.</p></li>
+<li><p>Added RAG indexing stage-log capture plumbing so indexing log lines are persisted into task stage logs and rendered in Node Detail stage panels.</p></li>
+<li><p>Added explicit execution-mode contract fields for Node Detail/status API payloads and normalized realtime runtime metadata (<code class="docutils literal notranslate"><span class="pre">query</span></code>, <code class="docutils literal notranslate"><span class="pre">indexing</span></code>, <code class="docutils literal notranslate"><span class="pre">delta_indexing</span></code>).</p></li>
+<li><p>Migrated Chat turn LLM execution to Kubernetes executor pods (executor-dispatched <code class="docutils literal notranslate"><span class="pre">llm_call</span></code> runtime path).</p></li>
+<li><p>Migrated RAG web chat synthesis/completion to Kubernetes executor pods (executor-dispatched <code class="docutils literal notranslate"><span class="pre">rag_chat_completion</span></code> path).</p></li>
+<li><p>Updated agent-task Celery execution flow to route all task kinds through Kubernetes executor dispatch (no worker-local LLM execution path).</p></li>
+<li><p>Began backend image-slim cutover by removing backend-side LLM CLI installation and backend-side <code class="docutils literal notranslate"><span class="pre">vllm</span></code> install from the Studio backend Docker image.</p></li>
+<li><p>Updated Kubernetes/operator docs to reflect executor-only LLM runtime architecture and dev rollback guidance.</p></li>
+</ul>
+</section>
+<section id="id3">
+<h2>2026-02-17<a class="headerlink" href="#id3" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Completed Studio React-only cutover: backend no longer serves legacy Jinja/static GUI routes, and frontend nginx removed backend fallback proxy behavior.</p></li>
+<li><p>Documented final split route/runtime contract: <code class="docutils literal notranslate"><span class="pre">/web</span></code> (React frontend) and <code class="docutils literal notranslate"><span class="pre">/api</span></code> (backend API/realtime).</p></li>
+<li><p>Added React-only runtime guard and automated backend/split integration tests to prevent legacy GUI route regressions.</p></li>
+<li><p>Completed Celery runtime decoupling for Studio: backend now runs web/API only, while dedicated Kubernetes deployments run worker (<cite>llmctl-celery-worker</cite>) and beat (<cite>llmctl-celery-beat</cite>).</p></li>
+<li><p>Documented Celery queue topology, dedicated beat scheduling model, and worker-slot scaling formula (<cite>replicas x concurrency</cite>) for Kubernetes operations.</p></li>
+<li><p>Added automated worker runtime tests for <cite>app/llmctl-celery-worker/run.py</cite> and Stage 7 queue/beat smoke validation notes.</p></li>
+<li><p>Migrated integrated MCP runtime architecture to Kubernetes-hosted services and removed Studio runtime dependence on bundled MCP executables.</p></li>
+<li><p>Added integrated MCP endpoint contract and lifecycle documentation (startup migration sync + seed alignment) for DB-backed <code class="docutils literal notranslate"><span class="pre">mcp_servers</span></code> rows.</p></li>
+<li><p>Added Kubernetes operator documentation for integrated MCP Deployments/Services, secret inputs, and one-release cutover gate controls.</p></li>
+<li><p>Completed Kubernetes-only node execution cutover: node-like compute now executes in Kubernetes executor pods using full <code class="docutils literal notranslate"><span class="pre">node_execution</span></code> payloads and structured <code class="docutils literal notranslate"><span class="pre">output_state</span></code>/<code class="docutils literal notranslate"><span class="pre">routing_state</span></code> results (no probe-only path).</p></li>
+<li><p>Added runtime evidence contract docs for <code class="docutils literal notranslate"><span class="pre">provider_dispatch_id</span></code>, <code class="docutils literal notranslate"><span class="pre">k8s_job_name</span></code>, <code class="docutils literal notranslate"><span class="pre">k8s_pod_name</span></code>, and <code class="docutils literal notranslate"><span class="pre">k8s_terminal_reason</span></code>.</p></li>
+<li><p>Documented final architecture split: chat remains service-runtime, node-like workloads run in executor pods.</p></li>
+<li><p>Added <code class="docutils literal notranslate"><span class="pre">with_test_postgres.sh</span></code> local test harness to bootstrap disposable PostgreSQL and prevent backend test runs from blocking on missing local DB wiring.</p></li>
+</ul>
+</section>
+<section id="id4">
+<h2>2026-02-16<a class="headerlink" href="#id4" title="Link to this heading"></a></h2>
 <ul class="simple">
 <li><p>Added first-class Launch Chat runtime with durable thread sessions.</p></li>
 <li><p>Added session-scoped model, MCP, and optional RAG collection selectors.</p></li>
@@ -108,6 +161,12 @@
 <li><p>Split Google integrations into separate <code class="docutils literal notranslate"><span class="pre">google_cloud</span></code> and <code class="docutils literal notranslate"><span class="pre">google_workspace</span></code> providers with independent service-account settings and dedicated Integrations tabs/routes.</p></li>
 <li><p>Added automatic migration of legacy <code class="docutils literal notranslate"><span class="pre">google_drive</span></code> integration settings into split Cloud/Workspace providers during settings reads/writes.</p></li>
 <li><p>Added Google Workspace integrated MCP scaffold controls while intentionally guarding runtime server creation until a supported Workspace MCP service-account execution path is finalized.</p></li>
+<li><p>Added Gunicorn-first Studio serving controls with optional environment overrides for concurrency, worker behavior, logs, and timeout/lifecycle tuning.</p></li>
+<li><p>Added reverse-proxy compliance controls/documentation for trusted forwarded headers, scheme/host resolution, WebSocket upgrades, and TLS termination modes.</p></li>
+<li><p>Added Flask-SocketIO + Redis multi-worker architecture documentation including sticky-session guidance for polling fallback and websocket-first transport recommendations.</p></li>
+<li><p>Added canonical realtime event-contract and room-scoping documentation for Jinja now and React migration compatibility.</p></li>
+<li><p>Added Node Executor runtime documentation covering DB-backed settings, multi-provider architecture (workspace/docker/kubernetes), execution contract versioning, dispatch state machine, fallback semantics, and cancellation behavior.</p></li>
+<li><p>Migrated MCP server configuration storage and APIs to JSON-only semantics, including PostgreSQL <code class="docutils literal notranslate"><span class="pre">JSONB</span></code> persistence with fail-fast legacy TOML-to-JSON migration behavior.</p></li>
 </ul>
 </section>
 </section>
@@ -116,7 +175,7 @@
            </div>
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
-        <a href="rag_flowchart_node.html" class="btn btn-neutral float-left" title="RAG Flowchart Node" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="specialized_flowchart_nodes.html" class="btn btn-neutral float-left" title="Specialized Flowchart Nodes" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
         <a href="api/modules.html" class="btn btn-neutral float-right" title="Studio API Packages" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 

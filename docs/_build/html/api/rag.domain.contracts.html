@@ -46,7 +46,13 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../chat_runtime.html">Launch Chat Runtime</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../codex_host_skills.html">Codex Host Skills</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -101,109 +107,8 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-rag.domain.contracts">
-<span id="rag-domain-contracts-module"></span><h1>rag.domain.contracts module<a class="headerlink" href="#module-rag.domain.contracts" title="Link to this heading"></a></h1>
-<dl class="py exception">
-<dt class="sig sig-object py" id="rag.domain.contracts.RagContractError">
-<em class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">rag.domain.contracts.</span></span><span class="sig-name descname"><span class="pre">RagContractError</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">reason_code</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">status_code</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">message</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/domain/contracts.html#RagContractError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.domain.contracts.RagContractError" title="Link to this definition"></a></dt>
-<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RuntimeError</span></code></p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>reason_code</strong> (<em>str</em>)</p></li>
-<li><p><strong>status_code</strong> (<em>int</em>)</p></li>
-<li><p><strong>message</strong> (<em>str</em>)</p></li>
-<li><p><strong>metadata</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>] </em><em>| </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>None</p>
-</dd>
-</dl>
-<dl class="py method">
-<dt class="sig sig-object py" id="rag.domain.contracts.RagContractError.as_payload">
-<span class="sig-name descname"><span class="pre">as_payload</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/domain/contracts.html#RagContractError.as_payload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.domain.contracts.RagContractError.as_payload" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>dict[str, <em>Any</em>]</p>
-</dd>
-</dl>
-</dd></dl>
-
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.domain.contracts.normalize_collection_selection">
-<span class="sig-prename descclassname"><span class="pre">rag.domain.contracts.</span></span><span class="sig-name descname"><span class="pre">normalize_collection_selection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">values</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/domain/contracts.html#normalize_collection_selection"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.domain.contracts.normalize_collection_selection" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>values</strong> (<em>Any</em>)</p>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>list[str]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.domain.contracts.rag_health_snapshot">
-<span class="sig-prename descclassname"><span class="pre">rag.domain.contracts.</span></span><span class="sig-name descname"><span class="pre">rag_health_snapshot</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/domain/contracts.html#rag_health_snapshot"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.domain.contracts.rag_health_snapshot" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>dict[str, <em>Any</em>]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.domain.contracts.list_collection_contract">
-<span class="sig-prename descclassname"><span class="pre">rag.domain.contracts.</span></span><span class="sig-name descname"><span class="pre">list_collection_contract</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/domain/contracts.html#list_collection_contract"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.domain.contracts.list_collection_contract" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p>dict[str, <em>Any</em>]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.domain.contracts.execute_query_contract">
-<span class="sig-prename descclassname"><span class="pre">rag.domain.contracts.</span></span><span class="sig-name descname"><span class="pre">execute_query_contract</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">question</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">collections</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">top_k</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">request_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">runtime_kind</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'chat'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_run_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flowchart_node_run_id</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">synthesize_answer</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/domain/contracts.html#execute_query_contract"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.domain.contracts.execute_query_contract" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>question</strong> (<em>str</em>)</p></li>
-<li><p><strong>collections</strong> (<em>list</em><em>[</em><em>str</em><em>]</em>)</p></li>
-<li><p><strong>top_k</strong> (<em>int</em>)</p></li>
-<li><p><strong>request_id</strong> (<em>str</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>runtime_kind</strong> (<em>str</em>)</p></li>
-<li><p><strong>flowchart_run_id</strong> (<em>int</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>flowchart_node_run_id</strong> (<em>int</em><em> | </em><em>None</em>)</p></li>
-<li><p><strong>synthesize_answer</strong> (<em>Callable</em><em>[</em><em>[</em><em>str</em><em>, </em><em>list</em><em>[</em><em>dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em><em>]</em><em>]</em><em>, </em><em>str</em><em> | </em><em>None</em><em>] </em><em>| </em><em>None</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>dict[str, <em>Any</em>]</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="rag.domain.contracts.run_index_for_collections">
-<span class="sig-prename descclassname"><span class="pre">rag.domain.contracts.</span></span><span class="sig-name descname"><span class="pre">run_index_for_collections</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">collections</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model_provider</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/rag/domain/contracts.html#run_index_for_collections"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#rag.domain.contracts.run_index_for_collections" title="Link to this definition"></a></dt>
-<dd><dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>mode</strong> (<em>str</em>)</p></li>
-<li><p><strong>collections</strong> (<em>list</em><em>[</em><em>str</em><em>]</em>)</p></li>
-<li><p><strong>model_provider</strong> (<em>str</em>)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p>dict[str, <em>Any</em>]</p>
-</dd>
-</dl>
-</dd></dl>
-
+  <section id="rag-domain-contracts-module">
+<h1>rag.domain.contracts module<a class="headerlink" href="#rag-domain-contracts-module" title="Link to this heading"></a></h1>
 </section>
 
 

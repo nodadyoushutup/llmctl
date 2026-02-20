@@ -1,0 +1,263 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Specialized Flowchart Nodes &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Changelog" href="changelog.html" />
+    <link rel="prev" title="RAG Flowchart Node" href="rag_flowchart_node.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="node_executor_runtime.html">Node Executor Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Specialized Flowchart Nodes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#inspector-contract">Inspector Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#node-artifact-retention">Node Artifact Retention</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#rest-api-contract">REST API Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#socket-event-contract">Socket Event Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#artifact-payload-schemas">Artifact Payload Schemas</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#mcp-contract-alignment">MCP Contract Alignment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#operator-workflow-guidance">Operator Workflow Guidance</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Specialized Flowchart Nodes</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/specialized_flowchart_nodes.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="specialized-flowchart-nodes">
+<h1>Specialized Flowchart Nodes<a class="headerlink" href="#specialized-flowchart-nodes" title="Link to this heading"></a></h1>
+<p>This guide documents specialized node behavior for <code class="docutils literal notranslate"><span class="pre">memory</span></code>, <code class="docutils literal notranslate"><span class="pre">plan</span></code>,
+<code class="docutils literal notranslate"><span class="pre">milestone</span></code>, and <code class="docutils literal notranslate"><span class="pre">decision</span></code> nodes, including inspector contracts, runtime
+artifact persistence, REST/socket payloads, and MCP alignment.</p>
+<section id="inspector-contract">
+<h2>Inspector Contract<a class="headerlink" href="#inspector-contract" title="Link to this heading"></a></h2>
+<p>Specialized nodes use curated inspector controls (generic controls are hidden
+for specialized behavior fields):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">memory</span></code> requires <code class="docutils literal notranslate"><span class="pre">action</span></code> (<code class="docutils literal notranslate"><span class="pre">add</span></code> or <code class="docutils literal notranslate"><span class="pre">retrieve</span></code>), supports optional
+<code class="docutils literal notranslate"><span class="pre">additive_prompt</span></code> (runtime infers when blank), includes retention controls,
+and requires system-managed <code class="docutils literal notranslate"><span class="pre">llmctl-mcp</span></code> binding.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">plan</span></code> requires <code class="docutils literal notranslate"><span class="pre">action</span></code> (<code class="docutils literal notranslate"><span class="pre">create_or_update_plan</span></code> or
+<code class="docutils literal notranslate"><span class="pre">complete_plan_item</span></code>), supports optional <code class="docutils literal notranslate"><span class="pre">additive_prompt</span></code>, supports
+completion targeting via <code class="docutils literal notranslate"><span class="pre">plan_item_id</span></code> or <code class="docutils literal notranslate"><span class="pre">stage_key</span></code> + <code class="docutils literal notranslate"><span class="pre">task_key</span></code> or
+<code class="docutils literal notranslate"><span class="pre">completion_source_path</span></code>, and includes retention controls.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">milestone</span></code> requires <code class="docutils literal notranslate"><span class="pre">action</span></code> (<code class="docutils literal notranslate"><span class="pre">create_or_update</span></code> or <code class="docutils literal notranslate"><span class="pre">mark_complete</span></code>),
+supports optional <code class="docutils literal notranslate"><span class="pre">additive_prompt</span></code>, and includes retention controls.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">decision</span></code> synchronizes conditions from solid outgoing connectors (<code class="docutils literal notranslate"><span class="pre">N</span></code>
+solid connectors maps to <code class="docutils literal notranslate"><span class="pre">N</span></code> condition entries) and has no MCP dependency
+for evaluation.</p></li>
+</ul>
+</section>
+<section id="node-artifact-retention">
+<h2>Node Artifact Retention<a class="headerlink" href="#node-artifact-retention" title="Link to this heading"></a></h2>
+<p>Specialized node artifacts are stored in <code class="docutils literal notranslate"><span class="pre">node_artifacts</span></code> with runtime
+retention controls from <code class="docutils literal notranslate"><span class="pre">FlowchartNode.config_json</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">retention_mode</span></code>: <code class="docutils literal notranslate"><span class="pre">forever</span></code> | <code class="docutils literal notranslate"><span class="pre">ttl</span></code> | <code class="docutils literal notranslate"><span class="pre">max_count</span></code> | <code class="docutils literal notranslate"><span class="pre">ttl_max_count</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">retention_ttl_seconds</span></code>: TTL window (defaults to <code class="docutils literal notranslate"><span class="pre">3600</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">retention_max_count</span></code>: history cap (defaults to <code class="docutils literal notranslate"><span class="pre">25</span></code>)</p></li>
+</ul>
+<p>Artifacts persist <code class="docutils literal notranslate"><span class="pre">request_id</span></code> and <code class="docutils literal notranslate"><span class="pre">correlation_id</span></code> for end-to-end tracing.</p>
+</section>
+<section id="rest-api-contract">
+<h2>REST API Contract<a class="headerlink" href="#rest-api-contract" title="Link to this heading"></a></h2>
+<p>Under the API prefix (<code class="docutils literal notranslate"><span class="pre">/api</span></code>), specialized artifact history endpoints are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/plans/{plan_id}/artifacts</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/plans/{plan_id}/artifacts/{artifact_id}</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/memories/{memory_id}/artifacts</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/memories/{memory_id}/artifacts/{artifact_id}</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/milestones/{milestone_id}/artifacts</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/milestones/{milestone_id}/artifacts/{artifact_id}</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/flowcharts/{flowchart_id}/nodes/{flowchart_node_id}/decision-artifacts</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/flowcharts/{flowchart_id}/nodes/{flowchart_node_id}/decision-artifacts/{artifact_id}</span></code></p></li>
+</ul>
+<p>List endpoints support paging/filtering (<cite>limit</cite>, <cite>offset</cite>, flowchart/run/node
+filters where applicable). Success payloads include:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ok</span></code></p></li>
+<li><p>identity scope fields (for example <code class="docutils literal notranslate"><span class="pre">plan_id</span></code> or <code class="docutils literal notranslate"><span class="pre">flowchart_id</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">count</span></code>/<code class="docutils literal notranslate"><span class="pre">limit</span></code>/<code class="docutils literal notranslate"><span class="pre">offset</span></code> for list responses</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">items</span></code> (list) or <code class="docutils literal notranslate"><span class="pre">item</span></code> (detail)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">request_id</span></code></p></li>
+<li><p>optional <code class="docutils literal notranslate"><span class="pre">correlation_id</span></code></p></li>
+</ul>
+<p>Error payloads use the shared envelope:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">code</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">message</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">details</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">request_id</span></code></p></li>
+<li><p>optional <code class="docutils literal notranslate"><span class="pre">correlation_id</span></code></p></li>
+</ul>
+</section>
+<section id="socket-event-contract">
+<h2>Socket Event Contract<a class="headerlink" href="#socket-event-contract" title="Link to this heading"></a></h2>
+<p>Specialized node execution emits run/node and artifact events:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">flowchart.node.updated</span></code> includes <code class="docutils literal notranslate"><span class="pre">flowchart_id</span></code>, <code class="docutils literal notranslate"><span class="pre">flowchart_run_id</span></code>,
+<code class="docutils literal notranslate"><span class="pre">flowchart_node_id</span></code>, <code class="docutils literal notranslate"><span class="pre">flowchart_node_type</span></code>, <code class="docutils literal notranslate"><span class="pre">node_run_id</span></code>, <code class="docutils literal notranslate"><span class="pre">status</span></code>,
+<code class="docutils literal notranslate"><span class="pre">execution_index</span></code>, <code class="docutils literal notranslate"><span class="pre">output_state</span></code>, <code class="docutils literal notranslate"><span class="pre">routing_state</span></code>, timing fields, and
+optional <code class="docutils literal notranslate"><span class="pre">error</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flowchart.run.updated</span></code> includes <code class="docutils literal notranslate"><span class="pre">flowchart_id</span></code>, <code class="docutils literal notranslate"><span class="pre">flowchart_run_id</span></code>,
+<code class="docutils literal notranslate"><span class="pre">status</span></code>, and timestamps.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flowchart:node_artifact:persisted</span></code> includes <code class="docutils literal notranslate"><span class="pre">flowchart_id</span></code>,
+<code class="docutils literal notranslate"><span class="pre">flowchart_run_id</span></code>, <code class="docutils literal notranslate"><span class="pre">flowchart_node_id</span></code>, <code class="docutils literal notranslate"><span class="pre">flowchart_node_type</span></code>,
+<code class="docutils literal notranslate"><span class="pre">node_run_id</span></code>, <code class="docutils literal notranslate"><span class="pre">artifact_id</span></code>, <code class="docutils literal notranslate"><span class="pre">artifact_type</span></code>, <code class="docutils literal notranslate"><span class="pre">artifact</span></code> (full
+serialized artifact), <code class="docutils literal notranslate"><span class="pre">request_id</span></code>, and <code class="docutils literal notranslate"><span class="pre">correlation_id</span></code>.</p></li>
+</ul>
+</section>
+<section id="artifact-payload-schemas">
+<h2>Artifact Payload Schemas<a class="headerlink" href="#artifact-payload-schemas" title="Link to this heading"></a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">memory</span></code> artifact payload:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">action</span></code>, <code class="docutils literal notranslate"><span class="pre">action_prompt_template</span></code>, <code class="docutils literal notranslate"><span class="pre">internal_action_prompt</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">action_results</span></code>, <code class="docutils literal notranslate"><span class="pre">additive_prompt</span></code>, <code class="docutils literal notranslate"><span class="pre">inferred_prompt</span></code>, <code class="docutils literal notranslate"><span class="pre">effective_prompt</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stored_memory</span></code>, <code class="docutils literal notranslate"><span class="pre">retrieved_memories</span></code>, <code class="docutils literal notranslate"><span class="pre">mcp_server_keys</span></code>, <code class="docutils literal notranslate"><span class="pre">routing_state</span></code></p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">plan</span></code> artifact payload:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">action</span></code>, <code class="docutils literal notranslate"><span class="pre">action_results</span></code>, <code class="docutils literal notranslate"><span class="pre">additive_prompt</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">completion_target</span></code>, <code class="docutils literal notranslate"><span class="pre">touched</span></code>, <code class="docutils literal notranslate"><span class="pre">plan</span></code>, <code class="docutils literal notranslate"><span class="pre">routing_state</span></code></p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">milestone</span></code> artifact payload:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">action</span></code>, <code class="docutils literal notranslate"><span class="pre">action_results</span></code>, <code class="docutils literal notranslate"><span class="pre">additive_prompt</span></code>, <code class="docutils literal notranslate"><span class="pre">checkpoint_hit</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">before_milestone</span></code>, <code class="docutils literal notranslate"><span class="pre">milestone</span></code>, <code class="docutils literal notranslate"><span class="pre">routing_state</span></code></p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">decision</span></code> artifact payload:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">matched_connector_ids</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">evaluations</span></code> (per connector: <code class="docutils literal notranslate"><span class="pre">connector_id</span></code>, <code class="docutils literal notranslate"><span class="pre">condition_text</span></code>,
+<code class="docutils literal notranslate"><span class="pre">matched</span></code>, <code class="docutils literal notranslate"><span class="pre">reason</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">no_match</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resolved_route_key</span></code>, <code class="docutils literal notranslate"><span class="pre">resolved_route_path</span></code>, <code class="docutils literal notranslate"><span class="pre">routing_state</span></code></p></li>
+</ul>
+</section>
+<section id="mcp-contract-alignment">
+<h2>MCP Contract Alignment<a class="headerlink" href="#mcp-contract-alignment" title="Link to this heading"></a></h2>
+<p>Specialized artifact retrieval is aligned through MCP tools:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_get_memory(...,</span> <span class="pre">include_artifacts=True)</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_get_plan(...,</span> <span class="pre">include_artifacts=True)</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_get_milestone(...,</span> <span class="pre">include_artifacts=True)</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_get_decision_artifact(...)</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">llmctl_get_node_artifact(...)</span></code> (generic artifact listing/detail)</p></li>
+</ul>
+</section>
+<section id="operator-workflow-guidance">
+<h2>Operator Workflow Guidance<a class="headerlink" href="#operator-workflow-guidance" title="Link to this heading"></a></h2>
+<p>Stage 5 fan-out guidance for this initiative:</p>
+<ol class="arabic simple">
+<li><p>Default operating mode is serial execution on <code class="docutils literal notranslate"><span class="pre">main</span></code> (no feature branches).</p></li>
+<li><p>Freeze shared contracts before any parallel assignment:
+<code class="docutils literal notranslate"><span class="pre">node_artifacts</span></code> schema, inspector config keys, API envelope, socket keys.</p></li>
+<li><p>If parallel execution is explicitly requested, keep branchless operation and
+integrate each agent’s changes one-at-a-time with test gates between merges.</p></li>
+<li><p>Require Stage 7 integration verification before Stage 8 test signoff.</p></li>
+<li><p>Record screenshot evidence and pass/fail matrix directly in the active plan.</p></li>
+</ol>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="rag_flowchart_node.html" class="btn btn-neutral float-left" title="RAG Flowchart Node" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="changelog.html" class="btn btn-neutral float-right" title="Changelog" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

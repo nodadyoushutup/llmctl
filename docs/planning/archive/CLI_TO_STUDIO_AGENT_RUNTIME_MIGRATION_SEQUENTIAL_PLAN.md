@@ -1,6 +1,6 @@
 # CLI To Studio Agent Runtime Migration - Sequential Plan
 
-Source of truth companion: `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md`
+Source of truth companion: `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md`
 
 Execution order:
 1. Complete Stages 2-6 in strict sequence.
@@ -13,7 +13,7 @@ Execution order:
 - [x] Publish canonical component dependency map and allowed call paths (prevent cross-layer leakage).
 - [x] Freeze executor split architecture (`llmctl-executor-frontier`, `llmctl-executor-vllm`) and ownership boundaries.
 - [x] Define canonical async lifecycle state machine for workflow run and node run progression.
-- [x] Stage output locked in `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE2_ARCHITECTURE_FREEZE.md`.
+- [x] Stage output locked in `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE2_ARCHITECTURE_FREEZE.md`.
 
 ## Stage 3 - Sequential Baseline B: Contracts + Persistence Foundations
 
@@ -21,7 +21,7 @@ Execution order:
 - [x] Freeze API error envelope and request/correlation ID requirements across backend responses and socket payloads.
 - [x] Add/adjust DB schema for run/node artifacts, routing state, fallback/degraded status markers, and idempotency keys.
 - [x] Define socket event contract names in `domain:entity:action` format and payload invariants.
-- [x] Stage output locked in `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE3_CONTRACTS_PERSISTENCE_FREEZE.md`.
+- [x] Stage output locked in `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE3_CONTRACTS_PERSISTENCE_FREEZE.md`.
 
 ## Stage 4 - Sequential Baseline C: Execution Loop + Routing Core
 
@@ -43,25 +43,28 @@ Execution order:
 - [x] Implement standard fallback contract (`success_with_warning`, `fallback_used`) when required deterministic tools fail/conflict.
 - [x] Implement shared tracing/audit envelope for tool calls, errors, and correlation propagation.
 - [x] Deliver cutover-critical base tool scaffolding required before domain fan-out implementation begins.
-- [x] Stage output locked in `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md`.
+- [x] Stage output locked in `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md`.
 
 ## Stage 14 - Sequential Reconvergence: Integration + Cutover Readiness
 
-- [ ] Merge fan-out outputs behind a unified runtime feature gate and remove temporary integration shims.
-- [ ] Execute end-to-end cutover rehearsal across representative workflows (task + special nodes + routing fan-out/fan-in).
-- [ ] Validate rollback triggers, migration checkpoint criteria, and failure containment behavior.
-- [ ] Finalize release checklist for big-bang cutover and hard rollback path.
+- [x] Merge fan-out outputs behind a unified runtime feature gate and remove temporary integration shims.
+- [x] Execute end-to-end cutover rehearsal across representative workflows (task + special nodes + routing fan-out/fan-in).
+- [x] Validate rollback triggers, migration checkpoint criteria, and failure containment behavior.
+- [x] Finalize release checklist for big-bang cutover and hard rollback path.
+- [x] Stage output locked in `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE14_RECONVERGENCE_FREEZE.md`.
 
 ## Stage 15 - Automated Testing
 
-- [ ] Run backend contract/integration test suites for API, socket events, routing determinism, and special-node tooling.
-- [ ] Run frontend unit/integration tests for model management and routing inspector behavior.
-- [ ] Run end-to-end migration and execution regression tests, including degraded/fallback scenarios.
-- [ ] Record automated test evidence and unresolved failures for cutover sign-off.
+- [x] Run backend contract/integration test suites for API, socket events, routing determinism, and special-node tooling.
+- [x] Run frontend unit/integration tests for model management and routing inspector behavior.
+- [x] Run end-to-end migration and execution regression tests, including degraded/fallback scenarios.
+- [x] Record automated test evidence and unresolved failures for cutover sign-off.
+- [x] Stage output locked in `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE15_AUTOMATED_TESTING_FREEZE.md`.
 
 ## Stage 16 - Docs Updates
 
-- [ ] Update Sphinx and Read the Docs content for runtime architecture, contracts, and operator workflows.
-- [ ] Update internal developer docs for executor split images, build/release flow, and tool-domain ownership.
-- [ ] Update API/socket/tool contract references and migration runbook documentation.
-- [ ] Archive finalized planning and implementation notes with links to test evidence and rollout checklist artifacts.
+- [x] Update Sphinx and Read the Docs content for runtime architecture, contracts, and operator workflows.
+- [x] Update internal developer docs for executor split images, build/release flow, and tool-domain ownership.
+- [x] Update API/socket/tool contract references and migration runbook documentation.
+- [x] Archive finalized planning and implementation notes with links to test evidence and rollout checklist artifacts.
+- [x] Stage output locked in `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE16_DOCS_UPDATES_FREEZE.md`.

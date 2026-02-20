@@ -1,0 +1,303 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Node Executor Runtime &mdash; llmctl technical API documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Agent Runtime Migration Runbook" href="agent_runtime_migration_runbook.html" />
+    <link rel="prev" title="Provider Runtime" href="provider_runtime.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            llmctl
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Runtime Guides</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="chat_runtime.html">Launch Chat Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="provider_runtime.html">Provider Runtime</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Node Executor Runtime</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#runtime-settings-contract">Runtime Settings Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#architecture">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#execution-contract">Execution Contract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#executor-split-images-and-build-release">Executor Split Images and Build/Release</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#dispatch-confirmation-and-state-machine">Dispatch Confirmation and State Machine</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#observability-and-run-history">Observability and Run History</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#operator-notes">Operator Notes</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="agent_runtime_migration_runbook.html">Agent Runtime Migration Runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="studio_serving_runtime.html">Studio Serving Runtime</a></li>
+<li class="toctree-l1"><a class="reference internal" href="agent_skill_binding.html">Agent Skill Binding</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codex_host_skills.html">Codex Host Skills</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rag_flowchart_node.html">RAG Flowchart Node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="specialized_flowchart_nodes.html">Specialized Flowchart Nodes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="changelog.html">Changelog</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/modules.html">Studio API Packages</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">llmctl</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Node Executor Runtime</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/node_executor_runtime.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="node-executor-runtime">
+<h1>Node Executor Runtime<a class="headerlink" href="#node-executor-runtime" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Node execution is Kubernetes-only.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">kubernetes</span></code>: ephemeral Job/Pod execution via Kubernetes API (<code class="docutils literal notranslate"><span class="pre">kubectl</span></code> control path).</p></li>
+</ul>
+<p>Runtime settings are DB-backed (<code class="docutils literal notranslate"><span class="pre">integration_settings(provider='node_executor')</span></code>)
+with bootstrap environment defaults only for first-run initialization.</p>
+</section>
+<section id="runtime-settings-contract">
+<h2>Runtime Settings Contract<a class="headerlink" href="#runtime-settings-contract" title="Link to this heading"></a></h2>
+<p>Keys:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">provider</span></code>: <code class="docutils literal notranslate"><span class="pre">kubernetes</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">agent_runtime_cutover_enabled</span></code> (Stage 14+ unified runtime gate).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_timeout_seconds</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">execution_timeout_seconds</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">log_collection_timeout_seconds</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cancel_grace_timeout_seconds</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cancel_force_kill_enabled</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">workspace_identity_key</span></code> (stable logical key, persisted per run as <code class="docutils literal notranslate"><span class="pre">workspace_identity</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_namespace</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_image</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_image_tag</span></code> (free-form executor tag override used when spawning job pods).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_frontier_image</span></code> and <code class="docutils literal notranslate"><span class="pre">k8s_frontier_image_tag</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_vllm_image</span></code> and <code class="docutils literal notranslate"><span class="pre">k8s_vllm_image_tag</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_in_cluster</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_service_account</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_kubeconfig</span></code> (encrypted at rest; runtime-only plaintext access).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_gpu_limit</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_job_ttl_seconds</span></code> (terminal Job/Pod retention before automatic cleanup).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_image_pull_secrets_json</span></code>.</p></li>
+</ul>
+</section>
+<section id="architecture">
+<h2>Architecture<a class="headerlink" href="#architecture" title="Link to this heading"></a></h2>
+<p>Studio control-plane modules:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">services/execution/router.py</span></code>: Kubernetes dispatch routing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/execution/kubernetes_executor.py</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/tasks.py</span></code>: flowchart/node orchestration and run metadata persistence.</p></li>
+</ul>
+<p>Execution plane:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">app/llmctl-executor</span></code> image runs one request payload and emits structured
+startup/result markers consumed by Studio.</p></li>
+</ul>
+<p>Runtime split:</p>
+<ul class="simple">
+<li><p>node-like workloads (flowchart nodes, quick-RAG/index node-like paths) run
+in ephemeral Kubernetes executor pods.</p></li>
+<li><p>chat turns dispatch LLM execution through executor <code class="docutils literal notranslate"><span class="pre">llm_call</span></code> payloads.</p></li>
+<li><p>RAG web chat synthesis/completion dispatches through executor
+<code class="docutils literal notranslate"><span class="pre">rag_chat_completion</span></code> payloads.</p></li>
+</ul>
+<p>Tool-domain ownership boundary:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">services/execution/tooling.py</span></code> owns deterministic invocation lifecycle
+(schema validation, retry/idempotency controls, trace envelope wiring).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/tasks.py</span></code> owns node-type dispatch and domain operation selection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">services/runtime_contracts.py</span></code> owns event/payload shape validation and
+socket event-type normalization (<code class="docutils literal notranslate"><span class="pre">domain:entity:action</span></code> canonical form).</p></li>
+</ul>
+</section>
+<section id="execution-contract">
+<h2>Execution Contract<a class="headerlink" href="#execution-contract" title="Link to this heading"></a></h2>
+<p>Executor payload to pod (<code class="docutils literal notranslate"><span class="pre">v1</span></code>):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">contract_version</span></code> and <code class="docutils literal notranslate"><span class="pre">result_contract_version</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">provider='kubernetes'</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">request_id</span></code>, <code class="docutils literal notranslate"><span class="pre">timeout_seconds</span></code>, <code class="docutils literal notranslate"><span class="pre">emit_start_markers</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">node_execution</span></code> with:
+- <code class="docutils literal notranslate"><span class="pre">entrypoint='services.tasks:_execute_flowchart_node_request'</span></code>
+- <code class="docutils literal notranslate"><span class="pre">python_paths</span></code> (includes Studio backend source path)
+- full serialized node request payload.</p></li>
+<li><p>transport: per-job ConfigMap (<code class="docutils literal notranslate"><span class="pre">payload.json</span></code>) mounted into executor pod and
+passed as <code class="docutils literal notranslate"><span class="pre">LLMCTL_EXECUTOR_PAYLOAD_FILE</span></code>.</p></li>
+</ul>
+<p>Executor result from pod (<code class="docutils literal notranslate"><span class="pre">v1</span></code>):</p>
+<ul class="simple">
+<li><p>envelope fields: <code class="docutils literal notranslate"><span class="pre">status</span></code>, <code class="docutils literal notranslate"><span class="pre">exit_code</span></code>, timestamps, <code class="docutils literal notranslate"><span class="pre">stdout</span></code>, <code class="docutils literal notranslate"><span class="pre">stderr</span></code>,
+<code class="docutils literal notranslate"><span class="pre">error</span></code>, <code class="docutils literal notranslate"><span class="pre">provider_metadata</span></code>.</p></li>
+<li><p>node output contract fields: <code class="docutils literal notranslate"><span class="pre">output_state</span></code> and <code class="docutils literal notranslate"><span class="pre">routing_state</span></code>.</p></li>
+</ul>
+<p>Kubernetes dispatcher consumes <code class="docutils literal notranslate"><span class="pre">output_state</span></code>/<code class="docutils literal notranslate"><span class="pre">routing_state</span></code> from executor
+result and does not execute worker-side node compute on the success path.</p>
+</section>
+<section id="executor-split-images-and-build-release">
+<h2>Executor Split Images and Build/Release<a class="headerlink" href="#executor-split-images-and-build-release" title="Link to this heading"></a></h2>
+<p>Image classes:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">frontier</span></code> image class (for non-vLLM providers): default image
+<code class="docutils literal notranslate"><span class="pre">llmctl-executor-frontier:latest</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">vllm</span></code> image class: default image <code class="docutils literal notranslate"><span class="pre">llmctl-executor-vllm:latest</span></code>.</p></li>
+</ul>
+<p>Runtime settings support independent image + tag overrides per class:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_frontier_image</span></code> / <code class="docutils literal notranslate"><span class="pre">k8s_frontier_image_tag</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_vllm_image</span></code> / <code class="docutils literal notranslate"><span class="pre">k8s_vllm_image_tag</span></code></p></li>
+</ul>
+<p>Recommended Harbor build/push commands (from repo root):</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>scripts/build/harbor.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-frontier<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tag<span class="w"> </span>&lt;tag&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--registry<span class="w"> </span>&lt;registry-host:port&gt;
+
+scripts/build/harbor.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tag<span class="w"> </span>&lt;tag&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--registry<span class="w"> </span>&lt;registry-host:port&gt;
+</pre></div>
+</div>
+<p>To publish both split executor images together:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>scripts/build/harbor.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-frontier<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--executor-vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tag<span class="w"> </span>&lt;tag&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--registry<span class="w"> </span>&lt;registry-host:port&gt;
+</pre></div>
+</div>
+</section>
+<section id="dispatch-confirmation-and-state-machine">
+<h2>Dispatch Confirmation and State Machine<a class="headerlink" href="#dispatch-confirmation-and-state-machine" title="Link to this heading"></a></h2>
+<p>Dispatch start confirmation accepts either:</p>
+<ul class="simple">
+<li><p>literal marker line <code class="docutils literal notranslate"><span class="pre">LLMCTL_EXECUTOR_STARTED</span></code>, or</p></li>
+<li><p>JSON marker <code class="docutils literal notranslate"><span class="pre">{&quot;event&quot;:&quot;executor_started&quot;,&quot;contract_version&quot;:&quot;v1&quot;,&quot;ts&quot;:&quot;...&quot;}</span></code>.</p></li>
+</ul>
+<p>Dispatch state progression:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_pending</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_submitted</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_confirmed</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_failed</span></code></p></li>
+</ul>
+<p>Ambiguous dispatch is fail-closed:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_status=dispatch_failed</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_uncertain=true</span></code></p></li>
+<li><p>no automatic fallback.</p></li>
+</ul>
+</section>
+<section id="observability-and-run-history">
+<h2>Observability and Run History<a class="headerlink" href="#observability-and-run-history" title="Link to this heading"></a></h2>
+<p>Node run metadata persisted for audit/filtering includes:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">selected_provider</span></code> and <code class="docutils literal notranslate"><span class="pre">final_provider</span></code> (both <code class="docutils literal notranslate"><span class="pre">kubernetes</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">provider_dispatch_id</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_job_name</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_pod_name</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_terminal_reason</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">workspace_identity</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">dispatch_status</span></code> and <code class="docutils literal notranslate"><span class="pre">dispatch_uncertain</span></code>.</p></li>
+<li><p>fallback/CLI compatibility fields remain in payload shape for v1 parity but are
+non-routing fields in Kubernetes-only mode.</p></li>
+</ul>
+</section>
+<section id="operator-notes">
+<h2>Operator Notes<a class="headerlink" href="#operator-notes" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>Kubernetes out-of-cluster mode requires <code class="docutils literal notranslate"><span class="pre">k8s_kubeconfig</span></code>; missing kubeconfig
+fails preflight with <code class="docutils literal notranslate"><span class="pre">config_error</span></code> classification.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">k8s_kubeconfig</span></code> is write-only in settings responses (metadata-only read:
+set flag, timestamp, fingerprint) and plaintext is restricted to runtime paths.</p></li>
+<li><p>Terminal executor jobs use <code class="docutils literal notranslate"><span class="pre">ttlSecondsAfterFinished</span></code> from <code class="docutils literal notranslate"><span class="pre">k8s_job_ttl_seconds</span></code>
+so completed/failed jobs are auto-cleaned after short retention.</p></li>
+<li><p>Backend service account requires namespace-scoped permissions for <code class="docutils literal notranslate"><span class="pre">configmaps</span></code>
+in addition to <code class="docutils literal notranslate"><span class="pre">jobs</span></code>/<code class="docutils literal notranslate"><span class="pre">pods</span></code> because executor payloads are delivered via
+per-job ConfigMaps.</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="provider_runtime.html" class="btn btn-neutral float-left" title="Provider Runtime" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="agent_runtime_migration_runbook.html" class="btn btn-neutral float-right" title="Agent Runtime Migration Runbook" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, llmctl contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
