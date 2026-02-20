@@ -22,3 +22,5 @@ resources:
   - studio-frontend-deployment.yaml
   - studio-frontend-service.yaml
   - studio-ingress.yaml
+  - mcp-public-ingress.yaml
+  - mcp-public-ingress-atlassian.yaml

@@ -312,15 +312,10 @@ class KubernetesExecutor:
             )
         except ValueError:
             if image_class == NODE_EXECUTOR_IMAGE_CLASS_VLLM:
-                image = str(
-                    settings.get("k8s_vllm_image")
-                    or settings.get("k8s_image")
-                    or "llmctl-executor-vllm:latest"
-                )
+                image = str(settings.get("k8s_vllm_image") or "llmctl-executor-vllm:latest")
             else:
                 image = str(
                     settings.get("k8s_frontier_image")
-                    or settings.get("k8s_image")
                     or "llmctl-executor-frontier:latest"
                 )
         in_cluster = _as_bool(settings.get("k8s_in_cluster"), default=False)

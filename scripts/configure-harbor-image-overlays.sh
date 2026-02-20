@@ -189,7 +189,6 @@ if [ -n "${ARGOCD_APP}" ]; then
     --kustomize-image "llmctl-mcp=${harbor_base}/llmctl-mcp:${HARBOR_TAG}" \
     --kustomize-image "llmctl-executor-frontier=${harbor_base}/llmctl-executor-frontier:${HARBOR_TAG}" \
     --kustomize-image "llmctl-executor-vllm=${harbor_base}/llmctl-executor-vllm:${HARBOR_TAG}" \
-    --kustomize-image "llmctl-executor=${harbor_base}/llmctl-executor-frontier:${HARBOR_TAG}" \
     --kustomize-image "llmctl-chromadb-mcp=${harbor_base}/llmctl-chromadb-mcp:${HARBOR_TAG}"
 
   echo "ArgoCD app image overrides updated."

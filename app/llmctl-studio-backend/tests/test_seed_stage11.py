@@ -169,14 +169,14 @@ class SeedStage11Tests(unittest.TestCase):
             assert server is not None
             self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
             self.assertEqual(
-                "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp/",
+                "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
                 server.config_json.get("url"),
             )
             self.assertEqual("streamable-http", server.config_json.get("transport"))
 
     def test_seed_defaults_does_not_churn_existing_integrated_url_row(self) -> None:
         config_json = {
-            "url": "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp/",
+            "url": "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
             "transport": "streamable-http",
         }
         with session_scope() as session:

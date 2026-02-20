@@ -106,6 +106,57 @@ class GitHubCloneStage13Tests(unittest.TestCase):
             logs,
         )
 
+    def test_maybe_checkout_repo_clones_into_task_scoped_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workspaces_root = temp_path / "workspaces"
+            workspaces_root.mkdir(parents=True, exist_ok=True)
+            clone_calls: list[tuple[str, Path, str, str]] = []
+
+            def _fake_clone(repo, dest, *, on_log=None, pat="", ssh_key_path=""):
+                del on_log
+                clone_calls.append((str(repo), Path(dest), str(pat), str(ssh_key_path)))
+
+            with patch.object(
+                studio_tasks.Config,
+                "WORKSPACES_DIR",
+                str(workspaces_root),
+            ), patch(
+                "services.tasks.load_integration_settings",
+                return_value={
+                    "repo": "nodadyoushutup/example",
+                    "pat": "pat-secret",
+                    "ssh_key_path": "",
+                },
+            ), patch.object(studio_tasks, "_clone_github_repo", side_effect=_fake_clone):
+                workspace = studio_tasks._maybe_checkout_repo(77)
+
+        self.assertEqual(workspaces_root / "task-77", workspace)
+        self.assertEqual(1, len(clone_calls))
+        repo, dest, pat, ssh_key_path = clone_calls[0]
+        self.assertEqual("nodadyoushutup/example", repo)
+        self.assertEqual(workspaces_root / "task-77", dest)
+        self.assertEqual("pat-secret", pat)
+        self.assertEqual("", ssh_key_path)
+
+    def test_prepare_task_runtime_home_cleans_previous_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workspaces_root = temp_path / "workspaces"
+            runtime_home = workspaces_root / "task-88-home"
+            runtime_home.mkdir(parents=True, exist_ok=True)
+            stale_file = runtime_home / "stale.txt"
+            stale_file.write_text("stale", encoding="utf-8")
+
+            with patch.object(studio_tasks.Config, "WORKSPACES_DIR", str(workspaces_root)):
+                prepared = studio_tasks._prepare_task_runtime_home(88)
+
+            self.assertEqual(runtime_home, prepared)
+            self.assertFalse(stale_file.exists())
+            self.assertTrue((runtime_home / ".config").is_dir())
+            self.assertTrue((runtime_home / ".cache").is_dir())
+            self.assertTrue((runtime_home / ".local" / "share").is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()

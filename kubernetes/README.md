@@ -89,12 +89,23 @@ Integrated MCP runtimes are deployed as first-class Kubernetes services in the s
 
 Service endpoint contract:
 
-- `http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp/`
+- `http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp`
 - `http://llmctl-mcp-github.llmctl.svc.cluster.local:8000/mcp/`
 - `http://llmctl-mcp-atlassian.llmctl.svc.cluster.local:8000/mcp/`
 - `http://llmctl-mcp-chroma.llmctl.svc.cluster.local:8000/mcp/`
 - `http://llmctl-mcp-google-cloud.llmctl.svc.cluster.local:8000/mcp/`
 - `http://llmctl-mcp-google-workspace.llmctl.svc.cluster.local:8000/mcp/`
+
+Public ingress endpoints (for OpenAI/Codex remote MCP reachability):
+
+- `<PUBLIC_BASE_URL>/mcp/llmctl` -> `llmctl-mcp`
+- `<PUBLIC_BASE_URL>/mcp/github` -> `llmctl-mcp-github`
+- `<PUBLIC_BASE_URL>/mcp/atlassian` -> `llmctl-mcp-atlassian`
+- `<PUBLIC_BASE_URL>/mcp/chroma` -> `llmctl-mcp-chroma`
+- `<PUBLIC_BASE_URL>/mcp/google-cloud` -> `llmctl-mcp-google-cloud`
+- `<PUBLIC_BASE_URL>/mcp/google-workspace` -> `llmctl-mcp-google-workspace`
+
+Set `LLMCTL_MCP_PUBLIC_BASE_URL` in `kubernetes/llmctl-studio/base/studio-configmap.yaml` to switch integrated MCP rows from internal `*.svc.cluster.local` URLs to these public ingress URLs.
 
 Google Cloud and Google Workspace MCP deployments read service-account credentials from Studio integration-managed files under `/app/data/credentials` (shared PVC). `llmctl-mcp-secrets` remains supported as a fallback source.
 
@@ -271,6 +282,7 @@ Edit `kubernetes/llmctl-studio/base/studio-configmap.yaml` for these keys:
 - `LLMCTL_STUDIO_MCP_WAIT_ENABLED` (toggle integrated MCP readiness gate at startup)
 - `LLMCTL_STUDIO_MCP_WAIT_TIMEOUT_SECONDS` (startup wait timeout)
 - `LLMCTL_STUDIO_MCP_REQUIRED_ENDPOINTS` (comma-separated list of MCP endpoint URLs Studio must see before startup)
+- `LLMCTL_MCP_PUBLIC_BASE_URL` (public origin used for integrated MCP URL rows, for example `https://203-0-113-10.sslip.io`)
 - `LLMCTL_NODE_EXECUTOR_PROVIDER` (`kubernetes` only)
 - `LLMCTL_NODE_EXECUTOR_K8S_IMAGE` (legacy fallback executor image; defaults to frontier image behavior)
 - `LLMCTL_NODE_EXECUTOR_K8S_FRONTIER_IMAGE` (frontier executor image for non-vLLM providers)

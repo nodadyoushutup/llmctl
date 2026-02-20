@@ -285,6 +285,55 @@ class NodeExecutorStage6Tests(unittest.TestCase):
                     captured["image"],
                 )
 
+    def test_vllm_job_manifest_uses_gpu_limit_only_when_configured(self) -> None:
+        executor = KubernetesExecutor({})
+        request = ExecutionRequest(
+            node_id=99,
+            node_type="llm_call",
+            node_ref_id=None,
+            node_config={"provider": "vllm_remote"},
+            input_context={},
+            execution_id=222,
+            execution_task_id=333,
+            execution_index=1,
+            enabled_providers=set(),
+            default_model_id=None,
+            mcp_server_keys=[],
+        )
+        manifest_without_gpu = executor._build_job_manifest(
+            request=request,
+            job_name="job-vllm-no-gpu",
+            namespace="default",
+            image="ghcr.io/acme/llmctl-executor-vllm:latest",
+            payload_configmap_name="payload-no-gpu",
+            service_account="",
+            image_pull_secrets=[],
+            k8s_gpu_limit=0,
+            execution_timeout=1800,
+            job_ttl_seconds=1800,
+        )
+        no_gpu_limits = (
+            manifest_without_gpu["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
+        )
+        self.assertNotIn("nvidia.com/gpu", no_gpu_limits)
+
+        manifest_with_gpu = executor._build_job_manifest(
+            request=request,
+            job_name="job-vllm-gpu",
+            namespace="default",
+            image="ghcr.io/acme/llmctl-executor-vllm:latest",
+            payload_configmap_name="payload-with-gpu",
+            service_account="",
+            image_pull_secrets=[],
+            k8s_gpu_limit=1,
+            execution_timeout=1800,
+            job_ttl_seconds=1800,
+        )
+        gpu_limits = (
+            manifest_with_gpu["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]
+        )
+        self.assertEqual("1", gpu_limits.get("nvidia.com/gpu"))
+
     def test_job_name_differs_for_same_node_and_execution_across_task_domains(self) -> None:
         executor = KubernetesExecutor({})
         flowchart_request = ExecutionRequest(

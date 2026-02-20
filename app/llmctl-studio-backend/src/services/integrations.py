@@ -102,8 +102,6 @@ NODE_EXECUTOR_SETTING_KEYS = (
     "workspace_identity_key",
     "agent_runtime_cutover_enabled",
     "k8s_namespace",
-    "k8s_image",
-    "k8s_image_tag",
     "k8s_frontier_image",
     "k8s_frontier_image_tag",
     "k8s_vllm_image",
@@ -405,19 +403,13 @@ def resolve_node_executor_k8s_image_for_class(
     payload = settings or {}
     normalized_class = normalize_node_executor_image_class(image_class)
     if normalized_class == NODE_EXECUTOR_IMAGE_CLASS_VLLM:
-        image_reference = (
-            payload.get("k8s_vllm_image")
-            or payload.get("k8s_image")
-            or "llmctl-executor-vllm:latest"
-        )
-        image_tag = payload.get("k8s_vllm_image_tag") or payload.get("k8s_image_tag")
+        image_reference = payload.get("k8s_vllm_image") or "llmctl-executor-vllm:latest"
+        image_tag = payload.get("k8s_vllm_image_tag")
     else:
         image_reference = (
-            payload.get("k8s_frontier_image")
-            or payload.get("k8s_image")
-            or "llmctl-executor-frontier:latest"
+            payload.get("k8s_frontier_image") or "llmctl-executor-frontier:latest"
         )
-        image_tag = payload.get("k8s_frontier_image_tag") or payload.get("k8s_image_tag")
+        image_tag = payload.get("k8s_frontier_image_tag")
     return resolve_node_executor_k8s_image(image_reference, image_tag)
 
 
@@ -535,8 +527,6 @@ def node_executor_default_settings() -> dict[str, str]:
         (Config.NODE_EXECUTOR_K8S_VLLM_IMAGE or "").strip()
         or "llmctl-executor-vllm:latest"
     )
-    # Legacy k8s_image is mirrored from canonical frontier image.
-    default_k8s_image = default_frontier_image
     return {
         "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": _coerce_int_setting(
@@ -573,11 +563,6 @@ def node_executor_default_settings() -> dict[str, str]:
             Config.NODE_EXECUTOR_AGENT_RUNTIME_CUTOVER_ENABLED
         ),
         "k8s_namespace": (Config.NODE_EXECUTOR_K8S_NAMESPACE or "").strip() or "default",
-        "k8s_image": default_k8s_image,
-        "k8s_image_tag": _safe_default_tag(
-            Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE_TAG
-        )
-        or extract_node_executor_image_tag(default_k8s_image),
         "k8s_frontier_image": default_frontier_image,
         "k8s_frontier_image_tag": _safe_default_tag(
             Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE_TAG
@@ -759,8 +744,6 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
         )
     except ValueError:
         settings["k8s_frontier_image_tag"] = defaults.get("k8s_frontier_image_tag") or ""
-    settings["k8s_image"] = settings["k8s_frontier_image"]
-    settings["k8s_image_tag"] = settings["k8s_frontier_image_tag"]
     try:
         settings["k8s_vllm_image"] = validate_node_executor_image_reference(
             settings.get("k8s_vllm_image"),
@@ -877,8 +860,6 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         "k8s_namespace": (
             (candidate.get("k8s_namespace") or "").strip() or "default"
         ),
-        "k8s_image": "",
-        "k8s_image_tag": "",
         "k8s_frontier_image": "",
         "k8s_frontier_image_tag": "",
         "k8s_vllm_image": "",
@@ -924,8 +905,6 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         frontier_tag_candidate,
         field_name="Kubernetes frontier image tag",
     )
-    validated["k8s_image"] = validated["k8s_frontier_image"]
-    validated["k8s_image_tag"] = validated["k8s_frontier_image_tag"]
     validated["k8s_vllm_image"] = validate_node_executor_image_reference(
         candidate.get("k8s_vllm_image"),
         field_name="Kubernetes vLLM image",
@@ -968,12 +947,6 @@ def node_executor_effective_config_summary() -> dict[str, str]:
         "agent_runtime_cutover_enabled": settings.get("agent_runtime_cutover_enabled")
         or "false",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
-        "k8s_image": settings.get("k8s_image") or "llmctl-executor-frontier:latest",
-        "k8s_image_tag": settings.get("k8s_image_tag") or "",
-        "k8s_effective_image": resolve_node_executor_k8s_image(
-            settings.get("k8s_image"),
-            settings.get("k8s_image_tag"),
-        ),
         "k8s_frontier_image": settings.get("k8s_frontier_image")
         or "llmctl-executor-frontier:latest",
         "k8s_frontier_image_tag": settings.get("k8s_frontier_image_tag") or "",
@@ -1016,8 +989,6 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
         "agent_runtime_cutover_enabled": settings.get("agent_runtime_cutover_enabled")
         or "false",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
-        "k8s_image": settings.get("k8s_image") or "llmctl-executor-frontier:latest",
-        "k8s_image_tag": settings.get("k8s_image_tag") or "",
         "k8s_frontier_image": settings.get("k8s_frontier_image")
         or "llmctl-executor-frontier:latest",
         "k8s_frontier_image_tag": settings.get("k8s_frontier_image_tag") or "",

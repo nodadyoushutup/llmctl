@@ -55,6 +55,13 @@ export default function ActionIcon({ name }) {
       </svg>
     )
   }
+  if (name === 'check') {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M6.4 12.1 2.8 8.5l1.4-1.4 2.2 2.2 5.4-5.4 1.4 1.4z" />
+      </svg>
+    )
+  }
   if (name === 'star') {
     return (
       <svg viewBox="0 0 16 16" aria-hidden="true">

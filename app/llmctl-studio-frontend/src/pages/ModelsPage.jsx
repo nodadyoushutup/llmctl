@@ -78,6 +78,7 @@ export default function ModelsPage() {
 
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [busyById, setBusyById] = useState({})
+  const [pendingDeleteById, setPendingDeleteById] = useState({})
   const [searchDraft, setSearchDraft] = useState(searchQuery)
   const [scrollRestoreAttempted, setScrollRestoreAttempted] = useState(false)
 
@@ -260,14 +261,28 @@ export default function ModelsPage() {
     })
   }
 
-  async function handleDelete(model) {
+  function setPendingDelete(modelId, pending) {
+    setPendingDeleteById((current) => {
+      const next = { ...current }
+      if (pending) {
+        next[modelId] = true
+      } else {
+        delete next[modelId]
+      }
+      return next
+    })
+  }
+
+  async function handleDelete(model, confirmed = false) {
     const modelId = Number.parseInt(String(model?.id || ''), 10)
     if (!Number.isInteger(modelId) || modelId <= 0) {
       return
     }
-    if (!window.confirm('Delete this model?')) {
+    if (!confirmed) {
+      setPendingDelete(modelId, true)
       return
     }
+    setPendingDelete(modelId, false)
     setBusy(modelId, true)
     try {
       await deleteModel(modelId)
@@ -310,6 +325,18 @@ export default function ModelsPage() {
     navigate(href, { state: { from: listHref } })
   }
 
+  function handleRowKeyDown(event, href) {
+    if (event.key !== 'Enter') {
+      return
+    }
+    if (shouldIgnoreRowClick(event.target)) {
+      return
+    }
+    event.preventDefault()
+    rememberListState()
+    navigate(href, { state: { from: listHref } })
+  }
+
   return (
     <section className="stack" aria-label="Models">
       <article className="card">
@@ -321,12 +348,12 @@ export default function ModelsPage() {
           <Link
             to="/models/new"
             state={{ from: listHref }}
-            className="icon-button"
+            className="button"
             aria-label="New model"
             title="New model"
             onClick={rememberListState}
           >
-            <ActionIcon name="plus" />
+            New Model
           </Link>
         </div>
         <div className="toolbar toolbar-wrap">
@@ -439,7 +466,21 @@ export default function ModelsPage() {
         ) : null}
         {state.loading ? <p>Loading models...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
-        {!state.loading && !state.error && visibleModels.length === 0 ? <p>No models matched the current filters.</p> : null}
+        {!state.loading && !state.error && visibleModels.length === 0 ? (
+          <div className="stack" style={{ marginTop: '8px' }}>
+            <p>No models matched the current filters.</p>
+            <div>
+              <Link
+                to="/models/new"
+                state={{ from: listHref }}
+                className="button"
+                onClick={rememberListState}
+              >
+                New Model
+              </Link>
+            </div>
+          </div>
+        ) : null}
         {!state.loading && !state.error && visibleModels.length > 0 ? (
           <div className="table-wrap">
             <table className="data-table">
@@ -447,21 +488,29 @@ export default function ModelsPage() {
                 <tr>
                   <th>Name</th>
                   <th>Provider</th>
-                  <th>Model</th>
-                  <th className="table-actions-cell">Default</th>
-                  <th className="table-actions-cell">Delete</th>
+                  <th>Default Alias</th>
+                  <th>Capability Tags</th>
+                  <th className="table-actions-cell">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleModels.map((model) => {
                   const href = `/models/${model.id}`
                   const busy = Boolean(busyById[model.id])
+                  const pendingDelete = Boolean(pendingDeleteById[model.id])
+                  const capabilityTags = Array.isArray(model?.capability_tags)
+                    ? model.capability_tags
+                        .map((value) => String(value || '').trim())
+                        .filter(Boolean)
+                    : []
                   return (
                     <tr
                       key={model.id}
                       className="table-row-link"
                       data-href={href}
+                      tabIndex={0}
                       onClick={(event) => handleRowClick(event, href)}
+                      onKeyDown={(event) => handleRowKeyDown(event, href)}
                     >
                       <td>
                         <Link
@@ -478,7 +527,8 @@ export default function ModelsPage() {
                         ) : null}
                       </td>
                       <td>{model.provider_label || model.provider || '-'}</td>
-                      <td>{model.model_name || '-'}</td>
+                      <td>{String(model?.default_alias || '').trim() || '-'}</td>
+                      <td>{capabilityTags.length ? capabilityTags.join(', ') : '-'}</td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
                           <button
@@ -491,19 +541,15 @@ export default function ModelsPage() {
                           >
                             <ActionIcon name={model.is_default ? 'star-filled' : 'star'} />
                           </button>
-                        </div>
-                      </td>
-                      <td className="table-actions-cell">
-                        <div className="table-actions">
                           <button
                             type="button"
                             className="icon-button icon-button-danger"
-                            aria-label="Delete model"
-                            title="Delete model"
+                            aria-label={pendingDelete ? 'Confirm delete model' : 'Delete model'}
+                            title={pendingDelete ? 'Confirm delete model' : 'Delete model'}
                             disabled={busy}
-                            onClick={() => handleDelete(model)}
+                            onClick={() => handleDelete(model, pendingDelete)}
                           >
-                            <ActionIcon name="trash" />
+                            <ActionIcon name={pendingDelete ? 'check' : 'trash'} />
                           </button>
                         </div>
                       </td>

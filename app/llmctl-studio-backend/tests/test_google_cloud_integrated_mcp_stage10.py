@@ -35,11 +35,13 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
         self._tmp_path = Path(self._tmp.name)
         self._orig_db_uri = Config.SQLALCHEMY_DATABASE_URI
         self._orig_k8s_namespace = Config.NODE_EXECUTOR_K8S_NAMESPACE
+        self._orig_mcp_public_base_url = Config.MCP_PUBLIC_BASE_URL
         self._orig_google_cloud_creds = GOOGLE_CLOUD_SERVICE_ACCOUNT_FILE
         self._orig_google_workspace_creds = GOOGLE_WORKSPACE_SERVICE_ACCOUNT_FILE
         self._orig_google_workspace_impersonate = GOOGLE_WORKSPACE_IMPERSONATE_USER_FILE
         Config.SQLALCHEMY_DATABASE_URI = f"sqlite:///{self._tmp_path / 'stage10.sqlite3'}"
         Config.NODE_EXECUTOR_K8S_NAMESPACE = "llmctl"
+        Config.MCP_PUBLIC_BASE_URL = ""
         self._dispose_engine()
         core_db._engine = create_engine(Config.SQLALCHEMY_DATABASE_URI, future=True)
         core_db.SessionLocal = sessionmaker(
@@ -74,6 +76,7 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
         self._dispose_engine()
         Config.SQLALCHEMY_DATABASE_URI = self._orig_db_uri
         Config.NODE_EXECUTOR_K8S_NAMESPACE = self._orig_k8s_namespace
+        Config.MCP_PUBLIC_BASE_URL = self._orig_mcp_public_base_url
         self._tmp.cleanup()
 
     def _dispose_engine(self) -> None:
@@ -256,7 +259,7 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
             )
             self.assertEqual(MCP_SERVER_TYPE_INTEGRATED, server.server_type)
             self.assertEqual(
-                "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp/",
+                "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
                 server.config_json.get("url"),
             )
             self.assertEqual("streamable-http", server.config_json.get("transport"))
@@ -311,3 +314,20 @@ class GoogleCloudIntegratedMcpStage10Tests(unittest.TestCase):
                 atlassian.config_json.get("url"),
             )
             self.assertEqual("streamable-http", atlassian.config_json.get("transport"))
+
+    def test_sync_uses_public_ingress_url_for_llmctl_when_base_url_configured(self) -> None:
+        Config.MCP_PUBLIC_BASE_URL = "https://203-0-113-10.sslip.io"
+
+        sync_integrated_mcp_servers()
+
+        with session_scope() as session:
+            llmctl_server = (
+                session.execute(select(MCPServer).where(MCPServer.server_key == "llmctl-mcp"))
+                .scalars()
+                .one()
+            )
+            self.assertEqual(
+                "https://203-0-113-10.sslip.io/mcp/llmctl",
+                llmctl_server.config_json.get("url"),
+            )
+            self.assertEqual("streamable-http", llmctl_server.config_json.get("transport"))

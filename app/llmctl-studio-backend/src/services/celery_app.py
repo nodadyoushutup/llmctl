@@ -27,7 +27,6 @@ celery_config = {
         Queue(RAG_QUEUE_GIT),
     ],
     "task_routes": {
-        "rag.worker.tasks.run_index_task": {"queue": RAG_QUEUE_INDEX},
         "services.tasks.run_huggingface_download_task": {"queue": HUGGINGFACE_DOWNLOAD_QUEUE},
     },
 }

@@ -49,7 +49,7 @@ Required remediation items (hard-gated):
 - [x] Remove codex/gemini/claude CLI command-builder reliance from flowchart and task-node runtime paths.
 - [x] Replace legacy CLI-specific tests with SDK-only invariants.
 - [x] Add regression tests that fail if frontier runtime attempts `codex`, `gemini`, or `claude` subprocess execution.
-- [ ] Add frontier executor integration smoke test proving `llm_call` + flowchart task node succeeds without CLI binaries on PATH.
+- [x] Add frontier executor integration smoke test proving `llm_call` + flowchart task node succeeds without CLI binaries on PATH.
 - [x] Add claim-evidence row in the matrix marking previous SDK-only claim as failed-until-remediated.
 
 ## Stage 2 - Claim Inventory + Normalization
@@ -125,9 +125,11 @@ Required remediation items (hard-gated):
 - Frontend tests passed for Stage 6 artifact/nav remediations:
   - `npm --prefix app/llmctl-studio-frontend test -- src/pages/ArtifactExplorerPage.test.jsx src/pages/ArtifactDetailPage.test.jsx src/App.routing.test.jsx src/lib/studioApi.test.js`
   - Result: 4 files, 61 tests passed.
-- Backend targeted Stage 6 tests were not runnable in current shell environment due missing Python test/runtime deps:
-  - `python3 -m pytest -q ...` failed with `No module named pytest`.
-  - `python3 -m unittest -q ...` failed importing `flask`.
+- Backend targeted Stage 5 frontier-runtime tests passed via Postgres wrapper:
+  - `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh --python /home/nodadyoushutup/llmctl/.venv/bin/python3 -- /home/nodadyoushutup/llmctl/.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_routes_via_execution_router_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_executor_context_uses_sdk_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_frontier_executor_smoke_llm_call_and_task_node_succeed_without_cli_binaries app.llmctl-studio-backend.tests.test_claude_provider_stage8.ClaudeProviderRuntimeStage8UnitTests.test_run_llm_claude_executor_context_uses_frontier_sdk_path`
+  - Result: 4 tests passed (`OK`).
+- Broad module run note (non-blocking for this claim closure):
+  - Running entire `test_flowchart_stage9.py` in one shot caused PostgreSQL test-container connection drops (`server closed the connection unexpectedly`); targeted claim tests above passed and provide closure evidence for `RMC-0345`.
 - Syntax verification passed:
   - `python3 -m compileall -q app/llmctl-studio-backend/src/web/views.py app/llmctl-studio-backend/tests/test_flowchart_stage9.py app/llmctl-studio-frontend/src/pages/ArtifactExplorerPage.jsx app/llmctl-studio-frontend/src/pages/ArtifactDetailPage.jsx app/llmctl-studio-frontend/src/lib/studioApi.js`
 - Frontend visual artifact captured (post-restart):
@@ -141,4 +143,19 @@ Required remediation items (hard-gated):
   - `app/llmctl-studio-backend/tests/test_claude_provider_stage8.py` now asserts executor-context Claude runtime uses SDK API path and no CLI subprocess.
 - Backend validation commands run:
   - `python3 -m compileall -q app/llmctl-studio-backend/src/services/tasks.py app/llmctl-studio-backend/tests/test_flowchart_stage9.py app/llmctl-studio-backend/tests/test_claude_provider_stage8.py` (passed)
-  - `python3 -m unittest ...` targeted Stage 5 tests (blocked: `ModuleNotFoundError: No module named 'flask'` in current shell environment)
+  - Targeted Stage 5 `python3 -m unittest` commands passed via the Postgres wrapper command listed above.
+- Postgres-backed Stage 5/critical-claim validation now executed successfully via skill wrapper:
+  - `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh -- .venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_routes_via_execution_router_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_executor_context_uses_sdk_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_frontier_executor_smoke_llm_call_and_task_node_succeed_without_cli_binaries app.llmctl-studio-backend.tests.test_claude_provider_stage8.ClaudeProviderRuntimeStage8UnitTests.test_run_llm_claude_executor_context_uses_frontier_sdk_path`
+  - Result: `Ran 4 tests ... OK` (includes explicit smoke for executor `llm_call` + flowchart `task` node with CLI subprocess paths forbidden).
+- Executor hard-cut/runtime-settings follow-up completed (non-critical claim remediation):
+  - Added regression test for legacy executor image key rejection (`k8s_image`, `k8s_image_tag`) and no-write behavior:
+    - `app/llmctl-studio-backend/tests/test_node_executor_stage2.py` (`test_runtime_route_rejects_legacy_image_fields_for_json_payload`).
+  - Added Harbor split-executor regression coverage:
+    - `app/llmctl-studio-backend/tests/test_executor_harbor_stage5.py`.
+  - Removed legacy ArgoCD overlay alias publication path:
+    - `scripts/configure-harbor-image-overlays.sh` no longer sets `llmctl-executor=...` alias.
+  - Validation commands:
+    - `.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_executor_harbor_stage5 app.llmctl-studio-backend.tests.test_node_executor_stage2 app.llmctl-studio-backend.tests.test_node_executor_stage6`
+    - `.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_executor_context_uses_sdk_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_frontier_executor_smoke_llm_call_and_task_node_succeed_without_cli_binaries app.llmctl-studio-backend.tests.test_claude_provider_stage8.ClaudeProviderRuntimeStage8UnitTests.test_run_llm_claude_executor_context_uses_frontier_sdk_path`
+    - `python3 -m compileall -q app/llmctl-studio-backend/src/core/config.py app/llmctl-studio-backend/src/services/execution/kubernetes_executor.py app/llmctl-studio-backend/src/services/integrations.py app/llmctl-studio-backend/src/web/views.py app/llmctl-studio-backend/tests/test_node_executor_stage2.py app/llmctl-studio-backend/tests/test_executor_harbor_stage5.py`
+  - Matrix impact: closed executor claims `RMC-0215`, `RMC-0216`, and `RMC-0218` to `pass` with linked evidence.

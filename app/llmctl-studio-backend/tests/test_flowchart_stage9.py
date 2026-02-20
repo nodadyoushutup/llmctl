@@ -3180,6 +3180,192 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         self.assertEqual("claude-sdk-ok", claude_result.stdout)
         self.assertEqual(3, sdk_mock.call_count)
 
+    def test_run_frontier_llm_sdk_codex_includes_mcp_tools_in_openai_request(self) -> None:
+        captured_request: dict[str, object] = {}
+
+        class _FakeResponses:
+            def create(self, **kwargs):
+                captured_request.update(kwargs)
+                return {
+                    "output": [
+                        {
+                            "content": [
+                                {
+                                    "text": "codex-mcp-ok",
+                                }
+                            ]
+                        }
+                    ]
+                }
+
+        class _FakeOpenAIClient:
+            def __init__(self, *, api_key: str):
+                self.api_key = api_key
+                self.responses = _FakeResponses()
+
+        with patch.dict(
+            sys.modules,
+            {
+                "openai": SimpleNamespace(OpenAI=_FakeOpenAIClient),
+            },
+            clear=False,
+        ):
+            result = studio_tasks._run_frontier_llm_sdk(
+                provider="codex",
+                prompt="hello",
+                mcp_configs={
+                    "llmctl-mcp": {
+                        "url": "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
+                        "transport": "streamable-http",
+                    }
+                },
+                model_config={},
+                env={"OPENAI_API_KEY": "test-openai-key"},
+            )
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("codex-mcp-ok", result.stdout)
+        tools = captured_request.get("tools")
+        self.assertIsInstance(tools, list)
+        self.assertEqual(1, len(tools or []))
+        tool_payload = dict((tools or [])[0])
+        self.assertEqual("mcp", tool_payload.get("type"))
+        self.assertEqual("llmctl-mcp", tool_payload.get("server_label"))
+        self.assertEqual(
+            "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
+            tool_payload.get("server_url"),
+        )
+
+    def test_run_frontier_llm_sdk_codex_rejects_non_http_mcp_config(self) -> None:
+        class _FakeResponses:
+            def create(self, **_kwargs):
+                raise AssertionError("OpenAI responses.create should not be reached")
+
+        class _FakeOpenAIClient:
+            def __init__(self, *, api_key: str):
+                self.api_key = api_key
+                self.responses = _FakeResponses()
+
+        with patch.dict(
+            sys.modules,
+            {
+                "openai": SimpleNamespace(OpenAI=_FakeOpenAIClient),
+            },
+            clear=False,
+        ):
+            result = studio_tasks._run_frontier_llm_sdk(
+                provider="codex",
+                prompt="hello",
+                mcp_configs={
+                    "custom-stdio-mcp": {
+                        "command": "python3",
+                        "args": ["-m", "mcp_server"],
+                    }
+                },
+                model_config={},
+                env={"OPENAI_API_KEY": "test-openai-key"},
+            )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("does not support these config fields", result.stderr)
+
+    def test_frontier_executor_smoke_llm_call_and_task_node_succeed_without_cli_binaries(self) -> None:
+        from services.execution.contracts import ExecutionRequest
+
+        with session_scope() as session:
+            model = LLMModel.create(
+                session,
+                name="stage9-smoke-codex",
+                provider="codex",
+                config_json="{}",
+            )
+            flowchart = Flowchart.create(session, name="stage9-smoke-flowchart")
+            task_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                model_id=model.id,
+                config_json="{}",
+            )
+            model_id = int(model.id)
+            task_node_id = int(task_node.id)
+
+        def _fake_frontier_sdk(*, provider, prompt, **_kwargs):
+            marker = "task-node-ok" if "task" in str(prompt or "").lower() else "llm-call-ok"
+            return subprocess.CompletedProcess(
+                [f"sdk:{provider}"],
+                0,
+                json.dumps({"text": marker, "provider": provider}),
+                "",
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                studio_tasks.LLMCTL_EXECUTOR_PAYLOAD_FILE_ENV: "/tmp/executor-node-payload.json",
+                "PATH": "/tmp/llmctl-no-frontier-cli",
+                "OPENAI_API_KEY": "stage9-smoke-openai-key",
+            },
+            clear=False,
+        ), patch.object(
+            studio_tasks,
+            "_run_frontier_llm_sdk",
+            side_effect=_fake_frontier_sdk,
+        ) as sdk_mock, patch(
+            "services.tasks.subprocess.Popen",
+            side_effect=AssertionError("frontier CLI subprocess execution is forbidden"),
+        ), patch(
+            "services.tasks.subprocess.run",
+            side_effect=AssertionError("frontier CLI subprocess execution is forbidden"),
+        ):
+            llm_call_output, llm_call_routing = studio_tasks._execute_flowchart_node_request(
+                ExecutionRequest(
+                    node_id=1,
+                    node_type=studio_tasks.EXECUTOR_NODE_TYPE_LLM_CALL,
+                    node_ref_id=None,
+                    node_config={
+                        "provider": "codex",
+                        "prompt": "llm_call smoke",
+                        "mcp_configs": {},
+                        "model_config": {},
+                    },
+                    input_context={"kind": "llm_call"},
+                    execution_id=9101,
+                    execution_task_id=None,
+                    execution_index=1,
+                    enabled_providers={"codex"},
+                    default_model_id=model_id,
+                    mcp_server_keys=[],
+                )
+            )
+            task_output, task_routing = studio_tasks._execute_flowchart_node_request(
+                ExecutionRequest(
+                    node_id=task_node_id,
+                    node_type=FLOWCHART_NODE_TYPE_TASK,
+                    node_ref_id=None,
+                    node_config={"task_prompt": "task smoke prompt"},
+                    input_context={"flowchart": {"id": 1}},
+                    execution_id=9102,
+                    execution_task_id=None,
+                    execution_index=1,
+                    enabled_providers={"codex"},
+                    default_model_id=model_id,
+                    mcp_server_keys=[],
+                )
+            )
+
+        self.assertEqual(studio_tasks.EXECUTOR_NODE_TYPE_LLM_CALL, llm_call_output.get("node_type"))
+        self.assertEqual("codex", llm_call_output.get("provider"))
+        self.assertEqual(0, int(llm_call_output.get("returncode", 1)))
+        self.assertIn("llm-call-ok", str(llm_call_output.get("stdout") or ""))
+        self.assertEqual({}, llm_call_routing)
+
+        self.assertEqual(FLOWCHART_NODE_TYPE_TASK, task_output.get("node_type"))
+        self.assertEqual("codex", task_output.get("provider"))
+        self.assertIn("task-node-ok", str(task_output.get("raw_output") or ""))
+        self.assertEqual({}, task_routing)
+        self.assertEqual(2, sdk_mock.call_count)
+
 
 class FlowchartStage9ApiTests(StudioDbTestCase):
     def setUp(self) -> None:

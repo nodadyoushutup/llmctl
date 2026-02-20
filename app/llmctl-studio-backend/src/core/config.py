@@ -238,6 +238,7 @@ class Config:
     CHROMA_HOST = os.getenv("CHROMA_HOST", "")
     CHROMA_PORT = os.getenv("CHROMA_PORT", "")
     CHROMA_SSL = os.getenv("CHROMA_SSL", "false")
+    MCP_PUBLIC_BASE_URL = os.getenv("LLMCTL_MCP_PUBLIC_BASE_URL", "")
 
     GITHUB_MCP_URL = os.getenv("GITHUB_MCP_URL", "")
 
@@ -281,11 +282,6 @@ class Config:
     NODE_EXECUTOR_K8S_FRONTIER_IMAGE = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_FRONTIER_IMAGE",
         "llmctl-executor-frontier:latest",
-    )
-    # Legacy alias kept for payload compatibility; frontier image is canonical.
-    NODE_EXECUTOR_K8S_IMAGE = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_K8S_IMAGE",
-        NODE_EXECUTOR_K8S_FRONTIER_IMAGE,
     )
     NODE_EXECUTOR_K8S_VLLM_IMAGE = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_VLLM_IMAGE",

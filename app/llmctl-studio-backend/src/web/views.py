@@ -20547,6 +20547,19 @@ def update_node_executor_runtime_settings_route():
             return {"error": "Node executor provider must be kubernetes."}, 400
         flash("Node executor provider must be kubernetes.", "error")
         return redirect(url_for("agents.settings_runtime"))
+    legacy_image_keys = ("k8s_image", "k8s_image_tag")
+    if any(
+        key in request_payload or key in request.form
+        for key in legacy_image_keys
+    ):
+        message = (
+            "Legacy node executor image fields are not supported. "
+            "Use k8s_frontier_image/k8s_frontier_image_tag instead."
+        )
+        if is_api_request:
+            return {"error": message}, 400
+        flash(message, "error")
+        return redirect(url_for("agents.settings_runtime"))
     kubeconfig_value = _settings_form_value(request_payload, "k8s_kubeconfig")
     kubeconfig_clear = _as_bool(
         _settings_form_value(request_payload, "k8s_kubeconfig_clear")
@@ -20581,8 +20594,6 @@ def update_node_executor_runtime_settings_route():
             else "false"
         ),
         "k8s_namespace": _settings_form_value(request_payload, "k8s_namespace"),
-        "k8s_image": _settings_form_value(request_payload, "k8s_image"),
-        "k8s_image_tag": _settings_form_value(request_payload, "k8s_image_tag"),
         "k8s_frontier_image": _settings_form_value(
             request_payload, "k8s_frontier_image"
         ),

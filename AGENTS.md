@@ -21,6 +21,7 @@
 - Do not add fallback execution modes for provider/runtime migrations (for example CLI fallback, legacy image fallback, or silent downgrade behavior).
 - For provider/runtime changes, use Python SDK-first execution and fail fast with explicit errors when required SDK/runtime prerequisites are missing.
 - When replacing a legacy path, remove the deprecated path and UI affordances in the same change rather than keeping both.
+- For node executor image settings, use only `k8s_frontier_image` / `k8s_frontier_image_tag` and `k8s_vllm_image` / `k8s_vllm_image_tag`; do not read or write legacy `k8s_image` keys.
 
 # Planning Workflow
 

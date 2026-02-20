@@ -4127,6 +4127,94 @@ def _extract_claude_response_text(payload: Any) -> str:
     return str(payload or "").strip()
 
 
+def _build_codex_sdk_mcp_tools(
+    mcp_configs: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    tools: list[dict[str, Any]] = []
+    allowed_keys = {
+        "authorization",
+        "description",
+        "headers",
+        "include_tools",
+        "require_approval",
+        "transport",
+        "url",
+    }
+    for server_key in sorted(mcp_configs):
+        config = dict(mcp_configs.get(server_key) or {})
+        server_url = str(config.get("url") or "").strip()
+        if not server_url:
+            raise ValueError(
+                f"Codex MCP config for '{server_key}' must include a non-empty url."
+            )
+
+        transport = str(config.get("transport") or "").strip().lower()
+        if transport and transport not in {"streamable-http", "http", "sse"}:
+            raise ValueError(
+                "Codex SDK MCP only supports remote HTTP/SSE servers; "
+                f"server '{server_key}' has unsupported transport '{transport}'."
+            )
+
+        unsupported_keys = sorted(
+            key
+            for key, value in config.items()
+            if key not in allowed_keys
+            and value not in (None, "", [], {})
+        )
+        if unsupported_keys:
+            raise ValueError(
+                "Codex SDK MCP does not support these config fields for "
+                f"'{server_key}': {', '.join(unsupported_keys)}."
+            )
+
+        require_approval = str(config.get("require_approval") or "").strip().lower()
+        if require_approval and require_approval not in {"always", "never"}:
+            raise ValueError(
+                "Codex MCP config for "
+                f"'{server_key}' has invalid require_approval='{require_approval}'."
+            )
+        tool: dict[str, Any] = {
+            "type": "mcp",
+            "server_label": str(server_key),
+            "server_url": server_url,
+            "require_approval": require_approval or "never",
+        }
+        description = str(config.get("description") or "").strip()
+        if description:
+            tool["server_description"] = description
+
+        headers = _extract_mapping_config(config.get("headers"), "headers")
+        explicit_authorization = str(config.get("authorization") or "").strip()
+        header_authorization = ""
+        for header_key, header_value in headers.items():
+            if header_key.lower() == "authorization":
+                header_authorization = str(header_value).strip()
+                break
+        if explicit_authorization and header_authorization and (
+            explicit_authorization != header_authorization
+        ):
+            raise ValueError(
+                "Codex MCP config for "
+                f"'{server_key}' defines conflicting authorization values."
+            )
+        authorization = explicit_authorization or header_authorization
+        if authorization:
+            tool["authorization"] = authorization
+        forwarded_headers = {
+            key: value
+            for key, value in headers.items()
+            if key.lower() != "authorization"
+        }
+        if forwarded_headers:
+            tool["headers"] = forwarded_headers
+
+        include_tools = _extract_list_config(config.get("include_tools"), "include_tools")
+        if include_tools:
+            tool["allowed_tools"] = include_tools
+        tools.append(tool)
+    return tools
+
+
 def _run_frontier_llm_sdk(
     *,
     provider: str,
@@ -4142,7 +4230,7 @@ def _run_frontier_llm_sdk(
     prompt_text = str(prompt or "")
     config_map = model_config if isinstance(model_config, dict) else {}
     timeout_seconds = max(1.0, _safe_float(config_map.get("request_timeout_seconds"), 300.0))
-    if mcp_configs:
+    if mcp_configs and provider != "codex":
         return subprocess.CompletedProcess(
             [f"sdk:{provider}"],
             1,
@@ -4183,6 +4271,15 @@ def _run_frontier_llm_sdk(
                     "",
                     "Codex runtime requires OPENAI_API_KEY or CODEX_API_KEY.",
                 )
+            try:
+                mcp_tools = _build_codex_sdk_mcp_tools(mcp_configs)
+            except ValueError as exc:
+                return subprocess.CompletedProcess(
+                    ["sdk:codex"],
+                    1,
+                    "",
+                    str(exc),
+                )
             if on_log:
                 on_log(
                     f"Running {provider_label}: OpenAI SDK responses model={model_name}."
@@ -4191,6 +4288,8 @@ def _run_frontier_llm_sdk(
                 "model": model_name,
                 "input": prompt_text,
             }
+            if mcp_tools:
+                request["tools"] = mcp_tools
             max_output_tokens = _optional_positive_int(config_map.get("max_output_tokens"))
             if max_output_tokens is not None:
                 request["max_output_tokens"] = max_output_tokens

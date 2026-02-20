@@ -1,0 +1,49 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: llmctl-mcp-public
+  namespace: llmctl
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/rewrite-target: /mcp
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /mcp/llmctl
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-mcp
+                port:
+                  name: http
+          - path: /mcp/github
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-mcp-github
+                port:
+                  name: http
+          - path: /mcp/chroma
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-mcp-chroma
+                port:
+                  name: http
+          - path: /mcp/google-cloud
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-mcp-google-cloud
+                port:
+                  name: http
+          - path: /mcp/google-workspace
+            pathType: Prefix
+            backend:
+              service:
+                name: llmctl-mcp-google-workspace
+                port:
+                  name: http

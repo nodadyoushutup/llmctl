@@ -27,11 +27,22 @@ LEGACY_ATLASSIAN_KEY = "jira"
 INTEGRATED_MCP_TRANSPORT = "streamable-http"
 INTEGRATED_MCP_DEFAULT_PATH = "/mcp/"
 INTEGRATED_MCP_PATH_OVERRIDES: dict[str, str] = {
+    # llmctl MCP service is mounted at /mcp; /mcp/ redirects (307) and can break
+    # remote MCP tool discovery clients that do not follow redirects.
+    INTEGRATED_MCP_LLMCTL_KEY: "/mcp",
     # GitHub MCP service is mounted at /mcp (no trailing slash); /mcp/ returns 404.
     INTEGRATED_MCP_GITHUB_KEY: "/mcp",
     # Google MCP proxies are mounted at /mcp (no trailing slash); /mcp/ returns 404.
     INTEGRATED_MCP_GOOGLE_CLOUD_KEY: "/mcp",
     INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY: "/mcp",
+}
+INTEGRATED_MCP_PUBLIC_PATH_SEGMENTS: dict[str, str] = {
+    INTEGRATED_MCP_LLMCTL_KEY: "llmctl",
+    INTEGRATED_MCP_GITHUB_KEY: "github",
+    INTEGRATED_MCP_ATLASSIAN_KEY: "atlassian",
+    INTEGRATED_MCP_CHROMA_KEY: "chroma",
+    INTEGRATED_MCP_GOOGLE_CLOUD_KEY: "google-cloud",
+    INTEGRATED_MCP_GOOGLE_WORKSPACE_KEY: "google-workspace",
 }
 INTEGRATED_MCP_SERVICE_ENDPOINTS: dict[str, tuple[str, int]] = {
     INTEGRATED_MCP_LLMCTL_KEY: ("llmctl-mcp", 9020),
@@ -292,6 +303,17 @@ def _google_workspace_config() -> dict[str, Any]:
 
 
 def _integrated_service_config(server_key: str) -> dict[str, Any]:
+    public_base_url = _public_mcp_base_url()
+    if public_base_url:
+        segment = INTEGRATED_MCP_PUBLIC_PATH_SEGMENTS.get(server_key)
+        if segment is None:
+            raise KeyError(
+                f"No public MCP ingress path segment configured for server {server_key}"
+            )
+        return {
+            "url": f"{public_base_url}/mcp/{segment}",
+            "transport": INTEGRATED_MCP_TRANSPORT,
+        }
     endpoint = INTEGRATED_MCP_SERVICE_ENDPOINTS.get(server_key)
     if endpoint is None:
         raise KeyError(f"No integrated MCP service endpoint configured for {server_key}")
@@ -304,6 +326,18 @@ def _integrated_service_config(server_key: str) -> dict[str, Any]:
         ),
         "transport": INTEGRATED_MCP_TRANSPORT,
     }
+
+
+def _public_mcp_base_url() -> str:
+    cleaned = _clean(getattr(Config, "MCP_PUBLIC_BASE_URL", ""))
+    if not cleaned:
+        return ""
+    if not (cleaned.startswith("https://") or cleaned.startswith("http://")):
+        logger.warning(
+            "LLMCTL_MCP_PUBLIC_BASE_URL must include http:// or https://; ignoring invalid value."
+        )
+        return ""
+    return cleaned.rstrip("/")
 
 
 def _integrated_mcp_namespace() -> str:

@@ -85,6 +85,17 @@ describe('ModelsPage', () => {
     expect(row?.getAttribute('data-href')).toBe('/models/11')
   })
 
+  test('renders default model-management list columns and header create action', async () => {
+    renderPage('/models')
+    await screen.findByRole('link', { name: 'Alpha' })
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Provider' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Default Alias' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Capability Tags' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'New model' })).toBeInTheDocument()
+  })
+
   test('debounces search updates before filtering table rows', async () => {
     renderPage('/models?per_page=10')
     await screen.findByRole('link', { name: 'Alpha' })
@@ -111,24 +122,41 @@ describe('ModelsPage', () => {
     expect(await screen.findByText('Model detail route')).toBeInTheDocument()
   })
 
+  test('pressing Enter on a focused row navigates to model detail', async () => {
+    const { container } = renderPage('/models')
+    await screen.findByRole('link', { name: 'Alpha' })
+    const row = container.querySelector('tr.table-row-link')
+    expect(row).toBeTruthy()
+    row?.focus()
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(await screen.findByText('Model detail route')).toBeInTheDocument()
+  })
+
   test('delete icon action does not trigger row navigation', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderPage('/models')
     await screen.findByRole('link', { name: 'Alpha' })
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete model' })[0])
     expect(deleteModel).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('button', { name: 'Confirm delete model' })).toHaveLength(1)
     expect(screen.queryByText('Model detail route')).not.toBeInTheDocument()
   })
 
   test('operation failures report through flash viewport instead of inline error text', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     deleteModel.mockRejectedValueOnce(new Error('Delete failed in test'))
 
     renderPage('/models')
     await screen.findByRole('link', { name: 'Alpha' })
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete model' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Confirm delete model' })[0])
 
     expect(await screen.findByText('Delete failed in test')).toBeInTheDocument()
     expect(screen.queryByText('Delete failed in test', { selector: 'p.error-text' })).not.toBeInTheDocument()
+  })
+
+  test('empty-state includes a primary New Model action in the body', async () => {
+    getModels.mockResolvedValueOnce({ models: [], default_model_id: null })
+    renderPage('/models')
+    expect(await screen.findByText('No models matched the current filters.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'New Model' })).toBeInTheDocument()
   })
 })

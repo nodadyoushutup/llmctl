@@ -32,7 +32,6 @@ from services.integrations import (
     load_node_executor_runtime_settings,
     normalize_node_executor_run_metadata,
     node_executor_effective_config_summary,
-    resolve_node_executor_k8s_image,
     resolve_node_executor_k8s_image_for_class,
     save_node_executor_settings,
 )
@@ -133,8 +132,8 @@ class NodeExecutorStage2Tests(unittest.TestCase):
             {
                 "provider": "kubernetes",
                 "workspace_identity_key": "workspace-prod",
-                "k8s_image": "llmctl-executor@sha256:" + ("a" * 64),
-                "k8s_image_tag": "release-2026-02-18",
+                "k8s_frontier_image": "llmctl-executor@sha256:" + ("a" * 64),
+                "k8s_frontier_image_tag": "release-2026-02-18",
                 "k8s_gpu_limit": "2",
                 "k8s_job_ttl_seconds": "2400",
                 "agent_runtime_cutover_enabled": "true",
@@ -142,7 +141,7 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         )
         self.assertEqual("kubernetes", updated.get("provider"))
         self.assertEqual("workspace-prod", updated.get("workspace_identity_key"))
-        self.assertEqual("release-2026-02-18", updated.get("k8s_image_tag"))
+        self.assertEqual("release-2026-02-18", updated.get("k8s_frontier_image_tag"))
         self.assertEqual("2", updated.get("k8s_gpu_limit"))
         self.assertEqual("2400", updated.get("k8s_job_ttl_seconds"))
         self.assertEqual("true", updated.get("agent_runtime_cutover_enabled"))
@@ -249,8 +248,6 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "workspace_identity_key": "default",
                 "agent_runtime_cutover_enabled": "true",
                 "k8s_namespace": "default",
-                "k8s_image": "llmctl-executor-frontier:latest",
-                "k8s_image_tag": "dev-2026-02-18",
                 "k8s_frontier_image": "llmctl-executor-frontier:latest",
                 "k8s_frontier_image_tag": "dev-2026-02-18",
                 "k8s_vllm_image": "llmctl-executor-vllm:latest",
@@ -271,12 +268,40 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("kubernetes", settings.get("provider"))
         self.assertEqual("120", settings.get("dispatch_timeout_seconds"))
         self.assertEqual("true", settings.get("k8s_in_cluster"))
-        self.assertEqual("dev-2026-02-18", settings.get("k8s_image_tag"))
         self.assertEqual("dev-2026-02-18", settings.get("k8s_frontier_image_tag"))
         self.assertEqual("gpu-2026-02-18", settings.get("k8s_vllm_image_tag"))
         self.assertEqual("1", settings.get("k8s_gpu_limit"))
         self.assertEqual("900", settings.get("k8s_job_ttl_seconds"))
         self.assertEqual("true", settings.get("agent_runtime_cutover_enabled"))
+
+    def test_runtime_route_rejects_legacy_image_fields_for_json_payload(self) -> None:
+        baseline_settings = load_node_executor_settings()
+        response = self.client.post(
+            "/settings/runtime/node-executor",
+            json={
+                "provider": "kubernetes",
+                "k8s_image": "llmctl-executor-frontier:legacy",
+                "k8s_image_tag": "legacy-tag",
+                "k8s_frontier_image": "llmctl-executor-frontier:should-not-save",
+                "k8s_frontier_image_tag": "should-not-save",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(400, response.status_code)
+        payload = response.get_json() or {}
+        self.assertIn(
+            "Legacy node executor image fields are not supported.",
+            str(payload.get("error") or ""),
+        )
+        settings = load_node_executor_settings()
+        self.assertEqual(
+            baseline_settings.get("k8s_frontier_image"),
+            settings.get("k8s_frontier_image"),
+        )
+        self.assertEqual(
+            baseline_settings.get("k8s_frontier_image_tag"),
+            settings.get("k8s_frontier_image_tag"),
+        )
 
     def test_agent_task_node_executor_metadata_defaults(self) -> None:
         with session_scope() as session:
