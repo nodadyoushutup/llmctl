@@ -84,27 +84,43 @@ class ClaudeProviderRuntimeStage8UnitTests(unittest.TestCase):
         self.assertEqual(1, run_mock.call_count)
 
     def test_run_llm_claude_requires_api_key_when_policy_enabled(self) -> None:
-        with patch.object(studio_tasks.Config, "CLAUDE_AUTH_REQUIRE_API_KEY", True), patch.object(
+        with patch.object(
+            studio_tasks, "_is_executor_node_execution_context", return_value=True
+        ), patch.object(
+            studio_tasks.Config, "CLAUDE_AUTH_REQUIRE_API_KEY", True
+        ), patch.object(
             studio_tasks, "_resolve_claude_auth_key", return_value=("", "")
         ):
-            with self.assertRaises(RuntimeError):
-                studio_tasks._run_llm(
-                    provider="claude",
-                    prompt="hello",
-                    mcp_configs={},
-                    model_config={},
-                    env={},
-                )
+            result = studio_tasks._run_llm(
+                provider="claude",
+                prompt="hello",
+                mcp_configs={},
+                model_config={},
+                env={},
+            )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("ANTHROPIC_API_KEY", result.stderr)
 
-    def test_run_llm_claude_injects_auth_and_runs_process(self) -> None:
+    def test_run_llm_claude_executor_context_uses_frontier_sdk_path(self) -> None:
         completed = subprocess.CompletedProcess(
-            args=["claude", "--print"], returncode=0, stdout="ok", stderr=""
+            args=["sdk:claude"],
+            returncode=0,
+            stdout="ok",
+            stderr="",
         )
-        with patch.object(studio_tasks, "_resolve_claude_auth_key", return_value=("secret", "integration_settings")), patch.object(
-            studio_tasks, "_ensure_claude_cli_ready", return_value={}
+        with patch.object(
+            studio_tasks, "_is_executor_node_execution_context", return_value=True
         ), patch.object(
-            studio_tasks, "_run_llm_process", return_value=completed
-        ) as run_mock:
+            studio_tasks,
+            "_run_frontier_llm_sdk",
+            return_value=completed,
+        ) as sdk_mock, patch(
+            "services.tasks.subprocess.run",
+            side_effect=AssertionError("claude CLI subprocess execution is forbidden"),
+        ), patch(
+            "services.tasks.subprocess.Popen",
+            side_effect=AssertionError("claude CLI subprocess execution is forbidden"),
+        ):
             result = studio_tasks._run_llm(
                 provider="claude",
                 prompt="hello",
@@ -113,8 +129,8 @@ class ClaudeProviderRuntimeStage8UnitTests(unittest.TestCase):
                 env={},
             )
         self.assertEqual(0, result.returncode)
-        run_env = run_mock.call_args.kwargs.get("env") or {}
-        self.assertEqual("secret", run_env.get("ANTHROPIC_API_KEY"))
+        self.assertEqual("ok", result.stdout)
+        self.assertEqual(1, sdk_mock.call_count)
 
     def test_provider_model_options_include_curated_and_custom_claude_models(self) -> None:
         with patch.object(studio_views, "discover_vllm_local_models", return_value=[]):

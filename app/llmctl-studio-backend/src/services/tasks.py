@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 import logging
 import os
@@ -11,6 +13,7 @@ import selectors
 import subprocess
 import tempfile
 import time
+import uuid
 from collections import deque
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -115,9 +118,14 @@ from core.models import (
     NODE_ARTIFACT_RETENTION_TTL,
     NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
     NODE_ARTIFACT_TYPE_DECISION,
+    NODE_ARTIFACT_TYPE_END,
+    NODE_ARTIFACT_TYPE_FLOWCHART,
     NODE_ARTIFACT_TYPE_MEMORY,
     NODE_ARTIFACT_TYPE_MILESTONE,
     NODE_ARTIFACT_TYPE_PLAN,
+    NODE_ARTIFACT_TYPE_RAG,
+    NODE_ARTIFACT_TYPE_START,
+    NODE_ARTIFACT_TYPE_TASK,
     Plan,
     PlanStage,
     PlanTask,
@@ -229,6 +237,8 @@ FLOWCHART_FAN_IN_MODE_CHOICES = (
     FLOWCHART_FAN_IN_MODE_CUSTOM,
 )
 AGENT_RUNTIME_CUTOVER_FLAG_KEY = "__agent_runtime_cutover_enabled"
+FRONTIER_LLM_PROVIDERS = {"codex", "gemini", "claude"}
+LLMCTL_EXECUTOR_PAYLOAD_FILE_ENV = "LLMCTL_EXECUTOR_PAYLOAD_FILE"
 
 
 def _utcnow() -> datetime:
@@ -781,6 +791,42 @@ def _executor_only_worker_compute_disabled(
     raise RuntimeError(
         "Executor-only compute path attempted local worker execution."
     )
+
+
+_llm_dispatch_context: ContextVar[dict[str, Any] | None] = ContextVar(
+    "llm_dispatch_context",
+    default=None,
+)
+
+
+@contextmanager
+def _llm_dispatch_scope(
+    *,
+    request_id: str,
+    node_id: int,
+    execution_id: int,
+    mcp_server_keys: list[str] | None = None,
+):
+    token = _llm_dispatch_context.set(
+        {
+        "request_id": str(request_id or "").strip() or uuid.uuid4().hex,
+        "node_id": max(1, int(node_id)),
+        "execution_id": max(1, int(execution_id)),
+        "mcp_server_keys": [
+            str(item).strip()
+            for item in (mcp_server_keys or [])
+            if str(item).strip()
+        ],
+    }
+    )
+    try:
+        yield
+    finally:
+        _llm_dispatch_context.reset(token)
+
+
+def _is_executor_node_execution_context() -> bool:
+    return bool(str(os.getenv(LLMCTL_EXECUTOR_PAYLOAD_FILE_ENV) or "").strip())
 
 
 def _failed_execution_result(message: str) -> ExecutionResult:
@@ -3987,6 +4033,366 @@ def _is_upstream_500(stdout: str, stderr: str) -> bool:
     return any(marker in haystack for marker in markers)
 
 
+def _optional_positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _error_status_code(exc: Exception) -> int:
+    for attr in ("status_code", "status"):
+        value = getattr(exc, attr, None)
+        try:
+            code = int(value)
+        except (TypeError, ValueError):
+            continue
+        if code > 0:
+            return code
+    return 1
+
+
+def _extract_openai_response_text(payload: Any) -> str:
+    output_text = str(getattr(payload, "output_text", "") or "").strip()
+    if output_text:
+        return output_text
+    if hasattr(payload, "model_dump"):
+        try:
+            payload = payload.model_dump()
+        except Exception:
+            payload = None
+    if not isinstance(payload, dict):
+        return str(payload or "").strip()
+    outputs = payload.get("output")
+    if not isinstance(outputs, list):
+        return str(payload).strip()
+    chunks: list[str] = []
+    for item in outputs:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            text_value = str(block.get("text") or block.get("output_text") or "").strip()
+            if text_value:
+                chunks.append(text_value)
+    if chunks:
+        return "\n".join(chunks).strip()
+    return str(payload).strip()
+
+
+def _extract_google_response_text(payload: Any) -> str:
+    direct = str(getattr(payload, "text", "") or "").strip()
+    if direct:
+        return direct
+    candidates = list(getattr(payload, "candidates", None) or [])
+    chunks: list[str] = []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = list(getattr(content, "parts", None) or [])
+        for part in parts:
+            text_value = str(getattr(part, "text", "") or "").strip()
+            if text_value:
+                chunks.append(text_value)
+    if chunks:
+        return "\n".join(chunks).strip()
+    return str(payload or "").strip()
+
+
+def _extract_claude_response_text(payload: Any) -> str:
+    blocks = list(getattr(payload, "content", None) or [])
+    chunks: list[str] = []
+    for block in blocks:
+        text_value = str(getattr(block, "text", "") or "").strip()
+        if text_value:
+            chunks.append(text_value)
+            continue
+        if isinstance(block, dict):
+            fallback = str(block.get("text") or "").strip()
+            if fallback:
+                chunks.append(fallback)
+    if chunks:
+        return "\n".join(chunks).strip()
+    return str(payload or "").strip()
+
+
+def _run_frontier_llm_sdk(
+    *,
+    provider: str,
+    prompt: str | None,
+    mcp_configs: dict[str, dict[str, Any]],
+    model_config: dict[str, Any] | None = None,
+    on_update: Callable[[str, str], None] | None = None,
+    on_log: Callable[[str], None] | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    provider_label = _provider_label(provider)
+    env_map = dict(env or os.environ.copy())
+    prompt_text = str(prompt or "")
+    config_map = model_config if isinstance(model_config, dict) else {}
+    timeout_seconds = max(1.0, _safe_float(config_map.get("request_timeout_seconds"), 300.0))
+    if mcp_configs:
+        return subprocess.CompletedProcess(
+            [f"sdk:{provider}"],
+            1,
+            "",
+            (
+                f"{provider_label} SDK runtime does not support MCP transport config. "
+                "MCP server wiring via CLI has been removed; unbind MCP servers for this run."
+            ),
+        )
+
+    def _emit_result(result: subprocess.CompletedProcess[str]) -> subprocess.CompletedProcess[str]:
+        if on_update is not None:
+            on_update(str(result.stdout or ""), str(result.stderr or ""))
+        return result
+
+    def _run_once() -> subprocess.CompletedProcess[str]:
+        if provider == "codex":
+            try:
+                from openai import OpenAI
+            except Exception as exc:  # pragma: no cover
+                return subprocess.CompletedProcess(
+                    ["sdk:codex"],
+                    1,
+                    "",
+                    f"OpenAI Python SDK is required for codex provider: {exc}",
+                )
+            codex_settings = _codex_settings_from_model_config(config_map)
+            model_name = str(codex_settings.get("model") or "").strip() or (Config.CODEX_MODEL or "gpt-5")
+            api_key = (
+                _load_codex_auth_key()
+                or str(env_map.get("OPENAI_API_KEY") or "").strip()
+                or str(env_map.get("CODEX_API_KEY") or "").strip()
+            )
+            if not api_key:
+                return subprocess.CompletedProcess(
+                    ["sdk:codex"],
+                    1,
+                    "",
+                    "Codex runtime requires OPENAI_API_KEY or CODEX_API_KEY.",
+                )
+            if on_log:
+                on_log(
+                    f"Running {provider_label}: OpenAI SDK responses model={model_name}."
+                )
+            request: dict[str, Any] = {
+                "model": model_name,
+                "input": prompt_text,
+            }
+            max_output_tokens = _optional_positive_int(config_map.get("max_output_tokens"))
+            if max_output_tokens is not None:
+                request["max_output_tokens"] = max_output_tokens
+            temperature = _optional_float(config_map.get("temperature"))
+            if temperature is not None:
+                request["temperature"] = temperature
+            top_p = _optional_float(config_map.get("top_p"))
+            if top_p is not None:
+                request["top_p"] = top_p
+            try:
+                response_payload = OpenAI(api_key=api_key).responses.create(**request)
+            except Exception as exc:
+                return subprocess.CompletedProcess(
+                    ["sdk:codex"],
+                    _error_status_code(exc),
+                    "",
+                    str(exc),
+                )
+            output_text = _extract_openai_response_text(response_payload)
+            return subprocess.CompletedProcess(["sdk:codex"], 0, output_text, "")
+
+        if provider == "gemini":
+            try:
+                from google import genai
+            except Exception as exc:  # pragma: no cover
+                return subprocess.CompletedProcess(
+                    ["sdk:gemini"],
+                    1,
+                    "",
+                    f"google-genai Python SDK is required for gemini provider: {exc}",
+                )
+            gemini_settings = _gemini_settings_from_model_config(config_map)
+            model_name = str(gemini_settings.get("model") or "").strip() or (
+                Config.GEMINI_MODEL or "gemini-2.5-flash"
+            )
+            api_key = (
+                _load_gemini_auth_key()
+                or str(env_map.get("GEMINI_API_KEY") or "").strip()
+                or str(env_map.get("GOOGLE_API_KEY") or "").strip()
+            )
+            if not api_key:
+                return subprocess.CompletedProcess(
+                    ["sdk:gemini"],
+                    1,
+                    "",
+                    "Gemini runtime requires GEMINI_API_KEY or GOOGLE_API_KEY.",
+                )
+            if on_log:
+                on_log(
+                    f"Running {provider_label}: Google SDK generate_content model={model_name}."
+                )
+            request_config: dict[str, Any] = {}
+            max_output_tokens = _optional_positive_int(config_map.get("max_output_tokens"))
+            if max_output_tokens is not None:
+                request_config["max_output_tokens"] = max_output_tokens
+            temperature = _optional_float(config_map.get("temperature"))
+            if temperature is not None:
+                request_config["temperature"] = temperature
+            top_p = _optional_float(config_map.get("top_p"))
+            if top_p is not None:
+                request_config["top_p"] = top_p
+            top_k = _optional_positive_int(config_map.get("top_k"))
+            if top_k is not None:
+                request_config["top_k"] = top_k
+            try:
+                response_payload = genai.Client(api_key=api_key).models.generate_content(
+                    model=model_name,
+                    contents=prompt_text,
+                    config=request_config if request_config else None,
+                )
+            except Exception as exc:
+                return subprocess.CompletedProcess(
+                    ["sdk:gemini"],
+                    _error_status_code(exc),
+                    "",
+                    str(exc),
+                )
+            output_text = _extract_google_response_text(response_payload)
+            return subprocess.CompletedProcess(["sdk:gemini"], 0, output_text, "")
+
+        if provider == "claude":
+            try:
+                from anthropic import Anthropic
+            except Exception as exc:  # pragma: no cover
+                return subprocess.CompletedProcess(
+                    ["sdk:claude"],
+                    1,
+                    "",
+                    f"Anthropic Python SDK is required for claude provider: {exc}",
+                )
+            model_name = str(config_map.get("model") or "").strip() or (Config.CLAUDE_MODEL or "claude-sonnet-4-0")
+            claude_api_key, _ = _resolve_claude_auth_key(env_map)
+            if not claude_api_key:
+                if Config.CLAUDE_AUTH_REQUIRE_API_KEY:
+                    return subprocess.CompletedProcess(
+                        ["sdk:claude"],
+                        1,
+                        "",
+                        (
+                            "Claude runtime requires ANTHROPIC_API_KEY. "
+                            "Set it in Settings -> Provider -> Claude or via environment."
+                        ),
+                    )
+                if on_log:
+                    on_log(
+                        "Claude auth key not set. Continuing because "
+                        "CLAUDE_AUTH_REQUIRE_API_KEY=false."
+                    )
+            if on_log:
+                on_log(
+                    f"Running {provider_label}: Anthropic SDK messages model={model_name}."
+                )
+            request: dict[str, Any] = {
+                "model": model_name,
+                "max_tokens": _safe_int(config_map.get("max_tokens"), 2048),
+                "messages": [{"role": "user", "content": prompt_text}],
+            }
+            temperature = _optional_float(config_map.get("temperature"))
+            if temperature is not None:
+                request["temperature"] = temperature
+            top_p = _optional_float(config_map.get("top_p"))
+            if top_p is not None:
+                request["top_p"] = top_p
+            system_prompt = str(config_map.get("system") or "").strip()
+            if system_prompt:
+                request["system"] = system_prompt
+            try:
+                response_payload = Anthropic(api_key=claude_api_key).messages.create(**request)
+            except Exception as exc:
+                return subprocess.CompletedProcess(
+                    ["sdk:claude"],
+                    _error_status_code(exc),
+                    "",
+                    str(exc),
+                )
+            output_text = _extract_claude_response_text(response_payload)
+            return subprocess.CompletedProcess(["sdk:claude"], 0, output_text, "")
+
+        return subprocess.CompletedProcess(
+            [f"sdk:{provider}"],
+            1,
+            "",
+            f"Unknown frontier provider '{provider}'.",
+        )
+
+    result = _run_once()
+    if result.returncode != 0 and (
+        result.returncode >= 500 or _is_upstream_500(result.stdout, result.stderr)
+    ):
+        if on_log:
+            on_log(f"{provider_label} returned upstream 500; retrying once.")
+        time.sleep(1.0)
+        result = _run_once()
+    return _emit_result(result)
+
+
+def _run_frontier_llm_via_execution_router(
+    *,
+    provider: str,
+    prompt: str | None,
+    mcp_configs: dict[str, dict[str, Any]],
+    model_config: dict[str, Any] | None = None,
+    on_update: Callable[[str, str], None] | None = None,
+    on_log: Callable[[str], None] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    context = _llm_dispatch_context.get() or {}
+    request_id = str(context.get("request_id") or "").strip() or uuid.uuid4().hex
+    node_id = _safe_int(context.get("node_id"), 1)
+    execution_id = _safe_int(context.get("execution_id"), 1)
+    raw_mcp_keys = context.get("mcp_server_keys")
+    if isinstance(raw_mcp_keys, list):
+        mcp_server_keys = [str(item).strip() for item in raw_mcp_keys if str(item).strip()]
+    else:
+        mcp_server_keys = sorted(
+            str(key).strip()
+            for key in (mcp_configs or {})
+            if str(key).strip()
+        )
+    if on_log:
+        on_log(
+            f"Routing {_provider_label(provider)} execution through node execution router."
+        )
+    execution_result = execute_llm_call_via_execution_router(
+        provider=provider,
+        prompt=prompt,
+        mcp_configs=mcp_configs,
+        model_config=model_config,
+        request_id=request_id,
+        node_id=max(1, node_id),
+        execution_id=max(1, execution_id),
+        mcp_server_keys=mcp_server_keys,
+    )
+    completed = llm_completed_process_from_execution_result(
+        provider=provider,
+        execution_result=execution_result,
+    )
+    setattr(completed, "_llmctl_execution_result", execution_result)
+    if on_update is not None:
+        on_update(str(completed.stdout or ""), str(completed.stderr or ""))
+    return completed
+
+
 def _run_llm(
     provider: str,
     prompt: str | None,
@@ -3996,78 +4402,32 @@ def _run_llm(
     on_log: Callable[[str], None] | None = None,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
+    dispatch_via_router: bool = True,
 ) -> subprocess.CompletedProcess[str]:
+    provider = str(provider or "").strip().lower()
     if model_config is None and provider == "codex":
         model_config = _load_legacy_codex_model_config()
+    if provider in FRONTIER_LLM_PROVIDERS:
+        if dispatch_via_router and not _is_executor_node_execution_context():
+            return _run_frontier_llm_via_execution_router(
+                provider=provider,
+                prompt=prompt,
+                mcp_configs=mcp_configs,
+                model_config=model_config,
+                on_update=on_update,
+                on_log=on_log,
+            )
+        return _run_frontier_llm_sdk(
+            provider=provider,
+            prompt=prompt,
+            mcp_configs=mcp_configs,
+            model_config=model_config,
+            on_update=on_update,
+            on_log=on_log,
+            env=env,
+        )
     provider_label = _provider_label(provider)
-    cmd: list[str] | None = None
-    if provider == "codex":
-        env = dict(env or os.environ.copy())
-        codex_api_key = _load_codex_auth_key()
-        if codex_api_key:
-            env["OPENAI_API_KEY"] = codex_api_key
-            env["CODEX_API_KEY"] = codex_api_key
-        codex_settings = _codex_settings_from_model_config(model_config or {})
-        mcp_overrides = _build_mcp_overrides_from_configs(mcp_configs)
-        codex_overrides = _build_codex_overrides(codex_settings)
-        cmd = _build_codex_cmd(
-            mcp_overrides=mcp_overrides,
-            codex_overrides=codex_overrides,
-            model=codex_settings.get("model"),
-        )
-    elif provider == "gemini":
-        env = dict(env or os.environ.copy())
-        gemini_api_key = _load_gemini_auth_key()
-        if gemini_api_key:
-            env["GEMINI_API_KEY"] = gemini_api_key
-            env["GOOGLE_API_KEY"] = gemini_api_key
-        gemini_settings = _gemini_settings_from_model_config(model_config or {})
-        _ensure_gemini_mcp_servers(mcp_configs, on_log=on_log, cwd=cwd, env=env)
-        if gemini_settings.get("sandbox") is not None:
-            sandbox_enabled = bool(gemini_settings.get("sandbox"))
-            sandbox_value = str(env.get("GEMINI_SANDBOX", "")).strip()
-            if sandbox_enabled:
-                if sandbox_value and sandbox_value.lower() not in {"true", "false"}:
-                    pass
-                elif _gemini_sandbox_available():
-                    env["GEMINI_SANDBOX"] = "true"
-                else:
-                    if on_log:
-                        on_log(
-                            "Gemini sandbox requested but docker/podman not found; "
-                            "running without sandbox."
-                        )
-                    env["GEMINI_SANDBOX"] = "false"
-            else:
-                env["GEMINI_SANDBOX"] = "false"
-        cmd = _build_gemini_cmd(
-            sorted(mcp_configs),
-            model=gemini_settings.get("model"),
-            approval_mode=gemini_settings.get("approval_mode"),
-            extra_args=gemini_settings.get("extra_args"),
-        )
-    elif provider == "claude":
-        env = dict(env or os.environ.copy())
-        claude_api_key, auth_source = _resolve_claude_auth_key(env)
-        if claude_api_key:
-            env["ANTHROPIC_API_KEY"] = claude_api_key
-        elif Config.CLAUDE_AUTH_REQUIRE_API_KEY:
-            raise RuntimeError(
-                "Claude runtime requires ANTHROPIC_API_KEY. "
-                "Set it in Settings -> Provider -> Claude or via environment."
-            )
-        elif on_log:
-            on_log(
-                "Claude auth key not set. Continuing because "
-                "CLAUDE_AUTH_REQUIRE_API_KEY=false."
-            )
-        if claude_api_key and on_log:
-            on_log(f"Claude auth source: {auth_source}.")
-        _ensure_claude_cli_ready(on_log=on_log, env=env)
-        mcp_config = _build_claude_mcp_config(mcp_configs)
-        model_name = str((model_config or {}).get("model") or "").strip()
-        cmd = _build_claude_cmd(mcp_config, model=model_name)
-    elif provider == "vllm_local":
+    if provider == "vllm_local":
         local_settings = _vllm_local_settings_from_model_config(model_config or {})
         if mcp_configs and on_log:
             on_log(
@@ -4122,14 +4482,6 @@ def _run_llm(
         return result
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
-    logger.info("Running %s: %s", provider_label, " ".join(cmd))
-    result = _run_llm_process(cmd, prompt, on_update=on_update, cwd=cwd, env=env)
-    if result.returncode != 0 and _is_upstream_500(result.stdout, result.stderr):
-        if on_log:
-            on_log(f"{provider_label} returned upstream 500; retrying once.")
-        time.sleep(1.0)
-        result = _run_llm_process(cmd, prompt, on_update=on_update, cwd=cwd, env=env)
-    return result
 
 
 def _update_task_logs(
@@ -4647,6 +4999,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
     mcp_configs: dict[str, dict[str, Any]] = {}
     agent_id: int | None = None
     run_id: int | None = None
+    flowchart_node_id: int | None = None
     payload = ""
     task_kind: str | None = None
     github_repo = ""
@@ -4672,6 +5025,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         if task.status not in {"queued", "running"}:
             return
         run: Run | None = None
+        flowchart_node_id = task.flowchart_node_id
         if task.run_id is not None:
             run = session.get(Run, task.run_id)
             if run is None:
@@ -5453,16 +5807,25 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                         "Fallback mode selected but no SKILL.md excerpts were available."
                     )
             _append_task_log(f"Launching {provider_label}...")
-            result = _run_llm(
-                provider,
-                payload,
-                mcp_configs=mcp_configs,
-                model_config=model_config,
-                on_update=_persist_logs,
-                on_log=_append_task_log,
-                cwd=llm_cwd,
-                env=llm_env,
-            )
+            dispatch_request_id = f"agent-task-{int(task_id)}"
+            dispatch_node_id = max(1, int(flowchart_node_id or task_id))
+            dispatch_execution_id = max(1, int(task_id))
+            with _llm_dispatch_scope(
+                request_id=dispatch_request_id,
+                node_id=dispatch_node_id,
+                execution_id=dispatch_execution_id,
+                mcp_server_keys=sorted(mcp_configs),
+            ):
+                result = _run_llm(
+                    provider,
+                    payload,
+                    mcp_configs=mcp_configs,
+                    model_config=model_config,
+                    on_update=_persist_logs,
+                    on_log=_append_task_log,
+                    cwd=llm_cwd,
+                    env=llm_env,
+                )
         except FileNotFoundError as exc:
             llm_failed = True
             llm_message = str(exc)
@@ -6097,6 +6460,111 @@ def _prune_node_artifact_history(
             session.delete(item)
 
 
+def _flowchart_node_artifact_type(node_type: str) -> str:
+    normalized = str(node_type or "").strip().lower()
+    node_type_to_artifact_type = {
+        FLOWCHART_NODE_TYPE_START: NODE_ARTIFACT_TYPE_START,
+        FLOWCHART_NODE_TYPE_END: NODE_ARTIFACT_TYPE_END,
+        FLOWCHART_NODE_TYPE_FLOWCHART: NODE_ARTIFACT_TYPE_FLOWCHART,
+        FLOWCHART_NODE_TYPE_TASK: NODE_ARTIFACT_TYPE_TASK,
+        FLOWCHART_NODE_TYPE_PLAN: NODE_ARTIFACT_TYPE_PLAN,
+        FLOWCHART_NODE_TYPE_MILESTONE: NODE_ARTIFACT_TYPE_MILESTONE,
+        FLOWCHART_NODE_TYPE_MEMORY: NODE_ARTIFACT_TYPE_MEMORY,
+        FLOWCHART_NODE_TYPE_DECISION: NODE_ARTIFACT_TYPE_DECISION,
+        FLOWCHART_NODE_TYPE_RAG: NODE_ARTIFACT_TYPE_RAG,
+    }
+    return node_type_to_artifact_type.get(normalized, normalized or "unknown")
+
+
+def _persist_generic_flowchart_node_artifact(
+    session,
+    *,
+    flowchart_id: int,
+    flowchart_node_id: int,
+    flowchart_run_id: int,
+    flowchart_run_node_id: int,
+    node_type: str,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    output_state: dict[str, Any],
+    routing_state: dict[str, Any],
+) -> dict[str, Any]:
+    retention_mode, ttl_seconds, max_count = _node_artifact_retention_settings(
+        node_config
+    )
+    expires_at: datetime | None = None
+    if retention_mode in {
+        NODE_ARTIFACT_RETENTION_TTL,
+        NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
+    }:
+        expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
+
+    request_id, correlation_id = _resolve_node_artifact_request_ids(
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_config=node_config,
+        input_context=input_context,
+        output_state=output_state,
+    )
+    normalized_node_type = str(node_type or "").strip().lower()
+    artifact_type = _flowchart_node_artifact_type(normalized_node_type)
+    node_context = input_context.get("node") if isinstance(input_context.get("node"), dict) else {}
+    execution_index = _parse_optional_int(
+        node_context.get("execution_index"),
+        default=0,
+        minimum=1,
+    ) or _parse_optional_int(
+        output_state.get("execution_index"),
+        default=0,
+        minimum=1,
+    )
+    artifact_payload: dict[str, Any] = {
+        "node_type": normalized_node_type or str(node_type or "").strip(),
+        "input_context": input_context if isinstance(input_context, dict) else {},
+        "output_state": output_state if isinstance(output_state, dict) else {},
+        "routing_state": routing_state if isinstance(routing_state, dict) else {},
+    }
+    if isinstance(node_config, dict) and node_config:
+        artifact_payload["node_config"] = node_config
+    validate_node_artifact_payload_contract(
+        artifact_type,
+        artifact_payload,
+    )
+    artifact = NodeArtifact.create(
+        session,
+        flowchart_id=flowchart_id,
+        flowchart_node_id=flowchart_node_id,
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_type=normalized_node_type or "unknown",
+        artifact_type=artifact_type,
+        ref_id=node_ref_id,
+        execution_index=execution_index,
+        variant_key=f"run-{flowchart_run_id}-node-run-{flowchart_run_node_id}",
+        retention_mode=retention_mode,
+        expires_at=expires_at,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        payload_json=_json_dumps(artifact_payload),
+        contract_version=NODE_ARTIFACT_CONTRACT_VERSION,
+        payload_version=NODE_ARTIFACT_PAYLOAD_VERSION,
+        idempotency_key=build_node_artifact_idempotency_key(
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            artifact_type=artifact_type,
+        ),
+    )
+    _prune_node_artifact_history(
+        session,
+        flowchart_node_id=flowchart_node_id,
+        artifact_type=artifact_type,
+        retention_mode=retention_mode,
+        max_count=max_count,
+    )
+    return _serialize_node_artifact_for_flow(artifact)
+
+
 def _persist_milestone_node_artifact(
     session,
     *,
@@ -6483,6 +6951,84 @@ def _persist_decision_node_artifact(
         max_count=max_count,
     )
     return _serialize_node_artifact_for_flow(artifact)
+
+
+def _persist_flowchart_node_artifact(
+    session,
+    *,
+    flowchart_id: int,
+    flowchart_node_id: int,
+    flowchart_run_id: int,
+    flowchart_run_node_id: int,
+    node_type: str,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    output_state: dict[str, Any],
+    routing_state: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_node_type = str(node_type or "").strip().lower()
+    if normalized_node_type == FLOWCHART_NODE_TYPE_PLAN:
+        return _persist_plan_node_artifact(
+            session,
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            node_config=node_config,
+            input_context=input_context,
+            output_state=output_state,
+            routing_state=routing_state,
+        )
+    if normalized_node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+        return _persist_milestone_node_artifact(
+            session,
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            node_config=node_config,
+            input_context=input_context,
+            output_state=output_state,
+            routing_state=routing_state,
+        )
+    if normalized_node_type == FLOWCHART_NODE_TYPE_DECISION:
+        return _persist_decision_node_artifact(
+            session,
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            node_config=node_config,
+            input_context=input_context,
+            output_state=output_state,
+            routing_state=routing_state,
+        )
+    if normalized_node_type == FLOWCHART_NODE_TYPE_MEMORY:
+        return _persist_memory_node_artifact(
+            session,
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            node_config=node_config,
+            input_context=input_context,
+            output_state=output_state,
+            routing_state=routing_state,
+        )
+    return _persist_generic_flowchart_node_artifact(
+        session,
+        flowchart_id=flowchart_id,
+        flowchart_node_id=flowchart_node_id,
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_type=normalized_node_type,
+        node_ref_id=node_ref_id,
+        node_config=node_config,
+        input_context=input_context,
+        output_state=output_state,
+        routing_state=routing_state,
+    )
 
 
 def _serialize_plan_for_node(plan: Plan) -> dict[str, Any]:
@@ -7440,16 +7986,23 @@ def _execute_optional_llm_transform(
     with tempfile.TemporaryDirectory(prefix="llmctl-flowchart-transform-home-") as tmp_home:
         runtime_home = Path(tmp_home)
         _apply_run_local_home_env(llm_env, runtime_home)
-        result = _run_llm(
-            provider,
-            transform_prompt,
-            mcp_configs=mcp_configs,
-            model_config=model_config,
-            on_update=None,
-            on_log=None,
-            cwd=runtime_home,
-            env=llm_env,
-        )
+        dispatch_request_id = f"flowchart-transform-model-{int(model.id)}"
+        with _llm_dispatch_scope(
+            request_id=dispatch_request_id,
+            node_id=max(1, int(model.id)),
+            execution_id=max(1, int(model.id)),
+            mcp_server_keys=sorted(mcp_configs),
+        ):
+            result = _run_llm(
+                provider,
+                transform_prompt,
+                mcp_configs=mcp_configs,
+                model_config=model_config,
+                on_update=None,
+                on_log=None,
+                cwd=runtime_home,
+                env=llm_env,
+            )
     if result.returncode != 0:
         message = result.stderr.strip() or f"LLM transform failed with code {result.returncode}."
         raise RuntimeError(message)
@@ -8098,16 +8651,30 @@ def _execute_flowchart_task_node(
 
         _set_stage("llm_query")
         _append_script_log(f"Launching {_provider_label(provider)}...")
-        llm_result = _run_llm(
-            provider,
-            payload,
-            mcp_configs=mcp_configs,
-            model_config=model_config,
-            on_update=_capture_llm_updates,
-            on_log=_append_script_log,
-            cwd=llm_cwd,
-            env=llm_env,
+        request_id, _ = _resolve_flowchart_request_ids(
+            node_config=node_config,
+            input_context=input_context,
         )
+        dispatch_request_id = (
+            request_id
+            or f"flowchart-node-{int(node_id)}-run-{int(execution_id)}"
+        )
+        with _llm_dispatch_scope(
+            request_id=dispatch_request_id,
+            node_id=max(1, int(node_id)),
+            execution_id=max(1, int(execution_id)),
+            mcp_server_keys=sorted(mcp_configs),
+        ):
+            llm_result = _run_llm(
+                provider,
+                payload,
+                mcp_configs=mcp_configs,
+                model_config=model_config,
+                on_update=_capture_llm_updates,
+                on_log=_append_script_log,
+                cwd=llm_cwd,
+                env=llm_env,
+            )
 
         _set_stage("post_run")
         _run_stage_scripts(
@@ -9383,6 +9950,7 @@ def _execute_executor_llm_call_node(
         model_config=model_config,
         on_update=None,
         on_log=None,
+        dispatch_via_router=False,
     )
     return (
         {
@@ -10369,92 +10937,30 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             input_context_payload = _parse_json_object(
                                 succeeded_node_run.input_context_json
                             )
-                            if (
-                                str(node_spec.get("node_type") or "").strip().lower()
-                                == FLOWCHART_NODE_TYPE_PLAN
-                            ):
-                                artifact_summary = _persist_plan_node_artifact(
-                                    session,
-                                    flowchart_id=flowchart_id,
-                                    flowchart_node_id=node_id,
-                                    flowchart_run_id=run_id,
-                                    flowchart_run_node_id=node_run_id,
-                                    node_config=(
-                                        node_spec.get("config")
-                                        if isinstance(node_spec.get("config"), dict)
-                                        else {}
-                                    ),
-                                    input_context=input_context_payload,
-                                    output_state=output_state,
-                                    routing_state=routing_state,
+                            artifact_summary = _persist_flowchart_node_artifact(
+                                session,
+                                flowchart_id=flowchart_id,
+                                flowchart_node_id=node_id,
+                                flowchart_run_id=run_id,
+                                flowchart_run_node_id=node_run_id,
+                                node_type=str(node_spec.get("node_type") or ""),
+                                node_ref_id=_parse_optional_int(
+                                    node_spec.get("ref_id"),
+                                    default=0,
+                                    minimum=1,
                                 )
-                                output_state["artifact"] = artifact_summary
-                                artifact_summary_for_event = artifact_summary
-                            elif (
-                                str(node_spec.get("node_type") or "").strip().lower()
-                                == FLOWCHART_NODE_TYPE_MILESTONE
-                            ):
-                                artifact_summary = _persist_milestone_node_artifact(
-                                    session,
-                                    flowchart_id=flowchart_id,
-                                    flowchart_node_id=node_id,
-                                    flowchart_run_id=run_id,
-                                    flowchart_run_node_id=node_run_id,
-                                    node_config=(
-                                        node_spec.get("config")
-                                        if isinstance(node_spec.get("config"), dict)
-                                        else {}
-                                    ),
-                                    input_context=input_context_payload,
-                                    output_state=output_state,
-                                    routing_state=routing_state,
-                                )
-                                output_state["artifact"] = artifact_summary
-                                artifact_summary_for_event = artifact_summary
-                            elif (
-                                str(node_spec.get("node_type") or "").strip().lower()
-                                == FLOWCHART_NODE_TYPE_DECISION
-                            ):
-                                artifact_summary = _persist_decision_node_artifact(
-                                    session,
-                                    flowchart_id=flowchart_id,
-                                    flowchart_node_id=node_id,
-                                    flowchart_run_id=run_id,
-                                    flowchart_run_node_id=node_run_id,
-                                    node_config=(
-                                        node_spec.get("config")
-                                        if isinstance(node_spec.get("config"), dict)
-                                        else {}
-                                    ),
-                                    input_context=input_context_payload,
-                                    output_state=output_state,
-                                    routing_state=routing_state,
-                                )
-                                output_state["artifact"] = artifact_summary
-                                artifact_summary_for_event = artifact_summary
-                            if (
-                                str(node_spec.get("node_type") or "").strip().lower()
-                                == FLOWCHART_NODE_TYPE_MEMORY
-                            ):
-                                artifact_summary = _persist_memory_node_artifact(
-                                    session,
-                                    flowchart_id=flowchart_id,
-                                    flowchart_node_id=node_id,
-                                    flowchart_run_id=run_id,
-                                    flowchart_run_node_id=node_run_id,
-                                    node_config=(
-                                        node_spec.get("config")
-                                        if isinstance(node_spec.get("config"), dict)
-                                        else {}
-                                    ),
-                                    input_context=_parse_json_object(
-                                        succeeded_node_run.input_context_json
-                                    ),
-                                    output_state=output_state,
-                                    routing_state=routing_state,
-                                )
-                                output_state["artifact"] = artifact_summary
-                                artifact_summary_for_event = artifact_summary
+                                or None,
+                                node_config=(
+                                    node_spec.get("config")
+                                    if isinstance(node_spec.get("config"), dict)
+                                    else {}
+                                ),
+                                input_context=input_context_payload,
+                                output_state=output_state,
+                                routing_state=routing_state,
+                            )
+                            output_state["artifact"] = artifact_summary
+                            artifact_summary_for_event = artifact_summary
                             succeeded_node_run.output_state_json = _json_dumps(output_state)
                             succeeded_node_run.routing_state_json = _json_dumps(routing_state)
                             _apply_node_run_contract_metadata(

@@ -93,8 +93,8 @@ export default function SettingsRuntimePage() {
     k8sKubeconfig: '',
     k8sKubeconfigClear: false,
     k8sNamespace: '',
-    k8sImage: '',
-    k8sImageTag: '',
+    k8sFrontierImage: '',
+    k8sVllmImage: '',
     k8sServiceAccount: '',
     k8sGpuLimit: '',
     k8sJobTtlSeconds: '',
@@ -156,8 +156,16 @@ export default function SettingsRuntimePage() {
         k8sKubeconfig: String(nodeExecutor.k8s_kubeconfig || ''),
         k8sKubeconfigClear: false,
         k8sNamespace: String(nodeExecutor.k8s_namespace || ''),
-        k8sImage: String(nodeExecutor.k8s_image || ''),
-        k8sImageTag: String(nodeExecutor.k8s_image_tag || ''),
+        k8sFrontierImage: String(
+          nodeExecutor.k8s_effective_frontier_image
+          || nodeExecutor.k8s_frontier_image
+          || '',
+        ),
+        k8sVllmImage: String(
+          nodeExecutor.k8s_effective_vllm_image
+          || nodeExecutor.k8s_vllm_image
+          || '',
+        ),
         k8sServiceAccount: String(nodeExecutor.k8s_service_account || ''),
         k8sGpuLimit: String(nodeExecutor.k8s_gpu_limit || ''),
         k8sJobTtlSeconds: String(nodeExecutor.k8s_job_ttl_seconds || ''),
@@ -311,8 +319,8 @@ export default function SettingsRuntimePage() {
                   <label className="field"><span>Log collection timeout seconds</span><IntegerInput value={nodeExecutorForm.logCollectionTimeoutSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, logCollectionTimeoutSeconds: value }))} /></label>
                   <label className="field"><span>Cancel grace timeout seconds</span><IntegerInput value={nodeExecutorForm.cancelGraceTimeoutSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, cancelGraceTimeoutSeconds: value }))} /></label>
                   <label className="field"><span>Kubernetes namespace</span><input type="text" value={nodeExecutorForm.k8sNamespace} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sNamespace: event.target.value }))} /></label>
-                  <label className="field"><span>Kubernetes image</span><input type="text" value={nodeExecutorForm.k8sImage} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sImage: event.target.value }))} /></label>
-                  <label className="field"><span>Executor image tag</span><input type="text" value={nodeExecutorForm.k8sImageTag} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sImageTag: event.target.value }))} /></label>
+                  <label className="field"><span>Frontier image</span><input type="text" value={nodeExecutorForm.k8sFrontierImage} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sFrontierImage: event.target.value }))} /></label>
+                  <label className="field"><span>vLLM image</span><input type="text" value={nodeExecutorForm.k8sVllmImage} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sVllmImage: event.target.value }))} /></label>
                   <label className="field"><span>Service account</span><input type="text" value={nodeExecutorForm.k8sServiceAccount} onChange={(event) => setNodeExecutorForm((current) => ({ ...current, k8sServiceAccount: event.target.value }))} /></label>
                   <label className="field"><span>GPU limit</span><IntegerInput value={nodeExecutorForm.k8sGpuLimit} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, k8sGpuLimit: value }))} /></label>
                   <label className="field"><span>Job TTL seconds</span><IntegerInput value={nodeExecutorForm.k8sJobTtlSeconds} onValueChange={(value) => setNodeExecutorForm((current) => ({ ...current, k8sJobTtlSeconds: value }))} /></label>

@@ -529,16 +529,14 @@ def node_executor_default_settings() -> dict[str, str]:
 
     default_frontier_image = (
         (Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE or "").strip()
-        or (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip()
         or "llmctl-executor-frontier:latest"
     )
     default_vllm_image = (
         (Config.NODE_EXECUTOR_K8S_VLLM_IMAGE or "").strip()
         or "llmctl-executor-vllm:latest"
     )
-    default_k8s_image = (
-        (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip() or default_frontier_image
-    )
+    # Legacy k8s_image is mirrored from canonical frontier image.
+    default_k8s_image = default_frontier_image
     return {
         "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
         "dispatch_timeout_seconds": _coerce_int_setting(
@@ -743,36 +741,16 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
         (settings.get("k8s_namespace") or "").strip() or defaults["k8s_namespace"]
     )
     try:
-        settings["k8s_image"] = validate_node_executor_image_reference(
-            settings.get("k8s_image"),
-            field_name="Kubernetes image",
-        ) or defaults["k8s_image"]
-    except ValueError:
-        settings["k8s_image"] = defaults["k8s_image"]
-    image_tag_candidate = (
-        settings.get("k8s_image_tag")
-        or extract_node_executor_image_tag(settings.get("k8s_image"))
-        or extract_node_executor_image_tag(defaults.get("k8s_image"))
-    )
-    try:
-        settings["k8s_image_tag"] = normalize_node_executor_image_tag(
-            image_tag_candidate
-        )
-    except ValueError:
-        settings["k8s_image_tag"] = extract_node_executor_image_tag(
-            settings.get("k8s_image")
-        )
-    try:
         settings["k8s_frontier_image"] = validate_node_executor_image_reference(
             settings.get("k8s_frontier_image"),
             field_name="Kubernetes frontier image",
-        ) or settings["k8s_image"]
+        ) or defaults["k8s_frontier_image"]
     except ValueError:
-        settings["k8s_frontier_image"] = settings["k8s_image"]
+        settings["k8s_frontier_image"] = defaults["k8s_frontier_image"]
     frontier_tag_candidate = (
         settings.get("k8s_frontier_image_tag")
         or extract_node_executor_image_tag(settings.get("k8s_frontier_image"))
-        or settings.get("k8s_image_tag")
+        or extract_node_executor_image_tag(defaults.get("k8s_frontier_image"))
     )
     try:
         settings["k8s_frontier_image_tag"] = normalize_node_executor_image_tag(
@@ -780,7 +758,9 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
             field_name="Kubernetes frontier image tag",
         )
     except ValueError:
-        settings["k8s_frontier_image_tag"] = settings.get("k8s_image_tag") or ""
+        settings["k8s_frontier_image_tag"] = defaults.get("k8s_frontier_image_tag") or ""
+    settings["k8s_image"] = settings["k8s_frontier_image"]
+    settings["k8s_image_tag"] = settings["k8s_frontier_image_tag"]
     try:
         settings["k8s_vllm_image"] = validate_node_executor_image_reference(
             settings.get("k8s_vllm_image"),
@@ -926,30 +906,26 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
             candidate.get("k8s_image_pull_secrets_json") or ""
         ).strip(),
     }
-    validated["k8s_image"] = validate_node_executor_image_reference(
-        candidate.get("k8s_image"),
-        field_name="Kubernetes image",
-    ) or "llmctl-executor-frontier:latest"
-    image_tag_candidate = (
-        candidate.get("k8s_image_tag")
-        or extract_node_executor_image_tag(validated.get("k8s_image"))
-    )
-    validated["k8s_image_tag"] = normalize_node_executor_image_tag(
-        image_tag_candidate
+    default_frontier_image = (
+        (Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE or "").strip()
+        or "llmctl-executor-frontier:latest"
     )
     validated["k8s_frontier_image"] = validate_node_executor_image_reference(
         candidate.get("k8s_frontier_image"),
         field_name="Kubernetes frontier image",
-    ) or validated["k8s_image"]
+    ) or default_frontier_image
     frontier_tag_candidate = (
         candidate.get("k8s_frontier_image_tag")
         or extract_node_executor_image_tag(validated.get("k8s_frontier_image"))
-        or validated.get("k8s_image_tag")
+        or (Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE_TAG or "").strip()
+        or extract_node_executor_image_tag(default_frontier_image)
     )
     validated["k8s_frontier_image_tag"] = normalize_node_executor_image_tag(
         frontier_tag_candidate,
         field_name="Kubernetes frontier image tag",
     )
+    validated["k8s_image"] = validated["k8s_frontier_image"]
+    validated["k8s_image_tag"] = validated["k8s_frontier_image_tag"]
     validated["k8s_vllm_image"] = validate_node_executor_image_reference(
         candidate.get("k8s_vllm_image"),
         field_name="Kubernetes vLLM image",

@@ -106,6 +106,8 @@ import {
   getFlowcharts,
   getFlowchartRuntime,
   getNode,
+  getNodeArtifact,
+  getNodeArtifacts,
   getNodeMeta,
   getNodes,
   getNodeStatus,
@@ -676,6 +678,30 @@ describe('studioApi', () => {
     expect(requestJson).toHaveBeenNthCalledWith(19, '/memories/4/delete', { method: 'POST' })
   })
 
+  test('stage 4 generic artifact endpoints map to expected api paths', () => {
+    getNodeArtifacts({
+      limit: 25,
+      offset: 5,
+      order: 'asc',
+      artifactType: 'task',
+      nodeType: 'task',
+      flowchartId: 9,
+      flowchartNodeId: 7,
+      flowchartRunId: 11,
+      flowchartRunNodeId: 13,
+      refId: 3,
+      requestId: 'req-1',
+      correlationId: 'corr-1',
+    })
+    getNodeArtifact(55)
+
+    expect(requestJson).toHaveBeenNthCalledWith(
+      1,
+      '/artifacts?limit=25&offset=5&order=asc&artifact_type=task&node_type=task&flowchart_id=9&flowchart_node_id=7&flowchart_run_id=11&flowchart_run_node_id=13&ref_id=3&request_id=req-1&correlation_id=corr-1',
+    )
+    expect(requestJson).toHaveBeenNthCalledWith(2, '/artifacts/55')
+  })
+
   test('stage 5 flowchart endpoints map to expected api paths', () => {
     getFlowcharts()
     getFlowchartMeta()
@@ -817,8 +843,8 @@ describe('studioApi', () => {
       k8sKubeconfig: '',
       k8sKubeconfigClear: false,
       k8sNamespace: 'llmctl',
-      k8sImage: 'llmctl/studio:dev',
-      k8sImageTag: '2026.02.18',
+      k8sFrontierImage: 'llmctl-executor-frontier:latest',
+      k8sVllmImage: 'llmctl-executor-vllm:latest',
       k8sServiceAccount: 'studio-runner',
       k8sGpuLimit: 0,
       k8sJobTtlSeconds: 600,
@@ -926,8 +952,10 @@ describe('studioApi', () => {
         k8s_kubeconfig: '',
         k8s_kubeconfig_clear: false,
         k8s_namespace: 'llmctl',
-        k8s_image: 'llmctl/studio:dev',
-        k8s_image_tag: '2026.02.18',
+        k8s_frontier_image: 'llmctl-executor-frontier:latest',
+        k8s_frontier_image_tag: '',
+        k8s_vllm_image: 'llmctl-executor-vllm:latest',
+        k8s_vllm_image_tag: '',
         k8s_service_account: 'studio-runner',
         k8s_gpu_limit: 0,
         k8s_job_ttl_seconds: 600,

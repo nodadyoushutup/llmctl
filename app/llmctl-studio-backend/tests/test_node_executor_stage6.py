@@ -237,6 +237,54 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             captured["image"],
         )
 
+    def test_kubernetes_executor_selects_frontier_image_for_frontier_providers(self) -> None:
+        settings = {
+            "k8s_in_cluster": "true",
+            "k8s_frontier_image": "ghcr.io/acme/llmctl-executor-frontier:latest",
+            "k8s_frontier_image_tag": "v2026.02.18",
+            "k8s_vllm_image": "ghcr.io/acme/llmctl-executor-vllm:latest",
+            "k8s_vllm_image_tag": "v2026.02.19",
+        }
+        for provider in ("openai", "anthropic", "google"):
+            with self.subTest(provider=provider):
+                request = ExecutionRequest(
+                    node_id=12,
+                    node_type="llm_call",
+                    node_ref_id=None,
+                    node_config={"provider": provider},
+                    input_context={},
+                    execution_id=111,
+                    execution_task_id=222,
+                    execution_index=1,
+                    enabled_providers=set(),
+                    default_model_id=None,
+                    mcp_server_keys=[],
+                )
+                executor = KubernetesExecutor(settings)
+                captured = {"image": ""}
+                executor._dispatch_via_kubernetes = (  # type: ignore[method-assign]
+                    lambda **kwargs: captured.update({"image": str(kwargs.get("image") or "")})
+                    or _KubernetesDispatchOutcome(
+                        job_name=f"job-tag-frontier-{provider}",
+                        pod_name=f"pod-tag-frontier-{provider}",
+                        stdout="",
+                        stderr="",
+                        startup_marker_seen=True,
+                        executor_result={
+                            "status": "success",
+                            "output_state": {"node_type": "llm_call"},
+                            "routing_state": {},
+                        },
+                        terminal_reason="Complete",
+                    )
+                )
+                result = executor.execute(request, lambda _request: ({"local": True}, {}))
+                self.assertEqual("success", result.status)
+                self.assertEqual(
+                    "ghcr.io/acme/llmctl-executor-frontier:v2026.02.18",
+                    captured["image"],
+                )
+
     def test_job_name_differs_for_same_node_and_execution_across_task_domains(self) -> None:
         executor = KubernetesExecutor({})
         flowchart_request = ExecutionRequest(

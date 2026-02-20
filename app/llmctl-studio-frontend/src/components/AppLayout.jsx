@@ -24,9 +24,19 @@ const navSections = [
     id: 'workflow',
     label: 'Artifact',
     items: [
-      { id: 'plans', to: '/plans', label: 'Plans', icon: 'fa-solid fa-map' },
-      { id: 'milestones', to: '/milestones', label: 'Milestones', icon: 'fa-solid fa-flag-checkered' },
-      { id: 'memories', to: '/memories', label: 'Memories', icon: 'fa-solid fa-brain' },
+      {
+        id: 'artifact-all',
+        to: '/artifacts/all',
+        label: 'All Artifacts',
+        icon: 'fa-solid fa-boxes-stacked',
+        matchPrefixes: ['/artifacts/all', '/artifacts/item/'],
+      },
+      { id: 'artifact-task', to: '/artifacts/type/task', label: 'Task', icon: 'fa-solid fa-list-check' },
+      { id: 'artifact-plan', to: '/artifacts/type/plan', label: 'Plan', icon: 'fa-solid fa-map' },
+      { id: 'artifact-milestone', to: '/artifacts/type/milestone', label: 'Milestone', icon: 'fa-solid fa-flag-checkered' },
+      { id: 'artifact-memory', to: '/artifacts/type/memory', label: 'Memory', icon: 'fa-solid fa-brain' },
+      { id: 'artifact-decision', to: '/artifacts/type/decision', label: 'Decision', icon: 'fa-solid fa-code-branch' },
+      { id: 'artifact-rag', to: '/artifacts/type/rag', label: 'RAG', icon: 'fa-solid fa-database' },
     ],
   },
   {
@@ -118,7 +128,7 @@ export default function AppLayout({ children }) {
   const isFlowchartDetailRoute = useMemo(() => /^\/flowcharts\/\d+\/?$/.test(location.pathname), [location.pathname])
   const isNodeDetailRoute = useMemo(() => /^\/nodes\/\d+\/?$/.test(location.pathname), [location.pathname])
   const isFixedListRoute = useMemo(
-    () => /^(\/nodes|\/runs|\/plans|\/milestones|\/memories)\/?$/.test(location.pathname),
+    () => /^(\/nodes|\/runs|\/plans|\/milestones|\/memories|\/artifacts\/all|\/artifacts\/type\/[^/]+)\/?$/.test(location.pathname),
     [location.pathname],
   )
   const isFixedContentRoute = isFlowchartDetailRoute || isNodeDetailRoute || isFixedListRoute

@@ -18,7 +18,10 @@ RUN apt-get update \
         ca-certificates \
         curl \
         git \
+        ghostscript \
         openssh-client \
+        ocrmypdf \
+        poppler-utils \
         tesseract-ocr \
         tesseract-ocr-eng \
     && python3 -m venv /opt/venv \
@@ -30,6 +33,13 @@ COPY app/llmctl-executor/requirements.studio-runtime.txt /app/app/llmctl-executo
 COPY app/llmctl-executor/requirements.txt /app/app/llmctl-executor/requirements.txt
 RUN /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-executor/requirements.frontier.lock.txt \
     && /opt/venv/bin/pip check \
+    && /opt/venv/bin/python3 -c "import fitz, pytesseract, PIL; print('frontier-ocr-python-deps-ok')" \
+    && for required in tesseract pdfinfo pdftotext pdftoppm gs ocrmypdf; do \
+        command -v "${required}" >/dev/null 2>&1 || { \
+            echo "Missing required OCR/PDF tool in frontier image: ${required}" >&2; \
+            exit 1; \
+        }; \
+    done \
     && /opt/venv/bin/python3 -c "import importlib.util,sys; sys.exit(1 if importlib.util.find_spec('vllm') else 0)" \
     && for blocked in codex gemini claude; do \
         if command -v "${blocked}" >/dev/null 2>&1; then \

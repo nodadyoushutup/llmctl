@@ -136,9 +136,14 @@ from core.models import (
     NODE_ARTIFACT_RETENTION_TTL,
     NODE_ARTIFACT_RETENTION_TTL_MAX_COUNT,
     NODE_ARTIFACT_TYPE_DECISION,
+    NODE_ARTIFACT_TYPE_END,
+    NODE_ARTIFACT_TYPE_FLOWCHART,
     NODE_ARTIFACT_TYPE_MEMORY,
     NODE_ARTIFACT_TYPE_MILESTONE,
     NODE_ARTIFACT_TYPE_PLAN,
+    NODE_ARTIFACT_TYPE_RAG,
+    NODE_ARTIFACT_TYPE_START,
+    NODE_ARTIFACT_TYPE_TASK,
     Plan,
     PlanStage,
     PlanTask,
@@ -8081,6 +8086,19 @@ def _parse_node_artifact_list_params(
     )
 
 
+NODE_ARTIFACT_TYPE_FILTER_CHOICES = {
+    NODE_ARTIFACT_TYPE_START,
+    NODE_ARTIFACT_TYPE_END,
+    NODE_ARTIFACT_TYPE_FLOWCHART,
+    NODE_ARTIFACT_TYPE_TASK,
+    NODE_ARTIFACT_TYPE_PLAN,
+    NODE_ARTIFACT_TYPE_MILESTONE,
+    NODE_ARTIFACT_TYPE_MEMORY,
+    NODE_ARTIFACT_TYPE_DECISION,
+    NODE_ARTIFACT_TYPE_RAG,
+}
+
+
 def _workflow_request_id() -> str:
     return request_id_from_request(request)
 
@@ -11921,6 +11939,153 @@ def view_decision_node_artifact(flowchart_id: int, flowchart_node_id: int, artif
     }
     if correlation_id:
         payload["correlation_id"] = correlation_id
+    return payload
+
+
+@bp.get("/artifacts")
+def list_node_artifacts():
+    workflow_request_id = _workflow_request_id()
+    workflow_correlation_id = _workflow_correlation_id()
+    parsed, error_response = _parse_node_artifact_list_params(
+        request_id=workflow_request_id,
+        correlation_id=workflow_correlation_id,
+    )
+    if error_response is not None:
+        return error_response
+    assert parsed is not None
+    try:
+        ref_id = _coerce_optional_int(
+            request.args.get("ref_id"),
+            field_name="ref_id",
+            minimum=1,
+        )
+    except ValueError as exc:
+        return _workflow_error_envelope(
+            code="invalid_request",
+            message=str(exc),
+            details={},
+            request_id=workflow_request_id,
+            correlation_id=workflow_correlation_id,
+        ), 400
+
+    artifact_type_filter = str(request.args.get("artifact_type") or "").strip().lower()
+    node_type_filter = str(request.args.get("node_type") or "").strip().lower()
+    request_id_filter = str(request.args.get("trace_request_id") or request.args.get("request_id") or "").strip()
+    correlation_id_filter = str(
+        request.args.get("trace_correlation_id") or request.args.get("correlation_id") or ""
+    ).strip()
+    if artifact_type_filter and artifact_type_filter not in NODE_ARTIFACT_TYPE_FILTER_CHOICES:
+        return _workflow_error_envelope(
+            code="invalid_request",
+            message="artifact_type is not supported.",
+            details={
+                "artifact_type": artifact_type_filter,
+                "supported": sorted(NODE_ARTIFACT_TYPE_FILTER_CHOICES),
+            },
+            request_id=workflow_request_id,
+            correlation_id=workflow_correlation_id,
+        ), 400
+    if node_type_filter and node_type_filter not in FLOWCHART_NODE_TYPE_CHOICES:
+        return _workflow_error_envelope(
+            code="invalid_request",
+            message="node_type is not supported.",
+            details={
+                "node_type": node_type_filter,
+                "supported": sorted(FLOWCHART_NODE_TYPE_CHOICES),
+            },
+            request_id=workflow_request_id,
+            correlation_id=workflow_correlation_id,
+        ), 400
+
+    with session_scope() as session:
+        artifact_filters: list[object] = []
+        flowchart_id = parsed["flowchart_id"]
+        flowchart_node_id = parsed["flowchart_node_id"]
+        flowchart_run_id = parsed["flowchart_run_id"]
+        flowchart_run_node_id = parsed["flowchart_run_node_id"]
+        if isinstance(flowchart_id, int):
+            artifact_filters.append(NodeArtifact.flowchart_id == flowchart_id)
+        if isinstance(flowchart_node_id, int):
+            artifact_filters.append(NodeArtifact.flowchart_node_id == flowchart_node_id)
+        if isinstance(flowchart_run_id, int):
+            artifact_filters.append(NodeArtifact.flowchart_run_id == flowchart_run_id)
+        if isinstance(flowchart_run_node_id, int):
+            artifact_filters.append(NodeArtifact.flowchart_run_node_id == flowchart_run_node_id)
+        if artifact_type_filter:
+            artifact_filters.append(
+                func.lower(NodeArtifact.artifact_type) == artifact_type_filter
+            )
+        if node_type_filter:
+            artifact_filters.append(func.lower(NodeArtifact.node_type) == node_type_filter)
+        if isinstance(ref_id, int):
+            artifact_filters.append(NodeArtifact.ref_id == ref_id)
+        if request_id_filter:
+            artifact_filters.append(NodeArtifact.request_id == request_id_filter)
+        if correlation_id_filter:
+            artifact_filters.append(NodeArtifact.correlation_id == correlation_id_filter)
+
+        total_count = (
+            session.execute(select(func.count(NodeArtifact.id)).where(*artifact_filters))
+            .scalar_one()
+        )
+        stmt = select(NodeArtifact).where(*artifact_filters)
+        if parsed["descending"]:
+            stmt = stmt.order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+        else:
+            stmt = stmt.order_by(NodeArtifact.created_at.asc(), NodeArtifact.id.asc())
+        artifacts = (
+            session.execute(
+                stmt.limit(int(parsed["limit"])).offset(int(parsed["offset"]))
+            )
+            .scalars()
+            .all()
+        )
+    payload: dict[str, object] = {
+        "ok": True,
+        "count": len(artifacts),
+        "total_count": int(total_count or 0),
+        "limit": int(parsed["limit"]),
+        "offset": int(parsed["offset"]),
+        "filters": {
+            "artifact_type": artifact_type_filter or None,
+            "node_type": node_type_filter or None,
+            "flowchart_id": parsed["flowchart_id"],
+            "flowchart_node_id": parsed["flowchart_node_id"],
+            "flowchart_run_id": parsed["flowchart_run_id"],
+            "flowchart_run_node_id": parsed["flowchart_run_node_id"],
+            "ref_id": ref_id,
+            "request_id": request_id_filter or None,
+            "correlation_id": correlation_id_filter or None,
+        },
+        "items": [_serialize_node_artifact(item) for item in artifacts],
+        "request_id": workflow_request_id,
+    }
+    if workflow_correlation_id:
+        payload["correlation_id"] = workflow_correlation_id
+    return payload
+
+
+@bp.get("/artifacts/<int:artifact_id>")
+def view_node_artifact(artifact_id: int):
+    workflow_request_id = _workflow_request_id()
+    workflow_correlation_id = _workflow_correlation_id()
+    with session_scope() as session:
+        artifact = session.get(NodeArtifact, artifact_id)
+        if artifact is None:
+            return _workflow_error_envelope(
+                code="not_found",
+                message=f"Artifact {artifact_id} was not found.",
+                details={"artifact_id": artifact_id},
+                request_id=workflow_request_id,
+                correlation_id=workflow_correlation_id,
+            ), 404
+    payload: dict[str, object] = {
+        "ok": True,
+        "item": _serialize_node_artifact(artifact),
+        "request_id": workflow_request_id,
+    }
+    if workflow_correlation_id:
+        payload["correlation_id"] = workflow_correlation_id
     return payload
 
 

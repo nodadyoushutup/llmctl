@@ -24,41 +24,72 @@ Stage 0 decisions:
 - [x] Sequence work so critical gaps are fixed immediately after discovery.
 - [x] Ensure final stages are `Automated Testing` then `Docs Updates`.
 
+## Critical Incident Addendum (2026-02-20): Frontier SDK-Only Claim Violation
+
+Observed production failure:
+
+- Executor node run failed with `Node execution failed: [Errno 2] No such file or directory: 'codex'`.
+
+Confirmed code evidence:
+
+- Node execution still enters `services.tasks:_execute_flowchart_node_request` (`app/llmctl-executor/src/llmctl_executor/payload.py`, `app/llmctl-studio-backend/src/services/tasks.py`).
+- Flowchart task execution path still calls legacy `_run_llm(...)` in `tasks.py`.
+- `tasks.py` codex provider path still shells to `Config.CODEX_CMD exec` and builds CLI flags.
+- Frontier executor image explicitly denies bundled `codex`, `gemini`, and `claude` binaries (`app/llmctl-executor/Dockerfile`).
+
+Why this was missed:
+
+- Migration work completed executor dispatch/image split, but provider execution in `services/tasks.py` remained CLI-based for flowchart task paths.
+- Test strategy relied heavily on `_run_llm` mocks and included assertions that codex CLI args are present, reinforcing legacy behavior.
+- Stage 15 freeze recorded unresolved blocker inventory, so full claim closure never reached hard-proof parity.
+
+Required remediation items (hard-gated):
+
+- [x] Replace frontier provider execution in `services/tasks.py` with SDK/router execution path (no CLI binary invocation).
+- [x] Remove codex/gemini/claude CLI command-builder reliance from flowchart and task-node runtime paths.
+- [x] Replace legacy CLI-specific tests with SDK-only invariants.
+- [x] Add regression tests that fail if frontier runtime attempts `codex`, `gemini`, or `claude` subprocess execution.
+- [ ] Add frontier executor integration smoke test proving `llm_call` + flowchart task node succeeds without CLI binaries on PATH.
+- [x] Add claim-evidence row in the matrix marking previous SDK-only claim as failed-until-remediated.
+
 ## Stage 2 - Claim Inventory + Normalization
 
-- [ ] Enumerate every checked claim across active runtime migration planning docs.
-- [ ] Normalize claims into a canonical inventory with stable IDs and source references.
-- [ ] Classify claims by domain (`backend`, `api`, `frontend`, `contracts`, `ops`, `testing`, `docs`).
-- [ ] Mark claims that define invariants (must-have behaviors) versus informational claims.
+- [x] Enumerate every checked claim across active runtime migration planning docs.
+- [x] Normalize claims into a canonical inventory with stable IDs and source references.
+- [x] Classify claims by domain (`backend`, `api`, `frontend`, `contracts`, `ops`, `testing`, `docs`).
+- [x] Mark claims that define invariants (must-have behaviors) versus informational claims.
 
 ## Stage 3 - Evidence Matrix Construction
 
-- [ ] Build a claim evidence matrix under `docs/planning/active/` linking each claim ID to:
+- [x] Build a claim evidence matrix under `docs/planning/active/` linking each claim ID to:
 - [ ] Code paths that implement the claim.
 - [ ] Automated tests that prove the claim.
 - [ ] API/UI/runtime evidence for user-visible behavior when applicable.
-- [ ] Mark each claim as `pass`, `fail`, or `insufficient evidence`.
+- [x] Mark each claim as `pass`, `fail`, or `insufficient evidence`.
 
 ## Stage 4 - Critical Gap Triage + Immediate Fix Queue
 
-- [ ] Rank all failed claims by severity (`critical`, `high`, `medium`, `low`).
-- [ ] Define immediate fix queue for `critical` items, starting with artifact invariant drift.
-- [ ] Convert each critical claim into concrete acceptance tests before implementation.
-- [ ] Lock a remediation order that preserves runtime safety and deterministic behavior.
+- [x] Rank all failed claims by severity (`critical`, `high`, `medium`, `low`).
+- [x] Define immediate fix queue for `critical` items, starting with artifact invariant drift.
+- [x] Convert each critical claim into concrete acceptance tests before implementation.
+- [x] Lock a remediation order that preserves runtime safety and deterministic behavior.
+- [x] Treat "frontier SDK-only claim violation (CLI invocation in node execution path)" as a critical priority-0 gap.
 
 ## Stage 5 - Critical Backend Remediation
 
 - [ ] Implement backend fixes for critical failed claims.
-- [ ] For artifact invariants, add missing node artifact types/persistence paths for required node classes.
-- [ ] Ensure contract/version/idempotency metadata is persisted consistently for new artifact writes.
-- [ ] Preserve backward compatibility or add explicit migration behavior where needed.
+- [x] For artifact invariants, add missing node artifact types/persistence paths for required node classes.
+- [x] Ensure contract/version/idempotency metadata is persisted consistently for new artifact writes.
+- [x] Preserve backward compatibility or add explicit migration behavior where needed.
+- [x] Complete provider runtime cutover in `services/tasks.py` so flowchart/task execution no longer shells out to frontier CLIs.
+- [x] Ensure `execute_llm_call_via_execution_router` (or equivalent SDK path) is the only frontier provider execution path.
 
 ## Stage 6 - API + Frontend Remediation
 
-- [ ] Implement/extend API endpoints needed to expose corrected runtime state.
-- [ ] Implement frontend surfaces for corrected artifact visibility and navigation parity.
-- [ ] Ensure list/detail row-link and action behaviors remain compliant with AGENTS instructions.
-- [ ] Route operation-level outcomes through shared flash messages where mutations are added or changed.
+- [x] Implement/extend API endpoints needed to expose corrected runtime state.
+- [x] Implement frontend surfaces for corrected artifact visibility and navigation parity.
+- [x] Ensure list/detail row-link and action behaviors remain compliant with AGENTS instructions.
+- [x] Route operation-level outcomes through shared flash messages where mutations are added or changed.
 
 ## Stage 7 - Hard-Gate Guardrail Implementation
 
@@ -66,6 +97,7 @@ Stage 0 decisions:
 - [ ] Add claim-to-test linkage checks (or equivalent machine-checkable mapping).
 - [ ] Add CI failure conditions for unresolved critical/high failed claims.
 - [ ] Ensure guardrails are documented and executable by contributors.
+- [ ] Add static/runtime guardrail: fail CI if frontier runtime code paths include direct `codex|gemini|claude` command execution.
 
 ## Stage 8 - Remaining Claim Remediation (High/Medium/Low)
 
@@ -77,9 +109,9 @@ Stage 0 decisions:
 ## Stage 9 - Automated Testing
 
 - [ ] Run full backend test coverage for runtime contracts, artifacts, routing, and APIs.
-- [ ] Run frontend tests for artifact and navigation behaviors affected by remediations.
+- [x] Run frontend tests for artifact and navigation behaviors affected by remediations.
 - [ ] Run targeted end-to-end regression for representative workflows across node types.
-- [ ] Record command evidence and results in the active planning artifact.
+- [x] Record command evidence and results in the active planning artifact.
 
 ## Stage 10 - Docs Updates
 
@@ -88,3 +120,25 @@ Stage 0 decisions:
 - [ ] Publish the final claim evidence matrix with pass/fail closure evidence.
 - [ ] Move this plan to `docs/planning/archive/` once all stages are complete.
 
+## Execution Notes (2026-02-20)
+
+- Frontend tests passed for Stage 6 artifact/nav remediations:
+  - `npm --prefix app/llmctl-studio-frontend test -- src/pages/ArtifactExplorerPage.test.jsx src/pages/ArtifactDetailPage.test.jsx src/App.routing.test.jsx src/lib/studioApi.test.js`
+  - Result: 4 files, 61 tests passed.
+- Backend targeted Stage 6 tests were not runnable in current shell environment due missing Python test/runtime deps:
+  - `python3 -m pytest -q ...` failed with `No module named pytest`.
+  - `python3 -m unittest -q ...` failed importing `flask`.
+- Syntax verification passed:
+  - `python3 -m compileall -q app/llmctl-studio-backend/src/web/views.py app/llmctl-studio-backend/tests/test_flowchart_stage9.py app/llmctl-studio-frontend/src/pages/ArtifactExplorerPage.jsx app/llmctl-studio-frontend/src/pages/ArtifactDetailPage.jsx app/llmctl-studio-frontend/src/lib/studioApi.js`
+- Frontend visual artifact captured (post-restart):
+  - `docs/screenshots/2026-02-19-23-44-27--artifacts-task--stage6-remediation-post-restart--1920x1080--4fcc88f--fcb8ae.png`
+- Frontier SDK/runtime cutover implementation landed for Stage 5:
+  - `app/llmctl-studio-backend/src/services/tasks.py` now routes frontier providers via `execute_llm_call_via_execution_router` outside executor node-execution context.
+  - Executor node-execution context now uses SDK/HTTP frontier provider calls (no `codex|gemini|claude` CLI subprocess invocation).
+  - `app/llmctl-studio-backend/src/services/tasks.py` call sites now pass explicit dispatch context (`request_id`, `node_id`, `execution_id`) for routed LLM execution.
+- Frontier guardrail regression tests updated:
+  - `app/llmctl-studio-backend/tests/test_flowchart_stage9.py` now asserts frontier `_run_llm` does not use CLI subprocess paths in router and executor contexts.
+  - `app/llmctl-studio-backend/tests/test_claude_provider_stage8.py` now asserts executor-context Claude runtime uses SDK API path and no CLI subprocess.
+- Backend validation commands run:
+  - `python3 -m compileall -q app/llmctl-studio-backend/src/services/tasks.py app/llmctl-studio-backend/tests/test_flowchart_stage9.py app/llmctl-studio-backend/tests/test_claude_provider_stage8.py` (passed)
+  - `python3 -m unittest ...` targeted Stage 5 tests (blocked: `ModuleNotFoundError: No module named 'flask'` in current shell environment)

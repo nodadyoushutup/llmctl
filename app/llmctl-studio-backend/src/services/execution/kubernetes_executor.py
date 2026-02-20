@@ -82,7 +82,14 @@ _POD_ENV_PREFIX_ALLOWLIST = (
     "GITHUB_",
 )
 _VLLM_PROVIDER_SET = {"vllm_local", "vllm_remote"}
-_FRONTIER_PROVIDER_SET = {"codex", "gemini", "claude"}
+_FRONTIER_PROVIDER_SET = {
+    "codex",
+    "openai",
+    "gemini",
+    "google",
+    "claude",
+    "anthropic",
+}
 
 
 def _utcnow() -> datetime:

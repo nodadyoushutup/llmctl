@@ -562,6 +562,72 @@ export function updateQuickTaskDefaults({
   })
 }
 
+export function getNodeArtifacts(
+  {
+    limit = 50,
+    offset = 0,
+    order = 'desc',
+    artifactType = '',
+    nodeType = '',
+    flowchartId = null,
+    flowchartNodeId = null,
+    flowchartRunId = null,
+    flowchartRunNodeId = null,
+    refId = null,
+    requestId = '',
+    correlationId = '',
+  } = {},
+) {
+  const params = {}
+  if (Number.isFinite(limit) && limit > 0) {
+    params.limit = Math.floor(limit)
+  }
+  if (Number.isFinite(offset) && offset >= 0) {
+    params.offset = Math.floor(offset)
+  }
+  const normalizedOrder = String(order || 'desc').trim().toLowerCase()
+  if (normalizedOrder === 'asc' || normalizedOrder === 'desc') {
+    params.order = normalizedOrder
+  }
+  const normalizedArtifactType = String(artifactType || '').trim().toLowerCase()
+  if (normalizedArtifactType) {
+    params.artifact_type = normalizedArtifactType
+  }
+  const normalizedNodeType = String(nodeType || '').trim().toLowerCase()
+  if (normalizedNodeType) {
+    params.node_type = normalizedNodeType
+  }
+  if (flowchartId != null && String(flowchartId).trim() !== '') {
+    params.flowchart_id = parsePositiveId(flowchartId, 'flowchartId')
+  }
+  if (flowchartNodeId != null && String(flowchartNodeId).trim() !== '') {
+    params.flowchart_node_id = parsePositiveId(flowchartNodeId, 'flowchartNodeId')
+  }
+  if (flowchartRunId != null && String(flowchartRunId).trim() !== '') {
+    params.flowchart_run_id = parsePositiveId(flowchartRunId, 'flowchartRunId')
+  }
+  if (flowchartRunNodeId != null && String(flowchartRunNodeId).trim() !== '') {
+    params.flowchart_run_node_id = parsePositiveId(flowchartRunNodeId, 'flowchartRunNodeId')
+  }
+  if (refId != null && String(refId).trim() !== '') {
+    params.ref_id = parsePositiveId(refId, 'refId')
+  }
+  const normalizedRequestId = String(requestId || '').trim()
+  if (normalizedRequestId) {
+    params.request_id = normalizedRequestId
+  }
+  const normalizedCorrelationId = String(correlationId || '').trim()
+  if (normalizedCorrelationId) {
+    params.correlation_id = normalizedCorrelationId
+  }
+  return requestJson(appendQuery('/artifacts', params))
+}
+
+export function getNodeArtifact(artifactId) {
+  const parsedArtifactId = parsePositiveId(artifactId, 'artifactId')
+  return requestJson(`/artifacts/${parsedArtifactId}`)
+}
+
 export function getPlans({ page = 1, perPage = 20 } = {}) {
   return requestJson(
     appendQuery('/plans', {
@@ -1322,14 +1388,16 @@ export function updateSettingsRuntimeNodeExecutor({
   k8sKubeconfig = '',
   k8sKubeconfigClear = false,
   k8sNamespace = '',
-  k8sImage = '',
-  k8sImageTag = '',
+  k8sFrontierImage = '',
+  k8sVllmImage = '',
   k8sServiceAccount = '',
   k8sGpuLimit = '',
   k8sJobTtlSeconds = '',
   k8sImagePullSecretsJson = '',
   k8sInCluster = false,
 } = {}) {
+  const normalizedFrontierImage = String(k8sFrontierImage || '').trim()
+  const normalizedVllmImage = String(k8sVllmImage || '').trim()
   return requestJson('/settings/runtime/node-executor', {
     method: 'POST',
     body: {
@@ -1343,8 +1411,10 @@ export function updateSettingsRuntimeNodeExecutor({
       k8s_kubeconfig: k8sKubeconfig,
       k8s_kubeconfig_clear: k8sKubeconfigClear,
       k8s_namespace: k8sNamespace,
-      k8s_image: k8sImage,
-      k8s_image_tag: k8sImageTag,
+      k8s_frontier_image: normalizedFrontierImage,
+      k8s_frontier_image_tag: '',
+      k8s_vllm_image: normalizedVllmImage,
+      k8s_vllm_image_tag: '',
       k8s_service_account: k8sServiceAccount,
       k8s_gpu_limit: k8sGpuLimit,
       k8s_job_ttl_seconds: k8sJobTtlSeconds,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
-import { getMemoryArtifact, getMilestoneArtifact, getPlanArtifact } from '../lib/studioApi'
+import { getMemoryArtifact, getMilestoneArtifact, getNodeArtifact, getPlanArtifact } from '../lib/studioApi'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -22,6 +22,10 @@ function errorMessage(error, fallback) {
 }
 
 const ENTITY_CONFIG = {
+  artifact: {
+    label: 'artifact',
+    listPath: '/artifacts/all',
+  },
   plan: {
     label: 'plan',
     listPath: '/plans',
@@ -52,6 +56,10 @@ function entityContext(params) {
   if (memoryId) {
     return { kind: 'memory', entityId: memoryId }
   }
+  const genericArtifactId = parseId(params.artifactId)
+  if (genericArtifactId) {
+    return { kind: 'artifact', entityId: null }
+  }
   return { kind: null, entityId: null }
 }
 
@@ -63,12 +71,15 @@ export default function ArtifactDetailPage() {
 
   useEffect(() => {
     const config = context.kind ? ENTITY_CONFIG[context.kind] : null
-    if (!config || !context.entityId || !artifactId) {
+    if (!config || !artifactId) {
       setState({ loading: false, payload: null, error: 'Invalid artifact path.' })
       return
     }
     let cancelled = false
-    config.fetchArtifact(context.entityId, artifactId)
+    const requestPromise = context.kind === 'artifact'
+      ? getNodeArtifact(artifactId)
+      : config.fetchArtifact(context.entityId, artifactId)
+    requestPromise
       .then((payload) => {
         if (!cancelled) {
           setState({ loading: false, payload, error: '' })
@@ -96,7 +107,10 @@ export default function ArtifactDetailPage() {
   const payloadJson = artifact?.payload && typeof artifact.payload === 'object'
     ? JSON.stringify(artifact.payload, null, 2)
     : '{}'
-  const backPath = config ? `${config.listPath}/${context.entityId}` : '/'
+  const artifactType = String(artifact?.artifact_type || '').trim().toLowerCase()
+  const backPath = context.kind === 'artifact'
+    ? (artifactType ? `/artifacts/type/${artifactType}` : '/artifacts/all')
+    : (config ? `${config.listPath}/${context.entityId}` : '/')
   const flowchartRunId = parseId(artifact?.flowchart_run_id)
   const flowchartRunHref = flowchartRunId ? `/flowcharts/runs/${flowchartRunId}` : ''
   const action = String(artifact?.payload?.action || '').trim()

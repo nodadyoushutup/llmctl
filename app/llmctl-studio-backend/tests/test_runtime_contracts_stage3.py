@@ -18,6 +18,7 @@ if str(STUDIO_SRC) not in sys.path:
 from core.models import (
     FLOWCHART_NODE_TYPE_DECISION,
     NODE_ARTIFACT_TYPE_PLAN,
+    NODE_ARTIFACT_TYPE_TASK,
 )
 from services.runtime_contracts import (
     build_node_artifact_idempotency_key,
@@ -91,6 +92,17 @@ class RuntimeContractsStage3Tests(unittest.TestCase):
                 NODE_ARTIFACT_TYPE_PLAN,
                 {"action": "create_or_update_plan", "action_results": []},
             )
+
+    def test_validate_node_artifact_payload_contract_accepts_task_artifact_shape(self) -> None:
+        validate_node_artifact_payload_contract(
+            NODE_ARTIFACT_TYPE_TASK,
+            {
+                "node_type": "task",
+                "input_context": {},
+                "output_state": {"node_type": "task"},
+                "routing_state": {},
+            },
+        )
 
     def test_resolve_node_degraded_markers_prefers_fallback_reason(self) -> None:
         degraded, reason = resolve_node_degraded_markers(

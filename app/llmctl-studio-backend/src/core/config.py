@@ -278,13 +278,14 @@ class Config:
         "LLMCTL_NODE_EXECUTOR_K8S_NAMESPACE",
         "default",
     )
-    NODE_EXECUTOR_K8S_IMAGE = os.getenv(
-        "LLMCTL_NODE_EXECUTOR_K8S_IMAGE",
-        "llmctl-executor-frontier:latest",
-    )
     NODE_EXECUTOR_K8S_FRONTIER_IMAGE = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_FRONTIER_IMAGE",
-        NODE_EXECUTOR_K8S_IMAGE or "llmctl-executor-frontier:latest",
+        "llmctl-executor-frontier:latest",
+    )
+    # Legacy alias kept for payload compatibility; frontier image is canonical.
+    NODE_EXECUTOR_K8S_IMAGE = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_IMAGE",
+        NODE_EXECUTOR_K8S_FRONTIER_IMAGE,
     )
     NODE_EXECUTOR_K8S_VLLM_IMAGE = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_VLLM_IMAGE",

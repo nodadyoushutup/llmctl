@@ -63,6 +63,11 @@ describe('App routing', () => {
     expect((await screen.findAllByRole('heading', { name: 'Plans' })).length).toBeGreaterThan(0)
   })
 
+  test('artifacts route is native react', async () => {
+    renderAt('/artifacts/type/task')
+    expect(await screen.findByRole('heading', { name: 'Task Artifacts' })).toBeInTheDocument()
+  })
+
   test('milestones route is native react', async () => {
     renderAt('/milestones')
     expect((await screen.findAllByRole('heading', { name: 'Milestones' })).length).toBeGreaterThan(0)

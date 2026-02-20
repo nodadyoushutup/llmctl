@@ -9,9 +9,14 @@ from core.models import (
     FLOWCHART_NODE_TYPE_MILESTONE,
     FLOWCHART_NODE_TYPE_PLAN,
     NODE_ARTIFACT_TYPE_DECISION,
+    NODE_ARTIFACT_TYPE_END,
+    NODE_ARTIFACT_TYPE_FLOWCHART,
     NODE_ARTIFACT_TYPE_MEMORY,
     NODE_ARTIFACT_TYPE_MILESTONE,
     NODE_ARTIFACT_TYPE_PLAN,
+    NODE_ARTIFACT_TYPE_RAG,
+    NODE_ARTIFACT_TYPE_START,
+    NODE_ARTIFACT_TYPE_TASK,
 )
 
 RUNTIME_CONTRACT_VERSION = "v1"
@@ -64,6 +69,12 @@ NODE_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
     NODE_ARTIFACT_TYPE_DECISION: {
         "required": ["matched_connector_ids", "evaluations", "no_match", "routing_state"]
     },
+    NODE_ARTIFACT_TYPE_END: {
+        "required": ["node_type", "input_context", "output_state", "routing_state"]
+    },
+    NODE_ARTIFACT_TYPE_FLOWCHART: {
+        "required": ["node_type", "input_context", "output_state", "routing_state"]
+    },
     NODE_ARTIFACT_TYPE_MEMORY: {
         "required": ["action", "action_results", "routing_state"]
     },
@@ -72,6 +83,15 @@ NODE_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     NODE_ARTIFACT_TYPE_PLAN: {
         "required": ["action", "action_results", "plan", "routing_state"]
+    },
+    NODE_ARTIFACT_TYPE_RAG: {
+        "required": ["node_type", "input_context", "output_state", "routing_state"]
+    },
+    NODE_ARTIFACT_TYPE_START: {
+        "required": ["node_type", "input_context", "output_state", "routing_state"]
+    },
+    NODE_ARTIFACT_TYPE_TASK: {
+        "required": ["node_type", "input_context", "output_state", "routing_state"]
     },
 }
 

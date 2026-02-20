@@ -34,6 +34,7 @@ import MemoriesPage from './pages/MemoriesPage'
 import MemoryDetailPage from './pages/MemoryDetailPage'
 import MemoryEditPage from './pages/MemoryEditPage'
 import MemoryNewPage from './pages/MemoryNewPage'
+import ArtifactExplorerPage from './pages/ArtifactExplorerPage'
 import ArtifactDetailPage from './pages/ArtifactDetailPage'
 import FlowchartsPage from './pages/FlowchartsPage'
 import FlowchartNewPage from './pages/FlowchartNewPage'
@@ -109,6 +110,10 @@ export default function App() {
         <Route path="/nodes" element={<AppLayout><NodesPage /></AppLayout>} />
         <Route path="/nodes/new" element={<AppLayout><NodeNewPage /></AppLayout>} />
         <Route path="/nodes/:nodeId" element={<AppLayout><NodeDetailPage /></AppLayout>} />
+        <Route path="/artifacts" element={<Navigate to="/artifacts/all" replace />} />
+        <Route path="/artifacts/all" element={<AppLayout><ArtifactExplorerPage /></AppLayout>} />
+        <Route path="/artifacts/type/:artifactType" element={<AppLayout><ArtifactExplorerPage /></AppLayout>} />
+        <Route path="/artifacts/item/:artifactId" element={<AppLayout><ArtifactDetailPage /></AppLayout>} />
         <Route path="/plans" element={<AppLayout><PlansPage /></AppLayout>} />
         <Route path="/plans/new" element={<AppLayout><PlanNewPage /></AppLayout>} />
         <Route path="/plans/:planId" element={<AppLayout><PlanDetailPage /></AppLayout>} />

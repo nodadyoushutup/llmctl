@@ -2,11 +2,12 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import ArtifactDetailPage from './ArtifactDetailPage'
-import { getMemoryArtifact, getMilestoneArtifact, getPlanArtifact } from '../lib/studioApi'
+import { getMemoryArtifact, getMilestoneArtifact, getNodeArtifact, getPlanArtifact } from '../lib/studioApi'
 
 vi.mock('../lib/studioApi', () => ({
   getMemoryArtifact: vi.fn(),
   getMilestoneArtifact: vi.fn(),
+  getNodeArtifact: vi.fn(),
   getPlanArtifact: vi.fn(),
 }))
 
@@ -16,6 +17,7 @@ function renderPage(initialEntry) {
       <Routes>
         <Route path="/memories/:memoryId/artifacts/:artifactId" element={<ArtifactDetailPage />} />
         <Route path="/plans/:planId/artifacts/:artifactId" element={<ArtifactDetailPage />} />
+        <Route path="/artifacts/item/:artifactId" element={<ArtifactDetailPage />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -54,6 +56,21 @@ describe('ArtifactDetailPage', () => {
         updated_at: '2026-02-18 12:05',
       },
     })
+    getNodeArtifact.mockResolvedValue({
+      item: {
+        id: 101,
+        artifact_type: 'task',
+        node_type: 'task',
+        flowchart_id: 5,
+        flowchart_node_id: 14,
+        flowchart_run_id: 63,
+        flowchart_run_node_id: 108,
+        variant_key: 'run-63-node-run-108',
+        payload: { action: 'execute_task_prompt' },
+        created_at: '2026-02-18 13:00',
+        updated_at: '2026-02-18 13:01',
+      },
+    })
   })
 
   test('loads memory artifact details for memory route', async () => {
@@ -67,6 +84,7 @@ describe('ArtifactDetailPage', () => {
     expect(screen.getByRole('link', { name: 'run detail' })).toHaveAttribute('href', '/flowcharts/runs/42')
     expect(getMilestoneArtifact).not.toHaveBeenCalled()
     expect(getPlanArtifact).not.toHaveBeenCalled()
+    expect(getNodeArtifact).not.toHaveBeenCalled()
   })
 
   test('loads plan artifact details for plan route', async () => {
@@ -78,5 +96,19 @@ describe('ArtifactDetailPage', () => {
     expect(await screen.findByText('Artifact 17')).toBeInTheDocument()
     expect(getMemoryArtifact).not.toHaveBeenCalled()
     expect(getMilestoneArtifact).not.toHaveBeenCalled()
+    expect(getNodeArtifact).not.toHaveBeenCalled()
+  })
+
+  test('loads generic node artifact details for artifact explorer route', async () => {
+    renderPage('/artifacts/item/101')
+
+    await waitFor(() => {
+      expect(getNodeArtifact).toHaveBeenCalledWith(101)
+    })
+    expect(await screen.findByText('Artifact 101')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'back' })).toHaveAttribute('href', '/artifacts/type/task')
+    expect(getMemoryArtifact).not.toHaveBeenCalled()
+    expect(getMilestoneArtifact).not.toHaveBeenCalled()
+    expect(getPlanArtifact).not.toHaveBeenCalled()
   })
 })
