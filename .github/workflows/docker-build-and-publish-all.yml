@@ -1,10 +1,26 @@
-name: Build And Publish All Docker Images To GHCR
+name: Build And Publish Docker Images To GHCR
 
 on:
   workflow_dispatch:
     inputs:
+      image:
+        description: "Select one image or choose all."
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - llmctl-studio-backend
+          - llmctl-studio-frontend
+          - llmctl-celery-worker
+          - llmctl-rag
+          - llmctl-mcp
+          - llmctl-github-mcp
+          - llmctl-chromadb-mcp
+          - llmctl-executor-frontier
+          - llmctl-executor-vllm
       tag:
-        description: "Optional semantic version tag (for example: 0.1.0). If omitted, each image auto-bumps its latest patch version."
+        description: "Optional semantic version tag (for example: 0.1.0). If omitted, latest patch version is auto-bumped per image."
         required: false
         default: ""
         type: string
@@ -14,53 +30,225 @@ permissions:
   packages: write
 
 jobs:
-  build-images:
+  select-images:
+    name: Select Images
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Build matrix from input
+        id: select
+        env:
+          SELECTED_IMAGE: ${{ inputs.image }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          selected = os.environ["SELECTED_IMAGE"]
+          catalog = [
+              {
+                  "image_name": "llmctl-studio-backend",
+                  "dockerfile": "app/llmctl-studio-backend/docker/Dockerfile",
+                  "build_args": "DOCKER_GID=999",
+              },
+              {
+                  "image_name": "llmctl-studio-frontend",
+                  "dockerfile": "app/llmctl-studio-frontend/docker/Dockerfile",
+                  "build_args": "\n".join(
+                      [
+                          "VITE_API_BASE_URL=",
+                          "VITE_API_BASE_PATH=/api",
+                          "VITE_WEB_BASE_PATH=/web",
+                          "VITE_SOCKET_PATH=/api/socket.io",
+                          "VITE_SOCKET_NAMESPACE=/rt",
+                      ]
+                  ),
+              },
+              {
+                  "image_name": "llmctl-celery-worker",
+                  "dockerfile": "app/llmctl-celery-worker/docker/Dockerfile",
+                  "build_args": "DOCKER_GID=999",
+              },
+              {
+                  "image_name": "llmctl-rag",
+                  "dockerfile": "app/llmctl-rag/docker/llmctl-rag.Dockerfile",
+                  "build_args": "",
+              },
+              {
+                  "image_name": "llmctl-mcp",
+                  "dockerfile": "app/llmctl-mcp/docker/llmctl-mcp.Dockerfile",
+                  "build_args": "",
+              },
+              {
+                  "image_name": "llmctl-github-mcp",
+                  "dockerfile": "app/llmctl-mcp/docker/github-mcp-proxy.Dockerfile",
+                  "build_args": "",
+              },
+              {
+                  "image_name": "llmctl-chromadb-mcp",
+                  "dockerfile": "app/llmctl-mcp/docker/chromadb-mcp-proxy.Dockerfile",
+                  "build_args": "",
+              },
+              {
+                  "image_name": "llmctl-executor-frontier",
+                  "dockerfile": "app/llmctl-executor/Dockerfile",
+                  "build_args": "",
+              },
+              {
+                  "image_name": "llmctl-executor-vllm",
+                  "dockerfile": "app/llmctl-executor/Dockerfile.base",
+                  "build_args": "\n".join(
+                      [
+                          "INSTALL_STUDIO_BACKEND_DEPS=true",
+                          "VLLM_VERSION=0.9.0",
+                          "TRANSFORMERS_VERSION=4.53.3",
+                      ]
+                  ),
+              },
+          ]
+
+          if selected == "all":
+            include = catalog
+          else:
+            include = [item for item in catalog if item["image_name"] == selected]
+            if not include:
+              raise SystemExit(f"Unsupported image selection: {selected}")
+
+          matrix = json.dumps({"include": include}, separators=(",", ":"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"matrix={matrix}\n")
+          PY
+
+  build-and-publish:
     name: Build ${{ matrix.image_name }}
+    runs-on: ubuntu-latest
+    needs: select-images
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - image_name: llmctl-studio-backend
-            dockerfile: app/llmctl-studio-backend/docker/Dockerfile
-            build_args: |
-              DOCKER_GID=999
-          - image_name: llmctl-studio-frontend
-            dockerfile: app/llmctl-studio-frontend/docker/Dockerfile
-            build_args: |
-              VITE_API_BASE_URL=
-              VITE_API_BASE_PATH=/api
-              VITE_WEB_BASE_PATH=/web
-              VITE_SOCKET_PATH=/api/socket.io
-              VITE_SOCKET_NAMESPACE=/rt
-          - image_name: llmctl-celery-worker
-            dockerfile: app/llmctl-celery-worker/docker/Dockerfile
-            build_args: |
-              DOCKER_GID=999
-          - image_name: llmctl-rag
-            dockerfile: app/llmctl-rag/docker/llmctl-rag.Dockerfile
-            build_args: ""
-          - image_name: llmctl-mcp
-            dockerfile: app/llmctl-mcp/docker/llmctl-mcp.Dockerfile
-            build_args: ""
-          - image_name: llmctl-github-mcp
-            dockerfile: app/llmctl-mcp/docker/github-mcp-proxy.Dockerfile
-            build_args: ""
-          - image_name: llmctl-chromadb-mcp
-            dockerfile: app/llmctl-mcp/docker/chromadb-mcp-proxy.Dockerfile
-            build_args: ""
-          - image_name: llmctl-executor-frontier
-            dockerfile: app/llmctl-executor/Dockerfile
-            build_args: ""
-          - image_name: llmctl-executor-vllm
-            dockerfile: app/llmctl-executor/Dockerfile.base
-            build_args: |
-              INSTALL_STUDIO_BACKEND_DEPS=true
-              VLLM_VERSION=0.9.0
-              TRANSFORMERS_VERSION=4.53.3
-    uses: ./.github/workflows/_build-and-publish-image.yml
-    with:
-      image_name: ${{ matrix.image_name }}
-      dockerfile: ${{ matrix.dockerfile }}
-      build_args: ${{ matrix.build_args }}
-      tag: ${{ inputs.tag }}
-    secrets: inherit
+      matrix: ${{ fromJson(needs.select-images.outputs.matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve image metadata
+        id: image_meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ matrix.image_name }}
+        run: |
+          owner_lower="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner_lower}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version tag
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ matrix.image_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          api_base = "https://api.github.com"
+          token = os.environ["GITHUB_TOKEN"]
+          owner = os.environ["OWNER"]
+          image_name = os.environ["IMAGE_NAME"]
+          input_tag = os.environ["INPUT_TAG"].strip()
+          output_path = os.environ["GITHUB_OUTPUT"]
+
+          semver_pattern = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+          def api_get(path: str):
+            request = urllib.request.Request(
+                f"{api_base}{path}",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {token}",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            try:
+              with urllib.request.urlopen(request) as response:
+                return json.load(response)
+            except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                return None
+              body = exc.read().decode("utf-8", errors="replace")
+              raise RuntimeError(
+                  f"GitHub API request failed ({exc.code}) for {path}: {body}"
+              ) from exc
+
+          if input_tag:
+            if not semver_pattern.match(input_tag):
+              raise SystemExit(
+                  f"Invalid tag '{input_tag}'. Expected semantic version like 0.1.0."
+              )
+            resolved_tag = input_tag
+          else:
+            owner_doc = api_get(f"/users/{owner}")
+            if owner_doc is None:
+              raise SystemExit(f"Unable to resolve GitHub owner '{owner}'")
+
+            scope = "orgs" if owner_doc.get("type") == "Organization" else "users"
+            versions = []
+            page = 1
+
+            while True:
+              page_items = api_get(
+                  f"/{scope}/{owner}/packages/container/{image_name}/versions?per_page=100&page={page}"
+              )
+              if page_items is None:
+                break
+              if not isinstance(page_items, list) or not page_items:
+                break
+              versions.extend(page_items)
+              page += 1
+
+            candidates = []
+            for version in versions:
+              tags = (
+                  (version or {})
+                  .get("metadata", {})
+                  .get("container", {})
+                  .get("tags", [])
+              )
+              for tag in tags:
+                match = semver_pattern.match(tag)
+                if match:
+                  candidates.append(tuple(int(part) for part in match.groups()))
+
+            if not candidates:
+              resolved_tag = "0.0.1"
+            else:
+              major, minor, patch = max(candidates)
+              resolved_tag = f"{major}.{minor}.{patch + 1}"
+
+          print(f"Resolved tag for {image_name}: {resolved_tag}")
+          with open(output_path, "a", encoding="utf-8") as output:
+            output.write(f"tag={resolved_tag}\n")
+          PY
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: ${{ steps.image_meta.outputs.image }}:${{ steps.version.outputs.tag }}

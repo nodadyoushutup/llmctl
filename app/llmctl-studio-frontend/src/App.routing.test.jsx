@@ -98,6 +98,16 @@ describe('App routing', () => {
     expect((await screen.findAllByRole('heading', { name: 'Models' })).length).toBeGreaterThan(0)
   })
 
+  test('new model route is native react', async () => {
+    renderAt('/models/new')
+    expect(await screen.findByRole('heading', { name: 'New Model' })).toBeInTheDocument()
+  })
+
+  test('model detail route is native react', async () => {
+    renderAt('/models/1')
+    expect(await screen.findByRole('heading', { name: 'Model' })).toBeInTheDocument()
+  })
+
   test('mcps route is native react', async () => {
     renderAt('/mcps')
     expect((await screen.findAllByRole('heading', { name: 'MCP Servers' })).length).toBeGreaterThan(0)

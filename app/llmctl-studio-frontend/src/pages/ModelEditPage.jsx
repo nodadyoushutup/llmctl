@@ -34,6 +34,10 @@ function parseConfig(configText) {
   return parsed
 }
 
+function isConfigParseError(error, message) {
+  return error instanceof SyntaxError || message === 'Config must be a JSON object.'
+}
+
 export default function ModelEditPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -114,8 +118,11 @@ export default function ModelEditPage() {
       navigate(`/models/${parsedModelId}`, { state: { from: listHref } })
     } catch (error) {
       const message = errorMessage(error, error instanceof Error ? error.message : 'Failed to update model.')
-      if (message === 'Config must be a JSON object.' || message.startsWith('Unexpected token')) {
-        setFieldErrors((current) => ({ ...current, configText: message }))
+      if (isConfigParseError(error, message)) {
+        setFieldErrors((current) => ({
+          ...current,
+          configText: error instanceof SyntaxError ? 'Config must be valid JSON.' : message,
+        }))
       } else {
         flash.error(message)
       }
@@ -132,7 +139,7 @@ export default function ModelEditPage() {
             <p>Update provider selection and model policies.</p>
           </div>
           <div className="table-actions">
-            {parsedModelId ? <Link to={`/models/${parsedModelId}`} className="btn-link btn-secondary">Back to Model</Link> : null}
+            {parsedModelId ? <Link to={`/models/${parsedModelId}`} state={{ from: listHref }} className="btn-link btn-secondary">Back to Model</Link> : null}
             <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
           </div>
         </div>

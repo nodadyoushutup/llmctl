@@ -3066,6 +3066,19 @@ fieldset.field {
   pointer-events: none;
 }
 
+.flow-ws-edge-fallback-pill {
+  fill: rgba(245, 158, 11, 0.2);
+  stroke: rgba(245, 158, 11, 0.55);
+  stroke-width: 1;
+}
+
+.flow-ws-edge-fallback-pill-text {
+  fill: #f8ddb0;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .flow-ws-node {
   position: absolute;
   color: #fff;
@@ -3250,6 +3263,35 @@ fieldset.field {
 
 .flow-ws-mcp-picker {
   margin-top: 0;
+}
+
+.flow-ws-routing-details {
+  margin-top: 0;
+}
+
+.flow-ws-routing-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.flow-ws-routing-chip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.flow-ws-routing-chip {
+  padding: 3px 8px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.flow-ws-routing-body {
+  margin-top: 8px;
 }
 
 .flow-ws-mcp-checklist {

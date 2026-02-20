@@ -14,6 +14,18 @@ from .tooling import (
     invoke_deterministic_tool,
     resolve_base_tool_scaffold,
 )
+from .tool_domains import (
+    COMMAND_OPERATIONS,
+    GIT_OPERATIONS,
+    RAG_OPERATIONS,
+    WORKSPACE_OPERATIONS,
+    ToolDomainContext,
+    ToolDomainError,
+    run_command_tool,
+    run_git_tool,
+    run_rag_tool,
+    run_workspace_tool,
+)
 
 __all__ = [
     "KubernetesExecutor",
@@ -31,4 +43,14 @@ __all__ = [
     "invoke_deterministic_tool",
     "resolve_base_tool_scaffold",
     "build_fallback_warning",
+    "ToolDomainContext",
+    "ToolDomainError",
+    "WORKSPACE_OPERATIONS",
+    "GIT_OPERATIONS",
+    "COMMAND_OPERATIONS",
+    "RAG_OPERATIONS",
+    "run_workspace_tool",
+    "run_git_tool",
+    "run_command_tool",
+    "run_rag_tool",
 ]

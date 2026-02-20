@@ -250,6 +250,7 @@ from services.huggingface_downloads import (
     vllm_local_model_container_path as _shared_vllm_local_model_container_path,
     vllm_local_model_directory as _shared_vllm_local_model_directory,
 )
+from services.execution.idempotency import register_runtime_idempotency_key
 from services.realtime_events import emit_contract_event
 from services.runtime_contracts import RUNTIME_CONTRACT_VERSION
 from web.api_contracts import (
@@ -338,6 +339,19 @@ HUGGINGFACE_REPO_ID_PATTERN = re.compile(
 )
 HUGGINGFACE_DOWNLOAD_JOB_STATUS_ACTIVE = {"queued", "running"}
 HUGGINGFACE_DOWNLOAD_JOB_TTL_SECONDS = 6 * 60 * 60
+FLOWCHART_TRACE_DEFAULT_LIMIT = 50
+FLOWCHART_TRACE_MAX_LIMIT = 200
+FLOWCHART_RUN_CONTROL_ACTIONS = {
+    "pause",
+    "resume",
+    "cancel",
+    "retry",
+    "skip",
+    "rewind",
+}
+FLOWCHART_RUN_CONTROL_REPLAY_ACTIONS = {"retry", "skip", "rewind"}
+FLOWCHART_RUN_ACTIVE_STATUSES = {"queued", "running", "stopping", "pausing", "paused"}
+FLOWCHART_RUN_TERMINAL_STATUSES = {"completed", "succeeded", "failed", "stopped", "canceled"}
 HUGGINGFACE_DOWNLOAD_JOB_MAX_RECORDS = 64
 _huggingface_download_jobs_lock = threading.Lock()
 _huggingface_download_jobs: dict[str, dict[str, object]] = {}
@@ -6477,6 +6491,134 @@ def _serialize_flowchart_run(run: FlowchartRun) -> dict[str, object]:
         "finished_at": _human_time(run.finished_at),
         "updated_at": _human_time(run.updated_at),
     }
+
+
+def _normalize_flowchart_run_status(status: object) -> str:
+    return str(status or "").strip().lower()
+
+
+def _flowchart_build_replay_marker(*, action: str, replay_run_id: int) -> str:
+    return f"flowchart-replay:{str(action).strip().lower()}:{int(replay_run_id)}"
+
+
+def _flowchart_parse_replay_marker(value: object) -> tuple[str, int] | None:
+    raw = str(value or "").strip()
+    if not raw.startswith("flowchart-replay:"):
+        return None
+    parts = raw.split(":", 2)
+    if len(parts) != 3:
+        return None
+    action = str(parts[1] or "").strip().lower()
+    try:
+        replay_run_id = int(parts[2])
+    except ValueError:
+        return None
+    if action not in FLOWCHART_RUN_CONTROL_REPLAY_ACTIONS or replay_run_id <= 0:
+        return None
+    return action, replay_run_id
+
+
+def _flowchart_trace_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _flowchart_trace_optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("value must be a boolean.")
+
+
+def _flowchart_trace_paginate(
+    rows: list[dict[str, object]],
+    *,
+    limit: int,
+    offset: int,
+) -> dict[str, object]:
+    page_rows = rows[offset : offset + limit]
+    return {
+        "items": page_rows,
+        "total_count": len(rows),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def _flowchart_trace_request_identity(
+    *,
+    output_state: dict[str, object] | None,
+    routing_state: dict[str, object] | None,
+) -> tuple[str | None, str | None]:
+    output_payload = output_state if isinstance(output_state, dict) else {}
+    routing_payload = routing_state if isinstance(routing_state, dict) else {}
+
+    def _tooling_payload(source: dict[str, object]) -> dict[str, object]:
+        tooling = source.get("deterministic_tooling")
+        return tooling if isinstance(tooling, dict) else {}
+
+    output_tooling = _tooling_payload(output_payload)
+    routing_tooling = _tooling_payload(routing_payload)
+    request_id = _flowchart_trace_text(
+        output_tooling.get("request_id")
+        or routing_tooling.get("request_id")
+        or output_payload.get("request_id")
+        or routing_payload.get("request_id")
+    )
+    correlation_id = _flowchart_trace_text(
+        output_tooling.get("correlation_id")
+        or routing_tooling.get("correlation_id")
+        or output_payload.get("correlation_id")
+        or routing_payload.get("correlation_id")
+    )
+    return request_id, correlation_id
+
+
+def _flowchart_trace_warning_entries(
+    *,
+    node_run: FlowchartRunNode,
+    output_state: dict[str, object] | None,
+    routing_state: dict[str, object] | None,
+) -> list[dict[str, object]]:
+    warnings: list[dict[str, object]] = []
+    if bool(node_run.degraded_status):
+        warnings.append(
+            {
+                "kind": "degraded",
+                "message": str(node_run.degraded_reason or "degraded_execution"),
+            }
+        )
+    output_payload = output_state if isinstance(output_state, dict) else {}
+    routing_payload = routing_state if isinstance(routing_state, dict) else {}
+    tooling_payload = (
+        output_payload.get("deterministic_tooling")
+        if isinstance(output_payload.get("deterministic_tooling"), dict)
+        else routing_payload.get("deterministic_tooling")
+        if isinstance(routing_payload.get("deterministic_tooling"), dict)
+        else {}
+    )
+    tool_warnings = tooling_payload.get("warnings") if isinstance(tooling_payload, dict) else []
+    if isinstance(tool_warnings, list):
+        for item in tool_warnings:
+            if isinstance(item, dict):
+                warnings.append(
+                    {
+                        "kind": str(item.get("code") or item.get("kind") or "tool_warning"),
+                        "message": str(item.get("message") or "warning").strip(),
+                        "details": item.get("details") if isinstance(item.get("details"), dict) else {},
+                    }
+                )
+            else:
+                text = str(item or "").strip()
+                if text:
+                    warnings.append({"kind": "tool_warning", "message": text})
+    return warnings
 
 
 def _k8s_job_name_from_dispatch_id(provider_dispatch_id: str) -> str:
@@ -13667,7 +13809,33 @@ def flowchart_run_status(run_id: int):
             .where(FlowchartRunNode.flowchart_run_id == run_id)
             .group_by(FlowchartRunNode.status)
         ).all()
+        warning_rows = (
+            session.execute(
+                select(
+                    FlowchartRunNode.id,
+                    FlowchartRunNode.flowchart_node_id,
+                    FlowchartRunNode.degraded_reason,
+                    FlowchartRunNode.updated_at,
+                )
+                .where(
+                    FlowchartRunNode.flowchart_run_id == run_id,
+                    FlowchartRunNode.degraded_status.is_(True),
+                )
+                .order_by(FlowchartRunNode.updated_at.desc(), FlowchartRunNode.id.desc())
+                .limit(25)
+            )
+            .all()
+        )
     counts = {str(status): int(count or 0) for status, count in rows}
+    warnings = [
+        {
+            "flowchart_run_node_id": int(node_run_id),
+            "flowchart_node_id": int(flowchart_node_id),
+            "message": str(degraded_reason or "degraded_execution"),
+            "updated_at": _human_time(updated_at),
+        }
+        for node_run_id, flowchart_node_id, degraded_reason, updated_at in warning_rows
+    ]
     return {
         "id": flowchart_run.id,
         "status": flowchart_run.status,
@@ -13675,6 +13843,8 @@ def flowchart_run_status(run_id: int):
         "started_at": _human_time(flowchart_run.started_at),
         "finished_at": _human_time(flowchart_run.finished_at),
         "counts": counts,
+        "warning_count": len(warnings),
+        "warnings": warnings,
     }
 
 
@@ -14184,20 +14354,157 @@ def list_mcps():
     )
 
 
+def _parse_model_list_query() -> dict[str, object]:
+    query_control_requested = any(
+        key in request.args
+        for key in ("page", "per_page", "search", "provider", "sort_by", "sort_order")
+    )
+    page = _coerce_optional_int(request.args.get("page"), field_name="page", minimum=1)
+    per_page = _coerce_optional_int(
+        request.args.get("per_page"),
+        field_name="per_page",
+        minimum=1,
+    )
+    search_text = str(request.args.get("search") or "").strip()
+    provider_filter = str(request.args.get("provider") or "").strip().lower()
+    default_sort_by = "name" if query_control_requested else "created_at"
+    default_sort_order = "asc" if query_control_requested else "desc"
+    sort_by = str(request.args.get("sort_by") or default_sort_by).strip().lower()
+    sort_order = str(request.args.get("sort_order") or default_sort_order).strip().lower()
+    if sort_by not in MODEL_LIST_SORT_FIELDS:
+        raise ValueError(
+            "sort_by must be one of: "
+            + ", ".join(sorted(MODEL_LIST_SORT_FIELDS))
+            + "."
+        )
+    if sort_order not in {"asc", "desc"}:
+        raise ValueError("sort_order must be 'asc' or 'desc'.")
+
+    resolved_page = page if page is not None else 1
+    resolved_per_page = per_page if per_page is not None else (25 if query_control_requested else None)
+    if isinstance(resolved_per_page, int):
+        resolved_per_page = min(resolved_per_page, 200)
+    return {
+        "query_control_requested": query_control_requested,
+        "page": resolved_page,
+        "per_page": resolved_per_page,
+        "search_text": search_text,
+        "provider_filter": provider_filter,
+        "sort_by": sort_by,
+        "sort_order": sort_order,
+    }
+
+
 @bp.get("/models")
 def list_models():
-    models = _load_llm_models()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    try:
+        query = _parse_model_list_query()
+    except ValueError as exc:
+        if _workflow_wants_json():
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message=str(exc),
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
+        flash(str(exc), "error")
+        return redirect(url_for("agents.list_models"))
+
+    provider_filter = str(query["provider_filter"])
+    if provider_filter and provider_filter not in LLM_PROVIDERS:
+        message = f"Unknown provider filter '{provider_filter}'."
+        if _workflow_wants_json():
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message=message,
+                details={"provider": provider_filter},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
+        flash(message, "error")
+        return redirect(url_for("agents.list_models"))
+
+    with session_scope() as session:
+        filters = []
+        if provider_filter:
+            filters.append(LLMModel.provider == provider_filter)
+        search_text = str(query["search_text"])
+        if search_text:
+            pattern = f"%{search_text.lower()}%"
+            filters.append(
+                or_(
+                    func.lower(LLMModel.name).like(pattern),
+                    func.lower(func.coalesce(LLMModel.description, "")).like(pattern),
+                    func.lower(LLMModel.provider).like(pattern),
+                )
+            )
+
+        total_count = int(
+            session.scalar(select(func.count(LLMModel.id)).where(*filters)) or 0
+        )
+        sort_by = str(query["sort_by"])
+        sort_order = str(query["sort_order"])
+        sort_column = MODEL_LIST_SORT_FIELDS[sort_by]
+        stmt = select(LLMModel).where(*filters)
+        if sort_order == "asc":
+            stmt = stmt.order_by(sort_column.asc(), LLMModel.id.asc())
+        else:
+            stmt = stmt.order_by(sort_column.desc(), LLMModel.id.desc())
+
+        page = int(query["page"])
+        per_page = query["per_page"]
+        if isinstance(per_page, int):
+            offset = (page - 1) * per_page
+            stmt = stmt.limit(per_page).offset(offset)
+        models = session.execute(stmt).scalars().all()
+
     llm_settings = _load_integration_settings("llm")
     default_model_id = resolve_default_model_id(llm_settings)
     model_rows = [
         _serialize_model(model, default_model_id=default_model_id)
         for model in models
     ]
+    drifted_count = sum(
+        1
+        for item in model_rows
+        if isinstance(item.get("compatibility"), dict)
+        and bool((item.get("compatibility") or {}).get("drift_detected"))
+    )
+    resolved_per_page = int(per_page) if isinstance(per_page, int) else max(1, len(model_rows) or total_count or 1)
+    pagination_payload = {
+        "page": int(query["page"]),
+        "per_page": resolved_per_page,
+        "has_prev": int(query["page"]) > 1,
+        "has_next": int(query["page"]) * resolved_per_page < total_count,
+    }
+    payload = {
+        "models": model_rows,
+        "default_model_id": default_model_id,
+        "count": len(model_rows),
+        "total_count": total_count,
+        "pagination": pagination_payload,
+        "filters": {
+            "search": str(query["search_text"]),
+            "provider": provider_filter,
+        },
+        "sort": {
+            "by": str(query["sort_by"]),
+            "order": str(query["sort_order"]),
+        },
+        "compatibility_summary": {
+            "drifted_count": drifted_count,
+            "in_sync_count": len(model_rows) - drifted_count,
+        },
+    }
     if _workflow_wants_json():
-        return {
-            "models": model_rows,
-            "default_model_id": default_model_id,
-        }
+        return _workflow_success_payload(
+            payload=payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     return render_template(
         "models.html",
         models=model_rows,
@@ -14263,6 +14570,8 @@ def new_model():
 @bp.post("/models")
 def create_model():
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     payload = request.get_json(silent=True) if request.is_json else {}
     if payload is None or not isinstance(payload, dict):
         payload = {}
@@ -14283,12 +14592,24 @@ def create_model():
 
     if not name:
         if is_api_request:
-            return {"error": "Model name is required."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Model name is required.",
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Model name is required.", "error")
         return redirect(url_for("agents.new_model"))
     if provider not in LLM_PROVIDERS:
         if is_api_request:
-            return {"error": "Unknown provider selection."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Unknown provider selection.",
+                details={"provider": provider},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Unknown provider selection.", "error")
         return redirect(url_for("agents.new_model"))
 
@@ -14301,12 +14622,30 @@ def create_model():
             try:
                 parsed_config = json.loads(raw_config)
             except json.JSONDecodeError:
-                return {"error": "config must be valid JSON."}, 400
+                return _workflow_error_envelope(
+                    code="invalid_request",
+                    message="config must be valid JSON.",
+                    details={},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 400
             if not isinstance(parsed_config, dict):
-                return {"error": "config must be an object."}, 400
+                return _workflow_error_envelope(
+                    code="invalid_request",
+                    message="config must be an object.",
+                    details={},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 400
             config_payload = parsed_config
         else:
-            return {"error": "config must be an object."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="config must be an object.",
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
     else:
         config_source = (
             {key: ("" if value is None else str(value)) for key, value in payload.items()}
@@ -14321,14 +14660,26 @@ def create_model():
     )
     if markdown_filename_error:
         if is_api_request:
-            return {"error": markdown_filename_error}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message=markdown_filename_error,
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash(markdown_filename_error, "error")
         return redirect(url_for("agents.new_model"))
     model_options = _provider_model_options()
     model_name = str(config_payload.get("model") or "").strip()
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
         if is_api_request:
-            return {"error": "Codex model must be selected from the configured options."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Codex model must be selected from the configured options.",
+                details={"provider": provider, "model": model_name},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Codex model must be selected from the configured options.", "error")
         return redirect(url_for("agents.new_model"))
     if provider == "vllm_local" and not _model_option_allowed(
@@ -14337,9 +14688,15 @@ def create_model():
         model_options,
     ):
         if is_api_request:
-            return {
-                "error": "vLLM Local model must be selected from the discovered local model options."
-            }, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message=(
+                    "vLLM Local model must be selected from the discovered local model options."
+                ),
+                details={"provider": provider, "model": model_name},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash(
             "vLLM Local model must be selected from the discovered local model options.",
             "error",
@@ -14355,15 +14712,31 @@ def create_model():
             provider=provider,
             config_json=config_json,
         )
+    model_payload = _serialize_model(model, include_config=True)
 
     if is_api_request:
-        return {"ok": True, "model": _serialize_model(model, include_config=True)}, 201
+        _emit_model_provider_event(
+            event_type="config:model:created",
+            entity_kind="model",
+            entity_id=model.id,
+            payload={"model": model_payload},
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload={"model": model_payload},
+            request_id=request_id,
+            correlation_id=correlation_id,
+        ), 201
     flash(f"Model {model.id} created.", "success")
     return redirect(url_for("agents.view_model", model_id=model.id))
 
 
 @bp.get("/models/<int:model_id>")
 def view_model(model_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    is_api_request = _workflow_api_request()
     llm_settings = _load_integration_settings("llm")
     default_model_id = resolve_default_model_id(llm_settings)
     model_payload: dict[str, object] | None = None
@@ -14373,6 +14746,14 @@ def view_model(model_id: int):
     with session_scope() as session:
         model = session.get(LLMModel, model_id)
         if model is None:
+            if is_api_request:
+                return _workflow_error_envelope(
+                    code="not_found",
+                    message=f"Model {model_id} was not found.",
+                    details={"model_id": model_id},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 404
             abort(404)
         attached_nodes = (
             session.execute(
@@ -14433,13 +14814,17 @@ def view_model(model_id: int):
         ]
     assert model_payload is not None
     if _workflow_wants_json():
-        return {
-            "model": model_payload,
-            "attached_nodes": node_payload,
-            "attached_tasks": task_payload,
-            "flowcharts_by_id": flowcharts_by_id,
-            "is_default": bool(model_payload.get("is_default")),
-        }
+        return _workflow_success_payload(
+            payload={
+                "model": model_payload,
+                "attached_nodes": node_payload,
+                "attached_tasks": task_payload,
+                "flowcharts_by_id": flowcharts_by_id,
+                "is_default": bool(model_payload.get("is_default")),
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     is_default = bool(model_payload.get("is_default"))
     formatted_config = str(model_payload.get("config_json") or "{}")
     provider_label = str(model_payload.get("provider_label") or "")
@@ -14529,6 +14914,8 @@ def edit_model(model_id: int):
 @bp.post("/models/<int:model_id>")
 def update_model(model_id: int):
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     payload = request.get_json(silent=True) if request.is_json else {}
     if payload is None or not isinstance(payload, dict):
         payload = {}
@@ -14549,12 +14936,24 @@ def update_model(model_id: int):
 
     if not name:
         if is_api_request:
-            return {"error": "Model name is required."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Model name is required.",
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Model name is required.", "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
     if provider not in LLM_PROVIDERS:
         if is_api_request:
-            return {"error": "Unknown provider selection."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Unknown provider selection.",
+                details={"provider": provider},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Unknown provider selection.", "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
 
@@ -14567,12 +14966,30 @@ def update_model(model_id: int):
             try:
                 parsed_config = json.loads(raw_config)
             except json.JSONDecodeError:
-                return {"error": "config must be valid JSON."}, 400
+                return _workflow_error_envelope(
+                    code="invalid_request",
+                    message="config must be valid JSON.",
+                    details={},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 400
             if not isinstance(parsed_config, dict):
-                return {"error": "config must be an object."}, 400
+                return _workflow_error_envelope(
+                    code="invalid_request",
+                    message="config must be an object.",
+                    details={},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 400
             config_payload = parsed_config
         else:
-            return {"error": "config must be an object."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="config must be an object.",
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
     else:
         config_source = (
             {key: ("" if value is None else str(value)) for key, value in payload.items()}
@@ -14587,14 +15004,26 @@ def update_model(model_id: int):
     )
     if markdown_filename_error:
         if is_api_request:
-            return {"error": markdown_filename_error}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message=markdown_filename_error,
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash(markdown_filename_error, "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
     model_options = _provider_model_options()
     model_name = str(config_payload.get("model") or "").strip()
     if provider == "codex" and not _model_option_allowed(provider, model_name, model_options):
         if is_api_request:
-            return {"error": "Codex model must be selected from the configured options."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Codex model must be selected from the configured options.",
+                details={"provider": provider, "model": model_name},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Codex model must be selected from the configured options.", "error")
         return redirect(url_for("agents.edit_model", model_id=model_id))
     if provider == "vllm_local" and not _model_option_allowed(
@@ -14603,9 +15032,15 @@ def update_model(model_id: int):
         model_options,
     ):
         if is_api_request:
-            return {
-                "error": "vLLM Local model must be selected from the discovered local model options."
-            }, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message=(
+                    "vLLM Local model must be selected from the discovered local model options."
+                ),
+                details={"provider": provider, "model": model_name},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash(
             "vLLM Local model must be selected from the discovered local model options.",
             "error",
@@ -14616,14 +15051,35 @@ def update_model(model_id: int):
     with session_scope() as session:
         model = session.get(LLMModel, model_id)
         if model is None:
+            if is_api_request:
+                return _workflow_error_envelope(
+                    code="not_found",
+                    message=f"Model {model_id} was not found.",
+                    details={"model_id": model_id},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 404
             abort(404)
         model.name = name
         model.description = description or None
         model.provider = provider
         model.config_json = config_json
+    model_payload = _serialize_model(model, include_config=True)
 
     if is_api_request:
-        return {"ok": True, "model": _serialize_model(model, include_config=True)}
+        _emit_model_provider_event(
+            event_type="config:model:updated",
+            entity_kind="model",
+            entity_id=model.id,
+            payload={"model": model_payload},
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload={"model": model_payload},
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     flash("Model updated.", "success")
     return redirect(url_for("agents.view_model", model_id=model_id))
 
@@ -14631,6 +15087,8 @@ def update_model(model_id: int):
 @bp.post("/models/default")
 def update_default_model():
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     payload = request.get_json(silent=True) if request.is_json else {}
     if payload is None or not isinstance(payload, dict):
         payload = {}
@@ -14644,7 +15102,13 @@ def update_default_model():
     )
     if not model_raw.isdigit():
         if is_api_request:
-            return {"error": "Model selection required."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Model selection required.",
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Model selection required.", "error")
         return redirect(next_url)
     model_id = int(model_raw)
@@ -14657,7 +15121,13 @@ def update_default_model():
         model = session.get(LLMModel, model_id)
         if model is None:
             if is_api_request:
-                return {"error": "Model not found."}, 404
+                return _workflow_error_envelope(
+                    code="not_found",
+                    message="Model not found.",
+                    details={"model_id": model_id},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 404
             flash("Model not found.", "error")
             return redirect(next_url)
     if make_default:
@@ -14667,12 +15137,36 @@ def update_default_model():
         }
         _save_integration_settings("llm", payload)
         if is_api_request:
-            return {"ok": True, "default_model_id": model_id}
+            _emit_model_provider_event(
+                event_type="config:model:default_updated",
+                entity_kind="model",
+                entity_id=model_id,
+                payload={"default_model_id": model_id, "is_default": True},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            )
+            return _workflow_success_payload(
+                payload={"default_model_id": model_id},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            )
         flash("Default model updated.", "success")
     else:
         _save_integration_settings("llm", {"default_model_id": ""})
         if is_api_request:
-            return {"ok": True, "default_model_id": None}
+            _emit_model_provider_event(
+                event_type="config:model:default_updated",
+                entity_kind="model",
+                entity_id=model_id,
+                payload={"default_model_id": None, "is_default": False},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            )
+            return _workflow_success_payload(
+                payload={"default_model_id": None},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            )
         flash("Default model cleared.", "success")
     return redirect(next_url)
 
@@ -14680,13 +15174,25 @@ def update_default_model():
 @bp.post("/models/<int:model_id>/delete")
 def delete_model(model_id: int):
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     next_url = _safe_redirect_target(
         request.form.get("next"), url_for("agents.list_models")
     )
+    deleted_model_payload: dict[str, object] | None = None
     with session_scope() as session:
         model = session.get(LLMModel, model_id)
         if model is None:
+            if is_api_request:
+                return _workflow_error_envelope(
+                    code="not_found",
+                    message=f"Model {model_id} was not found.",
+                    details={"model_id": model_id},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 404
             abort(404)
+        deleted_model_payload = _serialize_model(model, include_config=True)
         attached_node_count = int(
             session.scalar(
                 select(func.count()).select_from(FlowchartNode).where(FlowchartNode.model_id == model_id)
@@ -14737,11 +15243,26 @@ def delete_model(model_id: int):
         _save_integration_settings("llm", {"default_model_id": ""})
         default_cleared = True
     if is_api_request:
-        return {
-            "ok": True,
-            "detached_count": detached_count,
-            "default_model_cleared": default_cleared,
-        }
+        _emit_model_provider_event(
+            event_type="config:model:deleted",
+            entity_kind="model",
+            entity_id=model_id,
+            payload={
+                "model": deleted_model_payload or {"id": model_id},
+                "detached_count": detached_count,
+                "default_model_cleared": default_cleared,
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload={
+                "detached_count": detached_count,
+                "default_model_cleared": default_cleared,
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     flash("Model deleted.", "success")
     if detached_count:
         flash(f"Detached from {detached_count} binding(s).", "info")

@@ -259,10 +259,10 @@ Dependency model:
 
 ## Stage 11 - Fan-Out E: Workspace/Git/Command/RAG Tool Domains
 
-- [ ] Implement filesystem/workspace tool suite (`list/read/write/.../apply_patch/chmod`) in shared tooling framework.
-- [ ] Implement extended git tool suite (branch, commit, push, PR, cherry-pick, noninteractive rebase, tagging).
-- [ ] Implement extended command-execution tooling (PTY/session lifecycle, timeouts, background jobs, artifact capture).
-- [ ] Implement RAG indexing/query tooling with full + delta indexing support and stable contracts.
+- [x] Implement filesystem/workspace tool suite (`list/read/write/.../apply_patch/chmod`) in shared tooling framework.
+- [x] Implement extended git tool suite (branch, commit, push, PR, cherry-pick, noninteractive rebase, tagging).
+- [x] Implement extended command-execution tooling (PTY/session lifecycle, timeouts, background jobs, artifact capture).
+- [x] Implement RAG indexing/query tooling with full + delta indexing support and stable contracts.
 
 ## Stage 12 - Fan-Out F: Observability + Run Introspection + Workflow Control
 
@@ -273,10 +273,11 @@ Dependency model:
 
 ## Stage 13 - Fan-Out G: Flow Migration Tooling + Compatibility Gate
 
-- [ ] Implement one-time flowchart schema transform pipeline for legacy definition migration.
-- [ ] Implement post-transform validation and dry-run execution checks before migration acceptance.
-- [ ] Implement compatibility gate reporting for non-migratable or policy-violating flow definitions.
-- [ ] Implement migration evidence artifacts and rollback-trigger metadata capture.
+- [x] Implement one-time flowchart schema transform pipeline for legacy definition migration.
+- [x] Implement post-transform validation and dry-run execution checks before migration acceptance.
+- [x] Implement compatibility gate reporting for non-migratable or policy-violating flow definitions.
+- [x] Implement migration evidence artifacts and rollback-trigger metadata capture.
+- [x] Stage output locked in `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE13_FLOW_MIGRATION_FREEZE.md`.
 
 ## Stage 14 - Sequential Reconvergence: Integration + Cutover Readiness
 

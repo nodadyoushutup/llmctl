@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
+import { resolveModelsListHref } from '../lib/modelsListState'
 import { getModel } from '../lib/studioApi'
 
 function parseId(value) {
@@ -22,9 +23,11 @@ function errorMessage(error, fallback) {
 }
 
 export default function ModelDetailPage() {
+  const location = useLocation()
   const { modelId } = useParams()
   const parsedModelId = useMemo(() => parseId(modelId), [modelId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
+  const listHref = useMemo(() => resolveModelsListHref(location.state?.from), [location.state])
 
   useEffect(() => {
     if (!parsedModelId) {
@@ -64,8 +67,8 @@ export default function ModelDetailPage() {
             <p>{model?.description || 'Model settings and binding usage.'}</p>
           </div>
           <div className="table-actions">
-            {model ? <Link to={`/models/${model.id}/edit`} className="btn-link">Edit</Link> : null}
-            <Link to="/models" className="btn-link btn-secondary">All Models</Link>
+            {model ? <Link to={`/models/${model.id}/edit`} state={{ from: listHref }} className="btn-link">Edit</Link> : null}
+            <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
           </div>
         </div>
         {loading ? <p>Loading model...</p> : null}

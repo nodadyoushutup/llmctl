@@ -26,6 +26,11 @@ function parseSortDirection(value) {
   return SORT_DIRECTIONS.has(normalized) ? normalized : 'asc'
 }
 
+function parsePerPage(value) {
+  const parsed = parsePositiveInt(value, 10)
+  return PER_PAGE_OPTIONS.includes(parsed) ? parsed : 10
+}
+
 function parseDefaultFilter(value) {
   const normalized = String(value || '').toLowerCase()
   if (normalized === 'default' || normalized === 'non_default') {
@@ -63,7 +68,7 @@ export default function ModelsPage() {
   const flash = useFlash()
   const [searchParams, setSearchParams] = useSearchParams()
   const page = parsePositiveInt(searchParams.get('page'), 1)
-  const perPage = parsePositiveInt(searchParams.get('per_page'), 10)
+  const perPage = parsePerPage(searchParams.get('per_page'))
   const sortKey = parseSortKey(searchParams.get('sort'))
   const sortDirection = parseSortDirection(searchParams.get('dir'))
   const providerFilter = String(searchParams.get('provider') || '').trim().toLowerCase()
@@ -183,7 +188,7 @@ export default function ModelsPage() {
   const pageStart = (currentPage - 1) * perPage
   const visibleModels = sortedModels.slice(pageStart, pageStart + perPage)
 
-  function updateParams(nextParams) {
+  const updateParams = useCallback((nextParams) => {
     const updated = new URLSearchParams(searchParams)
     for (const [key, value] of Object.entries(nextParams)) {
       if (value == null || value === '') {
@@ -195,7 +200,7 @@ export default function ModelsPage() {
     if (parsePositiveInt(updated.get('page'), 1) === 1) {
       updated.delete('page')
     }
-    if (parsePositiveInt(updated.get('per_page'), 10) === 10) {
+    if (parsePerPage(updated.get('per_page')) === 10) {
       updated.delete('per_page')
     }
     if (parseSortKey(updated.get('sort')) === 'name') {
@@ -214,7 +219,7 @@ export default function ModelsPage() {
       updated.delete('q')
     }
     setSearchParams(updated)
-  }
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     const normalizedDraft = searchDraft.trim()
@@ -227,14 +232,17 @@ export default function ModelsPage() {
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [searchDraft, searchQuery])
+  }, [searchDraft, searchQuery, updateParams])
 
   useEffect(() => {
+    if (state.loading) {
+      return
+    }
     if (page === currentPage) {
       return
     }
     updateParams({ page: currentPage })
-  }, [currentPage, page])
+  }, [currentPage, page, state.loading, updateParams])
 
   function setBusy(modelId, busy) {
     setBusyById((current) => {

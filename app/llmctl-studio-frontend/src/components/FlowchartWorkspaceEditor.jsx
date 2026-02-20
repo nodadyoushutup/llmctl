@@ -8,6 +8,15 @@ const NODE_TYPE_WITH_EDITABLE_REF = new Set(['flowchart'])
 const NODE_TYPE_REQUIRES_REF = new Set(['flowchart'])
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left']
 const EDGE_MODE_OPTIONS = ['solid', 'dotted']
+const FAN_IN_MODE_ALL = 'all'
+const FAN_IN_MODE_ANY = 'any'
+const FAN_IN_MODE_CUSTOM = 'custom'
+const DECISION_NO_MATCH_POLICY_FAIL = 'fail'
+const DECISION_NO_MATCH_POLICY_FALLBACK = 'fallback'
+const ROUTING_FOCUS_FIELD_FAN_IN_MODE = 'fanInMode'
+const ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT = 'fanInCustomCount'
+const ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR = 'fallbackConnector'
+const FLOW_WS_ROUTING_DETAILS_ID = 'flow-ws-routing-details'
 const MILESTONE_ACTION_OPTIONS = [
   { value: 'create_or_update', label: 'Create/Update milestone' },
   { value: 'mark_complete', label: 'Mark milestone complete' },
@@ -195,6 +204,33 @@ function normalizeZoom(value) {
 function normalizeNodeType(value) {
   const type = String(value || '').trim().toLowerCase()
   return DEFAULT_NODE_TYPES.includes(type) ? type : 'task'
+}
+
+function nodeSupportsRoutingConfig(nodeType) {
+  const normalized = normalizeNodeType(nodeType)
+  return normalized !== 'start'
+}
+
+function normalizeFanInMode(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === FAN_IN_MODE_ANY) {
+    return FAN_IN_MODE_ANY
+  }
+  if (normalized === FAN_IN_MODE_CUSTOM || normalized === 'custom_n' || normalized === 'custom-n') {
+    return FAN_IN_MODE_CUSTOM
+  }
+  return FAN_IN_MODE_ALL
+}
+
+function normalizeDecisionNoMatchPolicy(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === DECISION_NO_MATCH_POLICY_FALLBACK) {
+    return DECISION_NO_MATCH_POLICY_FALLBACK
+  }
+  if (normalized === DECISION_NO_MATCH_POLICY_FAIL) {
+    return DECISION_NO_MATCH_POLICY_FAIL
+  }
+  return ''
 }
 
 function normalizeRagMode(value) {
@@ -790,6 +826,44 @@ function retentionModeUsesMaxCount(mode) {
 function normalizeNodeConfig(config, nodeType = '') {
   const normalizedType = normalizeNodeType(nodeType)
   const nextConfig = config && typeof config === 'object' ? { ...config } : {}
+  if (nodeSupportsRoutingConfig(normalizedType)) {
+    const fanInMode = normalizeFanInMode(nextConfig.fan_in_mode)
+    if (fanInMode === FAN_IN_MODE_ALL) {
+      delete nextConfig.fan_in_mode
+      delete nextConfig.fan_in_custom_count
+    } else if (fanInMode === FAN_IN_MODE_ANY) {
+      nextConfig.fan_in_mode = FAN_IN_MODE_ANY
+      delete nextConfig.fan_in_custom_count
+    } else {
+      nextConfig.fan_in_mode = FAN_IN_MODE_CUSTOM
+      const fanInCustomCount = parsePositiveInt(nextConfig.fan_in_custom_count)
+      if (fanInCustomCount == null) {
+        delete nextConfig.fan_in_custom_count
+      } else {
+        nextConfig.fan_in_custom_count = fanInCustomCount
+      }
+    }
+  } else {
+    delete nextConfig.fan_in_mode
+    delete nextConfig.fan_in_custom_count
+  }
+  if (normalizedType === 'decision') {
+    const noMatchPolicy = normalizeDecisionNoMatchPolicy(nextConfig.no_match_policy)
+    if (noMatchPolicy) {
+      nextConfig.no_match_policy = noMatchPolicy
+    } else {
+      delete nextConfig.no_match_policy
+    }
+    const fallbackConditionKey = String(nextConfig.fallback_condition_key || '').trim()
+    if (fallbackConditionKey) {
+      nextConfig.fallback_condition_key = fallbackConditionKey
+    } else {
+      delete nextConfig.fallback_condition_key
+    }
+  } else {
+    delete nextConfig.no_match_policy
+    delete nextConfig.fallback_condition_key
+  }
   if (normalizedType === 'plan') {
     nextConfig.action = normalizePlanAction(nextConfig.action)
     nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
@@ -859,6 +933,67 @@ function normalizeDecisionConditions(value) {
     })
   }
   return normalized
+}
+
+function validateRoutingConfig({
+  nodeType,
+  config,
+  solidIncomingConnectorCount,
+  decisionSolidOutgoingConnectorIds,
+}) {
+  const nextConfig = config && typeof config === 'object' ? config : {}
+  const errors = []
+  const fieldErrors = {}
+  const fanInMode = normalizeFanInMode(nextConfig.fan_in_mode)
+  const fanInCustomCount = parsePositiveInt(nextConfig.fan_in_custom_count)
+  if (fanInMode === FAN_IN_MODE_CUSTOM) {
+    if (fanInCustomCount == null) {
+      fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT] = 'Custom N is required when fan-in mode is custom.'
+      errors.push(fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT])
+    } else if (solidIncomingConnectorCount === 0) {
+      fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT] = 'Custom N requires at least one solid incoming connector.'
+      errors.push(fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT])
+    } else if (fanInCustomCount > solidIncomingConnectorCount) {
+      fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT] = `Custom N must be <= solid incoming connector count (${solidIncomingConnectorCount}).`
+      errors.push(fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT])
+    }
+  }
+
+  const normalizedType = normalizeNodeType(nodeType)
+  if (normalizedType === 'decision') {
+    const noMatchPolicy = normalizeDecisionNoMatchPolicy(nextConfig.no_match_policy)
+    const fallbackConditionKey = String(nextConfig.fallback_condition_key || '').trim()
+    const connectorIds = decisionSolidOutgoingConnectorIds || new Set()
+    if (noMatchPolicy === DECISION_NO_MATCH_POLICY_FALLBACK && !fallbackConditionKey) {
+      fieldErrors[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR] = 'Fallback policy requires selecting a fallback connector.'
+      errors.push(fieldErrors[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR])
+    }
+    if (fallbackConditionKey && !connectorIds.has(fallbackConditionKey)) {
+      fieldErrors[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR] = 'Fallback connector must match a solid outgoing connector.'
+      errors.push(fieldErrors[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR])
+    }
+  }
+
+  const firstInvalidField = (
+    fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT]
+      ? ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT
+      : (
+        fieldErrors[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR]
+          ? ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR
+          : (
+            fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_MODE]
+              ? ROUTING_FOCUS_FIELD_FAN_IN_MODE
+              : ''
+          )
+      )
+  )
+
+  return {
+    hasErrors: errors.length > 0,
+    errors,
+    fieldErrors,
+    firstInvalidField,
+  }
 }
 
 function decisionConditionsEqual(left, right) {
@@ -1278,6 +1413,11 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const viewportPanRef = useRef(null)
   const zoomRef = useRef(1)
   const wheelZoomFrameRef = useRef(0)
+  const routingFieldRefs = useRef({
+    [ROUTING_FOCUS_FIELD_FAN_IN_MODE]: null,
+    [ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT]: null,
+    [ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR]: null,
+  })
 
   const [nodes, setNodes] = useState(() => initialWorkspace.nodes)
   const [edges, setEdges] = useState(() => initialWorkspace.edges)
@@ -1561,6 +1701,146 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       })
       .filter((entry) => Boolean(entry.connectorId))
   }, [selectedNode, selectedNodeType, edges, nodesByToken])
+  const solidIncomingConnectorCountByNodeToken = useMemo(() => {
+    const parentTokensByNodeToken = new Map()
+    for (const edge of edges) {
+      if (normalizeEdgeMode(edge.edge_mode) !== 'solid') {
+        continue
+      }
+      const sourceToken = String(edge.sourceToken || '')
+      const targetToken = String(edge.targetToken || '')
+      if (!sourceToken || !targetToken) {
+        continue
+      }
+      const parentTokens = parentTokensByNodeToken.get(targetToken) || new Set()
+      parentTokens.add(sourceToken)
+      parentTokensByNodeToken.set(targetToken, parentTokens)
+    }
+    const counts = new Map()
+    for (const [token, parentTokens] of parentTokensByNodeToken.entries()) {
+      counts.set(token, parentTokens.size)
+    }
+    return counts
+  }, [edges])
+  const decisionSolidOutgoingConnectorOptionsByNodeToken = useMemo(() => {
+    const optionsByToken = new Map()
+    const seenByToken = new Map()
+    for (const edge of edges) {
+      if (normalizeEdgeMode(edge.edge_mode) !== 'solid') {
+        continue
+      }
+      const sourceToken = String(edge.sourceToken || '').trim()
+      const sourceNode = nodesByToken.get(sourceToken)
+      if (!sourceNode || normalizeNodeType(sourceNode.node_type) !== 'decision') {
+        continue
+      }
+      const connectorId = String(edge.condition_key || '').trim()
+      if (!connectorId) {
+        continue
+      }
+      const seen = seenByToken.get(sourceToken) || new Set()
+      if (seen.has(connectorId)) {
+        continue
+      }
+      seen.add(connectorId)
+      seenByToken.set(sourceToken, seen)
+      const targetNode = nodesByToken.get(edge.targetToken)
+      const targetLabel = targetNode
+        ? String(targetNode.title || titleForType(targetNode.node_type)).trim()
+        : ''
+      const options = optionsByToken.get(sourceToken) || []
+      options.push({
+        connectorId,
+        targetLabel: targetLabel || 'Unresolved',
+      })
+      optionsByToken.set(sourceToken, options)
+    }
+    return optionsByToken
+  }, [edges, nodesByToken])
+  const routingValidationByNodeToken = useMemo(() => {
+    const validations = new Map()
+    for (const node of nodes) {
+      const solidIncomingConnectorCount = solidIncomingConnectorCountByNodeToken.get(node.token) || 0
+      const outgoingOptions = decisionSolidOutgoingConnectorOptionsByNodeToken.get(node.token) || []
+      const outgoingConnectorIds = new Set(outgoingOptions.map((entry) => entry.connectorId))
+      validations.set(
+        node.token,
+        validateRoutingConfig({
+          nodeType: node.node_type,
+          config: node.config,
+          solidIncomingConnectorCount,
+          decisionSolidOutgoingConnectorIds: outgoingConnectorIds,
+        }),
+      )
+    }
+    return validations
+  }, [nodes, solidIncomingConnectorCountByNodeToken, decisionSolidOutgoingConnectorOptionsByNodeToken])
+  const selectedRoutingValidation = selectedNode
+    ? (routingValidationByNodeToken.get(selectedNode.token) || {
+      hasErrors: false,
+      errors: [],
+      fieldErrors: {},
+      firstInvalidField: '',
+    })
+    : null
+  const selectedSolidIncomingConnectorCount = selectedNode
+    ? (solidIncomingConnectorCountByNodeToken.get(selectedNode.token) || 0)
+    : 0
+  const selectedRoutingConfig = selectedNode
+    ? (selectedNode.config && typeof selectedNode.config === 'object' ? selectedNode.config : {})
+    : {}
+  const selectedFanInMode = normalizeFanInMode(selectedRoutingConfig.fan_in_mode)
+  const selectedFanInCustomCount = parsePositiveInt(selectedRoutingConfig.fan_in_custom_count)
+  const selectedDecisionNoMatchPolicy = normalizeDecisionNoMatchPolicy(selectedRoutingConfig.no_match_policy)
+  const selectedDecisionFallbackConnectorId = String(selectedRoutingConfig.fallback_condition_key || '').trim()
+  const selectedDecisionFallbackConnectorOptions = selectedNode
+    ? (decisionSolidOutgoingConnectorOptionsByNodeToken.get(selectedNode.token) || [])
+    : []
+  const selectedRoutingSummaryChips = useMemo(() => {
+    if (!selectedNode || !nodeSupportsRoutingConfig(selectedNodeType)) {
+      return []
+    }
+    const chips = []
+    if (selectedFanInMode === FAN_IN_MODE_CUSTOM) {
+      chips.push({
+        key: 'fan-in-custom',
+        label: `custom ${selectedFanInCustomCount ?? '?'}`,
+        className: 'chip flow-ws-routing-chip',
+      })
+    } else {
+      chips.push({
+        key: 'fan-in-mode',
+        label: selectedFanInMode,
+        className: 'chip flow-ws-routing-chip',
+      })
+    }
+    if (selectedNodeType === 'decision') {
+      const fallbackLabel = selectedDecisionFallbackConnectorId
+        ? `fallback ${selectedDecisionFallbackConnectorId}`
+        : (selectedDecisionNoMatchPolicy === DECISION_NO_MATCH_POLICY_FAIL ? 'no match: fail' : 'no match: fail')
+      chips.push({
+        key: 'decision-fallback',
+        label: fallbackLabel,
+        className: 'chip flow-ws-routing-chip',
+      })
+    }
+    if (selectedRoutingValidation?.hasErrors) {
+      chips.push({
+        key: 'invalid',
+        label: `invalid ${selectedRoutingValidation.errors.length}`,
+        className: 'status-chip status-failed flow-ws-routing-chip',
+      })
+    }
+    return chips
+  }, [
+    selectedNode,
+    selectedNodeType,
+    selectedFanInMode,
+    selectedFanInCustomCount,
+    selectedDecisionNoMatchPolicy,
+    selectedDecisionFallbackConnectorId,
+    selectedRoutingValidation,
+  ])
   const selectedSpecializedControls = selectedNode
     ? SPECIALIZED_NODE_CONTROL_REGISTRY[selectedNodeType] || null
     : null
@@ -1604,6 +1884,57 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       onNotice(String(message || ''))
     }
   }, [onNotice])
+
+  const focusRoutingField = useCallback((fieldKey) => {
+    const field = routingFieldRefs.current[fieldKey]
+    if (!field) {
+      return
+    }
+    if (typeof field.scrollIntoView === 'function') {
+      field.scrollIntoView({ block: 'center', inline: 'nearest' })
+    }
+    if (typeof field.focus === 'function') {
+      field.focus()
+    }
+  }, [])
+
+  const validateRoutingBeforeSave = useCallback(() => {
+    let firstInvalid = null
+    for (const node of nodes) {
+      const validation = routingValidationByNodeToken.get(node.token)
+      if (!validation?.hasErrors) {
+        continue
+      }
+      firstInvalid = {
+        nodeToken: node.token,
+        validation,
+      }
+      break
+    }
+    if (!firstInvalid) {
+      return true
+    }
+
+    if (selectedNodeToken !== firstInvalid.nodeToken) {
+      setSelectedNodeToken(firstInvalid.nodeToken)
+      setSelectedEdgeId('')
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const routingDetails = document.getElementById(FLOW_WS_ROUTING_DETAILS_ID)
+        if (routingDetails && !routingDetails.open) {
+          routingDetails.open = true
+        }
+        if (firstInvalid.validation.firstInvalidField) {
+          focusRoutingField(firstInvalid.validation.firstInvalidField)
+        }
+      })
+    })
+
+    const firstMessage = firstInvalid.validation.errors[0] || 'Invalid routing configuration.'
+    emitNotice(`Save blocked. ${firstMessage}`)
+    return false
+  }, [emitNotice, focusRoutingField, nodes, routingValidationByNodeToken, selectedNodeToken])
 
   function updateNode(token, updater) {
     setNodes((current) => current.map((node) => {
@@ -1743,7 +2074,8 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
 
   useImperativeHandle(ref, () => ({
     applyServerGraph,
-  }), [applyServerGraph])
+    validateBeforeSave: validateRoutingBeforeSave,
+  }), [applyServerGraph, validateRoutingBeforeSave])
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -2389,6 +2721,17 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   const edgeCaption = String(edge.label || '').trim()
                     || decisionConditionText
                     || connectorId
+                  const sourceConfig = sourceNode.config && typeof sourceNode.config === 'object' ? sourceNode.config : {}
+                  const sourceFallbackConnectorId = String(sourceConfig.fallback_condition_key || '').trim()
+                  const sourceNoMatchPolicy = normalizeDecisionNoMatchPolicy(sourceConfig.no_match_policy)
+                  const isFallbackConnector = (
+                    normalizeNodeType(sourceNode.node_type) === 'decision'
+                    && normalizeEdgeMode(edge.edge_mode) === 'solid'
+                    && sourceNoMatchPolicy === DECISION_NO_MATCH_POLICY_FALLBACK
+                    && connectorId
+                    && sourceFallbackConnectorId
+                    && connectorId === sourceFallbackConnectorId
+                  )
                   const start = connectorPosition(sourceNode, edge.sourceHandleId)
                   const end = connectorPosition(targetNode, edge.targetHandleId)
                   const pathMeta = edgePath(start, end)
@@ -2404,6 +2747,17 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                         <text x={pathMeta.labelX} y={pathMeta.labelY} className="flow-ws-edge-label">
                           {edgeCaption}
                         </text>
+                      ) : null}
+                      {isFallbackConnector ? (
+                        <g
+                          className="flow-ws-edge-fallback-badge"
+                          transform={`translate(${pathMeta.labelX} ${pathMeta.labelY - (edgeCaption ? 18 : 0)})`}
+                        >
+                          <rect className="flow-ws-edge-fallback-pill" x="-30" y="-8" width="60" height="16" rx="8" />
+                          <text className="flow-ws-edge-fallback-pill-text" textAnchor="middle" dominantBaseline="middle">
+                            fallback
+                          </text>
+                        </g>
                       ) : null}
                       <path
                         d={pathMeta.d}
@@ -2519,6 +2873,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 title="Save graph"
                 disabled={saveButtonDisabled}
                 onClick={() => {
+                  if (!validateRoutingBeforeSave()) {
+                    return
+                  }
                   if (typeof onSaveGraph === 'function') {
                     onSaveGraph()
                   }
@@ -2562,6 +2919,156 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 ))}
               </select>
             </label>
+            {nodeSupportsRoutingConfig(selectedNodeType) ? (
+              <PersistedDetails
+                className="flow-ws-routing-details"
+                id={FLOW_WS_ROUTING_DETAILS_ID}
+                storageKey="flow-ws:inspector:routing"
+                defaultOpen={false}
+              >
+                <summary>
+                  <span className="chat-picker-summary">
+                    <i className="fa-solid fa-route" />
+                    <span>Routing</span>
+                  </span>
+                  <span className="flow-ws-routing-chip-row">
+                    {selectedRoutingSummaryChips.map((chip) => (
+                      <span key={chip.key} className={chip.className}>
+                        {chip.label}
+                      </span>
+                    ))}
+                  </span>
+                </summary>
+                <div className="stack-sm flow-ws-routing-body">
+                  <label className="field">
+                    <span>fan-in mode</span>
+                    <select
+                      ref={(node) => {
+                        routingFieldRefs.current[ROUTING_FOCUS_FIELD_FAN_IN_MODE] = node
+                      }}
+                      value={selectedFanInMode}
+                      onChange={(event) => {
+                        const nextMode = normalizeFanInMode(event.target.value)
+                        updateNode(selectedNode.token, (current) => {
+                          const nextConfig = current.config && typeof current.config === 'object'
+                            ? { ...current.config }
+                            : {}
+                          if (nextMode === FAN_IN_MODE_ALL) {
+                            delete nextConfig.fan_in_mode
+                            delete nextConfig.fan_in_custom_count
+                          } else if (nextMode === FAN_IN_MODE_ANY) {
+                            nextConfig.fan_in_mode = FAN_IN_MODE_ANY
+                            delete nextConfig.fan_in_custom_count
+                          } else {
+                            nextConfig.fan_in_mode = FAN_IN_MODE_CUSTOM
+                            const nextCount = parsePositiveInt(nextConfig.fan_in_custom_count)
+                            nextConfig.fan_in_custom_count = nextCount ?? Math.max(1, selectedSolidIncomingConnectorCount)
+                          }
+                          return {
+                            ...current,
+                            config: nextConfig,
+                          }
+                        })
+                      }}
+                    >
+                      <option value={FAN_IN_MODE_ALL}>all parents</option>
+                      <option value={FAN_IN_MODE_ANY}>any parent</option>
+                      <option value={FAN_IN_MODE_CUSTOM}>custom N</option>
+                    </select>
+                  </label>
+                  <p className="toolbar-meta">
+                    Solid incoming connectors: {selectedSolidIncomingConnectorCount}
+                  </p>
+                  {selectedFanInMode === FAN_IN_MODE_CUSTOM ? (
+                    <label className="field">
+                      <span>custom N</span>
+                      <input
+                        ref={(node) => {
+                          routingFieldRefs.current[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT] = node
+                        }}
+                        type="number"
+                        min="1"
+                        step="1"
+                        max={selectedSolidIncomingConnectorCount || undefined}
+                        value={selectedFanInCustomCount ?? ''}
+                        onChange={(event) => {
+                          updateNode(selectedNode.token, (current) => {
+                            const nextConfig = current.config && typeof current.config === 'object'
+                              ? { ...current.config }
+                              : {}
+                            const nextCount = parsePositiveInt(event.target.value)
+                            if (nextCount == null) {
+                              delete nextConfig.fan_in_custom_count
+                            } else {
+                              nextConfig.fan_in_custom_count = nextCount
+                            }
+                            return {
+                              ...current,
+                              config: nextConfig,
+                            }
+                          })
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                  {selectedRoutingValidation?.fieldErrors?.[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT] ? (
+                    <p className="error-text">{selectedRoutingValidation.fieldErrors[ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT]}</p>
+                  ) : null}
+                  {selectedNodeType === 'decision' ? (
+                    <>
+                      <label className="field">
+                        <span>fallback connector</span>
+                        <select
+                          ref={(node) => {
+                            routingFieldRefs.current[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR] = node
+                          }}
+                          value={selectedDecisionFallbackConnectorId}
+                          onChange={(event) => {
+                            const nextFallbackConnectorId = String(event.target.value || '').trim()
+                            updateNode(selectedNode.token, (current) => {
+                              const nextConfig = current.config && typeof current.config === 'object'
+                                ? { ...current.config }
+                                : {}
+                              if (!nextFallbackConnectorId) {
+                                nextConfig.no_match_policy = DECISION_NO_MATCH_POLICY_FAIL
+                                delete nextConfig.fallback_condition_key
+                              } else {
+                                nextConfig.no_match_policy = DECISION_NO_MATCH_POLICY_FALLBACK
+                                nextConfig.fallback_condition_key = nextFallbackConnectorId
+                              }
+                              return {
+                                ...current,
+                                config: nextConfig,
+                              }
+                            })
+                          }}
+                        >
+                          <option value="">fail on no match</option>
+                          {selectedDecisionFallbackConnectorOptions.map((entry) => (
+                            <option key={entry.connectorId} value={entry.connectorId}>
+                              {`${entry.connectorId} -> ${entry.targetLabel}`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {selectedDecisionFallbackConnectorOptions.length === 0 ? (
+                        <p className="toolbar-meta">Add a solid outgoing connector to enable fallback routing.</p>
+                      ) : null}
+                      {selectedRoutingValidation?.fieldErrors?.[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR] ? (
+                        <p className="error-text">{selectedRoutingValidation.fieldErrors[ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR]}</p>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {selectedRoutingValidation?.hasErrors
+                    ? selectedRoutingValidation.errors
+                      .filter((message) => !Object.values(selectedRoutingValidation.fieldErrors || {}).includes(message))
+                      .map((message) => (
+                        <p key={message} className="error-text">{message}</p>
+                      ))
+                    : null}
+                </div>
+              </PersistedDetails>
+            ) : null}
             {NODE_TYPE_WITH_EDITABLE_REF.has(selectedNodeType) ? (
               <label className="field">
                 <span>ref</span>

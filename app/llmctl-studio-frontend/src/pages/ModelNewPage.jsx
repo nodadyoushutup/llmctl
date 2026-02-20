@@ -29,6 +29,10 @@ function parseConfig(configText) {
   return parsed
 }
 
+function isConfigParseError(error, message) {
+  return error instanceof SyntaxError || message === 'Config must be a JSON object.'
+}
+
 export default function ModelNewPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -95,8 +99,11 @@ export default function ModelNewPage() {
       }
     } catch (error) {
       const message = errorMessage(error, error instanceof Error ? error.message : 'Failed to create model.')
-      if (message === 'Config must be a JSON object.' || message.startsWith('Unexpected token')) {
-        setFieldErrors((current) => ({ ...current, configText: message }))
+      if (isConfigParseError(error, message)) {
+        setFieldErrors((current) => ({
+          ...current,
+          configText: error instanceof SyntaxError ? 'Config must be valid JSON.' : message,
+        }))
       } else {
         flash.error(message)
       }

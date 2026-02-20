@@ -747,4 +747,110 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(modelOptionTexts).not.toContain('Chat Model')
     expect(modelOptionTexts).not.toContain('Gemini Chat')
   })
+
+  test('renders routing summary chips, updates routing config, and blocks invalid saves', async () => {
+    const onGraphChange = vi.fn()
+    const onNotice = vi.fn()
+    const onSaveGraph = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 120, y: 120 },
+          { id: 2, node_type: 'task', x: 260, y: 40, config: { task_prompt: 'A' } },
+          {
+            id: 3,
+            node_type: 'decision',
+            x: 260,
+            y: 200,
+            config: {
+              fan_in_mode: 'custom',
+              fan_in_custom_count: 3,
+              no_match_policy: 'fallback',
+              fallback_condition_key: 'missing_connector',
+            },
+          },
+          { id: 4, node_type: 'task', x: 520, y: 200, config: { task_prompt: 'B' } },
+        ]}
+        initialEdges={[
+          { source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1', edge_mode: 'solid' },
+          { source_node_id: 2, target_node_id: 3, source_handle_id: 'r1', target_handle_id: 'l1', edge_mode: 'solid' },
+          { source_node_id: 3, target_node_id: 4, source_handle_id: 'r1', target_handle_id: 'l1', edge_mode: 'solid', condition_key: 'approve' },
+        ]}
+        onGraphChange={onGraphChange}
+        onNotice={onNotice}
+        onSaveGraph={onSaveGraph}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:3"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:3"]'))
+    expect(screen.getByText('Routing')).toBeTruthy()
+    expect(screen.getByText('custom 3')).toBeTruthy()
+    expect(screen.getByText('fallback missing_connector')).toBeTruthy()
+    expect(screen.getByText('invalid 2')).toBeTruthy()
+
+    fireEvent.click(screen.getByLabelText('Save graph'))
+
+    await waitFor(() => {
+      expect(onSaveGraph).not.toHaveBeenCalled()
+      expect(onNotice).toHaveBeenCalled()
+      expect(document.getElementById('flow-ws-routing-details')?.open).toBe(true)
+    })
+    expect(screen.getByText('Custom N must be <= solid incoming connector count (1).')).toBeTruthy()
+    expect(screen.getByText('Fallback connector must match a solid outgoing connector.')).toBeTruthy()
+
+    const fallbackField = screen.getByText('fallback connector').closest('label')
+    const fallbackSelect = fallbackField?.querySelector('select')
+    expect(fallbackSelect).toBeTruthy()
+    fireEvent.change(fallbackSelect, { target: { value: 'approve' } })
+
+    const fanInModeField = screen.getByText('fan-in mode').closest('label')
+    const fanInModeSelect = fanInModeField?.querySelector('select')
+    expect(fanInModeSelect).toBeTruthy()
+    fireEvent.change(fanInModeSelect, { target: { value: 'any' } })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const decisionNode = payload?.nodes?.find((node) => node.id === 3)
+      expect(decisionNode?.config?.fan_in_mode).toBe('any')
+      expect(decisionNode?.config?.fan_in_custom_count).toBeUndefined()
+      expect(decisionNode?.config?.no_match_policy).toBe('fallback')
+      expect(decisionNode?.config?.fallback_condition_key).toBe('approve')
+    })
+
+    fireEvent.click(screen.getByLabelText('Save graph'))
+    await waitFor(() => {
+      expect(onSaveGraph).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  test('renders fallback badge on the configured decision connector edge', async () => {
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 120, y: 120 },
+          {
+            id: 2,
+            node_type: 'decision',
+            x: 300,
+            y: 120,
+            config: { no_match_policy: 'fallback', fallback_condition_key: 'reject' },
+          },
+          { id: 3, node_type: 'task', x: 560, y: 120, config: { task_prompt: 'Run branch' } },
+        ]}
+        initialEdges={[
+          { source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1', edge_mode: 'solid' },
+          { source_node_id: 2, target_node_id: 3, source_handle_id: 'r1', target_handle_id: 'l1', edge_mode: 'solid', condition_key: 'reject' },
+        ]}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-edge-fallback-badge')).toBeTruthy()
+    })
+    expect(screen.getByText('fallback')).toBeTruthy()
+  })
 })

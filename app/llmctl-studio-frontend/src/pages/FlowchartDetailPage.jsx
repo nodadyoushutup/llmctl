@@ -295,6 +295,9 @@ export default function FlowchartDetailPage() {
     if (!parsedFlowchartId) {
       return
     }
+    if (workspaceEditorRef.current?.validateBeforeSave && !workspaceEditorRef.current.validateBeforeSave()) {
+      return
+    }
     await withAction('save-graph', async () => {
       const nodesPayload = Array.isArray(editorGraph?.nodes) ? editorGraph.nodes : []
       const edgesPayload = Array.isArray(editorGraph?.edges) ? editorGraph.edges : []
