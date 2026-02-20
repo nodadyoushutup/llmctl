@@ -424,6 +424,60 @@ def _resolve_flowchart_request_ids(
     return (request_id or None, correlation_id or None)
 
 
+def _resolve_special_node_tool_operation(
+    *,
+    node_type: str,
+    node_config: dict[str, Any],
+) -> str | None:
+    normalized_node_type = str(node_type or "").strip().lower()
+    explicit_action = str(node_config.get("action") or "").strip()
+    if explicit_action:
+        return explicit_action
+    if normalized_node_type == FLOWCHART_NODE_TYPE_DECISION:
+        raw_conditions = (
+            node_config.get("decision_conditions")
+            if isinstance(node_config.get("decision_conditions"), list)
+            else []
+        )
+        for item in raw_conditions:
+            if not isinstance(item, dict):
+                continue
+            connector_id = str(item.get("connector_id") or "").strip()
+            condition_text = str(item.get("condition_text") or "").strip()
+            if connector_id and condition_text:
+                return "evaluate"
+        return "legacy_route"
+    return None
+
+
+def _resolve_special_node_tool_fallback_mode(node_config: dict[str, Any]) -> str:
+    raw_mode = str(node_config.get("tool_fallback_mode") or "").strip().lower()
+    if raw_mode in {"strict", "disabled", "off", "none"}:
+        return "disabled"
+    if raw_mode in {"enabled", "all", "fallback", "on"}:
+        return "all"
+    if raw_mode in {"conflict", "conflict_only", "conflicts_only"}:
+        return "conflict_only"
+    if "tool_fallback_enabled" in node_config:
+        return "all" if _coerce_bool(node_config.get("tool_fallback_enabled")) else "disabled"
+    return "disabled"
+
+
+def _is_special_node_tool_conflict_error(exc: Exception) -> bool:
+    error_text = str(exc or "").strip().lower()
+    if not error_text:
+        return False
+    conflict_markers = (
+        "conflict",
+        "duplicate",
+        "already exists",
+        "already has",
+        "idempotency",
+        "ambiguous",
+    )
+    return any(marker in error_text for marker in conflict_markers)
+
+
 def _build_special_node_tool_fallback_payload(
     *,
     node_type: str,
@@ -432,7 +486,11 @@ def _build_special_node_tool_fallback_payload(
     error: Exception,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     normalized_node_type = str(node_type or "").strip().lower()
-    action = str(node_config.get("action") or "").strip()
+    resolved_operation = _resolve_special_node_tool_operation(
+        node_type=node_type,
+        node_config=node_config,
+    )
+    action = str(node_config.get("action") or resolved_operation or "").strip()
     warning_message = str(error or "Deterministic tool invocation failed.").strip()
     warning = build_fallback_warning(
         message=warning_message,
@@ -539,9 +597,13 @@ def _execute_deterministic_special_node_with_framework(
     execution_id: int,
     invoke: Callable[[], tuple[dict[str, Any], dict[str, Any]]],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    resolved_operation = _resolve_special_node_tool_operation(
+        node_type=node_type,
+        node_config=node_config,
+    )
     scaffold = resolve_base_tool_scaffold(
         node_type=node_type,
-        operation=node_config.get("action"),
+        operation=resolved_operation,
     )
     request_id, correlation_id = _resolve_flowchart_request_ids(
         node_config=node_config,
@@ -557,7 +619,7 @@ def _execute_deterministic_special_node_with_framework(
         default=0,
         minimum=0,
     )
-    fallback_enabled = _coerce_bool(node_config.get("tool_fallback_enabled"))
+    fallback_mode = _resolve_special_node_tool_fallback_mode(node_config)
 
     def _validate_contract(
         output_state: dict[str, Any],
@@ -572,6 +634,11 @@ def _execute_deterministic_special_node_with_framework(
     def _fallback_builder(
         exc: Exception,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        if (
+            fallback_mode == "conflict_only"
+            and not _is_special_node_tool_conflict_error(exc)
+        ):
+            raise exc
         return _build_special_node_tool_fallback_payload(
             node_type=node_type,
             node_config=node_config,
@@ -599,7 +666,7 @@ def _execute_deterministic_special_node_with_framework(
         invoke=invoke,
         validate=_validate_contract,
         artifact_hook=None,
-        fallback_builder=_fallback_builder if fallback_enabled else None,
+        fallback_builder=_fallback_builder if fallback_mode != "disabled" else None,
     )
     return outcome.output_state, outcome.routing_state
 

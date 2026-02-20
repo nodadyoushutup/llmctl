@@ -1,4 +1,4 @@
-name: Build And Publish llmctl-studio-backend
+name: Build And Publish llmctl-executor-frontier
 
 on:
   workflow_dispatch:
@@ -17,9 +17,8 @@ jobs:
   build-image:
     uses: ./.github/workflows/_build-and-publish-image.yml
     with:
-      image_name: llmctl-studio-backend
-      dockerfile: app/llmctl-studio-backend/docker/Dockerfile
-      build_args: |
-        DOCKER_GID=999
+      image_name: llmctl-executor-frontier
+      dockerfile: app/llmctl-executor/Dockerfile
+      build_args: ""
       tag: ${{ inputs.tag }}
     secrets: inherit

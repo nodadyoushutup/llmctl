@@ -1,4 +1,4 @@
-name: Build And Publish llmctl-studio-backend
+name: Build And Publish llmctl-studio-frontend
 
 on:
   workflow_dispatch:
@@ -17,9 +17,13 @@ jobs:
   build-image:
     uses: ./.github/workflows/_build-and-publish-image.yml
     with:
-      image_name: llmctl-studio-backend
-      dockerfile: app/llmctl-studio-backend/docker/Dockerfile
+      image_name: llmctl-studio-frontend
+      dockerfile: app/llmctl-studio-frontend/docker/Dockerfile
       build_args: |
-        DOCKER_GID=999
+        VITE_API_BASE_URL=
+        VITE_API_BASE_PATH=/api
+        VITE_WEB_BASE_PATH=/web
+        VITE_SOCKET_PATH=/api/socket.io
+        VITE_SOCKET_NAMESPACE=/rt
       tag: ${{ inputs.tag }}
     secrets: inherit

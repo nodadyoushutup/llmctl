@@ -1,4 +1,4 @@
-name: Build And Publish llmctl-studio-backend
+name: Build And Publish llmctl-executor-vllm
 
 on:
   workflow_dispatch:
@@ -17,9 +17,11 @@ jobs:
   build-image:
     uses: ./.github/workflows/_build-and-publish-image.yml
     with:
-      image_name: llmctl-studio-backend
-      dockerfile: app/llmctl-studio-backend/docker/Dockerfile
+      image_name: llmctl-executor-vllm
+      dockerfile: app/llmctl-executor/Dockerfile.base
       build_args: |
-        DOCKER_GID=999
+        INSTALL_STUDIO_BACKEND_DEPS=true
+        VLLM_VERSION=0.9.0
+        TRANSFORMERS_VERSION=4.53.3
       tag: ${{ inputs.tag }}
     secrets: inherit

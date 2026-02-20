@@ -250,6 +250,8 @@ from services.huggingface_downloads import (
     vllm_local_model_container_path as _shared_vllm_local_model_container_path,
     vllm_local_model_directory as _shared_vllm_local_model_directory,
 )
+from services.realtime_events import emit_contract_event
+from services.runtime_contracts import RUNTIME_CONTRACT_VERSION
 from web.api_contracts import (
     build_api_error_envelope,
     correlation_id_from_request,
@@ -289,6 +291,46 @@ CLAUDE_MODEL_OPTIONS = (
     "claude-3-7-sonnet-latest",
     "claude-3-5-haiku-latest",
 )
+MODEL_PROVIDER_API_CONTRACT_VERSION = RUNTIME_CONTRACT_VERSION
+MODEL_LIST_SORT_FIELDS = {
+    "name": LLMModel.name,
+    "provider": LLMModel.provider,
+    "created_at": LLMModel.created_at,
+    "updated_at": LLMModel.updated_at,
+}
+PROVIDER_LIST_SORT_FIELDS = {"id", "label", "enabled", "is_default", "model"}
+MODEL_COMPATIBILITY_KEYS: dict[str, tuple[str, ...]] = {
+    "codex": (
+        "model",
+        "approval_policy",
+        "sandbox_mode",
+        "network_access",
+        "model_reasoning_effort",
+        "shell_env_inherit",
+        "shell_env_ignore_default_excludes",
+        "notice_hide_key",
+        "notice_hide_enabled",
+        "notice_migration_from",
+        "notice_migration_to",
+    ),
+    "gemini": ("model", "approval_mode", "sandbox", "extra_args"),
+    "claude": ("model",),
+    "vllm_local": (
+        "model",
+        "temperature",
+        "max_tokens",
+        "request_timeout_seconds",
+        "agent_markdown_filename",
+    ),
+    "vllm_remote": (
+        "model",
+        "base_url_override",
+        "temperature",
+        "max_tokens",
+        "request_timeout_seconds",
+        "agent_markdown_filename",
+    ),
+}
 QWEN_DEFAULT_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 QWEN_DEFAULT_MODEL_DIR_NAME = "qwen2.5-0.5b-instruct"
 HUGGINGFACE_REPO_ID_PATTERN = re.compile(
