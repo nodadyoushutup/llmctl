@@ -46,6 +46,13 @@ from services.execution.contracts import (
     ExecutionResult,
 )
 from services.execution.router import ExecutionRouter
+from services.execution.tooling import (
+    DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING,
+    ToolInvocationConfig,
+    build_fallback_warning,
+    invoke_deterministic_tool,
+    resolve_base_tool_scaffold,
+)
 from services.realtime_events import (
     combine_room_keys,
     download_scope_rooms,
@@ -397,6 +404,252 @@ def _runtime_evidence_payload(
         "k8s_pod_name": k8s_pod_name,
         "k8s_terminal_reason": k8s_terminal_reason,
     }
+
+
+def _resolve_flowchart_request_ids(
+    *,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    request_id = str(
+        node_config.get("request_id")
+        or input_context.get("request_id")
+        or ""
+    ).strip()
+    correlation_id = str(
+        node_config.get("correlation_id")
+        or input_context.get("correlation_id")
+        or ""
+    ).strip()
+    return (request_id or None, correlation_id or None)
+
+
+def _build_special_node_tool_fallback_payload(
+    *,
+    node_type: str,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    error: Exception,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    normalized_node_type = str(node_type or "").strip().lower()
+    action = str(node_config.get("action") or "").strip()
+    warning_message = str(error or "Deterministic tool invocation failed.").strip()
+    warning = build_fallback_warning(
+        message=warning_message,
+        details={
+            "node_type": normalized_node_type,
+            "action": action or "unknown",
+        },
+    )
+    route_key = str(node_config.get("route_key") or "").strip()
+    routing_state: dict[str, Any] = {}
+    if route_key:
+        routing_state["route_key"] = route_key
+
+    if normalized_node_type == FLOWCHART_NODE_TYPE_DECISION:
+        output_state = {
+            "node_type": FLOWCHART_NODE_TYPE_DECISION,
+            "matched_connector_ids": [],
+            "evaluations": [],
+            "no_match": True,
+            "action": action or "evaluate",
+            "action_results": ["Deterministic decision tool fallback contract applied."],
+        }
+        routing_state["matched_connector_ids"] = []
+        routing_state["evaluations"] = []
+        routing_state["no_match"] = True
+        return output_state, routing_state, warning
+
+    if normalized_node_type == FLOWCHART_NODE_TYPE_MEMORY:
+        execution_index = _parse_optional_int(
+            (
+                input_context.get("node")
+                if isinstance(input_context.get("node"), dict)
+                else {}
+            ).get("execution_index"),
+            default=0,
+            minimum=1,
+        ) or None
+        output_state = {
+            "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+            "action": action or MEMORY_NODE_ACTION_RETRIEVE,
+            "action_prompt_template": "",
+            "internal_action_prompt": "",
+            "action_results": ["Deterministic memory tool fallback contract applied."],
+            "additive_prompt": str(node_config.get("additive_prompt") or "").strip(),
+            "inferred_prompt": "",
+            "effective_prompt": "",
+            "memory_id": _parse_optional_int(
+                node_config.get("ref_id") or node_config.get("memory_id"),
+                default=0,
+                minimum=1,
+            )
+            or None,
+            "mcp_server_keys": [INTEGRATED_MCP_LLMCTL_KEY],
+            "attachments": [],
+            "retrieved_memories": [],
+            "stored_memory": None,
+            "execution_index": execution_index,
+        }
+        return output_state, routing_state, warning
+
+    if normalized_node_type == FLOWCHART_NODE_TYPE_MILESTONE:
+        output_state = {
+            "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
+            "action": action or MILESTONE_NODE_ACTION_CREATE_OR_UPDATE,
+            "additive_prompt": str(node_config.get("additive_prompt") or "").strip(),
+            "execution_index": _parse_optional_int(
+                (
+                    input_context.get("node")
+                    if isinstance(input_context.get("node"), dict)
+                    else {}
+                ).get("execution_index"),
+                default=0,
+                minimum=1,
+            )
+            or None,
+            "checkpoint_hit": False,
+            "action_results": ["Deterministic milestone tool fallback contract applied."],
+            "mcp_server_keys": [],
+            "attachments": [],
+            "before_milestone": {},
+            "milestone": {},
+        }
+        return output_state, routing_state, warning
+
+    output_state = {
+        "node_type": FLOWCHART_NODE_TYPE_PLAN,
+        "action": action or PLAN_NODE_ACTION_CREATE_OR_UPDATE,
+        "additive_prompt": str(node_config.get("additive_prompt") or "").strip(),
+        "action_results": ["Deterministic plan tool fallback contract applied."],
+        "completion_target": {},
+        "touched": {"stage_ids": [], "task_ids": [], "stages": [], "tasks": []},
+        "mcp_server_keys": [],
+        "attachments": [],
+        "plan": {},
+    }
+    return output_state, routing_state, warning
+
+
+def _execute_deterministic_special_node_with_framework(
+    *,
+    node_type: str,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    execution_id: int,
+    invoke: Callable[[], tuple[dict[str, Any], dict[str, Any]]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    scaffold = resolve_base_tool_scaffold(
+        node_type=node_type,
+        operation=node_config.get("action"),
+    )
+    request_id, correlation_id = _resolve_flowchart_request_ids(
+        node_config=node_config,
+        input_context=input_context,
+    )
+    retry_attempts = _parse_optional_int(
+        node_config.get("tool_retry_attempts"),
+        default=1,
+        minimum=1,
+    )
+    retry_backoff_ms = _parse_optional_int(
+        node_config.get("tool_retry_backoff_ms"),
+        default=0,
+        minimum=0,
+    )
+    fallback_enabled = _coerce_bool(node_config.get("tool_fallback_enabled"))
+
+    def _validate_contract(
+        output_state: dict[str, Any],
+        routing_state: dict[str, Any],
+    ) -> None:
+        validate_special_node_output_contract(
+            str(node_type or "").strip().lower(),
+            output_state,
+            routing_state,
+        )
+
+    def _fallback_builder(
+        exc: Exception,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        return _build_special_node_tool_fallback_payload(
+            node_type=node_type,
+            node_config=node_config,
+            input_context=input_context,
+            error=exc,
+        )
+
+    outcome = invoke_deterministic_tool(
+        config=ToolInvocationConfig(
+            node_type=str(scaffold.get("node_type") or node_type),
+            tool_name=str(scaffold.get("tool_name") or "deterministic.unknown"),
+            operation=str(scaffold.get("operation") or "execute"),
+            execution_id=execution_id,
+            request_id=request_id,
+            correlation_id=correlation_id,
+            idempotency_key=(
+                f"node_run:{int(execution_id)}:"
+                f"{str(scaffold.get('tool_name') or 'deterministic.unknown')}:"
+                f"{str(scaffold.get('operation') or 'execute')}"
+            ),
+            max_attempts=retry_attempts,
+            retry_backoff_seconds=retry_backoff_ms / 1000.0,
+            artifact_hook_key=str(scaffold.get("artifact_hook_key") or "").strip() or None,
+        ),
+        invoke=invoke,
+        validate=_validate_contract,
+        artifact_hook=None,
+        fallback_builder=_fallback_builder if fallback_enabled else None,
+    )
+    return outcome.output_state, outcome.routing_state
+
+
+def _augment_runtime_payload_with_deterministic_tooling(
+    runtime_payload: dict[str, Any] | None,
+    *,
+    output_state: dict[str, Any],
+    routing_state: dict[str, Any],
+) -> dict[str, Any]:
+    payload = dict(runtime_payload) if isinstance(runtime_payload, dict) else {}
+    tooling_payload = (
+        output_state.get("deterministic_tooling")
+        if isinstance(output_state.get("deterministic_tooling"), dict)
+        else {}
+    )
+    if not tooling_payload and isinstance(routing_state.get("deterministic_tooling"), dict):
+        tooling_payload = dict(routing_state.get("deterministic_tooling") or {})
+    execution_status = str(
+        tooling_payload.get("execution_status") or output_state.get("execution_status") or ""
+    ).strip()
+    fallback_used = bool(
+        tooling_payload.get("fallback_used")
+        or output_state.get("fallback_used")
+        or routing_state.get("fallback_used")
+    )
+    if execution_status:
+        payload["deterministic_execution_status"] = execution_status
+    if fallback_used:
+        payload["deterministic_fallback_used"] = True
+        payload["fallback_attempted"] = True
+        warning_message = ""
+        warnings = tooling_payload.get("warnings")
+        if isinstance(warnings, list) and warnings:
+            first_warning = warnings[0]
+            if isinstance(first_warning, dict):
+                warning_message = str(first_warning.get("message") or "").strip()
+            else:
+                warning_message = str(first_warning or "").strip()
+        payload["fallback_reason"] = (
+            warning_message
+            or str(payload.get("fallback_reason") or "").strip()
+            or "deterministic_tool_fallback"
+        )
+    elif execution_status == DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING:
+        payload["fallback_attempted"] = True
+        payload["fallback_reason"] = (
+            str(payload.get("fallback_reason") or "").strip() or "success_with_warning"
+        )
+    return payload
 
 
 def _quick_rag_worker_compute_disabled(
@@ -9079,39 +9332,63 @@ def _execute_flowchart_node(
             default_model_id=default_model_id,
         )
     if node_type == FLOWCHART_NODE_TYPE_DECISION:
-        return _execute_flowchart_decision_node(
+        return _execute_deterministic_special_node_with_framework(
+            node_type=node_type,
             node_config=node_config,
             input_context=input_context,
-            mcp_server_keys=mcp_server_keys,
+            execution_id=execution_id,
+            invoke=lambda: _execute_flowchart_decision_node(
+                node_config=node_config,
+                input_context=input_context,
+                mcp_server_keys=mcp_server_keys,
+            ),
         )
     if node_type == FLOWCHART_NODE_TYPE_PLAN:
-        return _execute_flowchart_plan_node(
-            node_id=node_id,
-            node_ref_id=node_ref_id,
+        return _execute_deterministic_special_node_with_framework(
+            node_type=node_type,
             node_config=node_config,
             input_context=input_context,
-            enabled_providers=enabled_providers,
-            default_model_id=default_model_id,
-            mcp_server_keys=mcp_server_keys,
+            execution_id=execution_id,
+            invoke=lambda: _execute_flowchart_plan_node(
+                node_id=node_id,
+                node_ref_id=node_ref_id,
+                node_config=node_config,
+                input_context=input_context,
+                enabled_providers=enabled_providers,
+                default_model_id=default_model_id,
+                mcp_server_keys=mcp_server_keys,
+            ),
         )
     if node_type == FLOWCHART_NODE_TYPE_MILESTONE:
-        return _execute_flowchart_milestone_node(
-            node_id=node_id,
-            node_ref_id=node_ref_id,
+        return _execute_deterministic_special_node_with_framework(
+            node_type=node_type,
             node_config=node_config,
             input_context=input_context,
-            execution_index=execution_index,
-            enabled_providers=enabled_providers,
-            default_model_id=default_model_id,
-            mcp_server_keys=mcp_server_keys,
+            execution_id=execution_id,
+            invoke=lambda: _execute_flowchart_milestone_node(
+                node_id=node_id,
+                node_ref_id=node_ref_id,
+                node_config=node_config,
+                input_context=input_context,
+                execution_index=execution_index,
+                enabled_providers=enabled_providers,
+                default_model_id=default_model_id,
+                mcp_server_keys=mcp_server_keys,
+            ),
         )
     if node_type == FLOWCHART_NODE_TYPE_MEMORY:
-        return _execute_flowchart_memory_node(
-            node_id=node_id,
-            node_ref_id=node_ref_id,
+        return _execute_deterministic_special_node_with_framework(
+            node_type=node_type,
             node_config=node_config,
             input_context=input_context,
-            mcp_server_keys=mcp_server_keys,
+            execution_id=execution_id,
+            invoke=lambda: _execute_flowchart_memory_node(
+                node_id=node_id,
+                node_ref_id=node_ref_id,
+                node_config=node_config,
+                input_context=input_context,
+                mcp_server_keys=mcp_server_keys,
+            ),
         )
     raise ValueError(f"Unsupported flowchart node type '{node_type}'.")
 
@@ -9679,18 +9956,6 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         if isinstance(execution_result.run_metadata, dict)
                         else routed_execution_request.run_metadata_payload()
                     )
-                    runtime_evidence = _runtime_evidence_payload(
-                        run_metadata=runtime_payload,
-                        provider_metadata=(
-                            execution_result.provider_metadata
-                            if isinstance(execution_result.provider_metadata, dict)
-                            else None
-                        ),
-                        error=execution_result.error
-                        if isinstance(execution_result.error, dict)
-                        else None,
-                        terminal_status=execution_result.status,
-                    )
                     if execution_result.status != "success":
                         failure_error = execution_result.error
                         failure_message = (
@@ -9712,6 +9977,23 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         dict(execution_result.routing_state)
                         if isinstance(execution_result.routing_state, dict)
                         else {}
+                    )
+                    runtime_payload = _augment_runtime_payload_with_deterministic_tooling(
+                        runtime_payload,
+                        output_state=output_state,
+                        routing_state=routing_state,
+                    )
+                    runtime_evidence = _runtime_evidence_payload(
+                        run_metadata=runtime_payload,
+                        provider_metadata=(
+                            execution_result.provider_metadata
+                            if isinstance(execution_result.provider_metadata, dict)
+                            else None
+                        ),
+                        error=execution_result.error
+                        if isinstance(execution_result.error, dict)
+                        else None,
+                        terminal_status=execution_result.status,
                     )
                     if runtime_evidence:
                         routing_state["runtime_evidence"] = runtime_evidence

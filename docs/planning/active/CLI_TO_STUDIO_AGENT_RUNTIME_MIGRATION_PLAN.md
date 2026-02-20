@@ -222,10 +222,11 @@ Dependency model:
 
 ## Stage 6 - Sequential Baseline E: Deterministic Tooling Framework
 
-- [ ] Implement shared internal tool invocation framework with schema validation, idempotency, retry controls, and artifact persistence hooks.
-- [ ] Implement standard fallback contract (`success_with_warning`, `fallback_used`) when required deterministic tools fail/conflict.
-- [ ] Implement shared tracing/audit envelope for tool calls, errors, and correlation propagation.
-- [ ] Deliver cutover-critical base tool scaffolding required before domain fan-out implementation begins.
+- [x] Implement shared internal tool invocation framework with schema validation, idempotency, retry controls, and artifact persistence hooks.
+- [x] Implement standard fallback contract (`success_with_warning`, `fallback_used`) when required deterministic tools fail/conflict.
+- [x] Implement shared tracing/audit envelope for tool calls, errors, and correlation propagation.
+- [x] Deliver cutover-critical base tool scaffolding required before domain fan-out implementation begins.
+- [x] Stage output locked in `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md`.
 
 ## Stage 7 - Fan-Out A: Model/Provider Management API + Backend Contracts
 

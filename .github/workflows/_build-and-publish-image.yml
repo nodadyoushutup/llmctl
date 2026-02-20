@@ -1,0 +1,160 @@
+name: Build And Publish GHCR Image (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: "GHCR image name without registry/owner (for example: llmctl-studio-backend)"
+        required: true
+        type: string
+      dockerfile:
+        description: "Path to Dockerfile"
+        required: true
+        type: string
+      build_args:
+        description: "Optional newline-delimited Docker build args"
+        required: false
+        default: ""
+        type: string
+      tag:
+        description: "Optional version tag (for example: 0.1.0). If omitted, next patch tag is computed from GHCR."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    name: Build and Push ${{ inputs.image_name }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve image metadata
+        id: image_meta
+        env:
+          IMAGE_NAME: ${{ inputs.image_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          owner_lower="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner_lower}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "owner_lower=${owner_lower}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version tag
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          api_base = "https://api.github.com"
+          token = os.environ["GITHUB_TOKEN"]
+          owner = os.environ["OWNER"]
+          image_name = os.environ["IMAGE_NAME"]
+          input_tag = os.environ["INPUT_TAG"].strip()
+          output_path = os.environ["GITHUB_OUTPUT"]
+
+          user_tag_pattern = re.compile(r"^v?\d+\.\d+\.\d+$")
+          semver_pattern = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+          def api_get(path: str):
+            request = urllib.request.Request(
+                f"{api_base}{path}",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {token}",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            try:
+              with urllib.request.urlopen(request) as response:
+                return json.load(response)
+            except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                return None
+              body = exc.read().decode("utf-8", errors="replace")
+              raise RuntimeError(
+                  f"GitHub API request failed ({exc.code}) for {path}: {body}"
+              ) from exc
+
+          if input_tag:
+            if not user_tag_pattern.match(input_tag):
+              raise SystemExit(
+                  f"Invalid tag '{input_tag}'. Expected semantic version like 0.1.0 or v0.1.0."
+              )
+            resolved_tag = input_tag
+          else:
+            owner_doc = api_get(f"/users/{owner}")
+            if owner_doc is None:
+              raise SystemExit(f"Unable to resolve GitHub owner '{owner}'")
+
+            scope = "orgs" if owner_doc.get("type") == "Organization" else "users"
+            versions = []
+            page = 1
+
+            while True:
+              page_items = api_get(
+                  f"/{scope}/{owner}/packages/container/{image_name}/versions?per_page=100&page={page}"
+              )
+              if page_items is None:
+                break
+              if not isinstance(page_items, list) or not page_items:
+                break
+              versions.extend(page_items)
+              page += 1
+
+            candidates = []
+            for version in versions:
+              tags = (
+                  (version or {})
+                  .get("metadata", {})
+                  .get("container", {})
+                  .get("tags", [])
+              )
+              for tag in tags:
+                match = semver_pattern.match(tag)
+                if match:
+                  candidates.append(tuple(int(part) for part in match.groups()))
+
+            if not candidates:
+              resolved_tag = "0.0.1"
+            else:
+              major, minor, patch = max(candidates)
+              resolved_tag = f"{major}.{minor}.{patch + 1}"
+
+          print(f"Resolved tag for {image_name}: {resolved_tag}")
+          with open(output_path, "a", encoding="utf-8") as output:
+            output.write(f"tag={resolved_tag}\n")
+          PY
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          push: true
+          build-args: ${{ inputs.build_args }}
+          tags: ${{ steps.image_meta.outputs.image }}:${{ steps.version.outputs.tag }}

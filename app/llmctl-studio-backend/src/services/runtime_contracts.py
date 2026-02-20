@@ -259,12 +259,18 @@ def resolve_node_degraded_markers(
     fallback_attempted = bool(runtime_payload.get("fallback_attempted"))
     dispatch_uncertain = bool(runtime_payload.get("dispatch_uncertain"))
     cli_fallback_used = bool(runtime_payload.get("cli_fallback_used"))
+    deterministic_fallback_used = bool(runtime_payload.get("deterministic_fallback_used"))
+    deterministic_execution_status = str(
+        runtime_payload.get("deterministic_execution_status") or ""
+    ).strip()
     fallback_reason = str(runtime_payload.get("fallback_reason") or "").strip()
     api_failure_category = str(runtime_payload.get("api_failure_category") or "").strip()
     degraded = bool(
         fallback_attempted
         or dispatch_uncertain
         or cli_fallback_used
+        or deterministic_fallback_used
+        or deterministic_execution_status == "success_with_warning"
         or fallback_reason
         or api_failure_category
     )
@@ -278,6 +284,10 @@ def resolve_node_degraded_markers(
         return True, "dispatch_uncertain"
     if cli_fallback_used:
         return True, "cli_fallback_used"
+    if deterministic_fallback_used:
+        return True, "deterministic_fallback_used"
+    if deterministic_execution_status == "success_with_warning":
+        return True, "success_with_warning"
     return True, "degraded"
 
 

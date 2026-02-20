@@ -103,6 +103,16 @@ class RuntimeContractsStage3Tests(unittest.TestCase):
         self.assertTrue(degraded)
         self.assertEqual("provider_unavailable", reason)
 
+    def test_resolve_node_degraded_markers_handles_deterministic_warning_contract(self) -> None:
+        degraded, reason = resolve_node_degraded_markers(
+            {
+                "deterministic_fallback_used": True,
+                "deterministic_execution_status": "success_with_warning",
+            }
+        )
+        self.assertTrue(degraded)
+        self.assertEqual("deterministic_fallback_used", reason)
+
     def test_idempotency_key_builders_are_stable(self) -> None:
         self.assertEqual(
             "flowchart_run:10:flowchart_node:33:execution:2",

@@ -1,0 +1,66 @@
+name: Build And Publish All Docker Images To GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional semantic version tag (for example: 0.1.0). If omitted, each image auto-bumps its latest patch version."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-images:
+    name: Build ${{ matrix.image_name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: llmctl-studio-backend
+            dockerfile: app/llmctl-studio-backend/docker/Dockerfile
+            build_args: |
+              DOCKER_GID=999
+          - image_name: llmctl-studio-frontend
+            dockerfile: app/llmctl-studio-frontend/docker/Dockerfile
+            build_args: |
+              VITE_API_BASE_URL=
+              VITE_API_BASE_PATH=/api
+              VITE_WEB_BASE_PATH=/web
+              VITE_SOCKET_PATH=/api/socket.io
+              VITE_SOCKET_NAMESPACE=/rt
+          - image_name: llmctl-celery-worker
+            dockerfile: app/llmctl-celery-worker/docker/Dockerfile
+            build_args: |
+              DOCKER_GID=999
+          - image_name: llmctl-rag
+            dockerfile: app/llmctl-rag/docker/llmctl-rag.Dockerfile
+            build_args: ""
+          - image_name: llmctl-mcp
+            dockerfile: app/llmctl-mcp/docker/llmctl-mcp.Dockerfile
+            build_args: ""
+          - image_name: llmctl-github-mcp
+            dockerfile: app/llmctl-mcp/docker/github-mcp-proxy.Dockerfile
+            build_args: ""
+          - image_name: llmctl-chromadb-mcp
+            dockerfile: app/llmctl-mcp/docker/chromadb-mcp-proxy.Dockerfile
+            build_args: ""
+          - image_name: llmctl-executor-frontier
+            dockerfile: app/llmctl-executor/Dockerfile
+            build_args: ""
+          - image_name: llmctl-executor-vllm
+            dockerfile: app/llmctl-executor/Dockerfile.base
+            build_args: |
+              INSTALL_STUDIO_BACKEND_DEPS=true
+              VLLM_VERSION=0.9.0
+              TRANSFORMERS_VERSION=4.53.3
+    uses: ./.github/workflows/_build-and-publish-image.yml
+    with:
+      image_name: ${{ matrix.image_name }}
+      dockerfile: ${{ matrix.dockerfile }}
+      build_args: ${{ matrix.build_args }}
+      tag: ${{ inputs.tag }}
+    secrets: inherit
