@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from core.db import session_scope
+from core.models import AgentTask, FlowchartNode, LLMModel
 from services.execution.contracts import (
     EXECUTION_CONTRACT_VERSION,
     EXECUTION_DISPATCH_CONFIRMED,
@@ -23,7 +25,15 @@ from services.execution.contracts import (
     ExecutionResult,
 )
 from services.execution.idempotency import register_dispatch_key
-from services.integrations import resolve_node_executor_k8s_image
+from services.integrations import (
+    NODE_EXECUTOR_IMAGE_CLASS_FRONTIER,
+    NODE_EXECUTOR_IMAGE_CLASS_VLLM,
+    resolve_node_executor_k8s_image_for_class,
+)
+from services.runtime_contracts import (
+    validate_node_output_contract,
+    validate_routing_output_contract,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +81,8 @@ _POD_ENV_PREFIX_ALLOWLIST = (
     "HUGGINGFACE_",
     "GITHUB_",
 )
+_VLLM_PROVIDER_SET = {"vllm_local", "vllm_remote"}
+_FRONTIER_PROVIDER_SET = {"codex", "gemini", "claude"}
 
 
 def _utcnow() -> datetime:
@@ -151,6 +163,90 @@ def _parse_image_pull_secrets(value: str | None) -> list[dict[str, str]]:
     return secrets
 
 
+def _normalize_provider_name(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _provider_from_model_id(model_id: int | None) -> str:
+    if model_id is None or model_id <= 0:
+        return ""
+    try:
+        with session_scope() as session:
+            model = session.get(LLMModel, int(model_id))
+            if model is None:
+                return ""
+            return _normalize_provider_name(model.provider)
+    except RuntimeError:
+        return ""
+
+
+def _request_model_provider(request: ExecutionRequest) -> str:
+    node_config = request.node_config if isinstance(request.node_config, dict) else {}
+    input_context = request.input_context if isinstance(request.input_context, dict) else {}
+
+    direct_provider = _normalize_provider_name(node_config.get("provider"))
+    if direct_provider:
+        return direct_provider
+    model_provider = _normalize_provider_name(node_config.get("model_provider"))
+    if model_provider:
+        return model_provider
+
+    model_config = node_config.get("model_config")
+    if isinstance(model_config, dict):
+        model_config_provider = _normalize_provider_name(model_config.get("provider"))
+        if model_config_provider:
+            return model_config_provider
+
+    rag_context = input_context.get("rag_quick_run")
+    if isinstance(rag_context, dict):
+        rag_provider = _normalize_provider_name(rag_context.get("model_provider"))
+        if rag_provider:
+            return rag_provider
+
+    node_type = _normalize_provider_name(request.node_type)
+    if node_type == "agent_task":
+        task_id = int(request.execution_task_id or request.node_id or 0)
+        if task_id > 0:
+            try:
+                with session_scope() as session:
+                    task = session.get(AgentTask, task_id)
+                    if task is not None:
+                        if task.model_id is not None:
+                            provider = _provider_from_model_id(int(task.model_id))
+                            if provider:
+                                return provider
+            except RuntimeError:
+                return ""
+
+    node_id = int(request.node_id or 0)
+    if node_id > 0:
+        try:
+            with session_scope() as session:
+                flow_node = session.get(FlowchartNode, node_id)
+                if flow_node is not None:
+                    if flow_node.model_id is not None:
+                        provider = _provider_from_model_id(int(flow_node.model_id))
+                        if provider:
+                            return provider
+                    if request.default_model_id is not None:
+                        provider = _provider_from_model_id(int(request.default_model_id))
+                        if provider:
+                            return provider
+        except RuntimeError:
+            return ""
+
+    return ""
+
+
+def _executor_image_class_for_request(request: ExecutionRequest) -> str:
+    provider = _request_model_provider(request)
+    if provider in _VLLM_PROVIDER_SET:
+        return NODE_EXECUTOR_IMAGE_CLASS_VLLM
+    if provider in _FRONTIER_PROVIDER_SET:
+        return NODE_EXECUTOR_IMAGE_CLASS_FRONTIER
+    return NODE_EXECUTOR_IMAGE_CLASS_FRONTIER
+
+
 @dataclass
 class _KubernetesDispatchOutcome:
     job_name: str
@@ -201,13 +297,25 @@ class KubernetesExecutor:
         started_at = _utcnow()
         settings = self._settings
         namespace = str(settings.get("k8s_namespace") or "default").strip() or "default"
+        image_class = _executor_image_class_for_request(request)
         try:
-            image = resolve_node_executor_k8s_image(
-                settings.get("k8s_image"),
-                settings.get("k8s_image_tag"),
+            image = resolve_node_executor_k8s_image_for_class(
+                settings,
+                image_class,
             )
         except ValueError:
-            image = str(settings.get("k8s_image") or "llmctl-executor:latest")
+            if image_class == NODE_EXECUTOR_IMAGE_CLASS_VLLM:
+                image = str(
+                    settings.get("k8s_vllm_image")
+                    or settings.get("k8s_image")
+                    or "llmctl-executor-vllm:latest"
+                )
+            else:
+                image = str(
+                    settings.get("k8s_frontier_image")
+                    or settings.get("k8s_image")
+                    or "llmctl-executor-frontier:latest"
+                )
         in_cluster = _as_bool(settings.get("k8s_in_cluster"), default=False)
         service_account = str(settings.get("k8s_service_account") or "").strip()
         kubeconfig = str(settings.get("k8s_kubeconfig") or "")
@@ -274,6 +382,14 @@ class KubernetesExecutor:
             or os.getenv(_EXECUTOR_ARGOCD_APP_NAME_ENV)
             or _EXECUTOR_ARGOCD_APP_NAME_DEFAULT
         ).strip()
+        logger.info(
+            "Node executor image class selected=%s image=%s node_type=%s node_id=%s execution_id=%s",
+            image_class,
+            image,
+            request.node_type,
+            request.node_id,
+            request.execution_id,
+        )
 
         try:
             outcome = self._dispatch_via_kubernetes(
@@ -1449,6 +1565,11 @@ class KubernetesExecutor:
             return {}, {}, "Kubernetes executor result is missing output_state."
         if not isinstance(routing_state, dict):
             return {}, {}, "Kubernetes executor result is missing routing_state."
+        try:
+            validate_node_output_contract(output_state)
+            validate_routing_output_contract(routing_state)
+        except ValueError as exc:
+            return {}, {}, str(exc)
         return output_state, routing_state, None
 
     def _dispatch_failed_result(

@@ -200,24 +200,25 @@ Dependency model:
 
 ## Stage 3 - Sequential Baseline B: Contracts + Persistence Foundations
 
-- [ ] Define JSON schemas and versioned contracts for node outputs, routing outputs, artifacts, and special-node tool outputs.
-- [ ] Freeze API error envelope and request/correlation ID requirements across backend responses and socket payloads.
-- [ ] Add/adjust DB schema for run/node artifacts, routing state, fallback/degraded status markers, and idempotency keys.
-- [ ] Define socket event contract names in `domain:entity:action` format and payload invariants.
+- [x] Define JSON schemas and versioned contracts for node outputs, routing outputs, artifacts, and special-node tool outputs.
+- [x] Freeze API error envelope and request/correlation ID requirements across backend responses and socket payloads.
+- [x] Add/adjust DB schema for run/node artifacts, routing state, fallback/degraded status markers, and idempotency keys.
+- [x] Define socket event contract names in `domain:entity:action` format and payload invariants.
+- [x] Stage output locked in `docs/planning/active/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE3_CONTRACTS_PERSISTENCE_FREEZE.md`.
 
 ## Stage 4 - Sequential Baseline C: Execution Loop + Routing Core
 
-- [ ] Implement/align orchestrator execution loop with connector/context-pass baseline (solid trigger + dotted context pull behavior).
-- [ ] Implement deterministic route resolution persistence (`matched_connector_ids`, `route_key`, `routing_state`) with fail-fast invalid-route handling.
-- [ ] Implement configurable fan-in policy (`all`, `any`, `custom N`) and save-time validation invariants.
-- [ ] Implement decision no-match behavior (explicit fallback connector or fail) as runtime-enforced policy.
+- [x] Implement/align orchestrator execution loop with connector/context-pass baseline (solid trigger + dotted context pull behavior).
+- [x] Implement deterministic route resolution persistence (`matched_connector_ids`, `route_key`, `routing_state`) with fail-fast invalid-route handling.
+- [x] Implement configurable fan-in policy (`all`, `any`, `custom N`) and save-time validation invariants.
+- [x] Implement decision no-match behavior (explicit fallback connector or fail) as runtime-enforced policy.
 
 ## Stage 5 - Sequential Baseline D: Executor Image + Runtime Plumbing
 
-- [ ] Finalize split executor image definitions and lockfiles, including frontier CPU-only profile and vLLM dual-mode GPU/CPU fallback profile.
-- [ ] Remove deprecated CLI-tool dependency installs from executor images and enforce denylist policy.
-- [ ] Implement runtime settings for independent frontier/vLLM executor image tag selection.
-- [ ] Update Harbor-oriented build/release pipeline and image publication references for split executors.
+- [x] Finalize split executor image definitions and lockfiles, including frontier CPU-only profile and vLLM dual-mode GPU/CPU fallback profile.
+- [x] Remove deprecated CLI-tool dependency installs from executor images and enforce denylist policy.
+- [x] Implement runtime settings for independent frontier/vLLM executor image tag selection.
+- [x] Update Harbor-oriented build/release pipeline and image publication references for split executors.
 
 ## Stage 6 - Sequential Baseline E: Deterministic Tooling Framework
 

@@ -13,7 +13,7 @@ Usage: scripts/build/harbor.sh [options]
 Build and push llmctl images to Harbor.
 
 Defaults:
-  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-chromadb-mcp, llmctl-executor-base, llmctl-executor, llmctl-celery-worker
+  - Builds and pushes all images: llmctl-studio-backend, llmctl-studio-frontend, llmctl-mcp, llmctl-chromadb-mcp, llmctl-executor-frontier, llmctl-executor-vllm, llmctl-celery-worker
   - Pushes tag: latest
   - If --tag is non-latest, pushes both <tag> and latest
   - Project: llmctl
@@ -33,8 +33,10 @@ Options:
   --frontend               Build/push llmctl-studio-frontend only
   --mcp                    Build/push llmctl-mcp only
   --mcp-chroma             Build/push llmctl-chromadb-mcp only
-  --executor-base          Build/push llmctl-executor-base only
-  --executor               Build/push llmctl-executor only
+  --executor-frontier      Build/push llmctl-executor-frontier only
+  --executor-vllm          Build/push llmctl-executor-vllm only
+  --executor               Deprecated alias for --executor-frontier
+  --executor-base          Deprecated alias for --executor-vllm
   --celery-worker          Build/push llmctl-celery-worker only
   --all                    Build/push all images
 
@@ -108,8 +110,8 @@ SELECTED_STUDIO=false
 SELECTED_FRONTEND=false
 SELECTED_MCP=false
 SELECTED_MCP_CHROMA=false
-SELECTED_EXECUTOR_BASE=false
-SELECTED_EXECUTOR=false
+SELECTED_EXECUTOR_FRONTIER=false
+SELECTED_EXECUTOR_VLLM=false
 SELECTED_CELERY_WORKER=false
 SELECTION_MADE=false
 HARBOR_TAGS=()
@@ -185,13 +187,23 @@ while [ $# -gt 0 ]; do
       SELECTION_MADE=true
       shift
       ;;
-    --executor-base)
-      SELECTED_EXECUTOR_BASE=true
+    --executor-frontier)
+      SELECTED_EXECUTOR_FRONTIER=true
+      SELECTION_MADE=true
+      shift
+      ;;
+    --executor-vllm)
+      SELECTED_EXECUTOR_VLLM=true
       SELECTION_MADE=true
       shift
       ;;
     --executor)
-      SELECTED_EXECUTOR=true
+      SELECTED_EXECUTOR_FRONTIER=true
+      SELECTION_MADE=true
+      shift
+      ;;
+    --executor-base)
+      SELECTED_EXECUTOR_VLLM=true
       SELECTION_MADE=true
       shift
       ;;
@@ -205,8 +217,8 @@ while [ $# -gt 0 ]; do
       SELECTED_FRONTEND=true
       SELECTED_MCP=true
       SELECTED_MCP_CHROMA=true
-      SELECTED_EXECUTOR_BASE=true
-      SELECTED_EXECUTOR=true
+      SELECTED_EXECUTOR_FRONTIER=true
+      SELECTED_EXECUTOR_VLLM=true
       SELECTED_CELERY_WORKER=true
       SELECTION_MADE=true
       shift
@@ -228,8 +240,8 @@ if [ "${SELECTION_MADE}" = false ]; then
   SELECTED_FRONTEND=true
   SELECTED_MCP=true
   SELECTED_MCP_CHROMA=true
-  SELECTED_EXECUTOR_BASE=true
-  SELECTED_EXECUTOR=true
+  SELECTED_EXECUTOR_FRONTIER=true
+  SELECTED_EXECUTOR_VLLM=true
   SELECTED_CELERY_WORKER=true
 fi
 
@@ -410,6 +422,21 @@ build_and_push() {
   local local_image="${image_name}:latest"
   local remote_image=""
   local tag=""
+  local requested_tag_http_code=""
+
+  requested_tag_http_code="$(curl -sS -o /dev/null -w '%{http_code}' --user "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" \
+    "${HARBOR_API_SCHEME}://${HARBOR_REGISTRY}/api/v2.0/projects/${HARBOR_PROJECT}/repositories/${image_name}/artifacts/${HARBOR_TAG}")"
+
+  if [ "${requested_tag_http_code}" = "200" ]; then
+    echo
+    echo "Warning: ${HARBOR_PROJECT}/${image_name}:${HARBOR_TAG} already exists in Harbor; skipping build/push for ${image_name}."
+    return 0
+  fi
+
+  if [ "${requested_tag_http_code}" != "404" ]; then
+    echo
+    echo "Warning: unable to verify existing tag for ${HARBOR_PROJECT}/${image_name}:${HARBOR_TAG} (HTTP ${requested_tag_http_code}); continuing with build/push."
+  fi
 
   echo
   echo "==> Building ${local_image}"
@@ -455,12 +482,12 @@ if [ "${SELECTED_MCP_CHROMA}" = true ]; then
   build_and_push "llmctl-chromadb-mcp" "${REPO_ROOT}/app/llmctl-mcp/docker/build-chromadb-mcp.sh"
 fi
 
-if [ "${SELECTED_EXECUTOR_BASE}" = true ]; then
-  build_and_push "llmctl-executor-base" "${REPO_ROOT}/app/llmctl-executor/build-executor-base.sh"
+if [ "${SELECTED_EXECUTOR_FRONTIER}" = true ]; then
+  build_and_push "llmctl-executor-frontier" "${REPO_ROOT}/app/llmctl-executor/build-executor.sh"
 fi
 
-if [ "${SELECTED_EXECUTOR}" = true ]; then
-  build_and_push "llmctl-executor" "${REPO_ROOT}/app/llmctl-executor/build-executor.sh"
+if [ "${SELECTED_EXECUTOR_VLLM}" = true ]; then
+  build_and_push "llmctl-executor-vllm" "${REPO_ROOT}/app/llmctl-executor/build-executor-base.sh"
 fi
 
 if [ "${SELECTED_CELERY_WORKER}" = true ]; then

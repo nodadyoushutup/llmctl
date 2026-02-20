@@ -1194,6 +1194,31 @@ class FlowchartRunNode(BaseModel):
     input_context_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     routing_state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_contract_version: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="v1",
+        server_default=text("'v1'"),
+    )
+    routing_contract_version: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="v1",
+        server_default=text("'v1'"),
+    )
+    degraded_status: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    degraded_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     resolved_skill_ids_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_skill_versions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_skill_manifest_hash: Mapped[str | None] = mapped_column(
@@ -1288,8 +1313,20 @@ class NodeArtifact(BaseModel):
         String(128), nullable=True, index=True
     )
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    contract_version: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="v1",
+        server_default=text("'v1'"),
+    )
     payload_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+        index=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -1308,6 +1345,35 @@ class NodeArtifact(BaseModel):
     )
     flowchart_run_node: Mapped["FlowchartRunNode | None"] = relationship(
         "FlowchartRunNode", back_populates="artifacts"
+    )
+
+
+class RuntimeIdempotencyKey(BaseModel):
+    __tablename__ = "runtime_idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint("scope", "idempotency_key", name="uq_runtime_idempotency_scope_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    hit_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 

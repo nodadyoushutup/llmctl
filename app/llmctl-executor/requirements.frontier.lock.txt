@@ -1,0 +1,4 @@
+# Locked dependency input for llmctl-executor-frontier (Stage 5).
+# Frontier intentionally excludes vLLM/torch stacks.
+-r requirements.studio-runtime.txt
+-r requirements.txt

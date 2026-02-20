@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: chroma-mcp
-          image: llmctl-chromadb-mcp:0.0.2
+          image: llmctl-chromadb-mcp:0.1.0
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:

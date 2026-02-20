@@ -3,17 +3,19 @@ FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
-    LLMCTL_EXECUTOR_BASE_CUDA_TAG="12.8.0-cudnn-runtime-ubuntu24.04"
+    LLMCTL_EXECUTOR_BASE_CUDA_TAG="12.8.0-cudnn-runtime-ubuntu24.04" \
+    LLMCTL_EXECUTOR_FLAVOR="vllm"
 
-ARG INSTALL_CLAUDE=true
 ARG VLLM_VERSION=0.9.0
 ARG TRANSFORMERS_VERSION=4.53.3
+ARG INSTALL_STUDIO_BACKEND_DEPS=true
 
-LABEL org.opencontainers.image.title="llmctl-executor-base" \
-      org.opencontainers.image.description="Pinned CUDA + vLLM + Chromium + Node CLIs base image for llmctl executor" \
-      io.llmctl.executor_base.cuda_tag="12.8.0-cudnn-runtime-ubuntu24.04" \
-      io.llmctl.executor_base.vllm_version="${VLLM_VERSION}" \
-      io.llmctl.executor_base.transformers_version="${TRANSFORMERS_VERSION}"
+LABEL org.opencontainers.image.title="llmctl-executor-vllm" \
+      org.opencontainers.image.description="Dual-mode vLLM executor image (GPU-preferred with CPU fallback) for llmctl Studio runtime" \
+      io.llmctl.executor.flavor="vllm" \
+      io.llmctl.executor.cuda_tag="12.8.0-cudnn-runtime-ubuntu24.04" \
+      io.llmctl.executor.vllm_version="${VLLM_VERSION}" \
+      io.llmctl.executor.transformers_version="${TRANSFORMERS_VERSION}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -26,35 +28,34 @@ RUN apt-get update \
         python3 \
         python3-pip \
         python3-venv \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list \
-    && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-        | gpg --dearmor -o /etc/apt/keyrings/google-cloud.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-        > /etc/apt/sources.list.d/google-cloud-sdk.list \
-    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-        | gpg --dearmor -o /etc/apt/keyrings/google-linux.gpg \
-    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-linux.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
-        > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        google-chrome-stable \
-        nodejs \
-    && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium-browser \
-    && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium \
-    && npm install -g @openai/codex@latest @google/gemini-cli@latest \
-    && if [ "${INSTALL_CLAUDE}" = "true" ]; then npm install -g @anthropic-ai/claude-code@latest; fi \
+        tesseract-ocr \
+        tesseract-ocr-eng \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && if [ "${VLLM_VERSION}" = "0.9.0" ] && ! printf '%s' "${TRANSFORMERS_VERSION}" | grep -Eq '^4\.'; then \
         echo "Unsupported dependency combination: vllm ${VLLM_VERSION} requires transformers 4.x (got ${TRANSFORMERS_VERSION})." >&2; \
         exit 1; \
     fi \
-    && /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" "transformers==${TRANSFORMERS_VERSION}" \
-    && /opt/venv/bin/python3 -c "import torch, vllm; print(torch.__version__); print(vllm.__version__)" \
-    && chromium --version \
-    && node --version \
     && rm -rf /var/lib/apt/lists/*
+
+COPY app/llmctl-executor/requirements.vllm.lock.txt /app/app/llmctl-executor/requirements.vllm.lock.txt
+COPY app/llmctl-executor/requirements.studio-runtime.txt /app/app/llmctl-executor/requirements.studio-runtime.txt
+COPY app/llmctl-executor/requirements.txt /app/app/llmctl-executor/requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-executor/requirements.vllm.lock.txt \
+    && if [ "${INSTALL_STUDIO_BACKEND_DEPS}" = "false" ]; then \
+        /opt/venv/bin/pip uninstall -y Flask Flask-Seeder SQLAlchemy psycopg psycopg-binary celery redis gunicorn Flask-SocketIO simple-websocket chromadb google-api-python-client google-auth google-auth-httplib2 setuptools || true; \
+    fi \
+    && /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" "transformers==${TRANSFORMERS_VERSION}" \
+    && /opt/venv/bin/pip check \
+    && /opt/venv/bin/python3 -c "import torch, vllm; print(torch.__version__); print(vllm.__version__)" \
+    && for blocked in codex gemini claude; do \
+        if command -v "${blocked}" >/dev/null 2>&1; then \
+            echo "Denied CLI binary found in vLLM executor image: ${blocked}" >&2; \
+            exit 1; \
+        fi; \
+    done
+
+WORKDIR /app
+COPY app/llmctl-executor /app/app/llmctl-executor
+
+CMD ["python3", "app/llmctl-executor/run.py"]

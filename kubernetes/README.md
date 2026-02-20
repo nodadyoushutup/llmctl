@@ -120,7 +120,7 @@ Celery execution is decoupled from the Studio backend runtime:
 - `llmctl-studio-backend` is producer/control-plane only (enqueue + revoke + status reads).
 - `llmctl-celery-worker` consumes all task queues.
 - `llmctl-celery-beat` is the only scheduler for periodic dispatch (for example `workspace_cleanup`).
-- LLM execution is runtime-plane only: LLM calls dispatch to Kubernetes executor Jobs/Pods (`llmctl-executor` image) instead of executing in backend or Celery worker containers.
+- LLM execution is runtime-plane only: LLM calls dispatch to Kubernetes executor Jobs/Pods using split executor images (`llmctl-executor-frontier` and `llmctl-executor-vllm`) instead of executing in backend or Celery worker containers.
 
 This avoids duplicate beat scheduling and keeps worker scale independent of API scale.
 Do not run multiple beat deployments unless you intentionally coordinate distributed scheduling.
@@ -260,7 +260,7 @@ argocd app sync llmctl-studio
 ```
 
 That command updates Harbor image names for all llmctl-managed images so ArgoCD does not fall back to unqualified local names.
-`llmctl-celery-worker` is intentionally fixed to `:latest` in this workflow; the `--tag` value applies to `llmctl-studio-backend`, `llmctl-studio-frontend`, `llmctl-mcp`, and `llmctl-executor`.
+`llmctl-celery-worker` is intentionally fixed to `:latest` in this workflow; the `--tag` value applies to `llmctl-studio-backend`, `llmctl-studio-frontend`, `llmctl-mcp`, `llmctl-executor-frontier`, and `llmctl-executor-vllm`.
 
 ## Runtime knobs to edit
 
@@ -272,7 +272,9 @@ Edit `kubernetes/llmctl-studio/base/studio-configmap.yaml` for these keys:
 - `LLMCTL_STUDIO_MCP_WAIT_TIMEOUT_SECONDS` (startup wait timeout)
 - `LLMCTL_STUDIO_MCP_REQUIRED_ENDPOINTS` (comma-separated list of MCP endpoint URLs Studio must see before startup)
 - `LLMCTL_NODE_EXECUTOR_PROVIDER` (`kubernetes` only)
-- `LLMCTL_NODE_EXECUTOR_K8S_IMAGE` (executor image)
+- `LLMCTL_NODE_EXECUTOR_K8S_IMAGE` (legacy fallback executor image; defaults to frontier image behavior)
+- `LLMCTL_NODE_EXECUTOR_K8S_FRONTIER_IMAGE` (frontier executor image for non-vLLM providers)
+- `LLMCTL_NODE_EXECUTOR_K8S_VLLM_IMAGE` (vLLM executor image for `vllm_local` and `vllm_remote` providers)
 - `LLMCTL_NODE_EXECUTOR_K8S_SERVICE_ACCOUNT` (job pod service account)
 - `LLMCTL_NODE_EXECUTOR_K8S_GPU_LIMIT` (set `>0` to request NVIDIA GPU per executor Job)
 - `LLMCTL_NODE_EXECUTOR_K8S_JOB_TTL_SECONDS` (terminal pod/job retention before auto-cleanup)

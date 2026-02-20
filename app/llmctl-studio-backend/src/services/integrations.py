@@ -81,6 +81,12 @@ NODE_EXECUTOR_API_FAILURE_CATEGORY_CHOICES = (
 NODE_EXECUTOR_IMAGE_DIGEST_PATTERN = re.compile(r"^sha256:[a-f0-9]{64}$")
 NODE_EXECUTOR_IMAGE_TAG_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 NODE_EXECUTOR_WORKSPACE_IDENTITY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+NODE_EXECUTOR_IMAGE_CLASS_FRONTIER = "frontier"
+NODE_EXECUTOR_IMAGE_CLASS_VLLM = "vllm"
+NODE_EXECUTOR_IMAGE_CLASS_CHOICES = (
+    NODE_EXECUTOR_IMAGE_CLASS_FRONTIER,
+    NODE_EXECUTOR_IMAGE_CLASS_VLLM,
+)
 NODE_EXECUTOR_PROVIDER_DISPATCH_ID_PATTERN = re.compile(
     r"^(kubernetes):[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$"
 )
@@ -97,6 +103,10 @@ NODE_EXECUTOR_SETTING_KEYS = (
     "k8s_namespace",
     "k8s_image",
     "k8s_image_tag",
+    "k8s_frontier_image",
+    "k8s_frontier_image_tag",
+    "k8s_vllm_image",
+    "k8s_vllm_image_tag",
     "k8s_in_cluster",
     "k8s_service_account",
     "k8s_kubeconfig",
@@ -372,12 +382,42 @@ def resolve_node_executor_k8s_image(
     image = validate_node_executor_image_reference(
         image_reference,
         field_name="Kubernetes image",
-    ) or "llmctl-executor:latest"
+    ) or "llmctl-executor-frontier:latest"
     tag = normalize_node_executor_image_tag(image_tag)
     if not tag:
         return image
     repo, _current_tag = _split_node_executor_image_reference(image)
-    return f"{repo}:{tag}" if repo else f"llmctl-executor:{tag}"
+    return f"{repo}:{tag}" if repo else f"llmctl-executor-frontier:{tag}"
+
+
+def normalize_node_executor_image_class(value: str | None) -> str:
+    cleaned = (value or "").strip().lower()
+    if cleaned in NODE_EXECUTOR_IMAGE_CLASS_CHOICES:
+        return cleaned
+    return NODE_EXECUTOR_IMAGE_CLASS_FRONTIER
+
+
+def resolve_node_executor_k8s_image_for_class(
+    settings: dict[str, str] | None,
+    image_class: str,
+) -> str:
+    payload = settings or {}
+    normalized_class = normalize_node_executor_image_class(image_class)
+    if normalized_class == NODE_EXECUTOR_IMAGE_CLASS_VLLM:
+        image_reference = (
+            payload.get("k8s_vllm_image")
+            or payload.get("k8s_image")
+            or "llmctl-executor-vllm:latest"
+        )
+        image_tag = payload.get("k8s_vllm_image_tag") or payload.get("k8s_image_tag")
+    else:
+        image_reference = (
+            payload.get("k8s_frontier_image")
+            or payload.get("k8s_image")
+            or "llmctl-executor-frontier:latest"
+        )
+        image_tag = payload.get("k8s_frontier_image_tag") or payload.get("k8s_image_tag")
+    return resolve_node_executor_k8s_image(image_reference, image_tag)
 
 
 def normalize_provider_dispatch_id(
@@ -480,8 +520,23 @@ def normalize_node_executor_run_metadata(
 
 
 def node_executor_default_settings() -> dict[str, str]:
+    def _safe_default_tag(value: str | None) -> str:
+        try:
+            return normalize_node_executor_image_tag(value)
+        except ValueError:
+            return ""
+
+    default_frontier_image = (
+        (Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE or "").strip()
+        or (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip()
+        or "llmctl-executor-frontier:latest"
+    )
+    default_vllm_image = (
+        (Config.NODE_EXECUTOR_K8S_VLLM_IMAGE or "").strip()
+        or "llmctl-executor-vllm:latest"
+    )
     default_k8s_image = (
-        (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip() or "llmctl-executor:latest"
+        (Config.NODE_EXECUTOR_K8S_IMAGE or "").strip() or default_frontier_image
     )
     return {
         "provider": NODE_EXECUTOR_PROVIDER_KUBERNETES,
@@ -517,7 +572,20 @@ def node_executor_default_settings() -> dict[str, str]:
         ),
         "k8s_namespace": (Config.NODE_EXECUTOR_K8S_NAMESPACE or "").strip() or "default",
         "k8s_image": default_k8s_image,
-        "k8s_image_tag": "",
+        "k8s_image_tag": _safe_default_tag(
+            Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE_TAG
+        )
+        or extract_node_executor_image_tag(default_k8s_image),
+        "k8s_frontier_image": default_frontier_image,
+        "k8s_frontier_image_tag": _safe_default_tag(
+            Config.NODE_EXECUTOR_K8S_FRONTIER_IMAGE_TAG
+        )
+        or extract_node_executor_image_tag(default_frontier_image),
+        "k8s_vllm_image": default_vllm_image,
+        "k8s_vllm_image_tag": _safe_default_tag(
+            Config.NODE_EXECUTOR_K8S_VLLM_IMAGE_TAG
+        )
+        or extract_node_executor_image_tag(default_vllm_image),
         "k8s_in_cluster": _bool_string(Config.NODE_EXECUTOR_K8S_IN_CLUSTER),
         "k8s_service_account": (
             (Config.NODE_EXECUTOR_K8S_SERVICE_ACCOUNT or "").strip()
@@ -681,6 +749,54 @@ def load_node_executor_settings(*, include_secrets: bool = False) -> dict[str, s
         settings["k8s_image_tag"] = extract_node_executor_image_tag(
             settings.get("k8s_image")
         )
+    try:
+        settings["k8s_frontier_image"] = validate_node_executor_image_reference(
+            settings.get("k8s_frontier_image"),
+            field_name="Kubernetes frontier image",
+        ) or settings["k8s_image"]
+    except ValueError:
+        settings["k8s_frontier_image"] = settings["k8s_image"]
+    frontier_tag_candidate = (
+        settings.get("k8s_frontier_image_tag")
+        or extract_node_executor_image_tag(settings.get("k8s_frontier_image"))
+        or settings.get("k8s_image_tag")
+    )
+    try:
+        settings["k8s_frontier_image_tag"] = normalize_node_executor_image_tag(
+            frontier_tag_candidate,
+            field_name="Kubernetes frontier image tag",
+        )
+    except ValueError:
+        settings["k8s_frontier_image_tag"] = settings.get("k8s_image_tag") or ""
+    try:
+        settings["k8s_vllm_image"] = validate_node_executor_image_reference(
+            settings.get("k8s_vllm_image"),
+            field_name="Kubernetes vLLM image",
+        ) or defaults["k8s_vllm_image"]
+    except ValueError:
+        settings["k8s_vllm_image"] = defaults["k8s_vllm_image"]
+    vllm_tag_candidate = (
+        settings.get("k8s_vllm_image_tag")
+        or extract_node_executor_image_tag(settings.get("k8s_vllm_image"))
+        or extract_node_executor_image_tag(defaults.get("k8s_vllm_image"))
+    )
+    try:
+        settings["k8s_vllm_image_tag"] = normalize_node_executor_image_tag(
+            vllm_tag_candidate,
+            field_name="Kubernetes vLLM image tag",
+        )
+    except ValueError:
+        settings["k8s_vllm_image_tag"] = extract_node_executor_image_tag(
+            settings.get("k8s_vllm_image")
+        )
+    settings["k8s_effective_frontier_image"] = resolve_node_executor_k8s_image(
+        settings.get("k8s_frontier_image"),
+        settings.get("k8s_frontier_image_tag"),
+    )
+    settings["k8s_effective_vllm_image"] = resolve_node_executor_k8s_image(
+        settings.get("k8s_vllm_image"),
+        settings.get("k8s_vllm_image_tag"),
+    )
     settings["k8s_in_cluster"] = _bool_string(
         _as_bool_flag(settings.get("k8s_in_cluster"), default=False)
     )
@@ -764,6 +880,10 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
         ),
         "k8s_image": "",
         "k8s_image_tag": "",
+        "k8s_frontier_image": "",
+        "k8s_frontier_image_tag": "",
+        "k8s_vllm_image": "",
+        "k8s_vllm_image_tag": "",
         "k8s_in_cluster": _bool_string(
             _as_bool_flag(candidate.get("k8s_in_cluster"), default=False)
         ),
@@ -790,13 +910,38 @@ def save_node_executor_settings(payload: dict[str, str]) -> dict[str, str]:
     validated["k8s_image"] = validate_node_executor_image_reference(
         candidate.get("k8s_image"),
         field_name="Kubernetes image",
-    ) or "llmctl-executor:latest"
+    ) or "llmctl-executor-frontier:latest"
     image_tag_candidate = (
         candidate.get("k8s_image_tag")
         or extract_node_executor_image_tag(validated.get("k8s_image"))
     )
     validated["k8s_image_tag"] = normalize_node_executor_image_tag(
         image_tag_candidate
+    )
+    validated["k8s_frontier_image"] = validate_node_executor_image_reference(
+        candidate.get("k8s_frontier_image"),
+        field_name="Kubernetes frontier image",
+    ) or validated["k8s_image"]
+    frontier_tag_candidate = (
+        candidate.get("k8s_frontier_image_tag")
+        or extract_node_executor_image_tag(validated.get("k8s_frontier_image"))
+        or validated.get("k8s_image_tag")
+    )
+    validated["k8s_frontier_image_tag"] = normalize_node_executor_image_tag(
+        frontier_tag_candidate,
+        field_name="Kubernetes frontier image tag",
+    )
+    validated["k8s_vllm_image"] = validate_node_executor_image_reference(
+        candidate.get("k8s_vllm_image"),
+        field_name="Kubernetes vLLM image",
+    ) or "llmctl-executor-vllm:latest"
+    vllm_tag_candidate = (
+        candidate.get("k8s_vllm_image_tag")
+        or extract_node_executor_image_tag(validated.get("k8s_vllm_image"))
+    )
+    validated["k8s_vllm_image_tag"] = normalize_node_executor_image_tag(
+        vllm_tag_candidate,
+        field_name="Kubernetes vLLM image tag",
     )
     image_pull_secrets_json = (validated.get("k8s_image_pull_secrets_json") or "").strip()
     if image_pull_secrets_json:
@@ -826,11 +971,25 @@ def node_executor_effective_config_summary() -> dict[str, str]:
         "cancel_force_kill_enabled": settings.get("cancel_force_kill_enabled") or "true",
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
-        "k8s_image": settings.get("k8s_image") or "llmctl-executor:latest",
+        "k8s_image": settings.get("k8s_image") or "llmctl-executor-frontier:latest",
         "k8s_image_tag": settings.get("k8s_image_tag") or "",
         "k8s_effective_image": resolve_node_executor_k8s_image(
             settings.get("k8s_image"),
             settings.get("k8s_image_tag"),
+        ),
+        "k8s_frontier_image": settings.get("k8s_frontier_image")
+        or "llmctl-executor-frontier:latest",
+        "k8s_frontier_image_tag": settings.get("k8s_frontier_image_tag") or "",
+        "k8s_effective_frontier_image": resolve_node_executor_k8s_image(
+            settings.get("k8s_frontier_image"),
+            settings.get("k8s_frontier_image_tag"),
+        ),
+        "k8s_vllm_image": settings.get("k8s_vllm_image")
+        or "llmctl-executor-vllm:latest",
+        "k8s_vllm_image_tag": settings.get("k8s_vllm_image_tag") or "",
+        "k8s_effective_vllm_image": resolve_node_executor_k8s_image(
+            settings.get("k8s_vllm_image"),
+            settings.get("k8s_vllm_image_tag"),
         ),
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
@@ -858,8 +1017,14 @@ def load_node_executor_runtime_settings() -> dict[str, str]:
         "cancel_force_kill_enabled": settings.get("cancel_force_kill_enabled") or "true",
         "workspace_identity_key": settings.get("workspace_identity_key") or "default",
         "k8s_namespace": settings.get("k8s_namespace") or "default",
-        "k8s_image": settings.get("k8s_image") or "llmctl-executor:latest",
+        "k8s_image": settings.get("k8s_image") or "llmctl-executor-frontier:latest",
         "k8s_image_tag": settings.get("k8s_image_tag") or "",
+        "k8s_frontier_image": settings.get("k8s_frontier_image")
+        or "llmctl-executor-frontier:latest",
+        "k8s_frontier_image_tag": settings.get("k8s_frontier_image_tag") or "",
+        "k8s_vllm_image": settings.get("k8s_vllm_image")
+        or "llmctl-executor-vllm:latest",
+        "k8s_vllm_image_tag": settings.get("k8s_vllm_image_tag") or "",
         "k8s_in_cluster": settings.get("k8s_in_cluster") or "false",
         "k8s_service_account": settings.get("k8s_service_account") or "",
         "k8s_kubeconfig": settings.get("k8s_kubeconfig") or "",

@@ -274,7 +274,23 @@ class Config:
     )
     NODE_EXECUTOR_K8S_IMAGE = os.getenv(
         "LLMCTL_NODE_EXECUTOR_K8S_IMAGE",
-        "llmctl-executor:latest",
+        "llmctl-executor-frontier:latest",
+    )
+    NODE_EXECUTOR_K8S_FRONTIER_IMAGE = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_FRONTIER_IMAGE",
+        NODE_EXECUTOR_K8S_IMAGE or "llmctl-executor-frontier:latest",
+    )
+    NODE_EXECUTOR_K8S_VLLM_IMAGE = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_VLLM_IMAGE",
+        "llmctl-executor-vllm:latest",
+    )
+    NODE_EXECUTOR_K8S_FRONTIER_IMAGE_TAG = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_FRONTIER_IMAGE_TAG",
+        "",
+    )
+    NODE_EXECUTOR_K8S_VLLM_IMAGE_TAG = os.getenv(
+        "LLMCTL_NODE_EXECUTOR_K8S_VLLM_IMAGE_TAG",
+        "",
     )
     NODE_EXECUTOR_K8S_IN_CLUSTER = (
         os.getenv("LLMCTL_NODE_EXECUTOR_K8S_IN_CLUSTER", "false")

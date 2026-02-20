@@ -53,6 +53,17 @@ from services.realtime_events import (
     flowchart_scope_rooms,
     task_scope_rooms,
 )
+from services.runtime_contracts import (
+    NODE_ARTIFACT_CONTRACT_VERSION,
+    NODE_ARTIFACT_PAYLOAD_VERSION,
+    NODE_OUTPUT_CONTRACT_VERSION,
+    ROUTING_OUTPUT_CONTRACT_VERSION,
+    build_node_artifact_idempotency_key,
+    build_node_run_idempotency_key,
+    resolve_node_degraded_markers,
+    validate_node_artifact_payload_contract,
+    validate_special_node_output_contract,
+)
 from core.integrated_mcp import INTEGRATED_MCP_LLMCTL_KEY
 from core.mcp_config import build_mcp_overrides, parse_mcp_config
 from core.prompt_envelope import (
@@ -202,6 +213,14 @@ MEMORY_NODE_ACTION_PROMPT_TEMPLATES: dict[str, str] = {
 }
 DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS = 3600
 DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT = 25
+FLOWCHART_FAN_IN_MODE_ALL = "all"
+FLOWCHART_FAN_IN_MODE_ANY = "any"
+FLOWCHART_FAN_IN_MODE_CUSTOM = "custom"
+FLOWCHART_FAN_IN_MODE_CHOICES = (
+    FLOWCHART_FAN_IN_MODE_ALL,
+    FLOWCHART_FAN_IN_MODE_ANY,
+    FLOWCHART_FAN_IN_MODE_CUSTOM,
+)
 
 
 def _utcnow() -> datetime:
@@ -5592,7 +5611,9 @@ def _serialize_node_artifact_for_flow(node_artifact: NodeArtifact) -> dict[str, 
         "request_id": node_artifact.request_id,
         "correlation_id": node_artifact.correlation_id,
         "payload": payload,
+        "contract_version": node_artifact.contract_version,
         "payload_version": node_artifact.payload_version,
+        "idempotency_key": node_artifact.idempotency_key,
         "created_at": _json_safe(node_artifact.created_at),
         "updated_at": _json_safe(node_artifact.updated_at),
     }
@@ -5699,6 +5720,10 @@ def _persist_milestone_node_artifact(
         "milestone": milestone_payload if isinstance(milestone_payload, dict) else {},
         "routing_state": routing_state or {},
     }
+    validate_node_artifact_payload_contract(
+        NODE_ARTIFACT_TYPE_MILESTONE,
+        artifact_payload,
+    )
     artifact = NodeArtifact.create(
         session,
         flowchart_id=flowchart_id,
@@ -5720,6 +5745,13 @@ def _persist_milestone_node_artifact(
         request_id=request_id,
         correlation_id=correlation_id,
         payload_json=_json_dumps(artifact_payload),
+        contract_version=NODE_ARTIFACT_CONTRACT_VERSION,
+        payload_version=NODE_ARTIFACT_PAYLOAD_VERSION,
+        idempotency_key=build_node_artifact_idempotency_key(
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            artifact_type=NODE_ARTIFACT_TYPE_MILESTONE,
+        ),
     )
     _prune_node_artifact_history(
         session,
@@ -5805,6 +5837,10 @@ def _persist_memory_node_artifact(
         "routing_state": routing_state or {},
         "mcp_server_keys": output_state.get("mcp_server_keys") or [],
     }
+    validate_node_artifact_payload_contract(
+        NODE_ARTIFACT_TYPE_MEMORY,
+        artifact_payload,
+    )
     artifact = NodeArtifact.create(
         session,
         flowchart_id=flowchart_id,
@@ -5826,6 +5862,13 @@ def _persist_memory_node_artifact(
         request_id=request_id,
         correlation_id=correlation_id,
         payload_json=_json_dumps(artifact_payload),
+        contract_version=NODE_ARTIFACT_CONTRACT_VERSION,
+        payload_version=NODE_ARTIFACT_PAYLOAD_VERSION,
+        idempotency_key=build_node_artifact_idempotency_key(
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            artifact_type=NODE_ARTIFACT_TYPE_MEMORY,
+        ),
     )
     _prune_node_artifact_history(
         session,
@@ -5897,6 +5940,10 @@ def _persist_plan_node_artifact(
         "plan": plan_payload if isinstance(plan_payload, dict) else {},
         "routing_state": routing_state or {},
     }
+    validate_node_artifact_payload_contract(
+        NODE_ARTIFACT_TYPE_PLAN,
+        artifact_payload,
+    )
     artifact = NodeArtifact.create(
         session,
         flowchart_id=flowchart_id,
@@ -5913,6 +5960,13 @@ def _persist_plan_node_artifact(
         request_id=request_id,
         correlation_id=correlation_id,
         payload_json=_json_dumps(artifact_payload),
+        contract_version=NODE_ARTIFACT_CONTRACT_VERSION,
+        payload_version=NODE_ARTIFACT_PAYLOAD_VERSION,
+        idempotency_key=build_node_artifact_idempotency_key(
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            artifact_type=NODE_ARTIFACT_TYPE_PLAN,
+        ),
     )
     _prune_node_artifact_history(
         session,
@@ -5984,6 +6038,10 @@ def _persist_decision_node_artifact(
         "resolved_route_path": output_state.get("resolved_route_path"),
         "routing_state": routing_state or {},
     }
+    validate_node_artifact_payload_contract(
+        NODE_ARTIFACT_TYPE_DECISION,
+        artifact_payload,
+    )
     artifact = NodeArtifact.create(
         session,
         flowchart_id=flowchart_id,
@@ -6000,6 +6058,13 @@ def _persist_decision_node_artifact(
         request_id=request_id,
         correlation_id=correlation_id,
         payload_json=_json_dumps(artifact_payload),
+        contract_version=NODE_ARTIFACT_CONTRACT_VERSION,
+        payload_version=NODE_ARTIFACT_PAYLOAD_VERSION,
+        idempotency_key=build_node_artifact_idempotency_key(
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            artifact_type=NODE_ARTIFACT_TYPE_DECISION,
+        ),
     )
     _prune_node_artifact_history(
         session,
@@ -6469,6 +6534,24 @@ def _update_flowchart_node_task(
         task.finished_at = finished_at
 
 
+def _apply_node_run_contract_metadata(
+    node_run: FlowchartRunNode,
+    *,
+    runtime_payload: dict[str, Any] | None = None,
+) -> None:
+    node_run.output_contract_version = NODE_OUTPUT_CONTRACT_VERSION
+    node_run.routing_contract_version = ROUTING_OUTPUT_CONTRACT_VERSION
+    if not str(node_run.idempotency_key or "").strip():
+        node_run.idempotency_key = build_node_run_idempotency_key(
+            flowchart_run_id=int(node_run.flowchart_run_id),
+            flowchart_node_id=int(node_run.flowchart_node_id),
+            execution_index=int(node_run.execution_index or 1),
+        )
+    degraded_status, degraded_reason = resolve_node_degraded_markers(runtime_payload)
+    node_run.degraded_status = degraded_status
+    node_run.degraded_reason = degraded_reason
+
+
 def _finalize_flowchart_node_failure(
     *,
     flowchart_id: int,
@@ -6494,6 +6577,10 @@ def _finalize_flowchart_node_failure(
             failed_node_run.finished_at = finished_at
             failed_node_run.routing_state_json = _json_dumps(
                 {"runtime_evidence": runtime_evidence_payload}
+            )
+            _apply_node_run_contract_metadata(
+                failed_node_run,
+                runtime_payload=runtime_payload,
             )
         failed_task_id = node_task_id
         if failed_task_id is None and failed_node_run is not None:
@@ -6643,6 +6730,85 @@ def _edge_is_dotted(edge: dict[str, Any]) -> bool:
     return _normalize_flowchart_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_DOTTED
 
 
+def _normalize_flowchart_fan_in_mode(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"", FLOWCHART_FAN_IN_MODE_ALL}:
+        return FLOWCHART_FAN_IN_MODE_ALL
+    if cleaned == FLOWCHART_FAN_IN_MODE_ANY:
+        return FLOWCHART_FAN_IN_MODE_ANY
+    if cleaned in {"custom_n", "custom-n", FLOWCHART_FAN_IN_MODE_CUSTOM}:
+        return FLOWCHART_FAN_IN_MODE_CUSTOM
+    return FLOWCHART_FAN_IN_MODE_ALL
+
+
+def _resolve_flowchart_fan_in_requirement(
+    *,
+    node_id: int,
+    node_config: dict[str, Any],
+    solid_parent_ids: list[int],
+) -> int:
+    parent_count = len(solid_parent_ids)
+    if parent_count <= 1:
+        return parent_count
+    mode = _normalize_flowchart_fan_in_mode(node_config.get("fan_in_mode"))
+    if mode == FLOWCHART_FAN_IN_MODE_ANY:
+        return 1
+    if mode == FLOWCHART_FAN_IN_MODE_CUSTOM:
+        custom_count = _parse_optional_int(
+            node_config.get("fan_in_custom_count"),
+            default=0,
+            minimum=0,
+        )
+        if custom_count <= 0:
+            logger.warning(
+                "Flowchart node %s has invalid fan-in custom count; defaulting to all (%s).",
+                node_id,
+                parent_count,
+            )
+            return parent_count
+        if custom_count > parent_count:
+            logger.warning(
+                "Flowchart node %s fan-in custom count %s exceeds parent count %s; clamping.",
+                node_id,
+                custom_count,
+                parent_count,
+            )
+            return parent_count
+        return custom_count
+    return parent_count
+
+
+def _select_flowchart_ready_parent_ids(
+    *,
+    parent_tokens_by_parent_id: dict[int, deque[dict[str, Any]]],
+    parent_ids: list[int],
+    required_parent_count: int,
+) -> list[int]:
+    if required_parent_count <= 0:
+        return []
+    ready_parent_ids = [
+        parent_id
+        for parent_id in parent_ids
+        if len(parent_tokens_by_parent_id.get(parent_id) or []) > 0
+    ]
+    if len(ready_parent_ids) < required_parent_count:
+        return []
+    if required_parent_count >= len(parent_ids):
+        return list(parent_ids)
+    ranked_parent_ids = sorted(
+        ready_parent_ids,
+        key=lambda parent_id: (
+            _parse_optional_int(
+                (parent_tokens_by_parent_id.get(parent_id) or deque())[0].get("sequence"),
+                default=0,
+                minimum=0,
+            ),
+            parent_id,
+        ),
+    )
+    return ranked_parent_ids[:required_parent_count]
+
+
 def _resolve_flowchart_outgoing_edges(
     *,
     node_type: str,
@@ -6660,6 +6826,11 @@ def _resolve_flowchart_outgoing_edges(
     if node_type == FLOWCHART_NODE_TYPE_DECISION:
         if not solid_edges:
             raise ValueError("Decision node has no solid outgoing edges.")
+        available_condition_keys = {
+            str(edge.get("condition_key") or "").strip()
+            for edge in solid_edges
+            if str(edge.get("condition_key") or "").strip()
+        }
         matched_connector_ids = [
             str(value).strip()
             for value in (routing_state.get("matched_connector_ids") or [])
@@ -6670,9 +6841,32 @@ def _resolve_flowchart_outgoing_edges(
             or _coerce_bool(routing_state.get("no_match"))
         )
         if has_explicit_match_set:
-            if not matched_connector_ids:
-                return []
             matched_lookup = set(matched_connector_ids)
+            unknown_connector_ids = sorted(
+                matched_lookup.difference(available_condition_keys)
+            )
+            if unknown_connector_ids:
+                raise ValueError(
+                    "Decision routing referenced unknown connector_id(s): "
+                    + ", ".join(unknown_connector_ids)
+                )
+            if route_key and route_key not in matched_lookup:
+                raise ValueError(
+                    "Decision routing_state.route_key must be included in matched_connector_ids."
+                )
+            if not matched_connector_ids:
+                fallback_key = str(node_config.get("fallback_condition_key") or "").strip()
+                if fallback_key:
+                    for edge in solid_edges:
+                        condition_key = str(edge.get("condition_key") or "").strip()
+                        if condition_key == fallback_key:
+                            return [edge]
+                    raise ValueError(
+                        f"Decision no-match fallback '{fallback_key}' is not a valid solid outgoing connector."
+                    )
+                raise ValueError(
+                    "Decision produced no matched_connector_ids and no fallback_condition_key was configured."
+                )
             return [
                 edge
                 for edge in solid_edges
@@ -6692,22 +6886,19 @@ def _resolve_flowchart_outgoing_edges(
                 condition_key = str(edge.get("condition_key") or "").strip()
                 if condition_key == fallback_key:
                     return [edge]
-        default_edges = [
-            edge
-            for edge in solid_edges
-            if not str(edge.get("condition_key") or "").strip()
-        ]
-        if len(default_edges) == 1:
-            return default_edges
         raise ValueError(
             f"Decision route '{route_key}' has no matching outgoing edge and no fallback."
         )
 
     if route_key:
+        matched_edges: list[dict[str, Any]] = []
         for edge in solid_edges:
             condition_key = str(edge.get("condition_key") or "").strip()
             if condition_key == route_key:
-                return [edge]
+                matched_edges.append(edge)
+        if matched_edges:
+            return matched_edges
+        raise ValueError(f"Route key '{route_key}' has no matching solid outgoing edge.")
     return list(solid_edges)
 
 
@@ -7722,6 +7913,11 @@ def _execute_flowchart_decision_node(
         }
         if route_key:
             routing_state["route_key"] = route_key
+        validate_special_node_output_contract(
+            FLOWCHART_NODE_TYPE_DECISION,
+            output_state,
+            routing_state,
+        )
         return output_state, routing_state
 
     evaluations: list[dict[str, Any]] = []
@@ -7755,6 +7951,11 @@ def _execute_flowchart_decision_node(
     }
     if matched_connector_ids:
         routing_state["route_key"] = matched_connector_ids[0]
+    validate_special_node_output_contract(
+        FLOWCHART_NODE_TYPE_DECISION,
+        output_state,
+        routing_state,
+    )
     return output_state, routing_state
 
 
@@ -8019,6 +8220,11 @@ def _execute_flowchart_plan_node(
     routing_state: dict[str, Any] = {}
     if route_key:
         routing_state["route_key"] = route_key
+    validate_special_node_output_contract(
+        FLOWCHART_NODE_TYPE_PLAN,
+        output_state,
+        routing_state,
+    )
     return output_state, routing_state
 
 
@@ -8187,6 +8393,11 @@ def _execute_flowchart_milestone_node(
         routing_state["route_key"] = route_key
     if terminate_run:
         routing_state["terminate_run"] = True
+    validate_special_node_output_contract(
+        FLOWCHART_NODE_TYPE_MILESTONE,
+        output_state,
+        routing_state,
+    )
     return output_state, routing_state
 
 
@@ -8338,6 +8549,11 @@ def _execute_flowchart_memory_node(
     routing_state: dict[str, Any] = {}
     if route_key:
         routing_state["route_key"] = route_key
+    validate_special_node_output_contract(
+        FLOWCHART_NODE_TYPE_MEMORY,
+        output_state,
+        routing_state,
+    )
     return output_state, routing_state
 
 
@@ -9121,6 +9337,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     latest_results: dict[int, dict[str, Any]] = {}
     total_execution_count = 0
     incoming_parent_ids: dict[int, list[int]] = {}
+    required_parent_counts_by_target: dict[int, int] = {}
     parent_tokens_by_target: dict[int, dict[int, deque[dict[str, Any]]]] = {}
     for node_id in node_specs:
         parent_ids = sorted(
@@ -9131,6 +9348,15 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             }
         )
         incoming_parent_ids[node_id] = parent_ids
+        required_parent_counts_by_target[node_id] = _resolve_flowchart_fan_in_requirement(
+            node_id=node_id,
+            node_config=(
+                node_specs[node_id].get("config")
+                if isinstance(node_specs[node_id].get("config"), dict)
+                else {}
+            ),
+            solid_parent_ids=parent_ids,
+        )
         parent_tokens_by_target[node_id] = {
             parent_id: deque() for parent_id in parent_ids
         }
@@ -9338,6 +9564,15 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     agent_task_id=node_task.id,
                     status="running",
                     input_context_json=_json_dumps(input_context),
+                    output_contract_version=NODE_OUTPUT_CONTRACT_VERSION,
+                    routing_contract_version=ROUTING_OUTPUT_CONTRACT_VERSION,
+                    degraded_status=False,
+                    degraded_reason=None,
+                    idempotency_key=build_node_run_idempotency_key(
+                        flowchart_run_id=run_id,
+                        flowchart_node_id=node_id,
+                        execution_index=execution_index,
+                    ),
                     started_at=node_run_started_at,
                 )
                 node_run_id = node_run.id
@@ -9365,6 +9600,10 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     routed_execution_request.run_metadata_payload(),
                 )
                 runtime_payload = routed_execution_request.run_metadata_payload()
+                _apply_node_run_contract_metadata(
+                    node_run,
+                    runtime_payload=runtime_payload,
+                )
                 _emit_task_event(
                     "node.task.updated",
                     task=node_task,
@@ -9711,6 +9950,10 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                                 artifact_summary_for_event = artifact_summary
                             succeeded_node_run.output_state_json = _json_dumps(output_state)
                             succeeded_node_run.routing_state_json = _json_dumps(routing_state)
+                            _apply_node_run_contract_metadata(
+                                succeeded_node_run,
+                                runtime_payload=runtime_payload,
+                            )
                         _update_flowchart_node_task(
                             session,
                             node_run=succeeded_node_run,
@@ -9851,15 +10094,13 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             .first()
                         )
                         if failed_node_run is not None:
+                            failed_node_run.status = "failed"
                             failed_node_run.error = str(exc)
+                            failed_node_run.finished_at = failed_node_run.finished_at or _utcnow()
                         _update_flowchart_node_task(
                             session,
                             node_run=failed_node_run,
-                            status=(
-                                failed_node_run.status
-                                if failed_node_run is not None
-                                else "failed"
-                            ),
+                            status="failed",
                             error=str(exc),
                             finished_at=(
                                 failed_node_run.finished_at
@@ -9873,6 +10114,15 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             and failed_node_run.agent_task_id is not None
                         ):
                             failed_task = session.get(AgentTask, failed_node_run.agent_task_id)
+                        if failed_node_run is not None:
+                            _apply_node_run_contract_metadata(
+                                failed_node_run,
+                                runtime_payload=(
+                                    _task_runtime_metadata(failed_task)
+                                    if failed_task is not None
+                                    else None
+                                ),
+                            )
                         if failed_task is not None:
                             _emit_task_event(
                                 "node.task.completed",
@@ -10032,9 +10282,21 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     for parent_id in parent_ids:
                         parent_tokens.setdefault(parent_id, deque())
                     parent_tokens.setdefault(source_node_id, deque()).append(token)
-                    while all(len(parent_tokens[parent_id]) > 0 for parent_id in parent_ids):
+                    required_parent_count = required_parent_counts_by_target.get(
+                        target_node_id,
+                        len(parent_ids),
+                    )
+                    while True:
+                        selected_parent_ids = _select_flowchart_ready_parent_ids(
+                            parent_tokens_by_parent_id=parent_tokens,
+                            parent_ids=parent_ids,
+                            required_parent_count=required_parent_count,
+                        )
+                        if not selected_parent_ids:
+                            break
                         upstream_results = [
-                            parent_tokens[parent_id].popleft() for parent_id in parent_ids
+                            parent_tokens[parent_id].popleft()
+                            for parent_id in selected_parent_ids
                         ]
                         ready_queue.append(
                             {

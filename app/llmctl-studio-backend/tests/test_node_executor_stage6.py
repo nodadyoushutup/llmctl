@@ -163,8 +163,8 @@ class NodeExecutorStage6Tests(unittest.TestCase):
     def test_kubernetes_executor_uses_runtime_image_tag_for_spawned_job_image(self) -> None:
         settings = {
             "k8s_in_cluster": "true",
-            "k8s_image": "ghcr.io/acme/llmctl-executor:latest",
-            "k8s_image_tag": "v2026.02.18",
+            "k8s_frontier_image": "ghcr.io/acme/llmctl-executor-frontier:latest",
+            "k8s_frontier_image_tag": "v2026.02.18",
         }
         executor = KubernetesExecutor(settings)
         captured = {"image": ""}
@@ -187,7 +187,53 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         result = executor.execute(_request(), lambda _request: ({"local": True}, {}))
         self.assertEqual("success", result.status)
         self.assertEqual(
-            "ghcr.io/acme/llmctl-executor:v2026.02.18",
+            "ghcr.io/acme/llmctl-executor-frontier:v2026.02.18",
+            captured["image"],
+        )
+
+    def test_kubernetes_executor_selects_vllm_image_for_vllm_provider_requests(self) -> None:
+        settings = {
+            "k8s_in_cluster": "true",
+            "k8s_frontier_image": "ghcr.io/acme/llmctl-executor-frontier:latest",
+            "k8s_frontier_image_tag": "v2026.02.18",
+            "k8s_vllm_image": "ghcr.io/acme/llmctl-executor-vllm:latest",
+            "k8s_vllm_image_tag": "v2026.02.19",
+        }
+        request = ExecutionRequest(
+            node_id=12,
+            node_type="llm_call",
+            node_ref_id=None,
+            node_config={"provider": "vllm_remote"},
+            input_context={},
+            execution_id=111,
+            execution_task_id=222,
+            execution_index=1,
+            enabled_providers=set(),
+            default_model_id=None,
+            mcp_server_keys=[],
+        )
+        executor = KubernetesExecutor(settings)
+        captured = {"image": ""}
+        executor._dispatch_via_kubernetes = (  # type: ignore[method-assign]
+            lambda **kwargs: captured.update({"image": str(kwargs.get("image") or "")})
+            or _KubernetesDispatchOutcome(
+                job_name="job-tag-vllm-1",
+                pod_name="pod-tag-vllm-1",
+                stdout="",
+                stderr="",
+                startup_marker_seen=True,
+                executor_result={
+                    "status": "success",
+                    "output_state": {"node_type": "llm_call"},
+                    "routing_state": {},
+                },
+                terminal_reason="Complete",
+            )
+        )
+        result = executor.execute(request, lambda _request: ({"local": True}, {}))
+        self.assertEqual("success", result.status)
+        self.assertEqual(
+            "ghcr.io/acme/llmctl-executor-vllm:v2026.02.19",
             captured["image"],
         )
 

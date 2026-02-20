@@ -271,6 +271,11 @@ def _ensure_schema() -> None:
             "input_context_json": "TEXT",
             "output_state_json": "TEXT",
             "routing_state_json": "TEXT",
+            "output_contract_version": "VARCHAR(16) NOT NULL DEFAULT 'v1'",
+            "routing_contract_version": "VARCHAR(16) NOT NULL DEFAULT 'v1'",
+            "degraded_status": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "degraded_reason": "TEXT",
+            "idempotency_key": "VARCHAR(255)",
             "resolved_skill_ids_json": "TEXT",
             "resolved_skill_versions_json": "TEXT",
             "resolved_skill_manifest_hash": "VARCHAR(128)",
@@ -304,7 +309,9 @@ def _ensure_schema() -> None:
             "request_id": "VARCHAR(128)",
             "correlation_id": "VARCHAR(128)",
             "payload_json": "TEXT NOT NULL DEFAULT '{}'",
+            "contract_version": "VARCHAR(16) NOT NULL DEFAULT 'v1'",
             "payload_version": "INTEGER NOT NULL DEFAULT 1",
+            "idempotency_key": "VARCHAR(255)",
             "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
             "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
         }
@@ -314,6 +321,7 @@ def _ensure_schema() -> None:
         _ensure_columns(connection, "flowchart_node_skills", {"position": "INTEGER"})
         _ensure_flowchart_node_attachment_schema(connection)
         _ensure_agent_skill_binding_schema(connection)
+        _ensure_runtime_idempotency_schema(connection)
 
         milestone_columns = {
             "status": "TEXT NOT NULL DEFAULT 'planned'",
@@ -1854,6 +1862,57 @@ def _ensure_flowchart_node_attachment_schema(connection) -> None:
     )
 
 
+def _ensure_runtime_idempotency_schema(connection) -> None:
+    _execute_ddl(
+        connection,
+        (
+            "CREATE TABLE IF NOT EXISTS runtime_idempotency_keys ("
+            "id INTEGER PRIMARY KEY, "
+            "scope VARCHAR(96) NOT NULL, "
+            "idempotency_key VARCHAR(255) NOT NULL, "
+            "first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "hit_count INTEGER NOT NULL DEFAULT 1, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "CONSTRAINT uq_runtime_idempotency_scope_key "
+            "UNIQUE (scope, idempotency_key)"
+            ")"
+        ),
+    )
+    _ensure_columns(
+        connection,
+        "runtime_idempotency_keys",
+        {
+            "scope": "VARCHAR(96) NOT NULL",
+            "idempotency_key": "VARCHAR(255) NOT NULL",
+            "first_seen_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "last_seen_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "hit_count": "INTEGER NOT NULL DEFAULT 1",
+            "created_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        },
+    )
+    connection.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_idempotency_scope_key "
+            "ON runtime_idempotency_keys (scope, idempotency_key)"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runtime_idempotency_scope "
+            "ON runtime_idempotency_keys (scope)"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runtime_idempotency_last_seen_at "
+            "ON runtime_idempotency_keys (last_seen_at)"
+        )
+    )
+
+
 def _ensure_rag_schema(connection) -> None:
     tables = _table_names(connection)
 
@@ -2354,6 +2413,9 @@ def _ensure_flowchart_indexes(connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_flowchart_run_id ON flowchart_run_nodes (flowchart_run_id)",
         "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_flowchart_node_id ON flowchart_run_nodes (flowchart_node_id)",
         "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_agent_task_id ON flowchart_run_nodes (agent_task_id)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_degraded_status ON flowchart_run_nodes (degraded_status)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_output_contract_version ON flowchart_run_nodes (output_contract_version)",
+        "CREATE INDEX IF NOT EXISTS ix_flowchart_run_nodes_routing_contract_version ON flowchart_run_nodes (routing_contract_version)",
         "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_id ON agent_tasks (flowchart_id)",
         "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_run_id ON agent_tasks (flowchart_run_id)",
         "CREATE INDEX IF NOT EXISTS ix_agent_tasks_flowchart_node_id ON agent_tasks (flowchart_node_id)",
@@ -2368,6 +2430,13 @@ def _ensure_flowchart_indexes(connection) -> None:
     ]
     for statement in statements:
         connection.execute(text(statement))
+    connection.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_flowchart_run_nodes_idempotency_key "
+            "ON flowchart_run_nodes (idempotency_key) "
+            "WHERE idempotency_key IS NOT NULL"
+        )
+    )
     connection.execute(
         text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_tasks_provider_dispatch_id "
@@ -2432,6 +2501,19 @@ def _ensure_flowchart_indexes(connection) -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_node_artifacts_created_at "
                 "ON node_artifacts (created_at DESC)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_node_artifacts_contract_version "
+                "ON node_artifacts (contract_version)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_node_artifacts_idempotency_key "
+                "ON node_artifacts (idempotency_key) "
+                "WHERE idempotency_key IS NOT NULL"
             )
         )
 

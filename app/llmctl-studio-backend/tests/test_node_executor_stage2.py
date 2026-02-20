@@ -33,6 +33,7 @@ from services.integrations import (
     normalize_node_executor_run_metadata,
     node_executor_effective_config_summary,
     resolve_node_executor_k8s_image,
+    resolve_node_executor_k8s_image_for_class,
     save_node_executor_settings,
 )
 from web import views as studio_views
@@ -116,6 +117,8 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("0", settings.get("k8s_gpu_limit"))
         self.assertEqual("1800", settings.get("k8s_job_ttl_seconds"))
         self.assertEqual("default", settings.get("workspace_identity_key"))
+        self.assertTrue(bool(settings.get("k8s_frontier_image")))
+        self.assertTrue(bool(settings.get("k8s_vllm_image")))
 
     def test_node_executor_settings_save_and_validate(self) -> None:
         with self.assertRaises(ValueError):
@@ -202,17 +205,27 @@ class NodeExecutorStage2Tests(unittest.TestCase):
     def test_runtime_settings_include_image_tag_for_executor_image_selection(self) -> None:
         save_node_executor_settings(
             {
-                "k8s_image": "ghcr.io/acme/llmctl-executor:latest",
-                "k8s_image_tag": "v2026.02.18",
+                "k8s_frontier_image": "ghcr.io/acme/llmctl-executor-frontier:latest",
+                "k8s_frontier_image_tag": "v2026.02.18",
+                "k8s_vllm_image": "ghcr.io/acme/llmctl-executor-vllm:latest",
+                "k8s_vllm_image_tag": "v2026.02.19",
             }
         )
         runtime_settings = load_node_executor_runtime_settings()
-        self.assertEqual("v2026.02.18", runtime_settings.get("k8s_image_tag"))
+        self.assertEqual("v2026.02.18", runtime_settings.get("k8s_frontier_image_tag"))
+        self.assertEqual("v2026.02.19", runtime_settings.get("k8s_vllm_image_tag"))
         self.assertEqual(
-            "ghcr.io/acme/llmctl-executor:v2026.02.18",
-            resolve_node_executor_k8s_image(
-                runtime_settings.get("k8s_image"),
-                runtime_settings.get("k8s_image_tag"),
+            "ghcr.io/acme/llmctl-executor-frontier:v2026.02.18",
+            resolve_node_executor_k8s_image_for_class(
+                runtime_settings,
+                "frontier",
+            ),
+        )
+        self.assertEqual(
+            "ghcr.io/acme/llmctl-executor-vllm:v2026.02.19",
+            resolve_node_executor_k8s_image_for_class(
+                runtime_settings,
+                "vllm",
             ),
         )
 
@@ -228,8 +241,12 @@ class NodeExecutorStage2Tests(unittest.TestCase):
                 "cancel_force_kill_enabled": "true",
                 "workspace_identity_key": "default",
                 "k8s_namespace": "default",
-                "k8s_image": "llmctl-executor:latest",
+                "k8s_image": "llmctl-executor-frontier:latest",
                 "k8s_image_tag": "dev-2026-02-18",
+                "k8s_frontier_image": "llmctl-executor-frontier:latest",
+                "k8s_frontier_image_tag": "dev-2026-02-18",
+                "k8s_vllm_image": "llmctl-executor-vllm:latest",
+                "k8s_vllm_image_tag": "gpu-2026-02-18",
                 "k8s_in_cluster": "true",
                 "k8s_service_account": "executor",
                 "k8s_gpu_limit": "1",
@@ -247,6 +264,8 @@ class NodeExecutorStage2Tests(unittest.TestCase):
         self.assertEqual("120", settings.get("dispatch_timeout_seconds"))
         self.assertEqual("true", settings.get("k8s_in_cluster"))
         self.assertEqual("dev-2026-02-18", settings.get("k8s_image_tag"))
+        self.assertEqual("dev-2026-02-18", settings.get("k8s_frontier_image_tag"))
+        self.assertEqual("gpu-2026-02-18", settings.get("k8s_vllm_image_tag"))
         self.assertEqual("1", settings.get("k8s_gpu_limit"))
         self.assertEqual("900", settings.get("k8s_job_ttl_seconds"))
 

@@ -1,37 +1,42 @@
-FROM llmctl-executor-base:latest
+FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:${PATH}"
+    PATH="/opt/venv/bin:${PATH}" \
+    LLMCTL_EXECUTOR_FLAVOR="frontier"
 
-ARG INSTALL_VLLM=false
-ARG VLLM_VERSION=0.9.0
-ARG TRANSFORMERS_VERSION=4.53.3
-ARG INSTALL_STUDIO_BACKEND_DEPS=true
+LABEL org.opencontainers.image.title="llmctl-executor-frontier" \
+      org.opencontainers.image.description="CPU-only executor for non-vLLM providers with SDK-only dependency policy" \
+      io.llmctl.executor.flavor="frontier" \
+      io.llmctl.executor.cpu_only="true"
 
 WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        openssh-client \
         tesseract-ocr \
         tesseract-ocr-eng \
+    && python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && rm -rf /var/lib/apt/lists/*
 
-COPY app/llmctl-executor/requirements.txt /app/app/llmctl-executor/requirements.txt
+COPY app/llmctl-executor/requirements.frontier.lock.txt /app/app/llmctl-executor/requirements.frontier.lock.txt
 COPY app/llmctl-executor/requirements.studio-runtime.txt /app/app/llmctl-executor/requirements.studio-runtime.txt
-RUN if [ ! -x /opt/venv/bin/python3 ]; then \
-        echo "Missing /opt/venv in base image. Build/use llmctl-executor-base:latest (or retag a compatible base to that local tag)." >&2; \
-        exit 1; \
-    fi \
-    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && if [ "${INSTALL_STUDIO_BACKEND_DEPS}" = "true" ] && [ -s /app/app/llmctl-executor/requirements.studio-runtime.txt ]; then /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-executor/requirements.studio-runtime.txt; fi \
-    && if [ -s /app/app/llmctl-executor/requirements.txt ]; then /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-executor/requirements.txt; fi \
-    && if [ "${INSTALL_VLLM}" = "true" ] && [ "${VLLM_VERSION}" = "0.9.0" ] && ! printf '%s' "${TRANSFORMERS_VERSION}" | grep -Eq '^4\.'; then \
-        echo "Unsupported dependency combination: vllm ${VLLM_VERSION} requires transformers 4.x (got ${TRANSFORMERS_VERSION})." >&2; \
-        exit 1; \
-    fi \
-    && if [ "${INSTALL_VLLM}" = "true" ]; then /opt/venv/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" "transformers==${TRANSFORMERS_VERSION}"; fi \
-    && /opt/venv/bin/pip check
+COPY app/llmctl-executor/requirements.txt /app/app/llmctl-executor/requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir -r /app/app/llmctl-executor/requirements.frontier.lock.txt \
+    && /opt/venv/bin/pip check \
+    && /opt/venv/bin/python3 -c "import importlib.util,sys; sys.exit(1 if importlib.util.find_spec('vllm') else 0)" \
+    && for blocked in codex gemini claude; do \
+        if command -v "${blocked}" >/dev/null 2>&1; then \
+            echo "Denied CLI binary found in frontier image: ${blocked}" >&2; \
+            exit 1; \
+        fi; \
+    done
 
 COPY app/llmctl-executor /app/app/llmctl-executor
 

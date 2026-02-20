@@ -1,0 +1,4 @@
+# Locked dependency input for llmctl-executor-vllm (Stage 5).
+# vLLM/transformers pins are injected in Dockerfile.base build args.
+-r requirements.studio-runtime.txt
+-r requirements.txt

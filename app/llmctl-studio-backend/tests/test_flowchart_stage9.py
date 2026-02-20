@@ -302,17 +302,41 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         )
         self.assertEqual([2], [edge["id"] for edge in selected])
 
-    def test_decision_route_resolution_allows_no_match_terminal(self) -> None:
+    def test_decision_route_resolution_no_match_uses_fallback(self) -> None:
         selected = studio_tasks._resolve_flowchart_outgoing_edges(
             node_type=FLOWCHART_NODE_TYPE_DECISION,
-            node_config={},
+            node_config={"fallback_condition_key": "reject"},
             outgoing_edges=[
                 {"id": 11, "edge_mode": "solid", "condition_key": "approve"},
                 {"id": 12, "edge_mode": "solid", "condition_key": "reject"},
             ],
             routing_state={"matched_connector_ids": [], "no_match": True},
         )
-        self.assertEqual([], selected)
+        self.assertEqual([12], [edge["id"] for edge in selected])
+
+    def test_decision_route_resolution_no_match_without_fallback_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            studio_tasks._resolve_flowchart_outgoing_edges(
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                node_config={},
+                outgoing_edges=[
+                    {"id": 11, "edge_mode": "solid", "condition_key": "approve"},
+                    {"id": 12, "edge_mode": "solid", "condition_key": "reject"},
+                ],
+                routing_state={"matched_connector_ids": [], "no_match": True},
+            )
+
+    def test_decision_route_resolution_fails_for_unknown_connector_ids(self) -> None:
+        with self.assertRaises(ValueError):
+            studio_tasks._resolve_flowchart_outgoing_edges(
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                node_config={},
+                outgoing_edges=[
+                    {"id": 11, "edge_mode": "solid", "condition_key": "approve"},
+                    {"id": 12, "edge_mode": "solid", "condition_key": "reject"},
+                ],
+                routing_state={"matched_connector_ids": ["missing_connector"], "no_match": False},
+            )
 
     def test_non_decision_route_resolution_emits_only_solid_edges(self) -> None:
         selected = studio_tasks._resolve_flowchart_outgoing_edges(
@@ -325,6 +349,18 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             routing_state={},
         )
         self.assertEqual([1], [edge["id"] for edge in selected])
+
+    def test_non_decision_route_resolution_fails_for_unknown_route_key(self) -> None:
+        with self.assertRaises(ValueError):
+            studio_tasks._resolve_flowchart_outgoing_edges(
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                node_config={},
+                outgoing_edges=[
+                    {"id": 1, "edge_mode": "solid", "condition_key": "next"},
+                    {"id": 2, "edge_mode": "solid", "condition_key": "retry"},
+                ],
+                routing_state={"route_key": "missing"},
+            )
 
     def test_runtime_decision_multi_route_launches_all_matches(self) -> None:
         decision_config = {
@@ -457,7 +493,7 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 },
             )
 
-    def test_runtime_decision_no_match_stops_naturally(self) -> None:
+    def test_runtime_decision_no_match_without_fallback_fails_run(self) -> None:
         decision_config = {
             "decision_conditions": [
                 {
@@ -539,20 +575,19 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         with session_scope() as session:
             run = session.get(FlowchartRun, run_id)
             assert run is not None
-            self.assertEqual("completed", run.status)
+            self.assertEqual("failed", run.status)
             node_runs = (
                 session.query(FlowchartRunNode)
                 .where(FlowchartRunNode.flowchart_run_id == run_id)
                 .order_by(FlowchartRunNode.id.asc())
                 .all()
             )
-            self.assertEqual(
-                [start_node_id, decision_node_id],
-                [item.flowchart_node_id for item in node_runs],
-            )
+            self.assertEqual([start_node_id, decision_node_id], [item.flowchart_node_id for item in node_runs])
             decision_run = next(
                 item for item in node_runs if item.flowchart_node_id == decision_node_id
             )
+            self.assertEqual("failed", decision_run.status)
+            self.assertIn("no matched_connector_ids", str(decision_run.error or ""))
             decision_routing = json.loads(decision_run.routing_state_json or "{}")
             self.assertEqual([], decision_routing.get("matched_connector_ids"))
             self.assertTrue(decision_routing.get("no_match"))
@@ -569,6 +604,105 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             decision_artifact_payload = json.loads(decision_artifacts[0].payload_json or "{}")
             self.assertEqual([], decision_artifact_payload.get("matched_connector_ids"))
             self.assertTrue(decision_artifact_payload.get("no_match"))
+
+    def test_runtime_decision_no_match_uses_fallback_connector(self) -> None:
+        decision_config = {
+            "fallback_condition_key": "right_connector",
+            "decision_conditions": [
+                {
+                    "connector_id": "left_connector",
+                    "condition_text": "no-such-signal",
+                },
+                {
+                    "connector_id": "right_connector",
+                    "condition_text": "still-no-signal",
+                },
+            ],
+        }
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="Stage 9 Decision No Match Fallback")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            decision_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                x=160.0,
+                y=0.0,
+                config_json=json.dumps(decision_config, sort_keys=True),
+            )
+            left_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_END,
+                x=320.0,
+                y=-70.0,
+            )
+            right_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_END,
+                x=320.0,
+                y=70.0,
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=decision_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=decision_node.id,
+                target_node_id=left_node.id,
+                edge_mode="solid",
+                condition_key="left_connector",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=decision_node.id,
+                target_node_id=right_node.id,
+                edge_mode="solid",
+                condition_key="right_connector",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+            decision_node_id = decision_node.id
+            left_node_id = left_node.id
+            right_node_id = right_node.id
+
+        self._invoke_flowchart_run(flowchart_id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            node_runs = (
+                session.query(FlowchartRunNode)
+                .where(FlowchartRunNode.flowchart_run_id == run_id)
+                .all()
+            )
+            self.assertFalse(any(item.flowchart_node_id == left_node_id for item in node_runs))
+            self.assertTrue(any(item.flowchart_node_id == right_node_id for item in node_runs))
+            decision_run = next(
+                item for item in node_runs if item.flowchart_node_id == decision_node_id
+            )
+            decision_routing = json.loads(decision_run.routing_state_json or "{}")
+            self.assertEqual([], decision_routing.get("matched_connector_ids"))
+            self.assertTrue(decision_routing.get("no_match"))
 
     def test_runtime_emits_artifact_socket_event_with_request_and_correlation_ids(self) -> None:
         decision_config = {
@@ -3425,6 +3559,76 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertTrue(
             any("cannot mix solid and dotted modes" in str(error) for error in errors)
         )
+
+    def test_graph_rejects_custom_fan_in_above_solid_parent_count(self) -> None:
+        errors = studio_views._validate_flowchart_graph_snapshot(
+            nodes=[
+                {"id": 1, "node_type": FLOWCHART_NODE_TYPE_START, "x": 0, "y": 0, "config": {}},
+                {
+                    "id": 2,
+                    "node_type": FLOWCHART_NODE_TYPE_TASK,
+                    "x": 180,
+                    "y": -40,
+                    "config": {"task_prompt": "A"},
+                },
+                {
+                    "id": 3,
+                    "node_type": FLOWCHART_NODE_TYPE_TASK,
+                    "x": 180,
+                    "y": 40,
+                    "config": {"task_prompt": "B"},
+                },
+                {
+                    "id": 4,
+                    "node_type": FLOWCHART_NODE_TYPE_TASK,
+                    "x": 340,
+                    "y": 0,
+                    "config": {
+                        "task_prompt": "Target",
+                        "fan_in_mode": "custom",
+                        "fan_in_custom_count": 3,
+                    },
+                },
+            ],
+            edges=[
+                {"source_node_id": 1, "target_node_id": 2, "edge_mode": "solid"},
+                {"source_node_id": 1, "target_node_id": 3, "edge_mode": "solid"},
+                {"source_node_id": 2, "target_node_id": 4, "edge_mode": "solid"},
+                {"source_node_id": 3, "target_node_id": 4, "edge_mode": "solid"},
+            ],
+        )
+        self.assertTrue(any("fan_in_custom_count must be <=" in str(error) for error in errors))
+
+    def test_graph_rejects_decision_fallback_connector_not_in_solid_edges(self) -> None:
+        errors = studio_views._validate_flowchart_graph_snapshot(
+            nodes=[
+                {"id": 1, "node_type": FLOWCHART_NODE_TYPE_START, "x": 0, "y": 0, "config": {}},
+                {
+                    "id": 2,
+                    "node_type": FLOWCHART_NODE_TYPE_DECISION,
+                    "x": 120,
+                    "y": 0,
+                    "config": {"fallback_condition_key": "missing_connector"},
+                },
+                {
+                    "id": 3,
+                    "node_type": FLOWCHART_NODE_TYPE_TASK,
+                    "x": 280,
+                    "y": 0,
+                    "config": {"task_prompt": "run"},
+                },
+            ],
+            edges=[
+                {"source_node_id": 1, "target_node_id": 2, "edge_mode": "solid"},
+                {
+                    "source_node_id": 2,
+                    "target_node_id": 3,
+                    "edge_mode": "solid",
+                    "condition_key": "connector_1",
+                },
+            ],
+        )
+        self.assertTrue(any("fallback_condition_key" in str(error) for error in errors))
 
     def test_graph_uses_solid_edges_for_disconnected_detection(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Solid Reachability")

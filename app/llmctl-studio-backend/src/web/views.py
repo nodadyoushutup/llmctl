@@ -250,6 +250,11 @@ from services.huggingface_downloads import (
     vllm_local_model_container_path as _shared_vllm_local_model_container_path,
     vllm_local_model_directory as _shared_vllm_local_model_directory,
 )
+from web.api_contracts import (
+    build_api_error_envelope,
+    correlation_id_from_request,
+    request_id_from_request,
+)
 
 bp = Blueprint("agents", __name__, template_folder="templates")
 logger = logging.getLogger(__name__)
@@ -571,6 +576,20 @@ PLAN_NODE_ACTION_CHOICES = (
 )
 DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS = 3600
 DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT = 25
+FLOWCHART_FAN_IN_MODE_ALL = "all"
+FLOWCHART_FAN_IN_MODE_ANY = "any"
+FLOWCHART_FAN_IN_MODE_CUSTOM = "custom"
+FLOWCHART_FAN_IN_MODE_CHOICES = (
+    FLOWCHART_FAN_IN_MODE_ALL,
+    FLOWCHART_FAN_IN_MODE_ANY,
+    FLOWCHART_FAN_IN_MODE_CUSTOM,
+)
+FLOWCHART_DECISION_NO_MATCH_POLICY_FAIL = "fail"
+FLOWCHART_DECISION_NO_MATCH_POLICY_FALLBACK = "fallback"
+FLOWCHART_DECISION_NO_MATCH_POLICY_CHOICES = (
+    FLOWCHART_DECISION_NO_MATCH_POLICY_FAIL,
+    FLOWCHART_DECISION_NO_MATCH_POLICY_FALLBACK,
+)
 
 
 def _parse_agent_payload(raw_json: str) -> tuple[str, str | None, str | None]:
@@ -6222,6 +6241,86 @@ def _normalized_decision_conditions(
     return normalized
 
 
+def _normalize_flowchart_fan_in_mode(value: object, *, field_name: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"", FLOWCHART_FAN_IN_MODE_ALL}:
+        return FLOWCHART_FAN_IN_MODE_ALL
+    if cleaned == FLOWCHART_FAN_IN_MODE_ANY:
+        return FLOWCHART_FAN_IN_MODE_ANY
+    if cleaned in {"custom_n", "custom-n", FLOWCHART_FAN_IN_MODE_CUSTOM}:
+        return FLOWCHART_FAN_IN_MODE_CUSTOM
+    raise ValueError(
+        f"{field_name} must be one of: "
+        + ", ".join(FLOWCHART_FAN_IN_MODE_CHOICES)
+        + "."
+    )
+
+
+def _normalize_decision_no_match_policy(value: object, *, field_name: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return ""
+    if cleaned in FLOWCHART_DECISION_NO_MATCH_POLICY_CHOICES:
+        return cleaned
+    raise ValueError(
+        f"{field_name} must be one of: "
+        + ", ".join(FLOWCHART_DECISION_NO_MATCH_POLICY_CHOICES)
+        + "."
+    )
+
+
+def _sanitize_flowchart_node_routing_config(
+    config_payload: dict[str, object],
+    *,
+    field_prefix: str,
+) -> dict[str, object]:
+    sanitized = dict(config_payload)
+    fan_in_mode = _normalize_flowchart_fan_in_mode(
+        sanitized.get("fan_in_mode"),
+        field_name=f"{field_prefix}.fan_in_mode",
+    )
+    if fan_in_mode == FLOWCHART_FAN_IN_MODE_ALL:
+        sanitized.pop("fan_in_mode", None)
+        sanitized.pop("fan_in_custom_count", None)
+    elif fan_in_mode == FLOWCHART_FAN_IN_MODE_ANY:
+        sanitized["fan_in_mode"] = FLOWCHART_FAN_IN_MODE_ANY
+        sanitized.pop("fan_in_custom_count", None)
+    else:
+        fan_in_custom_count = _coerce_optional_int(
+            sanitized.get("fan_in_custom_count"),
+            field_name=f"{field_prefix}.fan_in_custom_count",
+            minimum=1,
+        )
+        if fan_in_custom_count is None:
+            raise ValueError(
+                f"{field_prefix}.fan_in_custom_count is required when fan_in_mode is custom."
+            )
+        sanitized["fan_in_mode"] = FLOWCHART_FAN_IN_MODE_CUSTOM
+        sanitized["fan_in_custom_count"] = fan_in_custom_count
+
+    no_match_policy = _normalize_decision_no_match_policy(
+        sanitized.get("no_match_policy"),
+        field_name=f"{field_prefix}.no_match_policy",
+    )
+    fallback_condition_key = str(sanitized.get("fallback_condition_key") or "").strip()
+    if fallback_condition_key:
+        sanitized["fallback_condition_key"] = fallback_condition_key
+    else:
+        sanitized.pop("fallback_condition_key", None)
+    if no_match_policy:
+        sanitized["no_match_policy"] = no_match_policy
+    else:
+        sanitized.pop("no_match_policy", None)
+    if (
+        no_match_policy == FLOWCHART_DECISION_NO_MATCH_POLICY_FALLBACK
+        and not fallback_condition_key
+    ):
+        raise ValueError(
+            f"{field_prefix}.fallback_condition_key is required when no_match_policy is fallback."
+        )
+    return sanitized
+
+
 def _validate_flowchart_utility_compatibility(
     node_type: str,
     *,
@@ -6949,6 +7048,11 @@ def _serialize_flowchart_run_node(
         "pulled_dotted_sources": pulled_dotted_sources,
         "trigger_source_count": len(trigger_sources),
         "pulled_dotted_source_count": len(pulled_dotted_sources),
+        "output_contract_version": node_run.output_contract_version,
+        "routing_contract_version": node_run.routing_contract_version,
+        "degraded_status": bool(node_run.degraded_status),
+        "degraded_reason": node_run.degraded_reason,
+        "idempotency_key": node_run.idempotency_key,
         "output_state": _parse_json_dict(node_run.output_state_json),
         "routing_state": routing_state,
         "artifact_history": artifact_history or [],
@@ -7682,7 +7786,9 @@ def _serialize_node_artifact(node_artifact: NodeArtifact) -> dict[str, object]:
         "request_id": node_artifact.request_id,
         "correlation_id": node_artifact.correlation_id,
         "payload": payload,
+        "contract_version": node_artifact.contract_version,
         "payload_version": node_artifact.payload_version,
+        "idempotency_key": node_artifact.idempotency_key,
         "created_at": _human_time(node_artifact.created_at),
         "updated_at": _human_time(node_artifact.updated_at),
     }
@@ -7746,25 +7852,11 @@ def _parse_node_artifact_list_params(
 
 
 def _workflow_request_id() -> str:
-    request_id = str(
-        request.headers.get("X-Request-ID")
-        or request.headers.get("X-Request-Id")
-        or request.args.get("request_id")
-        or ""
-    ).strip()
-    if request_id:
-        return request_id
-    return uuid.uuid4().hex
+    return request_id_from_request(request)
 
 
 def _workflow_correlation_id() -> str | None:
-    correlation_id = str(
-        request.headers.get("X-Correlation-ID")
-        or request.headers.get("X-Correlation-Id")
-        or request.args.get("correlation_id")
-        or ""
-    ).strip()
-    return correlation_id or None
+    return correlation_id_from_request(request)
 
 
 def _workflow_error_envelope(
@@ -7775,18 +7867,13 @@ def _workflow_error_envelope(
     request_id: str,
     correlation_id: str | None,
 ) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "ok": False,
-        "error": {
-            "code": code,
-            "message": message,
-            "details": details or {},
-            "request_id": request_id,
-        },
-    }
-    if correlation_id:
-        payload["correlation_id"] = correlation_id
-    return payload
+    return build_api_error_envelope(
+        code=code,
+        message=message,
+        details=details,
+        request_id=request_id,
+        correlation_id=correlation_id,
+    )
 
 
 def _validate_flowchart_graph_snapshot(
@@ -7796,6 +7883,7 @@ def _validate_flowchart_graph_snapshot(
     errors: list[str] = []
     node_ids: set[int] = set()
     node_type_by_id: dict[int, str] = {}
+    node_config_by_id: dict[int, dict[str, object]] = {}
     incoming: dict[int, int] = {}
     outgoing: dict[int, int] = {}
 
@@ -7804,7 +7892,15 @@ def _validate_flowchart_graph_snapshot(
         node_ids.add(node_id)
         node_type = str(node.get("node_type") or "")
         config_payload = node.get("config") if isinstance(node.get("config"), dict) else {}
+        try:
+            config_payload = _sanitize_flowchart_node_routing_config(
+                config_payload,
+                field_prefix=f"nodes[{node_id}].config",
+            )
+        except ValueError as exc:
+            errors.append(f"Node {node_id} ({node_type}) {exc}")
         node_type_by_id[node_id] = node_type
+        node_config_by_id[node_id] = config_payload
         incoming.setdefault(node_id, 0)
         outgoing.setdefault(node_id, 0)
         if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
@@ -7892,6 +7988,7 @@ def _validate_flowchart_graph_snapshot(
 
     decision_solid_outgoing_keys: dict[int, list[str]] = {}
     decision_solid_outgoing_counts: dict[int, int] = {}
+    solid_parent_ids_by_target: dict[int, set[int]] = {}
     edge_modes_by_pair: dict[tuple[int, int], set[str]] = {}
     for edge in edges:
         edge_mode = str(edge.get("edge_mode") or "").strip().lower()
@@ -7921,6 +8018,7 @@ def _validate_flowchart_graph_snapshot(
         node_type = node_type_by_id.get(source_node_id)
         condition_key = (str(edge.get("condition_key") or "")).strip()
         if edge_mode == "solid":
+            solid_parent_ids_by_target.setdefault(target_node_id, set()).add(source_node_id)
             if node_type == FLOWCHART_NODE_TYPE_DECISION:
                 if not condition_key:
                     errors.append(
@@ -7952,9 +8050,41 @@ def _validate_flowchart_graph_snapshot(
     for node in nodes:
         node_id = int(node["id"])
         node_type = str(node.get("node_type") or "")
+        config_payload = node_config_by_id.get(node_id, {})
         if node_type not in FLOWCHART_NODE_TYPE_CHOICES:
             continue
         outgoing_count = outgoing.get(node_id, 0)
+        try:
+            fan_in_mode = _normalize_flowchart_fan_in_mode(
+                config_payload.get("fan_in_mode"),
+                field_name=f"nodes[{node_id}].config.fan_in_mode",
+            )
+        except ValueError as exc:
+            errors.append(f"Node {node_id} ({node_type}) {exc}")
+            fan_in_mode = FLOWCHART_FAN_IN_MODE_ALL
+        solid_parent_count = len(solid_parent_ids_by_target.get(node_id, set()))
+        if fan_in_mode == FLOWCHART_FAN_IN_MODE_CUSTOM:
+            try:
+                fan_in_custom_count = _coerce_optional_int(
+                    config_payload.get("fan_in_custom_count"),
+                    field_name=f"nodes[{node_id}].config.fan_in_custom_count",
+                    minimum=1,
+                )
+            except ValueError as exc:
+                errors.append(f"Node {node_id} ({node_type}) {exc}")
+                fan_in_custom_count = None
+            if fan_in_custom_count is None:
+                errors.append(
+                    f"Node {node_id} ({node_type}) config.fan_in_custom_count is required when fan_in_mode is custom."
+                )
+            elif solid_parent_count == 0:
+                errors.append(
+                    f"Node {node_id} ({node_type}) cannot use custom fan-in without solid incoming connectors."
+                )
+            elif fan_in_custom_count > solid_parent_count:
+                errors.append(
+                    f"Node {node_id} ({node_type}) config.fan_in_custom_count must be <= solid incoming connector count ({solid_parent_count})."
+                )
         if node_type == FLOWCHART_NODE_TYPE_END:
             if outgoing_count > FLOWCHART_END_MAX_OUTGOING_EDGES:
                 errors.append(f"End node {node_id} cannot have outgoing edges.")
@@ -7966,6 +8096,26 @@ def _validate_flowchart_graph_snapshot(
         if len(keys) != len(set(keys)):
             errors.append(
                 f"Decision node {node_id} has duplicate condition_key values across solid edges."
+            )
+        fallback_condition_key = str(config_payload.get("fallback_condition_key") or "").strip()
+        if fallback_condition_key and fallback_condition_key not in set(keys):
+            errors.append(
+                f"Decision node {node_id} fallback_condition_key '{fallback_condition_key}' does not match a solid outgoing connector."
+            )
+        try:
+            no_match_policy = _normalize_decision_no_match_policy(
+                config_payload.get("no_match_policy"),
+                field_name=f"nodes[{node_id}].config.no_match_policy",
+            )
+        except ValueError as exc:
+            errors.append(f"Node {node_id} ({node_type}) {exc}")
+            no_match_policy = ""
+        if (
+            no_match_policy == FLOWCHART_DECISION_NO_MATCH_POLICY_FALLBACK
+            and not fallback_condition_key
+        ):
+            errors.append(
+                f"Decision node {node_id} requires fallback_condition_key when no_match_policy is fallback."
             )
 
     if len(start_nodes) == 1:
@@ -12883,6 +13033,10 @@ def upsert_flowchart_graph(flowchart_id: int):
                     )
                 if node_type == FLOWCHART_NODE_TYPE_MEMORY:
                     config_payload = _sanitize_memory_node_config(config_payload)
+                config_payload = _sanitize_flowchart_node_routing_config(
+                    config_payload,
+                    field_prefix=f"nodes[{index}].config",
+                )
 
                 compatibility_errors = _validate_flowchart_utility_compatibility(
                     node_type,
@@ -18476,6 +18630,16 @@ def update_node_executor_runtime_settings_route():
         "k8s_namespace": _settings_form_value(request_payload, "k8s_namespace"),
         "k8s_image": _settings_form_value(request_payload, "k8s_image"),
         "k8s_image_tag": _settings_form_value(request_payload, "k8s_image_tag"),
+        "k8s_frontier_image": _settings_form_value(
+            request_payload, "k8s_frontier_image"
+        ),
+        "k8s_frontier_image_tag": _settings_form_value(
+            request_payload, "k8s_frontier_image_tag"
+        ),
+        "k8s_vllm_image": _settings_form_value(request_payload, "k8s_vllm_image"),
+        "k8s_vllm_image_tag": _settings_form_value(
+            request_payload, "k8s_vllm_image_tag"
+        ),
         "k8s_in_cluster": (
             "true" if _as_bool(_settings_form_value(request_payload, "k8s_in_cluster")) else "false"
         ),
@@ -18491,6 +18655,16 @@ def update_node_executor_runtime_settings_route():
             "k8s_image_pull_secrets_json",
         ),
     }
+    optional_split_image_keys = (
+        "k8s_frontier_image",
+        "k8s_frontier_image_tag",
+        "k8s_vllm_image",
+        "k8s_vllm_image_tag",
+    )
+    for optional_key in optional_split_image_keys:
+        if optional_key in request_payload or optional_key in request.form:
+            continue
+        payload.pop(optional_key, None)
     if kubeconfig_clear:
         payload["k8s_kubeconfig"] = ""
     elif kubeconfig_value.strip():

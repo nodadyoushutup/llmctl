@@ -58,6 +58,9 @@ class RealtimeEventsStage6Tests(unittest.TestCase):
         self.assertEqual(first["event_id"], first["idempotency_key"])
         self.assertEqual(["task:42", "run:7"], first["room_keys"])
         self.assertEqual("task:42", first["sequence_stream"])
+        self.assertEqual("node:task:updated", first["event_type"])
+        self.assertEqual("node.task.updated", first.get("legacy_event_type"))
+        self.assertTrue(str(first.get("request_id") or "").strip())
         self.assertEqual(1, int(first["sequence"]))
         self.assertEqual(2, int(second["sequence"]))
 
@@ -85,11 +88,13 @@ class RealtimeEventsStage6Tests(unittest.TestCase):
             )
 
         self.assertEqual(2, len(captured))
-        self.assertEqual("flowchart.run.updated", captured[0][0])
+        self.assertEqual("flowchart:run:updated", captured[0][0])
         self.assertEqual("flowchart_run:9", captured[0][2])
         self.assertEqual("flowchart:5", captured[1][2])
         self.assertEqual(envelope["event_id"], captured[0][1]["event_id"])
         self.assertEqual(envelope["event_id"], captured[1][1]["event_id"])
+        self.assertEqual("flowchart:run:updated", envelope["event_type"])
+        self.assertEqual("flowchart.run.updated", envelope.get("legacy_event_type"))
 
     def test_runtime_metadata_normalization(self) -> None:
         normalized = normalize_runtime_metadata(

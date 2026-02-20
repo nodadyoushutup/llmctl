@@ -15,12 +15,14 @@ Render Harbor image settings into the llmctl-studio dev overlay.
 Defaults:
   - Registry endpoint auto-discovered from Harbor ClusterIP service (fallback: NodePort)
   - Project: llmctl
-  - Tag: 0.0.2
+  - Tag: 0.1.0
+  - Frontend tag: alpine
 
 Options:
   --registry <host:port>   Harbor registry endpoint (example: 10.107.62.134:80)
   --project <name>         Harbor project name (default: llmctl)
-  --tag <tag>              Image tag for llmctl images (default: 0.0.2)
+  --tag <tag>              Image tag for non-frontend llmctl images (default: 0.1.0)
+  --frontend-tag <tag>     Image tag for llmctl-studio-frontend (default: alpine)
   --argocd-app <name>      Also run argocd app set with Harbor image overrides
   -h, --help               Show this help
 
@@ -76,7 +78,8 @@ discover_registry() {
 
 HARBOR_REGISTRY="${HARBOR_REGISTRY:-}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-llmctl}"
-HARBOR_TAG="${HARBOR_TAG:-0.0.2}"
+HARBOR_TAG="${HARBOR_TAG:-0.1.0}"
+HARBOR_FRONTEND_TAG="${HARBOR_FRONTEND_TAG:-alpine}"
 ARGOCD_APP="${ARGOCD_APP:-}"
 
 while [ $# -gt 0 ]; do
@@ -106,6 +109,15 @@ while [ $# -gt 0 ]; do
         exit 2
       fi
       HARBOR_TAG="$2"
+      shift 2
+      ;;
+    --frontend-tag)
+      if [ $# -lt 2 ]; then
+        echo "Error: --frontend-tag requires a value." >&2
+        usage
+        exit 2
+      fi
+      HARBOR_FRONTEND_TAG="$2"
       shift 2
       ;;
     --argocd-app)
@@ -148,12 +160,14 @@ sed \
   -e "s|__HARBOR_REGISTRY__|${HARBOR_REGISTRY}|g" \
   -e "s|__HARBOR_PROJECT__|${HARBOR_PROJECT}|g" \
   -e "s|__HARBOR_TAG__|${HARBOR_TAG}|g" \
+  -e "s|__HARBOR_FRONTEND_TAG__|${HARBOR_FRONTEND_TAG}|g" \
   "${TEMPLATE_PATH}" >"${OUTPUT_PATH}"
 
 echo "Rendered ${OUTPUT_PATH}"
 echo "  registry: ${HARBOR_REGISTRY}"
 echo "  project:  ${HARBOR_PROJECT}"
 echo "  tag:      ${HARBOR_TAG}"
+echo "  frontend: ${HARBOR_FRONTEND_TAG}"
 echo
 echo "Apply dev overlay:"
 echo "  kubectl apply -k kubernetes/llmctl-studio/overlays/dev"
@@ -170,10 +184,12 @@ if [ -n "${ARGOCD_APP}" ]; then
   echo "Updating ArgoCD app '${ARGOCD_APP}' kustomize image overrides..."
   argocd app set "${ARGOCD_APP}" \
     --kustomize-image "llmctl-studio-backend=${harbor_base}/llmctl-studio-backend:${HARBOR_TAG}" \
-    --kustomize-image "llmctl-studio-frontend=${harbor_base}/llmctl-studio-frontend:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-studio-frontend=${harbor_base}/llmctl-studio-frontend:${HARBOR_FRONTEND_TAG}" \
     --kustomize-image "llmctl-celery-worker=${harbor_base}/llmctl-celery-worker:${HARBOR_TAG}" \
     --kustomize-image "llmctl-mcp=${harbor_base}/llmctl-mcp:${HARBOR_TAG}" \
-    --kustomize-image "llmctl-executor=${harbor_base}/llmctl-executor:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-executor-frontier=${harbor_base}/llmctl-executor-frontier:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-executor-vllm=${harbor_base}/llmctl-executor-vllm:${HARBOR_TAG}" \
+    --kustomize-image "llmctl-executor=${harbor_base}/llmctl-executor-frontier:${HARBOR_TAG}" \
     --kustomize-image "llmctl-chromadb-mcp=${harbor_base}/llmctl-chromadb-mcp:${HARBOR_TAG}"
 
   echo "ArgoCD app image overrides updated."

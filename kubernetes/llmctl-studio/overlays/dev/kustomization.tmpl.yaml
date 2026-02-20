@@ -8,9 +8,15 @@ images:
     newTag: __HARBOR_TAG__
   - name: llmctl-studio-frontend
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-studio-frontend
-    newTag: __HARBOR_TAG__
+    newTag: __HARBOR_FRONTEND_TAG__
   - name: llmctl-mcp
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-mcp
+    newTag: __HARBOR_TAG__
+  - name: llmctl-executor-frontier
+    newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor-frontier
+    newTag: __HARBOR_TAG__
+  - name: llmctl-executor-vllm
+    newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor-vllm
     newTag: __HARBOR_TAG__
   - name: llmctl-executor
     newName: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor
@@ -29,7 +35,13 @@ patches:
     patch: |-
       - op: replace
         path: /data/LLMCTL_NODE_EXECUTOR_K8S_IMAGE
-        value: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor:__HARBOR_TAG__
+        value: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor-frontier:__HARBOR_TAG__
+      - op: replace
+        path: /data/LLMCTL_NODE_EXECUTOR_K8S_FRONTIER_IMAGE
+        value: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor-frontier:__HARBOR_TAG__
+      - op: replace
+        path: /data/LLMCTL_NODE_EXECUTOR_K8S_VLLM_IMAGE
+        value: __HARBOR_REGISTRY__/__HARBOR_PROJECT__/llmctl-executor-vllm:__HARBOR_TAG__
   - path: studio-live-code-patch.yaml
     target:
       kind: Deployment

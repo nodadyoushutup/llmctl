@@ -349,6 +349,182 @@ class FlowchartConnectorStage6UnitTests(StudioDbTestCase):
                 sorted(item.get("node_id") for item in dotted_upstream_nodes),
             )
 
+    def test_runtime_fan_in_any_triggers_on_each_parent_token(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="stage6-fan-in-any")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            left_parent = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=120.0,
+                y=-50.0,
+            )
+            right_parent = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=120.0,
+                y=50.0,
+            )
+            target_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=260.0,
+                y=0.0,
+                config_json=json.dumps({"fan_in_mode": "any"}, sort_keys=True),
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=left_parent.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=right_parent.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=left_parent.id,
+                target_node_id=target_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=right_parent.id,
+                target_node_id=target_node.id,
+                edge_mode="solid",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+            target_node_id = target_node.id
+
+        self._invoke_flowchart_run(flowchart_id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            target_runs = (
+                session.query(FlowchartRunNode)
+                .where(
+                    FlowchartRunNode.flowchart_run_id == run_id,
+                    FlowchartRunNode.flowchart_node_id == target_node_id,
+                )
+                .all()
+            )
+            self.assertEqual(2, len(target_runs))
+
+    def test_runtime_fan_in_custom_requires_two_parents(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="stage6-fan-in-custom")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            left_parent = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=120.0,
+                y=-50.0,
+            )
+            right_parent = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=120.0,
+                y=50.0,
+            )
+            target_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_MEMORY,
+                x=260.0,
+                y=0.0,
+                config_json=json.dumps(
+                    {"fan_in_mode": "custom", "fan_in_custom_count": 2},
+                    sort_keys=True,
+                ),
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=left_parent.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=right_parent.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=left_parent.id,
+                target_node_id=target_node.id,
+                edge_mode="solid",
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=right_parent.id,
+                target_node_id=target_node.id,
+                edge_mode="solid",
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            flowchart_id = flowchart.id
+            run_id = flowchart_run.id
+            target_node_id = target_node.id
+
+        self._invoke_flowchart_run(flowchart_id, run_id)
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            assert run is not None
+            self.assertEqual("completed", run.status)
+            target_runs = (
+                session.query(FlowchartRunNode)
+                .where(
+                    FlowchartRunNode.flowchart_run_id == run_id,
+                    FlowchartRunNode.flowchart_node_id == target_node_id,
+                )
+                .all()
+            )
+            self.assertEqual(1, len(target_runs))
+            target_input_context = json.loads(target_runs[0].input_context_json or "{}")
+            upstream_nodes = target_input_context.get("upstream_nodes") or []
+            self.assertEqual(2, len(upstream_nodes))
+
     def test_runtime_mixed_loop_hits_guardrail(self) -> None:
         with session_scope() as session:
             flowchart = Flowchart.create(

@@ -57,43 +57,49 @@ Required result fields:
 
 Optional result fields (included when available): `usage`, `artifacts`, `warnings`, `metrics`.
 
-## Build Image
+## Build Images (Split Executors)
 
 ```bash
-# Build/refresh base image first (manual policy)
-app/llmctl-executor/build-executor-base.sh
-
-# Then build executor app image from the base
+# Build frontier image (CPU-only, non-vLLM providers)
 app/llmctl-executor/build-executor.sh
 
-# Or pass a version tag positionally
+# Build vLLM image (GPU-preferred, CPU fallback capable)
 app/llmctl-executor/build-executor-base.sh 0.0.3
-app/llmctl-executor/build-executor.sh 0.0.4
+app/llmctl-executor/build-executor.sh 0.0.3
 ```
 
 Build args:
-- `IMAGE_NAME=llmctl-executor:latest`
-- `INSTALL_VLLM=true|false` (default `false`; normally `false` because base includes pinned vLLM)
-- `INSTALL_STUDIO_BACKEND_DEPS=true|false` (default `true`; installs executor-compatible Studio runtime deps from `app/llmctl-executor/requirements.studio-runtime.txt`)
-- `VLLM_VERSION=<version>` (default `0.9.0`; used when `INSTALL_VLLM=true`)
-- `TRANSFORMERS_VERSION=<version>` (default `4.53.3`; pinned for `vllm==0.9.0` compatibility)
-- `PUSH_IMAGE=true|false` for `build-executor-base.sh` (default `false`; when `true`, pushes the built image tag)
+- `build-executor.sh` (frontier):
+  - `IMAGE_NAME=llmctl-executor-frontier:latest`
+- `build-executor-base.sh` (vLLM):
+  - `IMAGE_NAME=llmctl-executor-vllm:latest`
+  - `INSTALL_STUDIO_BACKEND_DEPS=true|false` (default `true`)
+  - `VLLM_VERSION=<version>` (default `0.9.0`)
+  - `TRANSFORMERS_VERSION=<version>` (default `4.53.3`)
+  - `PUSH_IMAGE=true|false` (default `false`)
+
+Dependency locks:
+- `app/llmctl-executor/requirements.frontier.lock.txt`
+- `app/llmctl-executor/requirements.vllm.lock.txt`
+
+Denylist enforcement (build-time):
+- No bundled CLI binaries in executor images (`codex`, `gemini`, `claude`).
+- Frontier image explicitly fails if `vllm` is present.
 
 Compatibility note:
 - `vllm==0.9.0` must be paired with `transformers` 4.x (`4.53.3` default). Using `transformers` 5.x causes an `aimv2` registration conflict at import time.
-- With older base images that include `vllm==0.8.5`, avoid installing full backend integration dependency sets in executor; use the curated runtime deps file above to keep OpenTelemetry compatible with vLLM.
 
 Examples:
 
 ```bash
-# Default: consume local llmctl-executor-base:latest
+# Build frontier image
 app/llmctl-executor/build-executor.sh
 
-# If you need a different base source, retag it locally as llmctl-executor-base:latest first
-# docker tag 127.0.0.1:30082/llmctl/llmctl-executor-base:sha-<tag> llmctl-executor-base:latest
+# Build and push vLLM image directly in one command
+# IMAGE_NAME=127.0.0.1:30082/llmctl/llmctl-executor-vllm:0.1.0 PUSH_IMAGE=true app/llmctl-executor/build-executor-base.sh
 
-# Build and push base image directly in one command
-# IMAGE_NAME=127.0.0.1:30082/llmctl/llmctl-executor-base:0.0.4 PUSH_IMAGE=true app/llmctl-executor/build-executor-base.sh
+# Build and tag frontier image for Harbor
+# IMAGE_NAME=127.0.0.1:30082/llmctl/llmctl-executor-frontier:0.1.0 app/llmctl-executor/build-executor.sh
 ```
 
 ## Smoke Test
