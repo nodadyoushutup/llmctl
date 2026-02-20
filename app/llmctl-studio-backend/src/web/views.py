@@ -12709,7 +12709,7 @@ def view_flowchart(flowchart_id: int):
                 select(FlowchartRun.id)
                 .where(
                     FlowchartRun.flowchart_id == flowchart_id,
-                    FlowchartRun.status.in_(["queued", "running", "stopping"]),
+                    FlowchartRun.status.in_(["queued", "running", "stopping", "pausing", "paused"]),
                 )
                 .order_by(FlowchartRun.created_at.desc(), FlowchartRun.id.desc())
                 .limit(1)
@@ -13848,6 +13848,826 @@ def flowchart_run_status(run_id: int):
     }
 
 
+@bp.get("/flowcharts/runs/<int:run_id>/trace")
+def flowchart_run_trace(run_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    include_arg = str(request.args.get("include") or "all").strip().lower()
+    include_tokens = {
+        token.strip().lower()
+        for token in include_arg.split(",")
+        if token.strip()
+    }
+    if not include_tokens or "all" in include_tokens:
+        include_tokens = {"run", "node", "tool", "artifact", "failure", "timeline"}
+    invalid_tokens = include_tokens.difference(
+        {"run", "node", "tool", "artifact", "failure", "timeline"}
+    )
+    if invalid_tokens:
+        return (
+            _workflow_error_envelope(
+                code="invalid_request",
+                message="include contains unsupported trace surfaces.",
+                details={"unsupported": sorted(invalid_tokens)},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ),
+            400,
+        )
+
+    status_arg = str(request.args.get("status") or "").strip().lower()
+    status_filters = {
+        token.strip()
+        for token in status_arg.split(",")
+        if token.strip()
+    }
+    trace_request_filter = _flowchart_trace_text(
+        request.args.get("trace_request_id") or request.args.get("request_id")
+    )
+    trace_correlation_filter = _flowchart_trace_text(
+        request.args.get("trace_correlation_id") or request.args.get("correlation_id")
+    )
+    try:
+        limit = _coerce_optional_int(
+            request.args.get("limit"),
+            field_name="limit",
+            minimum=1,
+        )
+        offset = _coerce_optional_int(
+            request.args.get("offset"),
+            field_name="offset",
+            minimum=0,
+        )
+        flowchart_node_id = _coerce_optional_int(
+            request.args.get("flowchart_node_id"),
+            field_name="flowchart_node_id",
+            minimum=1,
+        )
+        flowchart_run_node_id = _coerce_optional_int(
+            request.args.get("flowchart_run_node_id"),
+            field_name="flowchart_run_node_id",
+            minimum=1,
+        )
+        agent_task_id = _coerce_optional_int(
+            request.args.get("agent_task_id"),
+            field_name="agent_task_id",
+            minimum=1,
+        )
+        degraded_only = _flowchart_trace_optional_bool(request.args.get("degraded_only"))
+    except ValueError as exc:
+        return (
+            _workflow_error_envelope(
+                code="invalid_request",
+                message=str(exc),
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ),
+            400,
+        )
+
+    resolved_limit = min(limit if limit is not None else FLOWCHART_TRACE_DEFAULT_LIMIT, FLOWCHART_TRACE_MAX_LIMIT)
+    resolved_offset = offset if offset is not None else 0
+    artifact_type_filter = _flowchart_trace_text(request.args.get("artifact_type"))
+    if artifact_type_filter:
+        artifact_type_filter = artifact_type_filter.lower()
+
+    logger.info(
+        "Flowchart trace query run_id=%s request_id=%s correlation_id=%s include=%s limit=%s offset=%s",
+        run_id,
+        request_id,
+        correlation_id,
+        ",".join(sorted(include_tokens)),
+        resolved_limit,
+        resolved_offset,
+    )
+
+    node_rows: list[FlowchartRunNode] = []
+    artifacts: list[NodeArtifact] = []
+    flowchart_run: FlowchartRun | None = None
+    with session_scope() as session:
+        flowchart_run = session.get(FlowchartRun, run_id)
+        if flowchart_run is None:
+            abort(404)
+        node_stmt = select(FlowchartRunNode).where(FlowchartRunNode.flowchart_run_id == run_id)
+        if flowchart_node_id is not None:
+            node_stmt = node_stmt.where(FlowchartRunNode.flowchart_node_id == flowchart_node_id)
+        if flowchart_run_node_id is not None:
+            node_stmt = node_stmt.where(FlowchartRunNode.id == flowchart_run_node_id)
+        if agent_task_id is not None:
+            node_stmt = node_stmt.where(FlowchartRunNode.agent_task_id == agent_task_id)
+        if degraded_only is True:
+            node_stmt = node_stmt.where(FlowchartRunNode.degraded_status.is_(True))
+        if degraded_only is False:
+            node_stmt = node_stmt.where(FlowchartRunNode.degraded_status.is_(False))
+        node_rows = (
+            session.execute(
+                node_stmt.order_by(
+                    FlowchartRunNode.execution_index.asc(),
+                    FlowchartRunNode.created_at.asc(),
+                    FlowchartRunNode.id.asc(),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        artifact_stmt = select(NodeArtifact).where(NodeArtifact.flowchart_run_id == run_id)
+        if flowchart_node_id is not None:
+            artifact_stmt = artifact_stmt.where(NodeArtifact.flowchart_node_id == flowchart_node_id)
+        if flowchart_run_node_id is not None:
+            artifact_stmt = artifact_stmt.where(
+                NodeArtifact.flowchart_run_node_id == flowchart_run_node_id
+            )
+        if artifact_type_filter:
+            artifact_stmt = artifact_stmt.where(
+                func.lower(NodeArtifact.artifact_type) == artifact_type_filter
+            )
+        if trace_request_filter:
+            artifact_stmt = artifact_stmt.where(NodeArtifact.request_id == trace_request_filter)
+        if trace_correlation_filter:
+            artifact_stmt = artifact_stmt.where(
+                NodeArtifact.correlation_id == trace_correlation_filter
+            )
+        artifacts = (
+            session.execute(
+                artifact_stmt.order_by(NodeArtifact.created_at.desc(), NodeArtifact.id.desc())
+            )
+            .scalars()
+            .all()
+        )
+
+    node_items: list[dict[str, object]] = []
+    tool_items: list[dict[str, object]] = []
+    failure_items: list[dict[str, object]] = []
+    timeline_buffer: list[tuple[datetime, dict[str, object]]] = []
+    for node_row in node_rows:
+        output_state = _parse_json_dict(node_row.output_state_json)
+        routing_state = _parse_json_dict(node_row.routing_state_json)
+        trace_request_id, trace_correlation_id = _flowchart_trace_request_identity(
+            output_state=output_state,
+            routing_state=routing_state,
+        )
+        warnings = _flowchart_trace_warning_entries(
+            node_run=node_row,
+            output_state=output_state,
+            routing_state=routing_state,
+        )
+        if trace_request_filter and trace_request_filter != trace_request_id:
+            continue
+        if trace_correlation_filter and trace_correlation_filter != trace_correlation_id:
+            continue
+        if status_filters and _normalize_flowchart_run_status(node_row.status) not in status_filters:
+            continue
+        node_item = {
+            **_serialize_flowchart_run_node(node_row),
+            "request_id": trace_request_id,
+            "correlation_id": trace_correlation_id,
+            "warnings": warnings,
+        }
+        node_items.append(node_item)
+        tooling_payload = (
+            output_state.get("deterministic_tooling")
+            if isinstance(output_state.get("deterministic_tooling"), dict)
+            else routing_state.get("deterministic_tooling")
+            if isinstance(routing_state.get("deterministic_tooling"), dict)
+            else {}
+        )
+        if isinstance(tooling_payload, dict) and tooling_payload:
+            tool_items.append(
+                {
+                    "flowchart_run_node_id": node_row.id,
+                    "flowchart_node_id": node_row.flowchart_node_id,
+                    "agent_task_id": node_row.agent_task_id,
+                    "execution_index": node_row.execution_index,
+                    "tool_name": tooling_payload.get("tool_name"),
+                    "operation": tooling_payload.get("operation"),
+                    "execution_status": tooling_payload.get("execution_status"),
+                    "fallback_used": bool(tooling_payload.get("fallback_used")),
+                    "warnings": list(tooling_payload.get("warnings") or []),
+                    "request_id": _flowchart_trace_text(
+                        tooling_payload.get("request_id") or trace_request_id
+                    ),
+                    "correlation_id": _flowchart_trace_text(
+                        tooling_payload.get("correlation_id") or trace_correlation_id
+                    ),
+                    "updated_at": _human_time(node_row.updated_at),
+                }
+            )
+        if _normalize_flowchart_run_status(node_row.status) in {"failed", "error"} or str(
+            node_row.error or ""
+        ).strip():
+            failure_items.append(
+                {
+                    "flowchart_run_node_id": node_row.id,
+                    "flowchart_node_id": node_row.flowchart_node_id,
+                    "agent_task_id": node_row.agent_task_id,
+                    "status": node_row.status,
+                    "error": node_row.error or "",
+                    "degraded_status": bool(node_row.degraded_status),
+                    "degraded_reason": node_row.degraded_reason,
+                    "request_id": trace_request_id,
+                    "correlation_id": trace_correlation_id,
+                    "updated_at": _human_time(node_row.updated_at),
+                }
+            )
+        timeline_timestamp = (
+            node_row.finished_at
+            or node_row.started_at
+            or node_row.updated_at
+            or node_row.created_at
+        )
+        if timeline_timestamp is not None:
+            timeline_buffer.append(
+                (
+                    timeline_timestamp,
+                    {
+                        "event_type": "flowchart_node_status",
+                        "flowchart_run_node_id": node_row.id,
+                        "flowchart_node_id": node_row.flowchart_node_id,
+                        "status": node_row.status,
+                        "error": node_row.error or "",
+                        "warning_count": len(warnings),
+                        "request_id": trace_request_id,
+                        "correlation_id": trace_correlation_id,
+                        "timestamp": _human_time(timeline_timestamp),
+                    },
+                )
+            )
+            for warning in warnings:
+                timeline_buffer.append(
+                    (
+                        timeline_timestamp,
+                        {
+                            "event_type": "flowchart_warning",
+                            "flowchart_run_node_id": node_row.id,
+                            "flowchart_node_id": node_row.flowchart_node_id,
+                            "warning": warning,
+                            "request_id": trace_request_id,
+                            "correlation_id": trace_correlation_id,
+                            "timestamp": _human_time(timeline_timestamp),
+                        },
+                    )
+                )
+
+    artifact_items = [_serialize_node_artifact(item) for item in artifacts]
+    for artifact in artifacts:
+        timeline_timestamp = artifact.updated_at or artifact.created_at
+        if timeline_timestamp is None:
+            continue
+        timeline_buffer.append(
+            (
+                timeline_timestamp,
+                {
+                    "event_type": "flowchart_node_artifact",
+                    "artifact_id": artifact.id,
+                    "artifact_type": artifact.artifact_type,
+                    "flowchart_node_id": artifact.flowchart_node_id,
+                    "flowchart_run_node_id": artifact.flowchart_run_node_id,
+                    "request_id": _flowchart_trace_text(artifact.request_id),
+                    "correlation_id": _flowchart_trace_text(artifact.correlation_id),
+                    "timestamp": _human_time(timeline_timestamp),
+                },
+            )
+        )
+
+    if flowchart_run.created_at is not None:
+        timeline_buffer.append(
+            (
+                flowchart_run.created_at,
+                {
+                    "event_type": "flowchart_run_created",
+                    "status": flowchart_run.status,
+                    "flowchart_run_id": flowchart_run.id,
+                    "timestamp": _human_time(flowchart_run.created_at),
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        )
+    if flowchart_run.started_at is not None:
+        timeline_buffer.append(
+            (
+                flowchart_run.started_at,
+                {
+                    "event_type": "flowchart_run_started",
+                    "status": flowchart_run.status,
+                    "flowchart_run_id": flowchart_run.id,
+                    "timestamp": _human_time(flowchart_run.started_at),
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        )
+    if flowchart_run.finished_at is not None:
+        timeline_buffer.append(
+            (
+                flowchart_run.finished_at,
+                {
+                    "event_type": "flowchart_run_finished",
+                    "status": flowchart_run.status,
+                    "flowchart_run_id": flowchart_run.id,
+                    "timestamp": _human_time(flowchart_run.finished_at),
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        )
+
+    timeline_items = [
+        item
+        for _timestamp, item in sorted(
+            timeline_buffer,
+            key=lambda payload: payload[0],
+            reverse=True,
+        )
+    ]
+    if status_filters:
+        timeline_items = [
+            item
+            for item in timeline_items
+            if _normalize_flowchart_run_status(item.get("status")) in status_filters
+            or str(item.get("event_type") or "").strip() == "flowchart_warning"
+        ]
+    if trace_request_filter:
+        timeline_items = [
+            item for item in timeline_items if trace_request_filter == item.get("request_id")
+        ]
+    if trace_correlation_filter:
+        timeline_items = [
+            item
+            for item in timeline_items
+            if trace_correlation_filter == item.get("correlation_id")
+        ]
+
+    run_warning_count = sum(1 for item in node_items if bool(item.get("degraded_status"))) + sum(
+        1 for item in node_items if bool(item.get("warnings"))
+    )
+
+    empty_surface = _flowchart_trace_paginate([], limit=resolved_limit, offset=resolved_offset)
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "correlation_id": correlation_id,
+        "flowchart_run": {
+            **_serialize_flowchart_run(flowchart_run),
+            "warning_count": run_warning_count,
+        },
+        "filters": {
+            "include": sorted(include_tokens),
+            "status": sorted(status_filters),
+            "flowchart_node_id": flowchart_node_id,
+            "flowchart_run_node_id": flowchart_run_node_id,
+            "agent_task_id": agent_task_id,
+            "artifact_type": artifact_type_filter,
+            "trace_request_id": trace_request_filter,
+            "trace_correlation_id": trace_correlation_filter,
+            "degraded_only": degraded_only,
+        },
+        "limits": {
+            "limit": resolved_limit,
+            "offset": resolved_offset,
+            "max_limit": FLOWCHART_TRACE_MAX_LIMIT,
+        },
+        "run_trace": _flowchart_trace_paginate(
+            [
+                {
+                    **_serialize_flowchart_run(flowchart_run),
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                    "warning_count": run_warning_count,
+                }
+            ],
+            limit=resolved_limit,
+            offset=resolved_offset,
+        )
+        if "run" in include_tokens
+        else empty_surface,
+        "node_trace": _flowchart_trace_paginate(
+            node_items,
+            limit=resolved_limit,
+            offset=resolved_offset,
+        )
+        if "node" in include_tokens
+        else empty_surface,
+        "tool_trace": _flowchart_trace_paginate(
+            tool_items,
+            limit=resolved_limit,
+            offset=resolved_offset,
+        )
+        if "tool" in include_tokens
+        else empty_surface,
+        "artifact_trace": _flowchart_trace_paginate(
+            artifact_items,
+            limit=resolved_limit,
+            offset=resolved_offset,
+        )
+        if "artifact" in include_tokens
+        else empty_surface,
+        "failure_trace": _flowchart_trace_paginate(
+            failure_items,
+            limit=resolved_limit,
+            offset=resolved_offset,
+        )
+        if "failure" in include_tokens
+        else empty_surface,
+        "timeline": _flowchart_trace_paginate(
+            timeline_items,
+            limit=resolved_limit,
+            offset=resolved_offset,
+        )
+        if "timeline" in include_tokens
+        else empty_surface,
+    }
+
+
+def _control_cancel_flowchart_run(
+    session,
+    *,
+    run_id: int,
+    flowchart_run: FlowchartRun,
+    force: bool,
+) -> tuple[dict[str, object], list[tuple[str, bool]]]:
+    revoke_actions: list[tuple[str, bool]] = []
+    action = "none"
+    updated = False
+    now = utcnow()
+    current_status = _normalize_flowchart_run_status(flowchart_run.status)
+
+    if force:
+        if current_status in FLOWCHART_RUN_ACTIVE_STATUSES:
+            action = "canceled"
+            updated = True
+            flowchart_run.status = "canceled"
+            flowchart_run.finished_at = now
+            if flowchart_run.celery_task_id:
+                revoke_actions.append((flowchart_run.celery_task_id, True))
+
+            node_runs = (
+                session.execute(
+                    select(FlowchartRunNode).where(FlowchartRunNode.flowchart_run_id == run_id)
+                )
+                .scalars()
+                .all()
+            )
+            for node_run in node_runs:
+                if _normalize_flowchart_run_status(node_run.status) in {"queued", "running", "pending"}:
+                    node_run.status = "canceled"
+                    node_run.finished_at = now
+
+            tasks = (
+                session.execute(select(AgentTask).where(AgentTask.flowchart_run_id == run_id))
+                .scalars()
+                .all()
+            )
+            for task in tasks:
+                if _normalize_flowchart_run_status(task.status) in {"pending", "queued", "running"}:
+                    task.status = "canceled"
+                    task.finished_at = now
+                    if not task.error:
+                        task.error = "Canceled by user."
+                if task.celery_task_id:
+                    revoke_actions.append((task.celery_task_id, True))
+    else:
+        if current_status == "queued":
+            action = "stopped"
+            updated = True
+            flowchart_run.status = "stopped"
+            flowchart_run.finished_at = now
+            if flowchart_run.celery_task_id:
+                revoke_actions.append((flowchart_run.celery_task_id, False))
+        elif current_status in {"running", "paused", "pausing"}:
+            action = "stopping"
+            updated = True
+            flowchart_run.status = "stopping"
+        elif current_status == "stopping":
+            action = "stopping"
+
+    return (
+        {
+            "flowchart_run": _serialize_flowchart_run(flowchart_run),
+            "force": force,
+            "updated": updated,
+            "action": action,
+            "canceled": action == "canceled",
+            "stop_requested": action in {"stopping", "stopped"},
+        },
+        revoke_actions,
+    )
+
+
+@bp.post("/flowcharts/runs/<int:run_id>/control")
+def control_flowchart_run(run_id: int):
+    payload = _flowchart_request_payload()
+    wants_json = request.is_json or bool(payload) or _flowchart_wants_json()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    action = str(
+        payload.get("action")
+        or request.form.get("action")
+        or request.args.get("action")
+        or ""
+    ).strip().lower()
+    if action not in FLOWCHART_RUN_CONTROL_ACTIONS:
+        return (
+            _workflow_error_envelope(
+                code="invalid_request",
+                message=(
+                    "action is required and must be one of "
+                    + ", ".join(sorted(FLOWCHART_RUN_CONTROL_ACTIONS))
+                    + "."
+                ),
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ),
+            400,
+        )
+
+    force_value = payload.get("force")
+    if force_value is None:
+        force_value = request.form.get("force")
+    if force_value is None:
+        force_value = request.args.get("force")
+    force = _flowchart_as_bool(force_value)
+    force_new = _flowchart_as_bool(
+        payload.get("force_new")
+        if payload.get("force_new") is not None
+        else request.form.get("force_new")
+        if request.form.get("force_new") is not None
+        else request.args.get("force_new")
+    )
+    replay_idempotency_key = _flowchart_trace_text(
+        payload.get("idempotency_key")
+        or request.headers.get("X-Idempotency-Key")
+        or request.headers.get("Idempotency-Key")
+    ) or f"default:{action}:{run_id}"
+    rewind_to_node_run_id = None
+    try:
+        rewind_to_node_run_id = _coerce_optional_int(
+            payload.get("rewind_to_node_run_id")
+            if "rewind_to_node_run_id" in payload
+            else request.args.get("rewind_to_node_run_id"),
+            field_name="rewind_to_node_run_id",
+            minimum=1,
+        )
+    except ValueError as exc:
+        return (
+            _workflow_error_envelope(
+                code="invalid_request",
+                message=str(exc),
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ),
+            400,
+        )
+
+    flowchart_id: int | None = None
+    response_payload: dict[str, object]
+    revoke_actions: list[tuple[str, bool]] = []
+    replay_dispatch_run_id: int | None = None
+    replay_run_payload: dict[str, object] | None = None
+    status_before = ""
+    updated = False
+    applied_action = "none"
+    control_warnings: list[dict[str, str]] = []
+
+    with session_scope() as session:
+        flowchart_run = session.get(FlowchartRun, run_id)
+        if flowchart_run is None:
+            abort(404)
+        flowchart_id = int(flowchart_run.flowchart_id)
+        status_before = _normalize_flowchart_run_status(flowchart_run.status)
+
+        if action == "cancel":
+            response_payload, revoke_actions = _control_cancel_flowchart_run(
+                session,
+                run_id=run_id,
+                flowchart_run=flowchart_run,
+                force=force,
+            )
+            updated = bool(response_payload.get("updated"))
+            applied_action = str(response_payload.get("action") or "none")
+        elif action == "pause":
+            if status_before in {"running", "stopping"}:
+                flowchart_run.status = "pausing"
+                updated = True
+                applied_action = "pausing"
+            elif status_before == "queued":
+                flowchart_run.status = "paused"
+                updated = True
+                applied_action = "paused"
+            elif status_before in {"pausing", "paused"}:
+                applied_action = status_before
+            else:
+                applied_action = "noop"
+            response_payload = {
+                "flowchart_run": _serialize_flowchart_run(flowchart_run),
+                "updated": updated,
+                "action": applied_action,
+            }
+        elif action == "resume":
+            if status_before in {"paused", "pausing"}:
+                flowchart_run.status = "running"
+                flowchart_run.started_at = flowchart_run.started_at or utcnow()
+                updated = True
+                applied_action = "running"
+            elif status_before == "running":
+                applied_action = "running"
+            else:
+                applied_action = "noop"
+            response_payload = {
+                "flowchart_run": _serialize_flowchart_run(flowchart_run),
+                "updated": updated,
+                "action": applied_action,
+            }
+        else:
+            replay_marker = (
+                _flowchart_parse_replay_marker(flowchart_run.celery_task_id)
+                if not force_new
+                else None
+            )
+            if replay_marker is not None and replay_marker[0] == action:
+                existing_replay = session.get(FlowchartRun, replay_marker[1])
+                if existing_replay is not None:
+                    replay_run_payload = _serialize_flowchart_run(existing_replay)
+                    applied_action = "replay_existing"
+            if replay_run_payload is None and status_before in FLOWCHART_RUN_ACTIVE_STATUSES:
+                applied_action = "noop_active"
+            elif replay_run_payload is None:
+                accepted = (
+                    True
+                    if force_new
+                    else register_runtime_idempotency_key(
+                        f"flowchart_run_control:{action}:{run_id}",
+                        replay_idempotency_key,
+                    )
+                )
+                if not accepted and not force_new:
+                    applied_action = "idempotent_noop"
+                    replay_marker = _flowchart_parse_replay_marker(flowchart_run.celery_task_id)
+                    if replay_marker is not None:
+                        existing_replay = session.get(FlowchartRun, replay_marker[1])
+                        if existing_replay is not None:
+                            replay_run_payload = _serialize_flowchart_run(existing_replay)
+                            applied_action = "replay_existing"
+                else:
+                    replay_run = FlowchartRun.create(
+                        session,
+                        flowchart_id=flowchart_id,
+                        status="queued",
+                    )
+                    replay_dispatch_run_id = int(replay_run.id)
+                    replay_run_payload = _serialize_flowchart_run(replay_run)
+                    flowchart_run.celery_task_id = _flowchart_build_replay_marker(
+                        action=action,
+                        replay_run_id=replay_dispatch_run_id,
+                    )
+                    updated = True
+                    applied_action = "replay_queued"
+                    if action in {"skip", "rewind"}:
+                        control_warnings.append(
+                            {
+                                "code": "replay_from_start",
+                                "message": (
+                                    "Exact partial execution control is unavailable; "
+                                    "replayed from flowchart start."
+                                ),
+                            }
+                        )
+            response_payload = {
+                "flowchart_run": _serialize_flowchart_run(flowchart_run),
+                "updated": updated,
+                "action": applied_action,
+                "replay_run": replay_run_payload,
+                "rewind_to_node_run_id": rewind_to_node_run_id,
+            }
+
+    if replay_dispatch_run_id is not None and flowchart_id is not None:
+        try:
+            async_result = run_flowchart.delay(flowchart_id, replay_dispatch_run_id)
+            with session_scope() as session:
+                replay_run = session.get(FlowchartRun, replay_dispatch_run_id)
+                if replay_run is not None:
+                    replay_run.celery_task_id = async_result.id
+                    replay_run_payload = _serialize_flowchart_run(replay_run)
+                    response_payload["replay_run"] = replay_run_payload
+        except Exception as exc:
+            logger.exception(
+                "Failed to queue replay run %s for source run %s",
+                replay_dispatch_run_id,
+                run_id,
+            )
+            with session_scope() as session:
+                replay_run = session.get(FlowchartRun, replay_dispatch_run_id)
+                if replay_run is not None:
+                    replay_run.status = "failed"
+                    replay_run.finished_at = utcnow()
+                    response_payload["replay_run"] = _serialize_flowchart_run(replay_run)
+            control_warnings.append(
+                {
+                    "code": "replay_queue_failed",
+                    "message": str(exc) or "Failed to queue replay run.",
+                }
+            )
+
+    for task_id, terminate in revoke_actions:
+        try:
+            if terminate:
+                celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            else:
+                celery_app.control.revoke(task_id)
+        except Exception as exc:
+            logger.warning("Failed to revoke flowchart task %s: %s", task_id, exc)
+
+    if flowchart_id is not None:
+        emit_contract_event(
+            event_type="flowchart.run.updated",
+            entity_kind="flowchart_run",
+            entity_id=run_id,
+            room_keys=[f"flowchart:{flowchart_id}", f"flowchart_run:{run_id}"],
+            payload={
+                "flowchart_id": flowchart_id,
+                "flowchart_run_id": run_id,
+                "requested_action": action,
+                "applied_action": applied_action,
+                "status_before": status_before,
+                "status_after": (
+                    (response_payload.get("flowchart_run") or {}).get("status")
+                    if isinstance(response_payload.get("flowchart_run"), dict)
+                    else None
+                ),
+                "updated": bool(response_payload.get("updated")),
+                "replay_run_id": (
+                    (response_payload.get("replay_run") or {}).get("id")
+                    if isinstance(response_payload.get("replay_run"), dict)
+                    else None
+                ),
+                "warnings": list(control_warnings),
+            },
+            runtime=None,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+
+    logger.info(
+        "Flowchart run control action=%s run_id=%s updated=%s request_id=%s correlation_id=%s",
+        action,
+        run_id,
+        bool(response_payload.get("updated")),
+        request_id,
+        correlation_id,
+    )
+
+    response_payload = {
+        **response_payload,
+        "requested_action": action,
+        "applied_action": applied_action,
+        "idempotent": not bool(response_payload.get("updated")),
+        "request_id": request_id,
+        "correlation_id": correlation_id,
+        "warnings": control_warnings,
+    }
+
+    if wants_json:
+        return response_payload
+
+    default_next = (
+        url_for("agents.view_flowchart_history_run", flowchart_id=flowchart_id, run_id=run_id)
+        if flowchart_id is not None
+        else url_for("agents.list_flowcharts")
+    )
+    redirect_target = _safe_redirect_target(request.form.get("next"), default_next)
+    if action == "cancel":
+        if response_payload.get("action") == "canceled":
+            flash("Flowchart force stop requested.", "success")
+        elif response_payload.get("action") == "stopped":
+            flash("Flowchart stopped.", "success")
+        elif response_payload.get("action") == "stopping":
+            flash("Flowchart stop requested. It will stop after the current node finishes.", "success")
+        else:
+            flash("Flowchart run is not active.", "info")
+    elif action == "pause":
+        if response_payload.get("action") in {"pausing", "paused"}:
+            flash("Flowchart pause requested.", "success")
+        else:
+            flash("Flowchart run cannot be paused in its current state.", "info")
+    elif action == "resume":
+        if response_payload.get("action") == "running":
+            flash("Flowchart resumed.", "success")
+        else:
+            flash("Flowchart run is not paused.", "info")
+    else:
+        if isinstance(response_payload.get("replay_run"), dict):
+            flash(
+                f"Replay run {response_payload['replay_run'].get('id')} queued.",
+                "success",
+            )
+        else:
+            flash("No replay action was applied.", "info")
+    return redirect(redirect_target)
+
+
 @bp.get("/flowcharts/<int:flowchart_id>/runtime")
 def flowchart_runtime_status(flowchart_id: int):
     active_run_id: int | None = None
@@ -13862,7 +14682,7 @@ def flowchart_runtime_status(flowchart_id: int):
                 select(FlowchartRun)
                 .where(
                     FlowchartRun.flowchart_id == flowchart_id,
-                    FlowchartRun.status.in_(["queued", "running", "stopping"]),
+                    FlowchartRun.status.in_(["queued", "running", "stopping", "pausing", "paused"]),
                 )
                 .order_by(FlowchartRun.created_at.desc(), FlowchartRun.id.desc())
                 .limit(1)
@@ -13929,7 +14749,7 @@ def cancel_flowchart_run(run_id: int):
         current_status = str(flowchart_run.status or "").strip().lower()
 
         if force:
-            if current_status in {"queued", "running", "stopping"}:
+            if current_status in {"queued", "running", "stopping", "pausing", "paused"}:
                 action = "canceled"
                 updated = True
                 flowchart_run.status = "canceled"
@@ -13970,7 +14790,7 @@ def cancel_flowchart_run(run_id: int):
                 flowchart_run.finished_at = now
                 if flowchart_run.celery_task_id:
                     revoke_actions.append((flowchart_run.celery_task_id, False))
-            elif current_status == "running":
+            elif current_status in {"running", "pausing", "paused"}:
                 action = "stopping"
                 updated = True
                 flowchart_run.status = "stopping"
@@ -14516,32 +15336,38 @@ def list_models():
 
 @bp.get("/models/new")
 def new_model():
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     model_options = _provider_model_options()
     local_vllm_models = discover_vllm_local_models()
     codex_default_model = _codex_default_model(model_options.get("codex"))
     vllm_local_default_model = _vllm_local_default_model(local_vllm_models)
     vllm_remote_default_model = _vllm_remote_default_model()
     if _workflow_wants_json():
-        return {
-            "provider_options": _provider_options(),
-            "selected_provider": "codex",
-            "codex_config": _codex_model_config_defaults(
-                {},
-                default_model=codex_default_model,
-            ),
-            "gemini_config": _gemini_model_config_defaults({}),
-            "claude_config": _simple_model_config_defaults({}),
-            "vllm_local_config": _vllm_local_model_config_defaults(
-                {},
-                default_model=vllm_local_default_model,
-            ),
-            "vllm_remote_config": _vllm_remote_model_config_defaults(
-                {},
-                default_model=vllm_remote_default_model,
-            ),
-            "vllm_local_models": local_vllm_models,
-            "model_options": model_options,
-        }
+        return _workflow_success_payload(
+            payload={
+                "provider_options": _provider_options(),
+                "selected_provider": "codex",
+                "codex_config": _codex_model_config_defaults(
+                    {},
+                    default_model=codex_default_model,
+                ),
+                "gemini_config": _gemini_model_config_defaults({}),
+                "claude_config": _simple_model_config_defaults({}),
+                "vllm_local_config": _vllm_local_model_config_defaults(
+                    {},
+                    default_model=vllm_local_default_model,
+                ),
+                "vllm_remote_config": _vllm_remote_model_config_defaults(
+                    {},
+                    default_model=vllm_remote_default_model,
+                ),
+                "vllm_local_models": local_vllm_models,
+                "model_options": model_options,
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     return render_template(
         "model_new.html",
         provider_options=_provider_options(),
@@ -14845,9 +15671,20 @@ def view_model(model_id: int):
 
 @bp.get("/models/<int:model_id>/edit")
 def edit_model(model_id: int):
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    is_api_request = _workflow_api_request()
     with session_scope() as session:
         model = session.get(LLMModel, model_id)
         if model is None:
+            if is_api_request:
+                return _workflow_error_envelope(
+                    code="not_found",
+                    message=f"Model {model_id} was not found.",
+                    details={"model_id": model_id},
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                ), 404
             abort(404)
     config = _decode_model_config(model.config_json)
     model_options = _provider_model_options()
@@ -14856,31 +15693,35 @@ def edit_model(model_id: int):
     vllm_local_default_model = _vllm_local_default_model(local_vllm_models)
     vllm_remote_default_model = _vllm_remote_default_model()
     if _workflow_wants_json():
-        return {
-            "model": _serialize_model(model, include_config=True),
-            "provider_options": _provider_options(),
-            "selected_provider": model.provider,
-            "codex_config": _codex_model_config_defaults(
-                config if model.provider == "codex" else {},
-                default_model=codex_default_model,
-            ),
-            "gemini_config": _gemini_model_config_defaults(
-                config if model.provider == "gemini" else {}
-            ),
-            "claude_config": _simple_model_config_defaults(
-                config if model.provider == "claude" else {}
-            ),
-            "vllm_local_config": _vllm_local_model_config_defaults(
-                config if model.provider == "vllm_local" else {},
-                default_model=vllm_local_default_model,
-            ),
-            "vllm_remote_config": _vllm_remote_model_config_defaults(
-                config if model.provider == "vllm_remote" else {},
-                default_model=vllm_remote_default_model,
-            ),
-            "vllm_local_models": local_vllm_models,
-            "model_options": model_options,
-        }
+        return _workflow_success_payload(
+            payload={
+                "model": _serialize_model(model, include_config=True),
+                "provider_options": _provider_options(),
+                "selected_provider": model.provider,
+                "codex_config": _codex_model_config_defaults(
+                    config if model.provider == "codex" else {},
+                    default_model=codex_default_model,
+                ),
+                "gemini_config": _gemini_model_config_defaults(
+                    config if model.provider == "gemini" else {}
+                ),
+                "claude_config": _simple_model_config_defaults(
+                    config if model.provider == "claude" else {}
+                ),
+                "vllm_local_config": _vllm_local_model_config_defaults(
+                    config if model.provider == "vllm_local" else {},
+                    default_model=vllm_local_default_model,
+                ),
+                "vllm_remote_config": _vllm_remote_model_config_defaults(
+                    config if model.provider == "vllm_remote" else {},
+                    default_model=vllm_remote_default_model,
+                ),
+                "vllm_local_models": local_vllm_models,
+                "model_options": model_options,
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     return render_template(
         "model_edit.html",
         model=model,
@@ -18493,23 +19334,194 @@ def _settings_provider_context() -> dict[str, object]:
     }
 
 
+def _normalize_provider_id(raw: object) -> str:
+    return str(raw or "").strip().lower().replace("-", "_")
+
+
+def _provider_details_index(context: dict[str, object]) -> dict[str, dict[str, object]]:
+    details = context.get("provider_details")
+    rows = details if isinstance(details, list) else []
+    indexed: dict[str, dict[str, object]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        provider_id = _normalize_provider_id(row.get("id"))
+        if not provider_id:
+            continue
+        indexed[provider_id] = row
+    return indexed
+
+
+def _parse_provider_list_query() -> dict[str, object]:
+    page = _coerce_optional_int(request.args.get("page"), field_name="page", minimum=1)
+    per_page = _coerce_optional_int(
+        request.args.get("per_page"),
+        field_name="per_page",
+        minimum=1,
+    )
+    search_text = str(request.args.get("search") or "").strip().lower()
+    enabled_raw = str(request.args.get("enabled") or "").strip().lower()
+    if enabled_raw and enabled_raw not in {"true", "false"}:
+        raise ValueError("enabled must be 'true' or 'false' when provided.")
+    sort_by = str(request.args.get("sort_by") or "label").strip().lower()
+    if sort_by not in PROVIDER_LIST_SORT_FIELDS:
+        raise ValueError(
+            "sort_by must be one of: "
+            + ", ".join(sorted(PROVIDER_LIST_SORT_FIELDS))
+            + "."
+        )
+    sort_order = str(request.args.get("sort_order") or "asc").strip().lower()
+    if sort_order not in {"asc", "desc"}:
+        raise ValueError("sort_order must be 'asc' or 'desc'.")
+    resolved_page = page if page is not None else 1
+    resolved_per_page = min(per_page if per_page is not None else 25, 200)
+    return {
+        "page": resolved_page,
+        "per_page": resolved_per_page,
+        "search_text": search_text,
+        "enabled_filter": enabled_raw,
+        "sort_by": sort_by,
+        "sort_order": sort_order,
+    }
+
+
+@bp.get("/providers")
+def list_providers():
+    if not _workflow_wants_json():
+        return redirect(url_for("agents.settings_provider"))
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    try:
+        query = _parse_provider_list_query()
+    except ValueError as exc:
+        return _workflow_error_envelope(
+            code="invalid_request",
+            message=str(exc),
+            details={},
+            request_id=request_id,
+            correlation_id=correlation_id,
+        ), 400
+    context = _settings_provider_context()
+    provider_rows = [
+        dict(row)
+        for row in (context.get("provider_details") or [])
+        if isinstance(row, dict)
+    ]
+    search_text = str(query["search_text"])
+    if search_text:
+        provider_rows = [
+            row
+            for row in provider_rows
+            if search_text in str(row.get("id") or "").strip().lower()
+            or search_text in str(row.get("label") or "").strip().lower()
+            or search_text in str(row.get("model") or "").strip().lower()
+        ]
+    enabled_filter = str(query["enabled_filter"])
+    if enabled_filter:
+        enabled_flag = enabled_filter == "true"
+        provider_rows = [
+            row for row in provider_rows if bool(row.get("enabled")) == enabled_flag
+        ]
+
+    sort_by = str(query["sort_by"])
+    reverse = str(query["sort_order"]) == "desc"
+
+    def _sort_key(row: dict[str, object]) -> tuple[int, str]:
+        value = row.get(sort_by)
+        if isinstance(value, bool):
+            return (0, "1" if value else "0")
+        return (1, str(value or "").strip().lower())
+
+    provider_rows = sorted(provider_rows, key=_sort_key, reverse=reverse)
+    total_count = len(provider_rows)
+    page = int(query["page"])
+    per_page = int(query["per_page"])
+    start = (page - 1) * per_page
+    items = provider_rows[start : start + per_page]
+    return _workflow_success_payload(
+        payload={
+            "providers": items,
+            "count": len(items),
+            "total_count": total_count,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "has_prev": page > 1,
+                "has_next": page * per_page < total_count,
+            },
+            "filters": {
+                "search": search_text,
+                "enabled": enabled_filter,
+            },
+            "sort": {
+                "by": sort_by,
+                "order": str(query["sort_order"]),
+            },
+            "provider_summary": context.get("provider_summary") or {},
+        },
+        request_id=request_id,
+        correlation_id=correlation_id,
+    )
+
+
+@bp.get("/providers/<provider_id>")
+def view_provider(provider_id: str):
+    if not _workflow_wants_json():
+        return redirect(url_for("agents.settings_provider"))
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
+    normalized = _normalize_provider_id(provider_id)
+    context = _settings_provider_context()
+    details_index = _provider_details_index(context)
+    if normalized not in details_index:
+        return _workflow_error_envelope(
+            code="not_found",
+            message=f"Provider '{provider_id}' was not found.",
+            details={"provider": provider_id},
+            request_id=request_id,
+            correlation_id=correlation_id,
+        ), 404
+    settings_by_provider = {
+        "codex": context.get("codex_settings") or {},
+        "gemini": context.get("gemini_settings") or {},
+        "claude": context.get("claude_settings") or {},
+        "vllm_local": context.get("vllm_local_settings") or {},
+        "vllm_remote": context.get("vllm_remote_settings") or {},
+    }
+    return _workflow_success_payload(
+        payload={
+            "provider": details_index[normalized],
+            "provider_settings": settings_by_provider.get(normalized, {}),
+            "provider_summary": context.get("provider_summary") or {},
+        },
+        request_id=request_id,
+        correlation_id=correlation_id,
+    )
+
+
 def _render_settings_provider_page(section: str):
     section_meta = PROVIDER_SETTINGS_SECTIONS.get(section)
     if section_meta is None:
         abort(404)
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     context = _settings_provider_context()
     if _workflow_wants_json():
-        return {
-            "provider_section": section,
-            "provider_sections": [
-                {
-                    "id": key,
-                    "label": value["label"],
-                }
-                for key, value in PROVIDER_SETTINGS_SECTIONS.items()
-            ],
-            **context,
-        }
+        return _workflow_success_payload(
+            payload={
+                "provider_section": section,
+                "provider_sections": [
+                    {
+                        "id": key,
+                        "label": value["label"],
+                    }
+                    for key, value in PROVIDER_SETTINGS_SECTIONS.items()
+                ],
+                **context,
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     return render_template(
         "settings_provider.html",
         provider_section=section,
@@ -18547,12 +19559,20 @@ def settings_provider_vllm_remote():
 def update_provider_settings():
     payload = _settings_request_payload()
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     default_provider = (
         _settings_form_value(payload, "default_provider") or ""
     ).strip().lower()
     if default_provider and default_provider not in LLM_PROVIDERS:
         if is_api_request:
-            return {"error": "Unknown provider selection."}, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="Unknown provider selection.",
+                details={"provider": default_provider},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("Unknown provider selection.", "error")
         return redirect(url_for("agents.settings_provider"))
     enabled: set[str] = set()
@@ -18569,11 +19589,23 @@ def update_provider_settings():
     _save_integration_settings("llm", payload)
     selected_provider = payload["provider"]
     if is_api_request:
-        return {
-            "ok": True,
+        response_payload = {
             "provider": selected_provider,
             "enabled_providers": sorted(enabled),
         }
+        _emit_model_provider_event(
+            event_type="config:provider:updated",
+            entity_kind="provider",
+            entity_id=selected_provider or "controls",
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     if not enabled:
         flash("No providers enabled. Agents require a default model or provider.", "info")
     flash("Provider settings updated.", "success")
@@ -18584,13 +19616,28 @@ def update_provider_settings():
 def update_codex_settings():
     payload = _settings_request_payload()
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     api_key = _settings_form_value(payload, "codex_api_key")
     payload = {
         "codex_api_key": api_key,
     }
     _save_integration_settings("llm", payload)
     if is_api_request:
-        return {"ok": True}
+        response_payload = {"provider": "codex"}
+        _emit_model_provider_event(
+            event_type="config:provider:updated",
+            entity_kind="provider",
+            entity_id="codex",
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     flash("Codex auth settings updated.", "success")
     return redirect(url_for("agents.settings_provider_codex"))
 
@@ -18599,13 +19646,28 @@ def update_codex_settings():
 def update_gemini_settings():
     payload = _settings_request_payload()
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     api_key = _settings_form_value(payload, "gemini_api_key")
     payload = {
         "gemini_api_key": api_key,
     }
     _save_integration_settings("llm", payload)
     if is_api_request:
-        return {"ok": True}
+        response_payload = {"provider": "gemini"}
+        _emit_model_provider_event(
+            event_type="config:provider:updated",
+            entity_kind="provider",
+            entity_id="gemini",
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     flash("Gemini auth settings updated.", "success")
     return redirect(url_for("agents.settings_provider_gemini"))
 
@@ -18614,13 +19676,28 @@ def update_gemini_settings():
 def update_claude_settings():
     payload = _settings_request_payload()
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     api_key = _settings_form_value(payload, "claude_api_key")
     payload = {
         "claude_api_key": api_key,
     }
     _save_integration_settings("llm", payload)
     if is_api_request:
-        return {"ok": True}
+        response_payload = {"provider": "claude"}
+        _emit_model_provider_event(
+            event_type="config:provider:updated",
+            entity_kind="provider",
+            entity_id="claude",
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     flash("Claude auth settings updated.", "success")
     return redirect(url_for("agents.settings_provider_claude"))
 
@@ -18629,14 +19706,20 @@ def update_claude_settings():
 def update_vllm_local_settings():
     request_payload = _settings_request_payload()
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     local_model = _settings_form_value(request_payload, "vllm_local_model")
     discovered_local_values = {item["value"] for item in discover_vllm_local_models()}
     local_model_clean = local_model.strip()
     if local_model_clean and local_model_clean not in discovered_local_values:
         if is_api_request:
-            return {
-                "error": "vLLM local model must be selected from discovered local models."
-            }, 400
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message="vLLM local model must be selected from discovered local models.",
+                details={"provider": "vllm_local", "model": local_model_clean},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
         flash("vLLM local model must be selected from discovered local models.", "error")
         return redirect(url_for("agents.settings_provider_vllm_local"))
     payload = {
@@ -18654,7 +19737,20 @@ def update_vllm_local_settings():
         )
     _save_integration_settings("llm", payload)
     if is_api_request:
-        return {"ok": True}
+        response_payload = {"provider": "vllm_local"}
+        _emit_model_provider_event(
+            event_type="config:provider:updated",
+            entity_kind="provider",
+            entity_id="vllm_local",
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     flash("vLLM Local settings updated.", "success")
     return redirect(url_for("agents.settings_provider_vllm_local"))
 
@@ -18895,6 +19991,8 @@ def delete_vllm_local_huggingface_model():
 def update_vllm_remote_settings():
     payload = _settings_request_payload()
     is_api_request = _workflow_api_request()
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     remote_base_url = _settings_form_value(payload, "vllm_remote_base_url")
     remote_api_key = _settings_form_value(payload, "vllm_remote_api_key")
     remote_model = _settings_form_value(payload, "vllm_remote_model")
@@ -18907,7 +20005,20 @@ def update_vllm_remote_settings():
     }
     _save_integration_settings("llm", payload)
     if is_api_request:
-        return {"ok": True}
+        response_payload = {"provider": "vllm_remote"}
+        _emit_model_provider_event(
+            event_type="config:provider:updated",
+            entity_kind="provider",
+            entity_id="vllm_remote",
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        return _workflow_success_payload(
+            payload=response_payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
     flash("vLLM Remote settings updated.", "success")
     return redirect(url_for("agents.settings_provider_vllm_remote"))
 

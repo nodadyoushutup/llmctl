@@ -10,6 +10,7 @@ import { shouldIgnoreRowClick } from '../lib/tableRowLink'
 const SORT_KEYS = new Set(['name', 'provider', 'model', 'default'])
 const SORT_DIRECTIONS = new Set(['asc', 'desc'])
 const PER_PAGE_OPTIONS = [10, 25, 50]
+const EMPTY_MODELS = []
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -123,7 +124,10 @@ export default function ModelsPage() {
   }, [refresh])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
-  const models = payload && Array.isArray(payload.models) ? payload.models : []
+  const models = useMemo(
+    () => (payload && Array.isArray(payload.models) ? payload.models : EMPTY_MODELS),
+    [payload],
+  )
   const listHref = resolveModelsListHref(`/models${location.search}`)
 
   const providerOptions = useMemo(() => {
@@ -283,7 +287,7 @@ export default function ModelsPage() {
     }
     setBusy(modelId, true)
     try {
-      const nextIsDefault = !Boolean(model?.is_default)
+      const nextIsDefault = !model?.is_default
       await updateDefaultModel(modelId, nextIsDefault)
       await refresh({ silent: true })
       flash.success(nextIsDefault ? 'Default model updated.' : 'Default model unset.')

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { routeCountMeta } from './FlowchartRunDetailPage'
+import { routeCountMeta } from '../lib/flowchartRouting'
 
 describe('FlowchartRunDetailPage route count summary', () => {
   test('counts matched connectors when available', () => {

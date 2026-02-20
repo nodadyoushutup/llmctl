@@ -17,6 +17,12 @@ const ROUTING_FOCUS_FIELD_FAN_IN_MODE = 'fanInMode'
 const ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT = 'fanInCustomCount'
 const ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR = 'fallbackConnector'
 const FLOW_WS_ROUTING_DETAILS_ID = 'flow-ws-routing-details'
+const EMPTY_ROUTING_VALIDATION = {
+  hasErrors: false,
+  errors: [],
+  fieldErrors: {},
+  firstInvalidField: '',
+}
 const MILESTONE_ACTION_OPTIONS = [
   { value: 'create_or_update', label: 'Create/Update milestone' },
   { value: 'mark_complete', label: 'Mark milestone complete' },
@@ -1776,12 +1782,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     return validations
   }, [nodes, solidIncomingConnectorCountByNodeToken, decisionSolidOutgoingConnectorOptionsByNodeToken])
   const selectedRoutingValidation = selectedNode
-    ? (routingValidationByNodeToken.get(selectedNode.token) || {
-      hasErrors: false,
-      errors: [],
-      fieldErrors: {},
-      firstInvalidField: '',
-    })
+    ? (routingValidationByNodeToken.get(selectedNode.token) || EMPTY_ROUTING_VALIDATION)
     : null
   const selectedSolidIncomingConnectorCount = selectedNode
     ? (solidIncomingConnectorCountByNodeToken.get(selectedNode.token) || 0)
@@ -2048,7 +2049,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     setSelectedEdgeId('')
   }, [])
 
-  const applyServerGraph = useCallback((nextNodesRaw, nextEdgesRaw) => {
+  function applyServerGraph(nextNodesRaw, nextEdgesRaw) {
     const nextWorkspace = buildInitialWorkspace(nextNodesRaw, nextEdgesRaw)
     const selectedNodeSnapshot = buildNodeSelectionSnapshot(
       selectedNodeToken ? nodesByToken.get(selectedNodeToken) : null,
@@ -2070,12 +2071,12 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     setSelectedNodeToken(nextSelectedNodeToken)
     setSelectedEdgeId(nextSelectedEdgeId)
     return true
-  }, [edges, nodesByToken, selectedEdgeId, selectedNodeToken])
+  }
 
   useImperativeHandle(ref, () => ({
     applyServerGraph,
     validateBeforeSave: validateRoutingBeforeSave,
-  }), [applyServerGraph, validateRoutingBeforeSave])
+  }))
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -2135,7 +2136,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     setSelectedEdgeId('')
   }
 
-  const createEdge = useCallback((sourceToken, sourceHandleId, targetToken, targetHandleId) => {
+  function createEdge(sourceToken, sourceHandleId, targetToken, targetHandleId) {
     const sourceNode = nodesByToken.get(sourceToken)
     const targetNode = nodesByToken.get(targetToken)
     if (!sourceNode || !targetNode) {
@@ -2176,7 +2177,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     setEdges((current) => [...current, edge])
     setSelectedEdgeId(edge.localId)
     setSelectedNodeToken('')
-  }, [edges, nodesByToken])
+  }
 
   const toggleConnector = useCallback((nodeToken, handleId) => {
     if (!connectStart) {

@@ -1024,6 +1024,32 @@ def _emit_flowchart_node_event(
     finished_at: datetime | None = None,
     runtime: dict[str, Any] | None = None,
 ) -> None:
+    output_payload = output_state if isinstance(output_state, dict) else {}
+    routing_payload = routing_state if isinstance(routing_state, dict) else {}
+    output_tooling = (
+        output_payload.get("deterministic_tooling")
+        if isinstance(output_payload.get("deterministic_tooling"), dict)
+        else {}
+    )
+    routing_tooling = (
+        routing_payload.get("deterministic_tooling")
+        if isinstance(routing_payload.get("deterministic_tooling"), dict)
+        else {}
+    )
+    request_id = str(
+        output_tooling.get("request_id")
+        or routing_tooling.get("request_id")
+        or output_payload.get("request_id")
+        or routing_payload.get("request_id")
+        or ""
+    ).strip() or None
+    correlation_id = str(
+        output_tooling.get("correlation_id")
+        or routing_tooling.get("correlation_id")
+        or output_payload.get("correlation_id")
+        or routing_payload.get("correlation_id")
+        or ""
+    ).strip() or None
     payload = {
         "flowchart_id": flowchart_id,
         "flowchart_run_id": flowchart_run_id,
@@ -1038,6 +1064,8 @@ def _emit_flowchart_node_event(
         "routing_state": routing_state,
         "started_at": _resolve_updated_at_version(started_at),
         "finished_at": _resolve_updated_at_version(finished_at),
+        "request_id": request_id,
+        "correlation_id": correlation_id,
     }
     emit_contract_event(
         event_type=event_type,
@@ -1050,6 +1078,8 @@ def _emit_flowchart_node_event(
         ),
         payload=payload,
         runtime=runtime,
+        request_id=request_id,
+        correlation_id=correlation_id,
     )
 
 
@@ -1099,7 +1129,14 @@ def _emit_flowchart_run_event(
     run: FlowchartRun,
     flowchart_id: int,
     payload: dict[str, Any] | None = None,
+    runtime: dict[str, Any] | None = None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
 ) -> None:
+    resolved_request_id = str(request_id or "").strip() or f"flowchart-run-{int(run.id)}"
+    resolved_correlation_id = (
+        str(correlation_id or "").strip() or f"flowchart-run-{int(run.id)}"
+    )
     event_payload = {
         "flowchart_id": flowchart_id,
         "flowchart_run_id": int(run.id),
@@ -1107,6 +1144,8 @@ def _emit_flowchart_run_event(
         "started_at": _resolve_updated_at_version(run.started_at),
         "finished_at": _resolve_updated_at_version(run.finished_at),
         "updated_at": _resolve_updated_at_version(run.updated_at),
+        "request_id": resolved_request_id,
+        "correlation_id": resolved_correlation_id,
     }
     if payload:
         event_payload.update(payload)
@@ -1119,7 +1158,9 @@ def _emit_flowchart_run_event(
             flowchart_run_id=run.id,
         ),
         payload=event_payload,
-        runtime=None,
+        runtime=runtime,
+        request_id=resolved_request_id,
+        correlation_id=resolved_correlation_id,
     )
 
 
@@ -5913,6 +5954,34 @@ def _node_artifact_retention_settings(node_config: dict[str, Any]) -> tuple[str,
     return retention_mode, ttl_seconds, max_count
 
 
+def _resolve_node_artifact_request_ids(
+    *,
+    flowchart_run_id: int,
+    flowchart_run_node_id: int,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    output_state: dict[str, Any],
+) -> tuple[str, str | None]:
+    request_id = str(
+        node_config.get("request_id")
+        or input_context.get("request_id")
+        or output_state.get("request_id")
+        or ""
+    ).strip()
+    if not request_id:
+        request_id = f"flowchart-run-{int(flowchart_run_id)}-node-run-{int(flowchart_run_node_id)}"
+
+    correlation_id = str(
+        node_config.get("correlation_id")
+        or input_context.get("correlation_id")
+        or output_state.get("correlation_id")
+        or ""
+    ).strip()
+    if not correlation_id:
+        correlation_id = f"flowchart-run-{int(flowchart_run_id)}"
+    return request_id, correlation_id or None
+
+
 def _serialize_node_artifact_for_flow(node_artifact: NodeArtifact) -> dict[str, Any]:
     payload = _parse_json_object(node_artifact.payload_json)
     return {
@@ -6010,18 +6079,13 @@ def _persist_milestone_node_artifact(
     }:
         expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
 
-    request_id = str(
-        node_config.get("request_id")
-        or input_context.get("request_id")
-        or output_state.get("request_id")
-        or ""
-    ).strip() or None
-    correlation_id = str(
-        node_config.get("correlation_id")
-        or input_context.get("correlation_id")
-        or output_state.get("correlation_id")
-        or ""
-    ).strip() or None
+    request_id, correlation_id = _resolve_node_artifact_request_ids(
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_config=node_config,
+        input_context=input_context,
+        output_state=output_state,
+    )
     milestone_payload = output_state.get("milestone")
     milestone_id = None
     if isinstance(milestone_payload, dict):
@@ -6105,18 +6169,13 @@ def _persist_memory_node_artifact(
     }:
         expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
 
-    request_id = str(
-        node_config.get("request_id")
-        or input_context.get("request_id")
-        or output_state.get("request_id")
-        or ""
-    ).strip() or None
-    correlation_id = str(
-        node_config.get("correlation_id")
-        or input_context.get("correlation_id")
-        or output_state.get("correlation_id")
-        or ""
-    ).strip() or None
+    request_id, correlation_id = _resolve_node_artifact_request_ids(
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_config=node_config,
+        input_context=input_context,
+        output_state=output_state,
+    )
 
     stored_memory = (
         output_state.get("stored_memory")
@@ -6222,18 +6281,13 @@ def _persist_plan_node_artifact(
     }:
         expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
 
-    request_id = str(
-        node_config.get("request_id")
-        or input_context.get("request_id")
-        or output_state.get("request_id")
-        or ""
-    ).strip() or None
-    correlation_id = str(
-        node_config.get("correlation_id")
-        or input_context.get("correlation_id")
-        or output_state.get("correlation_id")
-        or ""
-    ).strip() or None
+    request_id, correlation_id = _resolve_node_artifact_request_ids(
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_config=node_config,
+        input_context=input_context,
+        output_state=output_state,
+    )
 
     node_context = input_context.get("node") if isinstance(input_context.get("node"), dict) else {}
     execution_index = _parse_optional_int(
@@ -6320,18 +6374,13 @@ def _persist_decision_node_artifact(
     }:
         expires_at = _utcnow() + timedelta(seconds=ttl_seconds)
 
-    request_id = str(
-        node_config.get("request_id")
-        or input_context.get("request_id")
-        or output_state.get("request_id")
-        or ""
-    ).strip() or None
-    correlation_id = str(
-        node_config.get("correlation_id")
-        or input_context.get("correlation_id")
-        or output_state.get("correlation_id")
-        or ""
-    ).strip() or None
+    request_id, correlation_id = _resolve_node_artifact_request_ids(
+        flowchart_run_id=flowchart_run_id,
+        flowchart_run_node_id=flowchart_run_node_id,
+        node_config=node_config,
+        input_context=input_context,
+        output_state=output_state,
+    )
 
     node_context = input_context.get("node") if isinstance(input_context.get("node"), dict) else {}
     execution_index = _parse_optional_int(
@@ -9519,6 +9568,8 @@ def _queue_followup_flowchart_run(
 def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     init_engine(Config.SQLALCHEMY_DATABASE_URI)
     init_db()
+    flowchart_run_request_id = f"flowchart-run-{int(run_id)}"
+    flowchart_run_correlation_id = f"flowchart-run-{int(run_id)}"
 
     rag_precheck_failure: tuple[int, str] | None = None
     with session_scope() as session:
@@ -9545,6 +9596,12 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             run.status = "stopped"
             run.finished_at = run.finished_at or _utcnow()
             return
+        if run.status == "pausing":
+            run.status = "paused"
+            run.finished_at = run.finished_at or _utcnow()
+            return
+        if run.status == "paused":
+            return
         flowchart = (
             session.execute(
                 select(Flowchart)
@@ -9569,6 +9626,8 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             run=run,
             flowchart_id=flowchart_id,
             payload={"transition": "started"},
+            request_id=flowchart_run_request_id,
+            correlation_id=flowchart_run_correlation_id,
         )
 
         node_specs: dict[int, dict[str, Any]] = {}
@@ -9645,6 +9704,8 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                         "transition": "failed_precheck",
                         "failure_message": message,
                     },
+                    request_id=flowchart_run_request_id,
+                    correlation_id=flowchart_run_correlation_id,
                 )
                 rag_precheck_failure = (int(rag_node_ids[0]), message)
 
@@ -9711,18 +9772,48 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     final_status = "completed"
     failure_message: str | None = None
     terminate_run = False
+    pause_event_emitted = False
 
     while ready_queue:
         with session_scope() as session:
             run = session.get(FlowchartRun, run_id)
             if run is None:
                 return
-            if run.status == "canceled":
+            run_status = str(run.status or "").strip().lower()
+            if run_status == "running" and pause_event_emitted:
+                _emit_flowchart_run_event(
+                    "flowchart.run.updated",
+                    run=run,
+                    flowchart_id=flowchart_id,
+                    payload={"transition": "resumed"},
+                    request_id=flowchart_run_request_id,
+                    correlation_id=flowchart_run_correlation_id,
+                )
+                pause_event_emitted = False
+            if run_status == "canceled":
                 run.finished_at = run.finished_at or _utcnow()
                 return
-            if run.status == "stopping":
+            if run_status == "stopping":
                 final_status = "stopped"
                 break
+            if run_status == "pausing":
+                run.status = "paused"
+                run.updated_at = _utcnow()
+                run_status = "paused"
+                pause_event_emitted = False
+            if run_status == "paused":
+                if not pause_event_emitted:
+                    _emit_flowchart_run_event(
+                        "flowchart.run.updated",
+                        run=run,
+                        flowchart_id=flowchart_id,
+                        payload={"transition": "paused"},
+                        request_id=flowchart_run_request_id,
+                        correlation_id=flowchart_run_correlation_id,
+                    )
+                    pause_event_emitted = True
+                time.sleep(0.25)
+                continue
 
         if max_runtime_minutes is not None:
             elapsed_minutes = (time.monotonic() - started_monotonic) / 60.0
@@ -9769,17 +9860,24 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             ready_queue.popleft() for _ in range(batch_size)
         ]
         activation_records: list[dict[str, Any]] = []
+        batch_paused = False
 
-        for activation in batch:
+        for batch_index, activation in enumerate(batch):
             with session_scope() as session:
                 run = session.get(FlowchartRun, run_id)
                 if run is None:
                     return
-                if run.status == "canceled":
+                run_status = str(run.status or "").strip().lower()
+                if run_status == "canceled":
                     run.finished_at = run.finished_at or _utcnow()
                     return
-                if run.status == "stopping":
+                if run_status == "stopping":
                     final_status = "stopped"
+                    break
+                if run_status in {"pausing", "paused"}:
+                    for pending_activation in reversed(batch[batch_index:]):
+                        ready_queue.appendleft(pending_activation)
+                    batch_paused = True
                     break
 
             node_id = _parse_optional_int(
@@ -9986,6 +10084,9 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
 
         if final_status in {"failed", "stopped"}:
             break
+        if batch_paused:
+            time.sleep(0.25)
+            continue
         if not activation_records:
             continue
 
@@ -10359,6 +10460,73 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                             finished_at=finished_at,
                             runtime=runtime_payload,
                         )
+                        if (
+                            succeeded_node_run is not None
+                            and bool(succeeded_node_run.degraded_status)
+                        ):
+                            tooling_payload = (
+                                output_state.get("deterministic_tooling")
+                                if isinstance(output_state.get("deterministic_tooling"), dict)
+                                else routing_state.get("deterministic_tooling")
+                                if isinstance(routing_state.get("deterministic_tooling"), dict)
+                                else {}
+                            )
+                            warning_list = (
+                                list(tooling_payload.get("warnings") or [])
+                                if isinstance(tooling_payload, dict)
+                                else []
+                            )
+                            first_warning = warning_list[0] if warning_list else None
+                            warning_message = ""
+                            if isinstance(first_warning, dict):
+                                warning_message = str(first_warning.get("message") or "").strip()
+                            elif first_warning is not None:
+                                warning_message = str(first_warning).strip()
+                            warning_message = (
+                                warning_message
+                                or str(succeeded_node_run.degraded_reason or "").strip()
+                                or "degraded_execution"
+                            )
+                            warning_request_id = str(
+                                (
+                                    tooling_payload.get("request_id")
+                                    if isinstance(tooling_payload, dict)
+                                    else ""
+                                )
+                                or output_state.get("request_id")
+                                or routing_state.get("request_id")
+                                or flowchart_run_request_id
+                            ).strip()
+                            warning_correlation_id = str(
+                                (
+                                    tooling_payload.get("correlation_id")
+                                    if isinstance(tooling_payload, dict)
+                                    else ""
+                                )
+                                or output_state.get("correlation_id")
+                                or routing_state.get("correlation_id")
+                                or flowchart_run_correlation_id
+                            ).strip()
+                            run_for_warning = session.get(FlowchartRun, run_id)
+                            if run_for_warning is not None:
+                                _emit_flowchart_run_event(
+                                    "flowchart.run.updated",
+                                    run=run_for_warning,
+                                    flowchart_id=flowchart_id,
+                                    payload={
+                                        "transition": "warning",
+                                        "flowchart_node_id": node_id,
+                                        "flowchart_node_run_id": succeeded_node_run.id,
+                                        "warning_message": warning_message,
+                                        "warning_count": len(warning_list)
+                                        if warning_list
+                                        else 1,
+                                    },
+                                    runtime=runtime_payload,
+                                    request_id=warning_request_id or flowchart_run_request_id,
+                                    correlation_id=warning_correlation_id
+                                    or flowchart_run_correlation_id,
+                                )
                     if artifact_summary_for_event is not None:
                         _emit_flowchart_node_artifact_event(
                             flowchart_id=flowchart_id,
@@ -10689,4 +10857,6 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                 "transition": "completed",
                 "failure_message": failure_message if final_status == "failed" else None,
             },
+            request_id=flowchart_run_request_id,
+            correlation_id=flowchart_run_correlation_id,
         )

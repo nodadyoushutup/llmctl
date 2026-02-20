@@ -24,7 +24,6 @@ from core.models import (
     FLOWCHART_NODE_TYPE_START,
     FLOWCHART_NODE_TYPE_TASK,
     Flowchart,
-    FlowchartEdge,
     FlowchartNode,
     MCPServer,
 )

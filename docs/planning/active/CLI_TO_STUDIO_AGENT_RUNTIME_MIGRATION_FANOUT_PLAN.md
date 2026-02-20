@@ -10,24 +10,24 @@ Prerequisites:
 
 ## Stage 7 - Fan-Out A: Model/Provider Management API + Backend Contracts
 
-- [ ] Implement provider/model CRUD and validation APIs with stable response contracts and pagination/filtering/sorting support.
-- [ ] Preserve direct `1:1` model-provider binding and provider-specific runtime settings behavior.
-- [ ] Implement compatibility-drift signaling contract and request/correlation ID propagation in API/socket surfaces.
-- [ ] Add backend contract tests for provider/model payloads and error envelopes.
+- [x] Implement provider/model CRUD and validation APIs with stable response contracts and pagination/filtering/sorting support.
+- [x] Preserve direct `1:1` model-provider binding and provider-specific runtime settings behavior.
+- [x] Implement compatibility-drift signaling contract and request/correlation ID propagation in API/socket surfaces.
+- [x] Add backend contract tests for provider/model payloads and error envelopes.
 
 ## Stage 8 - Fan-Out B: Model Management React UX
 
-- [ ] Implement routed list/detail/create model UX (`/models`, `/models/new`, `/models/:id`) with row-click detail navigation.
-- [ ] Enforce list-view interaction rules (row-link behavior, icon-only actions, delete confirm behavior, omitted redundant columns).
-- [ ] Route operation outcomes via shared flash message area (`FlashProvider`/`useFlash`) and keep inline validation field-scoped.
-- [ ] Implement list state restoration (pagination/sort/filter/scroll), debounced search, and loading/error/empty-state patterns.
+- [x] Implement routed list/detail/create model UX (`/models`, `/models/new`, `/models/:id`) with row-click detail navigation.
+- [x] Enforce list-view interaction rules (row-link behavior, icon-only actions, delete confirm behavior, omitted redundant columns).
+- [x] Route operation outcomes via shared flash message area (`FlashProvider`/`useFlash`) and keep inline validation field-scoped.
+- [x] Implement list state restoration (pagination/sort/filter/scroll), debounced search, and loading/error/empty-state patterns.
 
 ## Stage 9 - Fan-Out C: Routing Inspector UX + Validation
 
-- [ ] Implement `Node Inspector > Routing` section with collapsed summary chips and invalid-state chip behavior.
-- [ ] Implement routing controls (`all/any/custom N`, decision fallback connector selector) with real-time derived-state sync.
-- [ ] Implement save-blocking validation UX (inline errors, focus/scroll to first invalid field, flash-level operation feedback).
-- [ ] Implement connector-level fallback badge and run-detail route-count visualization behaviors.
+- [x] Implement `Node Inspector > Routing` section with collapsed summary chips and invalid-state chip behavior.
+- [x] Implement routing controls (`all/any/custom N`, decision fallback connector selector) with real-time derived-state sync.
+- [x] Implement save-blocking validation UX (inline errors, focus/scroll to first invalid field, flash-level operation feedback).
+- [x] Implement connector-level fallback badge and run-detail route-count visualization behaviors.
 
 ## Stage 10 - Fan-Out D: Special Node Tool Domains (Memory/Plan/Milestone/Decision)
 
@@ -45,10 +45,10 @@ Prerequisites:
 
 ## Stage 12 - Fan-Out F: Observability + Run Introspection + Workflow Control
 
-- [ ] Implement run/node/tool/artifact/failure trace query surfaces with strict filters/limits.
-- [ ] Implement workflow control tools (`pause/resume/cancel/retry/skip/rewind`) with idempotent semantics.
-- [ ] Implement warning propagation for degraded fallback usage in node status and run event timeline.
-- [ ] Ensure request/correlation ID tracing is available across API logs, socket events, and persisted artifacts.
+- [x] Implement run/node/tool/artifact/failure trace query surfaces with strict filters/limits.
+- [x] Implement workflow control tools (`pause/resume/cancel/retry/skip/rewind`) with idempotent semantics.
+- [x] Implement warning propagation for degraded fallback usage in node status and run event timeline.
+- [x] Ensure request/correlation ID tracing is available across API logs, socket events, and persisted artifacts.
 
 ## Stage 13 - Fan-Out G: Flow Migration Tooling + Compatibility Gate
 
