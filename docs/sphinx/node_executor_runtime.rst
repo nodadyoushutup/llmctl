@@ -25,8 +25,6 @@ Keys:
 - ``cancel_force_kill_enabled``.
 - ``workspace_identity_key`` (stable logical key, persisted per run as ``workspace_identity``).
 - ``k8s_namespace``.
-- ``k8s_image``.
-- ``k8s_image_tag`` (free-form executor tag override used when spawning job pods).
 - ``k8s_frontier_image`` and ``k8s_frontier_image_tag``.
 - ``k8s_vllm_image`` and ``k8s_vllm_image_tag``.
 - ``k8s_in_cluster``.
@@ -66,6 +64,51 @@ Tool-domain ownership boundary:
 - ``services/runtime_contracts.py`` owns event/payload shape validation and
   socket event-type normalization (``domain:entity:action`` canonical form).
 
+Frontier SDK Tool Loop
+----------------------
+
+Frontier providers execute through the shared Python SDK runtime adapter
+(``services/execution/agent_runtime.py``) with iterative tool calling:
+
+1. provider returns assistant output
+2. SDK tool calls are parsed into normalized calls
+3. deterministic tool domains are dispatched
+4. tool results are appended to the next cycle prompt
+5. loop terminates on final assistant output or max-cycle guard
+
+Provider capability matrix for this slice:
+
+- ``codex``: SDK model output + MCP transport wiring + SDK tool loop
+  (workspace/git/command).
+- ``gemini``: SDK model output + SDK tool loop (no MCP transport wiring).
+- ``claude``: SDK model output + SDK tool loop (no MCP transport wiring).
+
+Unsupported behavior is explicit and fail-fast:
+
+- non-codex providers reject MCP transport configs with deterministic errors
+- unknown tool names/domains return normalized error envelopes and terminate
+  execution
+- max-cycle guard defaults to ``24`` and is hard-capped at ``64``
+
+SDK tool domains are dispatched to deterministic handlers:
+
+- ``deterministic.workspace`` -> ``run_workspace_tool``
+- ``deterministic.git`` -> ``run_git_tool``
+- ``deterministic.command`` -> ``run_command_tool``
+
+Executor-Local Workspace Provisioning
+-------------------------------------
+
+Each Kubernetes executor pod gets isolated ephemeral workspace storage.
+
+- Job manifest mounts an ``emptyDir`` runtime volume at ``/tmp/llmctl/runtime``.
+- Executor payload ``cwd`` is set to a per-request runtime root under that mount.
+- Payload env sets:
+  - ``LLMCTL_STUDIO_WORKSPACES_DIR=<runtime_root>/workspaces``
+  - ``LLMCTL_STUDIO_DATA_DIR=<runtime_root>/data``
+- Task runtime clone/edit/test flows run inside this pod-local workspace root,
+  and SDK tool dispatch resolves workspace roots from the same runtime context.
+
 Execution Contract
 ------------------
 
@@ -89,6 +132,22 @@ Executor result from pod (``v1``):
 
 Kubernetes dispatcher consumes ``output_state``/``routing_state`` from executor
 result and does not execute worker-side node compute on the success path.
+
+SDK Tooling Evidence
+--------------------
+
+Tool-loop evidence is persisted for node/task outputs:
+
+- frontier runtime attaches per-call trace entries to completed results
+  (``_llmctl_tool_trace`` internal payload).
+- task/node outputs may include ``output_state.sdk_tooling`` containing:
+  - provider
+  - workspace root (when available)
+  - request/correlation identifiers
+  - tool call count and per-call operation/tool-domain trace data
+- existing runtime evidence fields remain available in outputs/events:
+  ``provider_dispatch_id``, ``k8s_job_name``, ``k8s_pod_name``,
+  ``k8s_terminal_reason``.
 
 Executor Split Images and Build/Release
 ---------------------------------------

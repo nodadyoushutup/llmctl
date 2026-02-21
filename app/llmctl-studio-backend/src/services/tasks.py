@@ -50,6 +50,13 @@ from services.execution.contracts import (
     ExecutionResult,
 )
 from services.execution.router import ExecutionRouter
+from services.execution.tool_domains import (
+    ToolDomainContext,
+    ToolDomainError,
+    run_command_tool,
+    run_git_tool,
+    run_workspace_tool,
+)
 from services.execution.tooling import (
     DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING,
     ToolInvocationConfig,
@@ -193,6 +200,8 @@ from services.execution.agent_runtime import (
     FrontierAgent,
     FrontierAgentDependencies,
     FrontierAgentRequest,
+    FrontierToolCall,
+    FrontierToolDispatchError,
 )
 from services.instructions.compiler import (
     InstructionCompileInput,
@@ -466,6 +475,55 @@ def _runtime_evidence_payload(
         "k8s_pod_name": k8s_pod_name,
         "k8s_terminal_reason": k8s_terminal_reason,
     }
+
+
+def _sdk_tooling_evidence_payload(
+    *,
+    llm_result: subprocess.CompletedProcess[str] | None,
+    provider: str | None = None,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    if llm_result is None:
+        return {}
+    raw_trace = getattr(llm_result, "_llmctl_tool_trace", None)
+    if not isinstance(raw_trace, list):
+        return {}
+
+    tool_calls: list[dict[str, Any]] = []
+    request_id = ""
+    correlation_id = ""
+    for item in raw_trace:
+        if not isinstance(item, dict):
+            continue
+        tool_call = dict(item)
+        trace_envelope = (
+            tool_call.get("trace_envelope")
+            if isinstance(tool_call.get("trace_envelope"), dict)
+            else {}
+        )
+        if not request_id:
+            request_id = str(trace_envelope.get("request_id") or "").strip()
+        if not correlation_id:
+            correlation_id = str(trace_envelope.get("correlation_id") or "").strip()
+        tool_calls.append(_json_safe(tool_call))
+
+    if not tool_calls:
+        return {}
+
+    payload: dict[str, Any] = {
+        "tool_call_count": len(tool_calls),
+        "tool_calls": tool_calls,
+    }
+    resolved_provider = str(provider or "").strip().lower()
+    if resolved_provider:
+        payload["provider"] = resolved_provider
+    if workspace_root is not None:
+        payload["workspace_root"] = str(workspace_root)
+    if request_id:
+        payload["request_id"] = request_id
+    if correlation_id:
+        payload["correlation_id"] = correlation_id
+    return payload
 
 
 def _resolve_flowchart_request_ids(
@@ -877,6 +935,7 @@ _llm_dispatch_context: ContextVar[dict[str, Any] | None] = ContextVar(
 def _llm_dispatch_scope(
     *,
     request_id: str,
+    correlation_id: str | None = None,
     node_id: int,
     execution_id: int,
     mcp_server_keys: list[str] | None = None,
@@ -884,6 +943,7 @@ def _llm_dispatch_scope(
     token = _llm_dispatch_context.set(
         {
         "request_id": str(request_id or "").strip() or uuid.uuid4().hex,
+        "correlation_id": str(correlation_id or "").strip() or None,
         "node_id": max(1, int(node_id)),
         "execution_id": max(1, int(execution_id)),
         "mcp_server_keys": [
@@ -4138,6 +4198,131 @@ def _is_upstream_500(stdout: str, stderr: str) -> bool:
     return any(marker in haystack for marker in markers)
 
 
+def _resolve_frontier_tool_workspace_root(
+    *,
+    workspace_root: str | Path | None,
+    env: dict[str, str] | None,
+) -> Path | None:
+    if workspace_root is not None:
+        text = str(workspace_root).strip()
+        if text:
+            return Path(text).expanduser().resolve()
+    env_map = env if isinstance(env, dict) else {}
+    for key in ("WORKSPACE_PATH", "LLMCTL_STUDIO_WORKSPACE"):
+        value = str(env_map.get(key) or "").strip()
+        if value:
+            return Path(value).expanduser().resolve()
+    return None
+
+
+def _dispatch_frontier_tool_call(
+    *,
+    tool_call: FrontierToolCall,
+    workspace_root: Path | None,
+    request_id: str | None,
+    correlation_id: str | None,
+    execution_id: int | None,
+) -> dict[str, Any]:
+    tool_name = str(tool_call.tool_name or "").strip().lower()
+    domain = ""
+    if tool_name == "deterministic.workspace":
+        domain = "workspace"
+    elif tool_name == "deterministic.git":
+        domain = "git"
+    elif tool_name == "deterministic.command":
+        domain = "command"
+    else:
+        raise FrontierToolDispatchError(
+            code="unsupported_tool_name",
+            message=f"Unsupported SDK tool '{tool_call.tool_name}'.",
+            details={
+                "call_id": tool_call.call_id,
+                "tool_name": tool_call.tool_name,
+            },
+            retryable=False,
+        )
+
+    if workspace_root is None:
+        raise FrontierToolDispatchError(
+            code="workspace_root_missing",
+            message="SDK tool dispatch requires a workspace root.",
+            details={
+                "call_id": tool_call.call_id,
+                "tool_name": tool_call.tool_name,
+                "tool_domain": domain,
+            },
+            retryable=False,
+        )
+
+    args = dict(tool_call.arguments or {})
+    operation = str(args.pop("operation", "") or "").strip().lower()
+    if not operation:
+        raise FrontierToolDispatchError(
+            code="tool_operation_missing",
+            message=f"Tool call '{tool_call.tool_name}' must include operation.",
+            details={
+                "call_id": tool_call.call_id,
+                "tool_name": tool_call.tool_name,
+                "tool_domain": domain,
+            },
+            retryable=False,
+        )
+
+    context = ToolDomainContext(
+        workspace_root=workspace_root,
+        execution_id=execution_id,
+        request_id=request_id,
+        correlation_id=correlation_id,
+    )
+    try:
+        if domain == "workspace":
+            outcome = run_workspace_tool(context=context, operation=operation, args=args)
+        elif domain == "git":
+            outcome = run_git_tool(context=context, operation=operation, args=args)
+        else:
+            outcome = run_command_tool(context=context, operation=operation, args=args)
+    except ToolDomainError as exc:
+        raise FrontierToolDispatchError(
+            code="tool_domain_error",
+            message=str(exc),
+            details={
+                "call_id": tool_call.call_id,
+                "tool_name": tool_call.tool_name,
+                "tool_domain": domain,
+                "operation": operation,
+            },
+            retryable=False,
+        ) from exc
+    except Exception as exc:
+        raise FrontierToolDispatchError(
+            code="tool_dispatch_internal_error",
+            message=f"Tool dispatch failed for {tool_call.tool_name}: {exc}",
+            details={
+                "call_id": tool_call.call_id,
+                "tool_name": tool_call.tool_name,
+                "tool_domain": domain,
+                "operation": operation,
+            },
+            retryable=False,
+        ) from exc
+
+    return {
+        "call_id": tool_call.call_id,
+        "tool_name": tool_call.tool_name,
+        "output": {
+            "tool_domain": domain,
+            "operation": operation,
+            "output_state": outcome.output_state,
+            "routing_state": outcome.routing_state,
+            "trace_envelope": outcome.trace_envelope,
+            "execution_status": outcome.execution_status,
+            "fallback_used": outcome.fallback_used,
+            "warnings": outcome.warnings,
+        },
+        "is_error": False,
+    }
+
+
 def _run_frontier_llm_sdk(
     *,
     provider: str,
@@ -4146,8 +4331,26 @@ def _run_frontier_llm_sdk(
     model_config: dict[str, Any] | None = None,
     on_update: Callable[[str, str], None] | None = None,
     on_log: Callable[[str], None] | None = None,
+    workspace_root: str | Path | None = None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    execution_id: int | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    resolved_workspace_root = _resolve_frontier_tool_workspace_root(
+        workspace_root=workspace_root,
+        env=env,
+    )
+
+    def _dispatch_tool_call(tool_call: FrontierToolCall) -> dict[str, Any]:
+        return _dispatch_frontier_tool_call(
+            tool_call=tool_call,
+            workspace_root=resolved_workspace_root,
+            request_id=request_id,
+            correlation_id=correlation_id,
+            execution_id=execution_id,
+        )
+
     runtime = FrontierAgent(
         FrontierAgentDependencies(
             provider_label=_provider_label,
@@ -4160,6 +4363,7 @@ def _run_frontier_llm_sdk(
             default_gemini_model=Config.GEMINI_MODEL or "gemini-2.5-flash",
             default_claude_model=Config.CLAUDE_MODEL or "claude-sonnet-4-0",
             require_claude_api_key=bool(Config.CLAUDE_AUTH_REQUIRE_API_KEY),
+            dispatch_tool_call=_dispatch_tool_call,
         )
     )
     return runtime.run(
@@ -4169,6 +4373,8 @@ def _run_frontier_llm_sdk(
             mcp_configs=mcp_configs,
             model_config=model_config,
             env=env,
+            request_id=request_id,
+            correlation_id=correlation_id,
         ),
         on_update=on_update,
         on_log=on_log,
@@ -4233,6 +4439,15 @@ def _run_llm(
     dispatch_via_router: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     provider = str(provider or "").strip().lower()
+    dispatch_context = _llm_dispatch_context.get() or {}
+    dispatch_request_id = str(dispatch_context.get("request_id") or "").strip() or None
+    dispatch_correlation_id = (
+        str(dispatch_context.get("correlation_id") or "").strip() or None
+    )
+    raw_execution_id = dispatch_context.get("execution_id")
+    dispatch_execution_id: int | None = None
+    if raw_execution_id is not None:
+        dispatch_execution_id = _safe_int(raw_execution_id, 1)
     if model_config is None and provider == "codex":
         model_config = _load_legacy_codex_model_config()
     if provider in FRONTIER_LLM_PROVIDERS:
@@ -4252,6 +4467,10 @@ def _run_llm(
             model_config=model_config,
             on_update=on_update,
             on_log=on_log,
+            workspace_root=cwd,
+            request_id=dispatch_request_id,
+            correlation_id=dispatch_correlation_id,
+            execution_id=dispatch_execution_id,
             env=env,
         )
     provider_label = _provider_label(provider)
@@ -5640,6 +5859,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             dispatch_execution_id = max(1, int(task_id))
             with _llm_dispatch_scope(
                 request_id=dispatch_request_id,
+                correlation_id=dispatch_request_id,
                 node_id=dispatch_node_id,
                 execution_id=dispatch_execution_id,
                 mcp_server_keys=sorted(mcp_configs),
@@ -6049,26 +6269,40 @@ def _infer_memory_node_prompt(
     action: str,
     input_context: dict[str, Any],
 ) -> str:
+    combined: list[str] = []
+    seen: set[str] = set()
+
+    def _append_output_state(value: Any) -> None:
+        text = _memory_context_value_to_text(value)
+        normalized = str(text or "").strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        combined.append(normalized)
+
     latest_upstream = (
         input_context.get("latest_upstream")
         if isinstance(input_context.get("latest_upstream"), dict)
         else {}
     )
-    latest_output_text = _memory_context_value_to_text(latest_upstream.get("output_state"))
-    if latest_output_text:
-        return latest_output_text[:4000]
+    _append_output_state(latest_upstream.get("output_state"))
 
     upstream_nodes = input_context.get("upstream_nodes")
     if isinstance(upstream_nodes, list):
-        combined: list[str] = []
         for item in upstream_nodes:
             if not isinstance(item, dict):
                 continue
-            text = _memory_context_value_to_text(item.get("output_state"))
-            if text:
-                combined.append(text)
-        if combined:
-            return "\n\n".join(combined)[:4000]
+            _append_output_state(item.get("output_state"))
+
+    dotted_upstream_nodes = input_context.get("dotted_upstream_nodes")
+    if isinstance(dotted_upstream_nodes, list):
+        for item in dotted_upstream_nodes:
+            if not isinstance(item, dict):
+                continue
+            _append_output_state(item.get("output_state"))
+
+    if combined:
+        return "\n\n".join(combined)[:4000]
 
     if action == MEMORY_NODE_ACTION_RETRIEVE:
         return ""
@@ -8173,6 +8407,7 @@ def _execute_optional_llm_transform(
         dispatch_request_id = f"flowchart-transform-model-{int(model.id)}"
         with _llm_dispatch_scope(
             request_id=dispatch_request_id,
+            correlation_id=dispatch_request_id,
             node_id=max(1, int(model.id)),
             execution_id=max(1, int(model.id)),
             mcp_server_keys=sorted(mcp_configs),
@@ -8837,7 +9072,7 @@ def _execute_flowchart_task_node(
 
         _set_stage("llm_query")
         _append_script_log(f"Launching {_provider_label(provider)}...")
-        request_id, _ = _resolve_flowchart_request_ids(
+        request_id, correlation_id = _resolve_flowchart_request_ids(
             node_config=node_config,
             input_context=input_context,
         )
@@ -8862,6 +9097,7 @@ def _execute_flowchart_task_node(
             last_llm_error = ""
             with _llm_dispatch_scope(
                 request_id=dispatch_request_id,
+                correlation_id=correlation_id or dispatch_request_id,
                 node_id=max(1, int(node_id)),
                 execution_id=max(1, int(execution_id)),
                 mcp_server_keys=sorted(mcp_configs),
@@ -8941,6 +9177,11 @@ def _execute_flowchart_task_node(
     if structured_output is None:
         structured_output = _parse_structured_output(llm_result.stdout)
     route_key = _extract_path_value(structured_output, "route_key")
+    sdk_tooling = _sdk_tooling_evidence_payload(
+        llm_result=llm_result,
+        provider=provider,
+        workspace_root=workspace,
+    )
 
     stage_logs = _serialize_stage_logs()
     output_state = {
@@ -8982,6 +9223,8 @@ def _execute_flowchart_task_node(
         "task_current_stage": current_stage,
         "task_stage_logs": stage_logs,
     }
+    if sdk_tooling:
+        output_state["sdk_tooling"] = sdk_tooling
     routing_state: dict[str, Any] = {}
     if route_key is not None and str(route_key).strip():
         routing_state["route_key"] = str(route_key).strip()
@@ -9838,6 +10081,8 @@ def _execute_flowchart_memory_node_llm_guided_add(
     default_model_id: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     _validate_memory_node_mcp_server_keys(mcp_server_keys)
+    has_configured_store_mode = "store_mode" in node_config
+    configured_store_mode = _normalize_memory_store_mode(node_config.get("store_mode"))
     additive_prompt = str(node_config.get("additive_prompt") or "").strip()
     inferred_prompt = ""
     if not additive_prompt:
@@ -9845,6 +10090,44 @@ def _execute_flowchart_memory_node_llm_guided_add(
             action=MEMORY_NODE_ACTION_ADD,
             input_context=input_context,
         )
+    if inferred_prompt:
+        resolved_node_config = dict(node_config)
+        resolved_node_config["action"] = MEMORY_NODE_ACTION_ADD
+        resolved_node_config["text"] = inferred_prompt
+        resolved_node_config["store_mode"] = (
+            configured_store_mode
+            if has_configured_store_mode
+            else MEMORY_NODE_STORE_MODE_REPLACE
+        )
+        output_state, routing_state = _execute_flowchart_memory_node_deterministic(
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=resolved_node_config,
+            input_context=input_context,
+            mcp_server_keys=mcp_server_keys,
+        )
+        action_results = (
+            output_state.get("action_results")
+            if isinstance(output_state.get("action_results"), list)
+            else []
+        )
+        action_results.append(
+            "LLM-guided add used connector context directly and persisted via deterministic memory writer."
+        )
+        output_state["action_results"] = action_results
+        output_state["llm_guided_add"] = {
+            "provider": None,
+            "model_id": None,
+            "model_name": None,
+            "inference_payload": {
+                "text": inferred_prompt,
+                "store_mode": _normalize_memory_store_mode(
+                    resolved_node_config.get("store_mode")
+                ),
+            },
+            "raw_output": "(skipped llm inference; used connector context)",
+        }
+        return output_state, routing_state
     effective_prompt = additive_prompt or inferred_prompt
     action_prompt_template, _internal_action_prompt = _build_memory_internal_action_prompt(
         action=MEMORY_NODE_ACTION_ADD,
@@ -9864,7 +10147,7 @@ def _execute_flowchart_memory_node_llm_guided_add(
     )
     payload = _build_task_payload("flowchart", inference_prompt)
     payload = _inject_runtime_metadata(payload, _build_runtime_payload(provider, model_config))
-    request_id, _ = _resolve_flowchart_request_ids(
+    request_id, correlation_id = _resolve_flowchart_request_ids(
         node_config=node_config,
         input_context=input_context,
     )
@@ -9874,6 +10157,7 @@ def _execute_flowchart_memory_node_llm_guided_add(
     )
     with _llm_dispatch_scope(
         request_id=dispatch_request_id,
+        correlation_id=correlation_id or dispatch_request_id,
         node_id=max(1, int(node_id)),
         execution_id=max(1, int(execution_id or node_id)),
         mcp_server_keys=sorted(mcp_configs),
@@ -9895,7 +10179,12 @@ def _execute_flowchart_memory_node_llm_guided_add(
     resolved_node_config = dict(node_config)
     resolved_node_config["action"] = MEMORY_NODE_ACTION_ADD
     resolved_node_config["text"] = normalized_add_payload["text"]
-    resolved_node_config["store_mode"] = normalized_add_payload["store_mode"]
+    resolved_store_mode = (
+        configured_store_mode
+        if has_configured_store_mode
+        else normalized_add_payload["store_mode"]
+    )
+    resolved_node_config["store_mode"] = resolved_store_mode
     output_state, routing_state = _execute_flowchart_memory_node_deterministic(
         node_id=node_id,
         node_ref_id=node_ref_id,
@@ -9916,7 +10205,10 @@ def _execute_flowchart_memory_node_llm_guided_add(
         "provider": model_metadata.get("provider"),
         "model_id": model_metadata.get("model_id"),
         "model_name": model_metadata.get("model_name"),
-        "inference_payload": normalized_add_payload,
+        "inference_payload": {
+            **normalized_add_payload,
+            "store_mode": resolved_store_mode,
+        },
         "raw_output": _schema_repair_output_excerpt(llm_result.stdout, limit=2000),
     }
     return output_state, routing_state
@@ -9965,7 +10257,7 @@ def _execute_flowchart_memory_node_llm_guided_retrieve(
     )
     payload = _build_task_payload("flowchart", inference_prompt)
     payload = _inject_runtime_metadata(payload, _build_runtime_payload(provider, model_config))
-    request_id, _ = _resolve_flowchart_request_ids(
+    request_id, correlation_id = _resolve_flowchart_request_ids(
         node_config=node_config,
         input_context=input_context,
     )
@@ -9975,6 +10267,7 @@ def _execute_flowchart_memory_node_llm_guided_retrieve(
     )
     with _llm_dispatch_scope(
         request_id=dispatch_request_id,
+        correlation_id=correlation_id or dispatch_request_id,
         node_id=max(1, int(node_id)),
         execution_id=max(1, int(execution_id or node_id)),
         mcp_server_keys=sorted(mcp_configs),
@@ -10604,14 +10897,21 @@ def _execute_executor_llm_call_node(
         on_log=None,
         dispatch_via_router=False,
     )
+    sdk_tooling = _sdk_tooling_evidence_payload(
+        llm_result=llm_result,
+        provider=provider,
+    )
+    output_state = {
+        "node_type": EXECUTOR_NODE_TYPE_LLM_CALL,
+        "provider": provider,
+        "returncode": int(llm_result.returncode),
+        "stdout": str(llm_result.stdout or ""),
+        "stderr": str(llm_result.stderr or ""),
+    }
+    if sdk_tooling:
+        output_state["sdk_tooling"] = sdk_tooling
     return (
-        {
-            "node_type": EXECUTOR_NODE_TYPE_LLM_CALL,
-            "provider": provider,
-            "returncode": int(llm_result.returncode),
-            "stdout": str(llm_result.stdout or ""),
-            "stderr": str(llm_result.stderr or ""),
-        },
+        output_state,
         {},
     )
 

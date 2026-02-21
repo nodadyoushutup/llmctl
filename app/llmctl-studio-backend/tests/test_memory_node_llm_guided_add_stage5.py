@@ -90,6 +90,96 @@ class MemoryNodeLlmGuidedAddStage5Tests(unittest.TestCase):
         self.assertEqual("replace", inference_payload.get("store_mode"))
         self.assertEqual(0.72, inference_payload.get("confidence"))
 
+    def test_llm_guided_add_without_additive_prompt_uses_connector_context_directly(self) -> None:
+        deterministic_output = {
+            "node_type": "memory",
+            "action": "add",
+            "action_results": ["Created memory 10 via llmctl-mcp."],
+        }
+        with patch.object(
+            studio_tasks,
+            "_run_llm",
+        ) as run_llm_mock, patch.object(
+            studio_tasks,
+            "_execute_flowchart_memory_node_deterministic",
+            return_value=(deterministic_output, {}),
+        ) as deterministic_mock:
+            output_state, routing_state = studio_tasks._execute_flowchart_memory_node_llm_guided_add(
+                node_id=9,
+                node_ref_id=10,
+                node_config={"action": "add"},
+                input_context={
+                    "latest_upstream": {"output_state": {"message": "Liam"}},
+                    "upstream_nodes": [{"output_state": {"message": "Liam"}}],
+                    "dotted_upstream_nodes": [{"output_state": {"message": "Noah"}}],
+                },
+                mcp_server_keys=["llmctl-mcp"],
+                execution_id=33,
+                enabled_providers={"codex"},
+                default_model_id=4,
+            )
+
+        run_llm_mock.assert_not_called()
+        deterministic_config = deterministic_mock.call_args.kwargs["node_config"]
+        self.assertEqual("Liam\n\nNoah", deterministic_config.get("text"))
+        self.assertEqual({}, routing_state)
+        self.assertTrue(
+            any(
+                "used connector context directly" in str(item)
+                for item in (output_state.get("action_results") or [])
+            )
+        )
+        llm_guided_payload = output_state.get("llm_guided_add") or {}
+        self.assertIsNone(llm_guided_payload.get("provider"))
+        inference_payload = llm_guided_payload.get("inference_payload") or {}
+        self.assertEqual("Liam\n\nNoah", inference_payload.get("text"))
+        self.assertEqual("replace", inference_payload.get("store_mode"))
+
+    def test_infer_memory_node_prompt_includes_dotted_upstream_context(self) -> None:
+        inferred = studio_tasks._infer_memory_node_prompt(
+            action=studio_tasks.MEMORY_NODE_ACTION_ADD,
+            input_context={
+                "upstream_nodes": [
+                    {"output_state": {"message": "Arthur"}},
+                ],
+                "dotted_upstream_nodes": [
+                    {"output_state": {"message": "Bennett"}},
+                ],
+            },
+        )
+        self.assertEqual("Arthur\n\nBennett", inferred)
+
+    def test_llm_guided_add_short_circuit_respects_configured_store_mode(self) -> None:
+        with patch.object(
+            studio_tasks,
+            "_run_llm",
+        ) as run_llm_mock, patch.object(
+            studio_tasks,
+            "_execute_flowchart_memory_node_deterministic",
+            return_value=(
+                {"node_type": "memory", "action": "add", "action_results": []},
+                {},
+            ),
+        ) as deterministic_mock:
+            output_state, _ = studio_tasks._execute_flowchart_memory_node_llm_guided_add(
+                node_id=9,
+                node_ref_id=10,
+                node_config={"action": "add", "store_mode": "append"},
+                input_context={
+                    "latest_upstream": {"output_state": {"message": "Liam"}},
+                },
+                mcp_server_keys=["llmctl-mcp"],
+                execution_id=33,
+                enabled_providers={"codex"},
+                default_model_id=4,
+            )
+
+        run_llm_mock.assert_not_called()
+        deterministic_config = deterministic_mock.call_args.kwargs["node_config"]
+        self.assertEqual("append", deterministic_config.get("store_mode"))
+        inference_payload = (output_state.get("llm_guided_add") or {}).get("inference_payload") or {}
+        self.assertEqual("append", inference_payload.get("store_mode"))
+
     def test_llm_guided_add_raises_on_llm_runtime_failure(self) -> None:
         with patch.object(
             studio_tasks,

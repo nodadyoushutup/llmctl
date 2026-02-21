@@ -1,14 +1,44 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
-import { cancelNode, deleteNode, getNode, getNodeStatus, removeNodeAttachment, retryNode } from '../lib/studioApi'
+import { cancelNode, deleteNode, getNode, getNodeStatus, retryNode } from '../lib/studioApi'
+import {
+  buildNodeLeftPanelSections,
+  connectorOutputRows,
+  inputConnectorSummaryRows,
+  NODE_LEFT_DEFAULT_SECTION_KEY,
+  nodeHistoryHref,
+  stageLogEmptyMessage,
+} from './NodeDetailPage.helpers'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function asRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+  return value
+}
+
+function asRecordList(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+}
+
+function formatPrettyJson(value) {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return '{}'
+  }
 }
 
 function errorMessage(error, fallback) {
@@ -67,10 +97,102 @@ function canCancel(status) {
     || normalized === 'executing'
 }
 
-function scriptTypeLabel(value) {
-  return String(value || '')
-    .replaceAll('_', ' ')
-    .trim() || '-'
+function asStringList(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map((item) => String(item || '').trim())
+    .filter((item) => item.length > 0)
+}
+
+function titleCaseLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) {
+    return '-'
+  }
+  if (normalized === 'context_only') {
+    return 'context only'
+  }
+  return normalized.replaceAll('_', ' ')
+}
+
+function renderMetadataCellValue(value) {
+  if (isValidElement(value)) {
+    return value
+  }
+  if (value == null || value === '') {
+    return '-'
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join('\n') : '-'
+  }
+  if (typeof value === 'object') {
+    return <pre className="node-context-code-block">{formatPrettyJson(value)}</pre>
+  }
+  return String(value)
+}
+
+function MetadataRowsTable({ rows }) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null
+  }
+  return (
+    <div className="node-output-summary-table-wrap">
+      <table className="node-output-summary-table">
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.label || 'row'}-${index + 1}`}>
+              <th scope="row">{row.label}</th>
+              <td>{renderMetadataCellValue(row.value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function sectionHasContent(section) {
+  if (!section || typeof section !== 'object') {
+    return false
+  }
+  const value = section.value && typeof section.value === 'object' && !Array.isArray(section.value)
+    ? section.value
+    : {}
+  switch (section.key) {
+    case 'input':
+      {
+        const triggerCount = Number.parseInt(String(value.trigger_source_count || ''), 10)
+        const contextOnlyCount = Number.parseInt(String(value.context_only_source_count || ''), 10)
+        const source = String(value.source || '').trim().toLowerCase()
+        return asRecordList(value.connector_blocks).length > 0
+          || Object.keys(asRecord(value.resolved_input_context)).length > 0
+          || (Number.isInteger(triggerCount) && triggerCount > 0)
+          || (Number.isInteger(contextOnlyCount) && contextOnlyCount > 0)
+          || (source.length > 0 && source !== 'none')
+      }
+    case 'results':
+      return String(value.primary_text || '').trim().length > 0
+        || asRecordList(value.summary_rows).length > 0
+        || asStringList(value.action_results).length > 0
+    case 'prompt':
+      return String(value.provided_prompt_text || '').trim().length > 0
+        || Object.keys(asRecord(value.provided_prompt_fields)).length > 0
+        || Boolean(value.no_inferred_prompt_in_deterministic_mode)
+    case 'agent':
+      return String(value.name || '').trim().length > 0 || Number.isInteger(value.id)
+    case 'mcp_servers':
+      return asRecordList(value.items).length > 0
+    case 'collections':
+      return asRecordList(value.items).length > 0
+    case 'raw_json':
+      return String(value.formatted_output || '').trim().length > 0
+    case 'details':
+      return asRecordList(value.rows).length > 0
+    default:
+      return false
+  }
 }
 
 function stageEntryKey(stage, index) {
@@ -95,22 +217,6 @@ function stageEntryLabel(stage, index) {
     return key
   }
   return `Stage ${index + 1}`
-}
-
-export function nodeHistoryHref(task) {
-  const flowchartNodeId = Number.parseInt(String(task?.flowchart_node_id || ''), 10)
-  if (Number.isInteger(flowchartNodeId) && flowchartNodeId > 0) {
-    return `/nodes?flowchart_node_id=${flowchartNodeId}`
-  }
-  return '/nodes'
-}
-
-export function stageLogEmptyMessage(stage, index) {
-  const label = stageEntryLabel(stage, index).trim().toLowerCase()
-  if (label === 'rag indexing' || label === 'rag delta indexing') {
-    return 'Waiting for indexing logs...'
-  }
-  return 'No logs yet.'
 }
 
 function isStageRunning(stage) {
@@ -140,9 +246,8 @@ export default function NodeDetailPage() {
   const flash = useFlash()
   const [actionError, setActionError] = useFlashState('error')
   const [busy, setBusy] = useState(false)
-  const [busyAttachmentId, setBusyAttachmentId] = useState(null)
   const [expandedStageKey, setExpandedStageKey] = useState('')
-  const [expandedLeftSectionKey, setExpandedLeftSectionKey] = useState('output')
+  const [expandedLeftSectionKey, setExpandedLeftSectionKey] = useState(NODE_LEFT_DEFAULT_SECTION_KEY)
   const [leftPanelExpanded, setLeftPanelExpanded] = useState(false)
   const stageLogRefs = useRef(new Map())
   const stageLogPinnedBottomRef = useRef(new Map())
@@ -214,7 +319,6 @@ export default function NodeDetailPage() {
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const task = payload && payload.task && typeof payload.task === 'object' ? payload.task : null
-  const agent = payload && payload.agent && typeof payload.agent === 'object' ? payload.agent : null
   const stageEntries = useMemo(
     () => (payload && Array.isArray(payload.stage_entries) ? payload.stage_entries : []),
     [payload],
@@ -228,58 +332,14 @@ export default function NodeDetailPage() {
   }, [expandedStageKey, stageEntries])
   const expandedStageLogs = String(expandedStage?.logs || '')
   const expandedStageRunning = isStageRunning(expandedStage)
-  const scripts = payload && Array.isArray(payload.scripts) ? payload.scripts : []
-  const attachments = payload && Array.isArray(payload.attachments) ? payload.attachments : []
-  const mcpServers = payload && Array.isArray(payload.mcp_servers) ? payload.mcp_servers : []
-  const selectedIntegrationLabels = payload && Array.isArray(payload.selected_integration_labels)
-    ? payload.selected_integration_labels
-    : []
-  const isQuickTask = Boolean(payload?.is_quick_task)
+  const leftSectionEntries = useMemo(
+    () => buildNodeLeftPanelSections(payload?.left_panel),
+    [payload?.left_panel],
+  )
   const active = canCancel(task?.status)
   const status = nodeStatusMeta(task?.status)
   const hasLeftHeaderMessage = state.loading || Boolean(state.error) || Boolean(actionError)
   const nodeHistoryLink = nodeHistoryHref(task)
-  const detailItems = useMemo(() => {
-    if (!task) {
-      return []
-    }
-    return [
-      { label: 'Kind', value: task.kind || '-' },
-      {
-        label: 'Agent',
-        value: agent ? <Link to={`/agents/${agent.id}`}>{agent.name}</Link> : (task.agent_id || '-'),
-      },
-      {
-        label: 'Flowchart',
-        value: task.flowchart_id
-          ? <Link to={`/flowcharts/${task.flowchart_id}`}>{task.flowchart_id}</Link>
-          : '-',
-      },
-      {
-        label: 'Flowchart run',
-        value: task.flowchart_run_id && task.flowchart_id
-          ? <Link to={`/flowcharts/${task.flowchart_id}/history/${task.flowchart_run_id}`}>{task.flowchart_run_id}</Link>
-          : (task.flowchart_run_id || '-'),
-      },
-      { label: 'Flowchart node', value: task.flowchart_node_id || '-' },
-      { label: 'Model', value: task.model_id || '-' },
-      { label: 'Autorun node', value: task.run_task_id || '-' },
-      { label: 'Celery task', value: task.celery_task_id || '-' },
-      { label: 'Current stage', value: task.current_stage || '-' },
-      { label: 'Created', value: task.created_at || '-' },
-      { label: 'Started', value: task.started_at || '-' },
-      { label: 'Finished', value: task.finished_at || '-' },
-    ]
-  }, [agent, task])
-  const leftSectionEntries = useMemo(
-    () => [
-      { key: 'output', label: 'Output' },
-      { key: 'prompt', label: 'Prompt' },
-      { key: 'details', label: 'Details' },
-      { key: 'context', label: 'Context' },
-    ],
-    [],
-  )
 
   useEffect(() => {
     if (!stageEntries.length) {
@@ -312,6 +372,12 @@ export default function NodeDetailPage() {
       return keyedEntries[0]?.key || ''
     })
   }, [stageEntries, task?.current_stage])
+
+  useEffect(() => {
+    if (!leftSectionEntries.some((section) => section.key === expandedLeftSectionKey)) {
+      setExpandedLeftSectionKey(NODE_LEFT_DEFAULT_SECTION_KEY)
+    }
+  }, [expandedLeftSectionKey, leftSectionEntries])
 
   const registerStageLogRef = useCallback((stageKey, node) => {
     if (!stageKey) {
@@ -445,22 +511,6 @@ export default function NodeDetailPage() {
     }
   }
 
-  async function handleAttachmentRemove(attachmentId) {
-    if (!task || !window.confirm('Remove this attachment?')) {
-      return
-    }
-    setActionError('')
-    setBusyAttachmentId(attachmentId)
-    try {
-      await removeNodeAttachment(task.id, attachmentId)
-      await refreshDetail({ silent: true })
-    } catch (error) {
-      setActionError(errorMessage(error, 'Failed to remove attachment.'))
-    } finally {
-      setBusyAttachmentId(null)
-    }
-  }
-
   return (
     <section className="node-detail-fixed-page" aria-label="Node detail">
       <div className={`node-detail-fixed-layout${leftPanelExpanded ? ' is-left-expanded' : ''}`}>
@@ -530,6 +580,9 @@ export default function NodeDetailPage() {
                 {leftSectionEntries.map((section) => {
                   const isExpanded = expandedLeftSectionKey === section.key
                   const contentId = `node-left-content-${section.key}`
+                  const sectionValue = asRecord(section.value)
+                  const sectionEmpty = section.emptyMessage || 'No data.'
+                  const hasContent = sectionHasContent(section)
                   return (
                     <section
                       key={section.key}
@@ -540,7 +593,7 @@ export default function NodeDetailPage() {
                         className="node-left-toggle"
                         aria-expanded={isExpanded}
                         aria-controls={contentId}
-                        onClick={() => setExpandedLeftSectionKey((current) => (current === section.key ? '' : section.key))}
+                        onClick={() => setExpandedLeftSectionKey(section.key)}
                       >
                         <span className="node-left-toggle-main">{section.label}</span>
                         <span className="node-left-toggle-meta">
@@ -550,84 +603,171 @@ export default function NodeDetailPage() {
                       </button>
                       {isExpanded ? (
                         <div className="node-left-content" id={contentId}>
-                          {section.key === 'prompt'
-                            ? (payload?.prompt_text ? <pre className="node-left-code-block">{payload.prompt_text}</pre> : <p className="toolbar-meta node-left-empty">No prompt recorded.</p>)
-                            : null}
-                          {section.key === 'output'
-                            ? (task?.output ? <pre className="node-left-code-block">{task.output}</pre> : <p className="toolbar-meta node-left-empty">No output yet.</p>)
-                            : null}
-                          {section.key === 'details'
-                            ? (
-                              task ? (
-                                <div className="node-left-scroll-panel">
-                                  <dl className="node-details-list">
-                                    {detailItems.map((item) => (
-                                      <div key={item.label} className="node-details-item">
-                                        <dt>{item.label}</dt>
-                                        <dd>{item.value}</dd>
-                                      </div>
-                                    ))}
-                                  </dl>
+                          {section.key === 'input' ? (
+                            <div className="node-left-scroll-panel stack-sm">
+                              <MetadataRowsTable rows={inputConnectorSummaryRows(sectionValue)} />
+                              {asRecordList(sectionValue.connector_blocks).length > 0 ? (
+                                <div className="stack-sm">
+                                  {asRecordList(sectionValue.connector_blocks).map((block, index) => {
+                                    const blockOutput = block.output_state
+                                    const outputRows = connectorOutputRows(blockOutput)
+                                    return (
+                                      <details key={String(block.id || `connector-${index + 1}`)} className="node-input-connector-block">
+                                        <summary className="node-input-connector-summary">
+                                          {String(block.label || `Connector ${index + 1}`)}
+                                        </summary>
+                                        <div className="node-input-connector-content stack-sm">
+                                          <MetadataRowsTable
+                                            rows={[
+                                              { label: 'Type', value: titleCaseLabel(block.classification) },
+                                              { label: 'Source node id', value: block.source_node_id ?? '-' },
+                                              { label: 'Source node type', value: String(block.source_node_type || '-') },
+                                              { label: 'Connector key', value: String(block.condition_key || '-') },
+                                              { label: 'Edge mode', value: String(block.edge_mode || '-') },
+                                            ]}
+                                          />
+                                          {outputRows.length > 0 ? (
+                                            <>
+                                              <p className="toolbar-meta">Connector output state</p>
+                                              <MetadataRowsTable
+                                                rows={outputRows.map((row) => ({
+                                                  label: row.label,
+                                                  value: row.value,
+                                                }))}
+                                              />
+                                            </>
+                                          ) : null}
+                                          <p className="toolbar-meta">Connector output raw JSON</p>
+                                          <pre className="node-context-code-block">{formatPrettyJson(blockOutput)}</pre>
+                                        </div>
+                                      </details>
+                                    )
+                                  })}
                                 </div>
-                              ) : (
-                                <p className="toolbar-meta node-left-empty">No details yet.</p>
-                              )
-                            )
-                            : null}
-                          {section.key === 'context'
-                            ? (
-                              <div className="node-left-scroll-panel stack-sm">
-                                <p>
-                                  Integrations:{' '}
-                                  {selectedIntegrationLabels.length > 0
-                                    ? selectedIntegrationLabels.join(', ')
-                                    : '-'}
-                                </p>
-                                <p>
-                                  MCP servers:{' '}
-                                  {mcpServers.length > 0
-                                    ? mcpServers.map((server) => server.name).join(', ')
-                                    : '-'}
-                                </p>
-                                <p>Scripts:</p>
-                                {scripts.length > 0 ? (
+                              ) : null}
+                              {Object.keys(asRecord(sectionValue.resolved_input_context)).length > 0 ? (
+                                <>
+                                  <p className="toolbar-meta">Resolved input context</p>
+                                  <pre className="node-context-code-block">{formatPrettyJson(sectionValue.resolved_input_context)}</pre>
+                                </>
+                              ) : null}
+                              {!hasContent ? <p className="toolbar-meta node-left-empty">{sectionEmpty}</p> : null}
+                            </div>
+                          ) : null}
+
+                          {section.key === 'results' ? (
+                            <div className="node-left-scroll-panel stack-sm">
+                              {String(sectionValue.primary_text || '').trim() ? (
+                                <p className="node-left-results-primary">{String(sectionValue.primary_text || '').trim()}</p>
+                              ) : null}
+                              <MetadataRowsTable
+                                rows={asRecordList(sectionValue.summary_rows).map((row) => ({
+                                  label: String(row.label || '-'),
+                                  value: row.value ?? '-',
+                                }))}
+                              />
+                              {asStringList(sectionValue.action_results).length > 0 ? (
+                                <div className="node-left-results-actions">
+                                  <p className="toolbar-meta">Action results</p>
                                   <ul>
-                                    {scripts.map((script) => (
-                                      <li key={script.id}>
-                                        {script.file_name} ({scriptTypeLabel(script.script_type)})
-                                      </li>
+                                    {asStringList(sectionValue.action_results).map((result, index) => (
+                                      <li key={`${result}-${index + 1}`}>{result}</li>
                                     ))}
                                   </ul>
-                                ) : (
-                                  <p className="toolbar-meta">No scripts attached.</p>
-                                )}
-                                <p>Attachments:</p>
-                                {attachments.length > 0 ? (
-                                  <ul>
-                                    {attachments.map((attachment) => (
-                                      <li key={attachment.id} className="node-detail-attachment-row">
-                                        <span>{attachment.file_name}</span>
-                                        {isQuickTask ? (
-                                          <button
-                                            type="button"
-                                            className="icon-button icon-button-danger"
-                                            aria-label={`Remove ${attachment.file_name}`}
-                                            title="Remove attachment"
-                                            disabled={busyAttachmentId === attachment.id}
-                                            onClick={() => handleAttachmentRemove(attachment.id)}
-                                          >
-                                            <ActionIcon name="trash" />
-                                          </button>
-                                        ) : null}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="toolbar-meta">No attachments.</p>
-                                )}
-                              </div>
-                            )
-                            : null}
+                                </div>
+                              ) : null}
+                              {!hasContent ? <p className="toolbar-meta node-left-empty">{sectionEmpty}</p> : null}
+                            </div>
+                          ) : null}
+
+                          {section.key === 'prompt' ? (
+                            <div className="node-left-scroll-panel stack-sm">
+                              {String(sectionValue.notice || '').trim() ? (
+                                <p className="toolbar-meta node-left-note">{String(sectionValue.notice || '').trim()}</p>
+                              ) : null}
+                              {String(sectionValue.provided_prompt_text || '').trim() ? (
+                                <>
+                                  <p className="toolbar-meta">Provided prompt text</p>
+                                  <pre className="node-left-code-block">{String(sectionValue.provided_prompt_text || '')}</pre>
+                                </>
+                              ) : null}
+                              {Object.keys(asRecord(sectionValue.provided_prompt_fields)).length > 0 ? (
+                                <>
+                                  <p className="toolbar-meta">Provided prompt fields</p>
+                                  <pre className="node-context-code-block">{formatPrettyJson(sectionValue.provided_prompt_fields)}</pre>
+                                </>
+                              ) : null}
+                              {!hasContent ? <p className="toolbar-meta node-left-empty">{sectionEmpty}</p> : null}
+                            </div>
+                          ) : null}
+
+                          {section.key === 'agent' ? (
+                            <div className="node-left-scroll-panel stack-sm">
+                              {hasContent ? (
+                                <MetadataRowsTable
+                                  rows={[
+                                    {
+                                      label: 'Agent',
+                                      value: String(sectionValue.link_href || '').trim()
+                                        ? <Link to={String(sectionValue.link_href)}>{String(sectionValue.name || sectionValue.id || '-')}</Link>
+                                        : String(sectionValue.name || sectionValue.id || '-'),
+                                    },
+                                  ]}
+                                />
+                              ) : null}
+                              {!hasContent ? <p className="toolbar-meta node-left-empty">{sectionEmpty}</p> : null}
+                            </div>
+                          ) : null}
+
+                          {section.key === 'mcp_servers' ? (
+                            <div className="node-left-scroll-panel stack-sm">
+                              {hasContent ? (
+                                <MetadataRowsTable
+                                  rows={asRecordList(sectionValue.items).map((item, index) => ({
+                                    label: `MCP ${index + 1}`,
+                                    value: String(item.server_key || '').trim()
+                                      ? `${String(item.name || '-')}\n${String(item.server_key)}`
+                                      : String(item.name || '-'),
+                                  }))}
+                                />
+                              ) : null}
+                              {!hasContent ? <p className="toolbar-meta node-left-empty">{sectionEmpty}</p> : null}
+                            </div>
+                          ) : null}
+
+                          {section.key === 'collections' ? (
+                            <div className="node-left-scroll-panel stack-sm">
+                              {hasContent ? (
+                                <MetadataRowsTable
+                                  rows={asRecordList(sectionValue.items).map((item, index) => ({
+                                    label: `Collection ${index + 1}`,
+                                    value: String(item.name || item.id_or_key || '-'),
+                                  }))}
+                                />
+                              ) : null}
+                              {!hasContent ? <p className="toolbar-meta node-left-empty">{sectionEmpty}</p> : null}
+                            </div>
+                          ) : null}
+
+                          {section.key === 'raw_json' ? (
+                            String(sectionValue.formatted_output || '').trim()
+                              ? <pre className="node-left-code-block">{String(sectionValue.formatted_output || '')}</pre>
+                              : <p className="toolbar-meta node-left-empty">{sectionEmpty}</p>
+                          ) : null}
+
+                          {section.key === 'details' ? (
+                            <div className="node-left-scroll-panel stack-sm">
+                              {hasContent ? (
+                                <MetadataRowsTable
+                                  rows={asRecordList(sectionValue.rows).map((row) => ({
+                                    label: String(row.label || '-'),
+                                    value: row.value ?? '-',
+                                  }))}
+                                />
+                              ) : null}
+                              {!hasContent ? <p className="toolbar-meta node-left-empty">{sectionEmpty}</p> : null}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </section>

@@ -1,5 +1,7 @@
 from .shared import *  # noqa: F401,F403
 
+from core.models import RAGRetrievalAudit
+
 __all__ = ['list_decision_node_artifacts', 'view_decision_node_artifact', 'list_flowcharts', 'new_flowchart', 'create_flowchart', 'view_flowchart', 'view_flowchart_history', 'view_flowchart_history_run', 'edit_flowchart', 'update_flowchart', 'delete_flowchart', 'get_flowchart_graph', 'upsert_flowchart_graph', 'validate_flowchart', 'run_flowchart_route', 'view_flowchart_run', 'flowchart_run_status', 'flowchart_run_trace', 'control_flowchart_run', 'flowchart_runtime_status', 'cancel_flowchart_run', 'get_flowchart_node_utilities', 'set_flowchart_node_model', 'attach_flowchart_node_mcp', 'detach_flowchart_node_mcp', 'attach_flowchart_node_script', 'detach_flowchart_node_script', 'reorder_flowchart_node_scripts']
 
 @bp.get("/flowcharts/<int:flowchart_id>/nodes/<int:flowchart_node_id>/decision-artifacts")
@@ -1226,11 +1228,22 @@ def upsert_flowchart_graph(flowchart_id: int):
 
             removed_node_ids = set(existing_nodes_by_id).difference(keep_node_ids)
             if removed_node_ids:
+                removed_node_run_ids = select(FlowchartRunNode.id).where(
+                    FlowchartRunNode.flowchart_node_id.in_(removed_node_ids)
+                )
                 # Preserve task history rows while allowing removed nodes to be deleted.
                 session.execute(
                     update(AgentTask)
                     .where(AgentTask.flowchart_node_id.in_(removed_node_ids))
                     .values(flowchart_node_id=None)
+                )
+                # Preserve retrieval audit history rows that reference removed run-node rows.
+                session.execute(
+                    update(RAGRetrievalAudit)
+                    .where(
+                        RAGRetrievalAudit.flowchart_node_run_id.in_(removed_node_run_ids)
+                    )
+                    .values(flowchart_node_run_id=None)
                 )
                 # Historical run-node rows still hold strict FKs to flowchart_nodes.
                 session.execute(

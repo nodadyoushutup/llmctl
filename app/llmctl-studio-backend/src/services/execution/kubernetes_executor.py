@@ -56,6 +56,10 @@ _EXECUTOR_PAYLOAD_MOUNT_PATH = "/tmp/llmctl/payload"
 _EXECUTOR_PAYLOAD_FILE_PATH = (
     f"{_EXECUTOR_PAYLOAD_MOUNT_PATH}/{_EXECUTOR_PAYLOAD_CONFIGMAP_KEY}"
 )
+_EXECUTOR_RUNTIME_VOLUME_NAME = "executor-runtime"
+_EXECUTOR_RUNTIME_MOUNT_PATH = "/tmp/llmctl/runtime"
+_EXECUTOR_RUNTIME_WORKSPACES_DIRNAME = "workspaces"
+_EXECUTOR_RUNTIME_DATA_DIRNAME = "data"
 _POD_ENV_ALLOWLIST = {
     "LLMCTL_STUDIO_DATABASE_URI",
     "LLMCTL_POSTGRES_HOST",
@@ -770,6 +774,19 @@ class KubernetesExecutor:
             "llmctl.workspace_identity": request.workspace_identity,
         }
 
+    def _executor_runtime_root(self, request: ExecutionRequest) -> str:
+        task_id = (
+            int(request.execution_task_id)
+            if request.execution_task_id is not None
+            else 0
+        )
+        execution_id = max(1, int(request.execution_id))
+        execution_index = max(1, int(request.execution_index))
+        suffix = _sanitize_k8s_name(
+            f"exec-{execution_id}-idx-{execution_index}-task-{task_id or 'none'}"
+        )
+        return f"{_EXECUTOR_RUNTIME_MOUNT_PATH}/{suffix}"
+
     def _executor_runtime_env_entries(self) -> list[dict[str, str]]:
         env_entries: list[dict[str, str]] = []
         for key in sorted(os.environ):
@@ -869,7 +886,11 @@ class KubernetesExecutor:
                     "name": "executor-payload",
                     "mountPath": _EXECUTOR_PAYLOAD_MOUNT_PATH,
                     "readOnly": True,
-                }
+                },
+                {
+                    "name": _EXECUTOR_RUNTIME_VOLUME_NAME,
+                    "mountPath": _EXECUTOR_RUNTIME_MOUNT_PATH,
+                },
             ],
         }
         template_spec: dict[str, Any] = {
@@ -888,7 +909,11 @@ class KubernetesExecutor:
                             }
                         ],
                     },
-                }
+                },
+                {
+                    "name": _EXECUTOR_RUNTIME_VOLUME_NAME,
+                    "emptyDir": {},
+                },
             ],
         }
         if live_code_enabled and live_code_host_path:
@@ -991,6 +1016,9 @@ class KubernetesExecutor:
             request_id = (
                 f"rag-chat-completion-{request.execution_id}"
             )
+        runtime_root = self._executor_runtime_root(request)
+        workspaces_dir = f"{runtime_root}/{_EXECUTOR_RUNTIME_WORKSPACES_DIRNAME}"
+        data_dir = f"{runtime_root}/{_EXECUTOR_RUNTIME_DATA_DIRNAME}"
 
         payload = {
             "contract_version": "v1",
@@ -999,6 +1027,11 @@ class KubernetesExecutor:
             "request_id": request_id,
             "timeout_seconds": max(5, min(execution_timeout, 3600)),
             "emit_start_markers": True,
+            "cwd": runtime_root,
+            "env": {
+                "LLMCTL_STUDIO_WORKSPACES_DIR": workspaces_dir,
+                "LLMCTL_STUDIO_DATA_DIR": data_dir,
+            },
             "node_execution": {
                 "entrypoint": "services.tasks:_execute_flowchart_node_request",
                 "python_paths": ["/app/app/llmctl-studio-backend/src"],
@@ -1011,6 +1044,8 @@ class KubernetesExecutor:
                 "flowchart_node_id": request.node_id,
                 "execution_id": request.execution_id,
                 "execution_mode": execution_mode,
+                "executor_runtime_root": runtime_root,
+                "executor_workspaces_dir": workspaces_dir,
             },
         }
         return json.dumps(payload, separators=(",", ":"))

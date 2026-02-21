@@ -4,6 +4,9 @@ Changelog
 2026-02-21
 ----------
 
+- Added frontier SDK tool-loop documentation for ``codex``/``gemini``/``claude`` provider behavior, unsupported MCP transport semantics, and deterministic workspace/git/command dispatch contracts.
+- Documented Kubernetes executor pod-local ephemeral runtime workspace provisioning (runtime ``emptyDir`` mount, payload ``cwd``, and workspace/data env wiring) for SDK tool-accessible clone/edit/test flows.
+- Documented SDK tooling evidence contract in node/task outputs (``output_state.sdk_tooling``) alongside existing runtime evidence fields.
 - Documented final Studio backend structural module layout after decomposition of ``web.views`` into package modules and package-based ``core.models`` layout.
 - Documented removal of vestigial backend CLI-era entrypoints (``src/__main__.py`` and ``src/cli/*``) from active runtime paths.
 - Updated Sphinx API generation excludes for package-based ``web/views`` and ``core/models`` paths.
@@ -12,6 +15,7 @@ Changelog
 - Updated Stage 9 flowchart backend tests for current graph-save contract semantics (structural violations ``400`` vs semantic validation via ``validation.errors``).
 - Updated migration runbook and specialized flowchart node docs to reflect current cutover status, guardrails, and memory-node/system-MCP enforcement behavior.
 - Documented memory-node mode selection contracts (``llm_guided``/``deterministic``), failure controls (``retry_count``/``fallback_enabled``), startup backfill migration defaults, and degraded fallback status markers in specialized flowchart node docs.
+- Reworked Node Detail left-panel contract and React IA to fixed sections (``Input``, ``Results``, ``Prompt``, ``Agent``, ``MCP Servers``, ``Collections``, ``Raw JSON``, ``Details``), with context-only connector terminology, per-connector input blocks, and table-first metadata rendering.
 
 2026-02-20
 ----------

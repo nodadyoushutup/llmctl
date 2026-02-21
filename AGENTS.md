@@ -6,6 +6,7 @@
 - Avoid redundant ID or updated columns when the row already links to detail.
 - When asked to update templates or pipelines, treat it as a database update unless explicitly requested to update the seed.
 - Use `python3` in commands and examples instead of `python`.
+- Use the repository virtual environment at `.venv` for Python and test commands (for example `.venv/bin/python -m pytest` or `.venv/bin/pytest`).
 
 # Flash Message Area
 
@@ -94,6 +95,12 @@
 - Avoid one-off component designs when an existing shared component can be reused or extended cleanly.
 - Prefer reusable CSS classes and shared style patterns over one-off CSS blocks; keep styling DRY and consistent.
 - Aim to implement components and styling correctly the first time, emphasizing maintainability, reuse, and predictable UX.
+
+# Metadata Presentation
+
+- Do not render metadata key/value content as bubbles, pills, chips, or card tiles.
+- Render metadata using plain readable structures (rows, tables, or clean definition-list layouts) with clear labels and values.
+- Reserve chip/pill visuals for compact status indicators only, not for general metadata fields.
 
 # React + Flask Data Flow
 

@@ -211,7 +211,7 @@ export default function RagSourcesPage() {
                         </td>
                         <td className="table-actions-cell">
                           <button type="button" className="icon-button icon-button-danger" title="Delete source" aria-label="Delete source" disabled={busy} onClick={() => handleDelete(sourceId)}>
-                            <i className="fa-regular fa-trash-can" aria-hidden="true" />
+                            <ActionIcon name="trash" />
                           </button>
                         </td>
                       </tr>

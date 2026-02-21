@@ -316,6 +316,36 @@ Node Detail stage assembly keeps canonical stage keys and remaps only
 
 Non-RAG nodes and missing/unknown modes keep existing ``LLM Query`` behavior.
 
+Node detail JSON payloads also expose a canonical ``left_panel`` object for
+React section rendering, with fixed section keys:
+
+- ``input``
+- ``results``
+- ``prompt``
+- ``agent``
+- ``mcp_servers``
+- ``collections``
+- ``raw_json``
+- ``details``
+
+``input`` includes connector-context contract fields used by the redesigned
+Node Detail panel:
+
+- ``source``
+- ``trigger_source_count``
+- ``context_only_source_count``
+- ``connector_blocks`` (one entry per connector source)
+- ``resolved_input_context``
+
+Connector terminology for UI-facing fields is normalized to ``trigger`` and
+``context_only``; legacy ``dotted`` naming remains internal/compatibility-only.
+
+Frontend section behavior defaults:
+
+- ``Results`` section expanded on initial load.
+- All other left-panel sections collapsed on initial load.
+- Single-open accordion behavior for left-panel section toggles.
+
 Developer Workflow (React-Only Split)
 -------------------------------------
 

@@ -644,6 +644,12 @@ MEMORY_NODE_MODE_CHOICES = (
     MEMORY_NODE_MODE_LLM_GUIDED,
     MEMORY_NODE_MODE_DETERMINISTIC,
 )
+MEMORY_NODE_STORE_MODE_APPEND = "append"
+MEMORY_NODE_STORE_MODE_REPLACE = "replace"
+MEMORY_NODE_STORE_MODE_CHOICES = (
+    MEMORY_NODE_STORE_MODE_APPEND,
+    MEMORY_NODE_STORE_MODE_REPLACE,
+)
 MEMORY_NODE_RETRY_COUNT_DEFAULT = 1
 MEMORY_NODE_RETRY_COUNT_MAX = 5
 MEMORY_NODE_FALLBACK_ENABLED_DEFAULT = True
@@ -7891,6 +7897,17 @@ def _normalize_memory_node_mode(value: object) -> str:
     return ""
 
 
+def _normalize_memory_node_store_mode(value: object) -> str:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return MEMORY_NODE_STORE_MODE_REPLACE
+    if cleaned in {"append", "additive", "add", "store"}:
+        return MEMORY_NODE_STORE_MODE_APPEND
+    if cleaned in {"replace", "overwrite", "set"}:
+        return MEMORY_NODE_STORE_MODE_REPLACE
+    return ""
+
+
 def _sanitize_memory_node_config(config_payload: dict[str, object]) -> dict[str, object]:
     sanitized = dict(config_payload)
     action_value = config_payload.get("action")
@@ -7904,6 +7921,14 @@ def _sanitize_memory_node_config(config_payload: dict[str, object]) -> dict[str,
             "config.mode must be one of: " + ", ".join(MEMORY_NODE_MODE_CHOICES) + "."
         )
     sanitized["mode"] = mode
+    store_mode = _normalize_memory_node_store_mode(config_payload.get("store_mode"))
+    if not store_mode:
+        raise ValueError(
+            "config.store_mode must be one of: "
+            + ", ".join(MEMORY_NODE_STORE_MODE_CHOICES)
+            + "."
+        )
+    sanitized["store_mode"] = store_mode
     sanitized["additive_prompt"] = str(config_payload.get("additive_prompt") or "").strip()
     retry_count = _coerce_optional_int(
         config_payload.get("retry_count"),

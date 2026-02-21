@@ -179,6 +179,7 @@ export default function RoleEditPage() {
                   onClick={handleDelete}
                   disabled={busy || deleting}
                 >
+                  <i className="fa-solid fa-trash" aria-hidden="true" />
                   {deleting ? 'Deleting...' : 'Delete Role'}
                 </button>
               ) : null}

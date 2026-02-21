@@ -47,6 +47,12 @@ const MEMORY_MODE_OPTIONS = [
   { value: MEMORY_MODE_LLM_GUIDED, label: 'LLM-guided' },
   { value: MEMORY_MODE_DETERMINISTIC, label: 'Deterministic' },
 ]
+const MEMORY_STORE_MODE_APPEND = 'append'
+const MEMORY_STORE_MODE_REPLACE = 'replace'
+const MEMORY_STORE_MODE_OPTIONS = [
+  { value: MEMORY_STORE_MODE_APPEND, label: 'Additive' },
+  { value: MEMORY_STORE_MODE_REPLACE, label: 'Replace' },
+]
 const PLAN_ACTION_CREATE_OR_UPDATE = 'create_or_update_plan'
 const PLAN_ACTION_COMPLETE_PLAN_ITEM = 'complete_plan_item'
 const PLAN_ACTION_OPTIONS = [
@@ -66,6 +72,7 @@ const DEFAULT_PLAN_RETENTION_MAX_COUNT = 25
 const DEFAULT_MEMORY_RETRY_COUNT = 1
 const MAX_MEMORY_RETRY_COUNT = 5
 const DEFAULT_MEMORY_FALLBACK_ENABLED = true
+const DEFAULT_MEMORY_STORE_MODE = MEMORY_STORE_MODE_REPLACE
 const TYPE_TO_REF_CATALOG_KEY = {
   flowchart: 'flowcharts',
   plan: 'plans',
@@ -922,6 +929,7 @@ function defaultConfigForType(nodeType) {
     return {
       action: 'add',
       mode: MEMORY_MODE_LLM_GUIDED,
+      store_mode: DEFAULT_MEMORY_STORE_MODE,
       additive_prompt: '',
       retry_count: DEFAULT_MEMORY_RETRY_COUNT,
       fallback_enabled: DEFAULT_MEMORY_FALLBACK_ENABLED,
@@ -974,6 +982,17 @@ function normalizeMemoryMode(value) {
     return MEMORY_MODE_DETERMINISTIC
   }
   return MEMORY_MODE_LLM_GUIDED
+}
+
+function normalizeMemoryStoreMode(value) {
+  const cleaned = String(value || '').trim().toLowerCase()
+  if (['append', 'additive', 'add', 'store'].includes(cleaned)) {
+    return MEMORY_STORE_MODE_APPEND
+  }
+  if (['replace', 'overwrite', 'set'].includes(cleaned)) {
+    return MEMORY_STORE_MODE_REPLACE
+  }
+  return DEFAULT_MEMORY_STORE_MODE
 }
 
 function normalizeMemoryRetryCount(value) {
@@ -1122,6 +1141,7 @@ function normalizeNodeConfig(config, nodeType = '') {
   if (normalizedType === 'memory') {
     nextConfig.action = normalizeMemoryAction(nextConfig.action)
     nextConfig.mode = normalizeMemoryMode(nextConfig.mode)
+    nextConfig.store_mode = normalizeMemoryStoreMode(nextConfig.store_mode)
     nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
     nextConfig.retry_count = normalizeMemoryRetryCount(nextConfig.retry_count)
     nextConfig.fallback_enabled = normalizeMemoryFallbackEnabled(nextConfig.fallback_enabled)
@@ -1131,6 +1151,7 @@ function normalizeNodeConfig(config, nodeType = '') {
   } else {
     delete nextConfig.retry_count
     delete nextConfig.fallback_enabled
+    delete nextConfig.store_mode
   }
   if (normalizedType !== 'rag' && normalizedType !== 'memory') {
     delete nextConfig.mode
@@ -2774,6 +2795,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       if (normalizedType !== 'memory') {
         delete nextConfig.retry_count
         delete nextConfig.fallback_enabled
+        delete nextConfig.store_mode
       }
       if (normalizedType !== 'plan') {
         delete nextConfig.plan_item_id
@@ -2805,6 +2827,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       if (normalizedType === 'memory') {
         nextConfig.action = normalizeMemoryAction(nextConfig.action)
         nextConfig.mode = normalizeMemoryMode(nextConfig.mode)
+        nextConfig.store_mode = normalizeMemoryStoreMode(nextConfig.store_mode)
         nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
         nextConfig.retry_count = normalizeMemoryRetryCount(nextConfig.retry_count)
         nextConfig.fallback_enabled = normalizeMemoryFallbackEnabled(nextConfig.fallback_enabled)
@@ -3684,6 +3707,27 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       }))}
                     >
                       {MEMORY_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {selectedNodeType === 'memory' ? (
+                  <label className="field">
+                    <span>store mode</span>
+                    <select
+                      value={selectedSpecializedConfig.store_mode}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          store_mode: normalizeMemoryStoreMode(event.target.value),
+                        },
+                      }))}
+                    >
+                      {MEMORY_STORE_MODE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>

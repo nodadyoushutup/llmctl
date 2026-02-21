@@ -481,22 +481,32 @@ class NodeExecutorStage6Tests(unittest.TestCase):
             live_code_host_path="/workspace/llmctl",
         )
         pod_spec = manifest["spec"]["template"]["spec"]
+        volume_map = {item.get("name"): item for item in pod_spec.get("volumes") or []}
+        mount_map = {
+            item.get("name"): item
+            for item in pod_spec["containers"][0].get("volumeMounts") or []
+        }
         self.assertEqual(
             "job-live-code-payload",
-            pod_spec["volumes"][0]["configMap"]["name"],
+            ((volume_map.get("executor-payload") or {}).get("configMap") or {}).get("name"),
         )
         self.assertEqual(
             "/workspace/llmctl",
-            pod_spec["volumes"][1]["hostPath"]["path"],
+            ((volume_map.get("project-code") or {}).get("hostPath") or {}).get("path"),
         )
         self.assertEqual(
             "/tmp/llmctl/payload",
-            pod_spec["containers"][0]["volumeMounts"][0]["mountPath"],
+            (mount_map.get("executor-payload") or {}).get("mountPath"),
+        )
+        self.assertEqual(
+            "/tmp/llmctl/runtime",
+            (mount_map.get("executor-runtime") or {}).get("mountPath"),
         )
         self.assertEqual(
             "/app",
-            pod_spec["containers"][0]["volumeMounts"][1]["mountPath"],
+            (mount_map.get("project-code") or {}).get("mountPath"),
         )
+        self.assertEqual({}, (volume_map.get("executor-runtime") or {}).get("emptyDir"))
 
     def test_build_job_manifest_includes_runtime_env_passthrough(self) -> None:
         executor = KubernetesExecutor({})
@@ -605,6 +615,23 @@ class NodeExecutorStage6Tests(unittest.TestCase):
         self.assertEqual("start", node_request.get("node_type"))
         self.assertEqual([], node_request.get("enabled_providers"))
         self.assertEqual([], node_request.get("mcp_server_keys"))
+        self.assertTrue(str(payload.get("cwd") or "").startswith("/tmp/llmctl/runtime/"))
+        payload_env = payload.get("env") or {}
+        self.assertIsInstance(payload_env, dict)
+        self.assertEqual(
+            f"{payload.get('cwd')}/workspaces",
+            payload_env.get("LLMCTL_STUDIO_WORKSPACES_DIR"),
+        )
+        self.assertEqual(
+            f"{payload.get('cwd')}/data",
+            payload_env.get("LLMCTL_STUDIO_DATA_DIR"),
+        )
+        metadata = payload.get("metadata") or {}
+        self.assertEqual(payload.get("cwd"), metadata.get("executor_runtime_root"))
+        self.assertEqual(
+            f"{payload.get('cwd')}/workspaces",
+            metadata.get("executor_workspaces_dir"),
+        )
 
     def test_kubernetes_executor_uses_remote_output_state_and_metadata(self) -> None:
         executor = KubernetesExecutor({})

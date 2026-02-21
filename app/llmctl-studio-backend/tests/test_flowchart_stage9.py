@@ -49,6 +49,7 @@ from core.models import (
     MCPServer,
     Milestone,
     Memory,
+    RAGRetrievalAudit,
     NodeArtifact,
     NODE_ARTIFACT_TYPE_END,
     NODE_ARTIFACT_TYPE_FLOWCHART,
@@ -4318,6 +4319,109 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             self.assertIsNone(persisted_task.flowchart_node_id)
             self.assertIsNone(session.get(FlowchartNode, removable_task_node_id))
 
+    def test_graph_upsert_detaches_rag_retrieval_audits_before_deleting_removed_nodes(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+        flowchart_id = self._create_flowchart("Stage 9 Graph Upsert Detach RAG Audits")
+        graph_response = self.client.get(f"/flowcharts/{flowchart_id}/graph")
+        self.assertEqual(200, graph_response.status_code)
+        graph_payload = graph_response.get_json() or {}
+        start_node = next(
+            node
+            for node in (graph_payload.get("nodes") or [])
+            if node.get("node_type") == FLOWCHART_NODE_TYPE_START
+        )
+        start_node_id = int(start_node["id"])
+
+        initial_save_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "id": start_node_id,
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "n-rag-remove",
+                        "node_type": FLOWCHART_NODE_TYPE_RAG,
+                        "x": 200,
+                        "y": 20,
+                        "config": {"mode": "query"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": start_node_id,
+                        "target_node_id": "n-rag-remove",
+                        "edge_mode": "solid",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, initial_save_response.status_code)
+        saved_payload = initial_save_response.get_json() or {}
+        removable_rag_node = next(
+            node
+            for node in (saved_payload.get("nodes") or [])
+            if node.get("node_type") == FLOWCHART_NODE_TYPE_RAG
+        )
+        removable_rag_node_id = int(removable_rag_node["id"])
+
+        with session_scope() as session:
+            run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart_id,
+                status="completed",
+            )
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=removable_rag_node_id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps({"node_type": FLOWCHART_NODE_TYPE_RAG}),
+            )
+            audit = RAGRetrievalAudit.create(
+                session,
+                runtime_kind="flowchart",
+                flowchart_run_id=run.id,
+                flowchart_node_run_id=run_node.id,
+                provider="mock-rag",
+            )
+            run_node_id = run_node.id
+            audit_id = audit.id
+
+        remove_node_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "id": start_node_id,
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    }
+                ],
+                "edges": [],
+            },
+        )
+        self.assertEqual(200, remove_node_response.status_code)
+
+        with session_scope() as session:
+            self.assertIsNone(session.get(FlowchartRunNode, run_node_id))
+            persisted_audit = session.get(RAGRetrievalAudit, audit_id)
+            self.assertIsNotNone(persisted_audit)
+            assert persisted_audit is not None
+            self.assertIsNone(persisted_audit.flowchart_node_run_id)
+            self.assertIsNone(session.get(FlowchartNode, removable_rag_node_id))
+
     def test_graph_requires_edge_mode_in_edge_payload(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Edge Mode Required")
         response = self.client.post(
@@ -5982,6 +6086,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         )
         memory_config = memory_node.get("config") or {}
         self.assertEqual("llm_guided", memory_config.get("mode"))
+        self.assertEqual("replace", memory_config.get("store_mode"))
         self.assertEqual(1, memory_config.get("retry_count"))
         self.assertTrue(bool(memory_config.get("fallback_enabled")))
 
@@ -6025,6 +6130,47 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertEqual(400, graph_response.status_code)
         payload = graph_response.get_json() or {}
         self.assertIn("config.mode must be one of", str(payload.get("error") or ""))
+
+    def test_flowchart_graph_rejects_memory_node_with_invalid_store_mode(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+
+        flowchart_id = self._create_flowchart("Memory Store Mode Validation")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "memory",
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "x": 250,
+                        "y": 0,
+                        "config": {"action": "add", "store_mode": "invalid"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "memory",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, graph_response.status_code)
+        payload = graph_response.get_json() or {}
+        self.assertIn("config.store_mode must be one of", str(payload.get("error") or ""))
 
     def test_flowchart_graph_rejects_plan_node_without_required_action(self) -> None:
         with session_scope() as session:

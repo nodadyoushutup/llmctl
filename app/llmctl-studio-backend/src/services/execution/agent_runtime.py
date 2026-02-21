@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 import re
 import subprocess
@@ -9,6 +10,8 @@ from typing import Any, Callable
 
 _UPSTREAM_500_MAX_ATTEMPTS = 2
 _MCP_TOOL_LIST_FAILED_DEPENDENCY_MAX_ATTEMPTS = 3
+_TOOL_LOOP_MAX_CYCLES_DEFAULT = 24
+_TOOL_LOOP_MAX_CYCLES_LIMIT = 64
 
 
 @dataclass(slots=True, frozen=True)
@@ -18,6 +21,38 @@ class FrontierAgentRequest:
     mcp_configs: dict[str, dict[str, Any]]
     model_config: dict[str, Any] | None = None
     env: dict[str, str] | None = None
+    request_id: str | None = None
+    correlation_id: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FrontierToolCall:
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(slots=True, frozen=True)
+class FrontierToolResult:
+    call_id: str
+    tool_name: str
+    output: Any
+    is_error: bool = False
+
+
+class FrontierToolDispatchError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(str(message or "Tool dispatch failed."))
+        self.code = str(code or "").strip() or "tool_dispatch_error"
+        self.details = dict(details or {})
+        self.retryable = bool(retryable)
 
 
 @dataclass(slots=True, frozen=True)
@@ -32,6 +67,9 @@ class FrontierAgentDependencies:
     default_gemini_model: str
     default_claude_model: str
     require_claude_api_key: bool
+    dispatch_tool_call: Callable[[FrontierToolCall], FrontierToolResult | dict[str, Any]] | None = (
+        None
+    )
 
 
 class FrontierAgent:
@@ -52,6 +90,8 @@ class FrontierAgent:
         prompt_text = str(request.prompt or "")
         config_map = request.model_config if isinstance(request.model_config, dict) else {}
         env_map = dict(request.env or os.environ.copy())
+        request_id = str(request.request_id or "").strip() or None
+        correlation_id = str(request.correlation_id or "").strip() or None
 
         if request.mcp_configs and provider != "codex":
             return self._emit_result(
@@ -67,11 +107,107 @@ class FrontierAgent:
                 on_update=on_update,
             )
 
+        max_cycles = _safe_int(
+            config_map.get("tool_loop_max_cycles"),
+            _TOOL_LOOP_MAX_CYCLES_DEFAULT,
+        )
+        if max_cycles < 1:
+            max_cycles = _TOOL_LOOP_MAX_CYCLES_DEFAULT
+        max_cycles = min(max_cycles, _TOOL_LOOP_MAX_CYCLES_LIMIT)
+
+        cycle_prompt = prompt_text
+        tool_trace: list[dict[str, Any]] = []
+        for cycle_index in range(1, max_cycles + 1):
+            result = self._run_provider_cycle(
+                provider=provider,
+                provider_label=provider_label,
+                prompt=cycle_prompt,
+                mcp_configs=request.mcp_configs,
+                config_map=config_map,
+                env_map=env_map,
+                on_log=on_log,
+            )
+            if result.returncode != 0:
+                return self._emit_result(
+                    result,
+                    on_update=on_update,
+                    tool_trace=tool_trace,
+                )
+
+            tool_calls = _extract_provider_tool_calls(
+                provider=provider,
+                payload=getattr(result, "_llmctl_raw_response", None),
+            )
+            if on_log:
+                on_log(
+                    "sdk_tool_cycle "
+                    f"provider={provider} cycle={cycle_index} tool_calls={len(tool_calls)}"
+                )
+            if not tool_calls:
+                return self._emit_result(
+                    result,
+                    on_update=on_update,
+                    tool_trace=tool_trace,
+                )
+
+            tool_results, dispatch_error = self._dispatch_tool_calls(
+                provider=provider,
+                tool_calls=tool_calls,
+                request_id=request_id,
+                correlation_id=correlation_id,
+                on_log=on_log,
+            )
+            tool_trace.extend(
+                _build_tool_trace_entries(
+                    provider=provider,
+                    cycle_index=cycle_index,
+                    tool_results=tool_results,
+                )
+            )
+            if dispatch_error is not None:
+                return self._emit_result(
+                    dispatch_error,
+                    on_update=on_update,
+                    tool_trace=tool_trace,
+                )
+            cycle_prompt = _append_tool_results_to_prompt(
+                prompt=cycle_prompt,
+                tool_results=tool_results,
+                cycle_index=cycle_index,
+            )
+
+        return self._emit_result(
+            _tool_loop_error_completed_process(
+                provider=provider,
+                code="tool_loop_max_cycles_exceeded",
+                message=(
+                    f"{provider_label} SDK tool loop exceeded max cycles "
+                    f"({max_cycles}) without producing a terminal response."
+                ),
+                details={"max_cycles": max_cycles},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ),
+            on_update=on_update,
+            tool_trace=tool_trace,
+        )
+
+    def _run_provider_cycle(
+        self,
+        *,
+        provider: str,
+        provider_label: str,
+        prompt: str,
+        mcp_configs: dict[str, dict[str, Any]],
+        config_map: dict[str, Any],
+        env_map: dict[str, str],
+        on_log: Callable[[str], None] | None,
+    ) -> subprocess.CompletedProcess[str]:
         def _run_once() -> subprocess.CompletedProcess[str]:
             if provider == "codex":
                 return self._run_codex(
-                    prompt=prompt_text,
-                    mcp_configs=request.mcp_configs,
+                    prompt=prompt,
+                    mcp_configs=mcp_configs,
                     config_map=config_map,
                     env_map=env_map,
                     on_log=on_log,
@@ -79,7 +215,7 @@ class FrontierAgent:
                 )
             if provider == "gemini":
                 return self._run_gemini(
-                    prompt=prompt_text,
+                    prompt=prompt,
                     config_map=config_map,
                     env_map=env_map,
                     on_log=on_log,
@@ -87,7 +223,7 @@ class FrontierAgent:
                 )
             if provider == "claude":
                 return self._run_claude(
-                    prompt=prompt_text,
+                    prompt=prompt,
                     config_map=config_map,
                     env_map=env_map,
                     on_log=on_log,
@@ -105,7 +241,7 @@ class FrontierAgent:
         while result.returncode != 0:
             if _is_retryable_mcp_tool_list_failed_dependency(
                 provider=provider,
-                mcp_configs=request.mcp_configs,
+                mcp_configs=mcp_configs,
                 returncode=result.returncode,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -133,14 +269,75 @@ class FrontierAgent:
                 result = _run_once()
                 continue
             break
-        return self._emit_result(result, on_update=on_update)
+        return result
+
+    def _dispatch_tool_calls(
+        self,
+        *,
+        provider: str,
+        tool_calls: list[FrontierToolCall],
+        request_id: str | None,
+        correlation_id: str | None,
+        on_log: Callable[[str], None] | None,
+    ) -> tuple[list[FrontierToolResult], subprocess.CompletedProcess[str] | None]:
+        dispatcher = self._dependencies.dispatch_tool_call
+        if dispatcher is None:
+            return [], _tool_loop_error_completed_process(
+                provider=provider,
+                code="tool_dispatcher_unconfigured",
+                message=(
+                    "SDK tool loop dispatcher is not configured. "
+                    "Tool domain wiring is required before tool calls can execute."
+                ),
+                details={"tool_call_count": len(tool_calls)},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            )
+        results: list[FrontierToolResult] = []
+        for tool_call in tool_calls:
+            if on_log:
+                on_log(
+                    "sdk_tool_dispatch "
+                    f"provider={provider} call_id={tool_call.call_id} "
+                    f"tool_name={tool_call.tool_name}"
+                )
+            try:
+                raw_result = dispatcher(tool_call)
+            except Exception as exc:
+                if isinstance(exc, FrontierToolDispatchError):
+                    return results, _tool_loop_error_completed_process(
+                        provider=provider,
+                        code=exc.code,
+                        message=str(exc),
+                        details=exc.details,
+                        request_id=request_id,
+                        correlation_id=correlation_id,
+                        retryable=exc.retryable,
+                    )
+                return results, _tool_loop_error_completed_process(
+                    provider=provider,
+                    code="tool_dispatch_failed",
+                    message=f"Tool dispatch failed for {tool_call.tool_name}: {exc}",
+                    details={
+                        "call_id": tool_call.call_id,
+                        "tool_name": tool_call.tool_name,
+                    },
+                    request_id=request_id,
+                    correlation_id=correlation_id,
+                )
+            normalized_result = _normalize_frontier_tool_result(raw_result, fallback=tool_call)
+            results.append(normalized_result)
+        return results, None
 
     @staticmethod
     def _emit_result(
         result: subprocess.CompletedProcess[str],
         *,
         on_update: Callable[[str, str], None] | None = None,
+        tool_trace: list[dict[str, Any]] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        if isinstance(tool_trace, list):
+            setattr(result, "_llmctl_tool_trace", list(tool_trace))
         if on_update is not None:
             on_update(str(result.stdout or ""), str(result.stderr or ""))
         return result
@@ -220,12 +417,14 @@ class FrontierAgent:
                 "",
                 str(exc),
             )
-        return subprocess.CompletedProcess(
+        completed = subprocess.CompletedProcess(
             ["sdk:codex"],
             0,
             _extract_openai_response_text(response_payload),
             "",
         )
+        setattr(completed, "_llmctl_raw_response", response_payload)
+        return completed
 
     def _run_gemini(
         self,
@@ -323,12 +522,14 @@ class FrontierAgent:
                 "",
                 str(exc),
             )
-        return subprocess.CompletedProcess(
+        completed = subprocess.CompletedProcess(
             ["sdk:gemini"],
             0,
             _extract_google_response_text(response_payload),
             "",
         )
+        setattr(completed, "_llmctl_raw_response", response_payload)
+        return completed
 
     def _run_claude(
         self,
@@ -398,12 +599,14 @@ class FrontierAgent:
                 "",
                 str(exc),
             )
-        return subprocess.CompletedProcess(
+        completed = subprocess.CompletedProcess(
             ["sdk:claude"],
             0,
             _extract_claude_response_text(response_payload),
             "",
         )
+        setattr(completed, "_llmctl_raw_response", response_payload)
+        return completed
 
 
 def _optional_positive_int(value: Any) -> int | None:
@@ -522,6 +725,304 @@ def _extract_claude_response_text(payload: Any) -> str:
     if chunks:
         return "\n".join(chunks).strip()
     return str(payload or "").strip()
+
+
+def _coerce_model_dump(payload: Any) -> Any:
+    if hasattr(payload, "model_dump"):
+        try:
+            return payload.model_dump()
+        except Exception:
+            return payload
+    return payload
+
+
+def _normalize_frontier_tool_arguments(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {"value": text}
+        if isinstance(parsed, dict):
+            return parsed
+        return {"value": parsed}
+    if raw is None:
+        return {}
+    return {"value": raw}
+
+
+def _extract_openai_tool_calls(payload: Any) -> list[FrontierToolCall]:
+    parsed = _coerce_model_dump(payload)
+    if not isinstance(parsed, dict):
+        return []
+    outputs = parsed.get("output")
+    if not isinstance(outputs, list):
+        return []
+    tool_calls: list[FrontierToolCall] = []
+    for item in outputs:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type not in {"function_call", "tool_call"}:
+            continue
+        name = str(item.get("name") or item.get("tool_name") or "").strip()
+        if not name and isinstance(item.get("function"), dict):
+            name = str(item.get("function", {}).get("name") or "").strip()
+        if not name:
+            continue
+        arguments = item.get("arguments")
+        if arguments is None and isinstance(item.get("function"), dict):
+            arguments = item.get("function", {}).get("arguments")
+        call_id = str(item.get("call_id") or item.get("id") or "").strip() or (
+            f"openai-call-{len(tool_calls) + 1}"
+        )
+        tool_calls.append(
+            FrontierToolCall(
+                call_id=call_id,
+                tool_name=name,
+                arguments=_normalize_frontier_tool_arguments(arguments),
+            )
+        )
+    return tool_calls
+
+
+def _extract_gemini_tool_calls(payload: Any) -> list[FrontierToolCall]:
+    candidates = list(getattr(payload, "candidates", None) or [])
+    tool_calls: list[FrontierToolCall] = []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = list(getattr(content, "parts", None) or [])
+        for part in parts:
+            function_call = getattr(part, "function_call", None)
+            if function_call is None and isinstance(part, dict):
+                function_call = part.get("function_call")
+            if function_call is None:
+                continue
+            name = str(
+                getattr(function_call, "name", None)
+                or (
+                    function_call.get("name")
+                    if isinstance(function_call, dict)
+                    else ""
+                )
+                or ""
+            ).strip()
+            if not name:
+                continue
+            arguments = (
+                getattr(function_call, "args", None)
+                if not isinstance(function_call, dict)
+                else function_call.get("args")
+            )
+            call_id = str(
+                getattr(function_call, "id", None)
+                or (
+                    function_call.get("id")
+                    if isinstance(function_call, dict)
+                    else ""
+                )
+                or ""
+            ).strip() or (f"gemini-call-{len(tool_calls) + 1}")
+            tool_calls.append(
+                FrontierToolCall(
+                    call_id=call_id,
+                    tool_name=name,
+                    arguments=_normalize_frontier_tool_arguments(arguments),
+                )
+            )
+    return tool_calls
+
+
+def _extract_claude_tool_calls(payload: Any) -> list[FrontierToolCall]:
+    blocks = list(getattr(payload, "content", None) or [])
+    tool_calls: list[FrontierToolCall] = []
+    for block in blocks:
+        block_type = str(
+            getattr(block, "type", None)
+            or (block.get("type") if isinstance(block, dict) else "")
+            or ""
+        ).strip().lower()
+        if block_type != "tool_use":
+            continue
+        name = str(
+            getattr(block, "name", None)
+            or (block.get("name") if isinstance(block, dict) else "")
+            or ""
+        ).strip()
+        if not name:
+            continue
+        arguments = (
+            getattr(block, "input", None)
+            if not isinstance(block, dict)
+            else block.get("input")
+        )
+        call_id = str(
+            getattr(block, "id", None)
+            or (block.get("id") if isinstance(block, dict) else "")
+            or ""
+        ).strip() or (f"claude-call-{len(tool_calls) + 1}")
+        tool_calls.append(
+            FrontierToolCall(
+                call_id=call_id,
+                tool_name=name,
+                arguments=_normalize_frontier_tool_arguments(arguments),
+            )
+        )
+    return tool_calls
+
+
+def _extract_provider_tool_calls(*, provider: str, payload: Any) -> list[FrontierToolCall]:
+    if payload is None:
+        return []
+    if provider == "codex":
+        return _extract_openai_tool_calls(payload)
+    if provider == "gemini":
+        return _extract_gemini_tool_calls(payload)
+    if provider == "claude":
+        return _extract_claude_tool_calls(payload)
+    return []
+
+
+def _normalize_frontier_tool_result(
+    value: FrontierToolResult | dict[str, Any],
+    *,
+    fallback: FrontierToolCall,
+) -> FrontierToolResult:
+    if isinstance(value, FrontierToolResult):
+        return value
+    payload = dict(value or {})
+    call_id = str(payload.get("call_id") or fallback.call_id).strip() or fallback.call_id
+    tool_name = str(payload.get("tool_name") or fallback.tool_name).strip() or fallback.tool_name
+    is_error = bool(payload.get("is_error"))
+    if "output" in payload:
+        output = payload.get("output")
+    elif "result" in payload:
+        output = payload.get("result")
+    else:
+        output = {
+            key: val
+            for key, val in payload.items()
+            if key not in {"call_id", "tool_name", "is_error"}
+        }
+    return FrontierToolResult(
+        call_id=call_id,
+        tool_name=tool_name,
+        output=output,
+        is_error=is_error,
+    )
+
+
+def _append_tool_results_to_prompt(
+    *,
+    prompt: str,
+    tool_results: list[FrontierToolResult],
+    cycle_index: int,
+) -> str:
+    serialized = json.dumps(
+        [
+            {
+                "call_id": item.call_id,
+                "tool_name": item.tool_name,
+                "is_error": bool(item.is_error),
+                "output": item.output,
+            }
+            for item in tool_results
+        ],
+        sort_keys=True,
+    )
+    prefix = prompt.strip()
+    if prefix:
+        prefix = f"{prefix}\n\n"
+    return (
+        f"{prefix}Tool results from cycle {int(cycle_index)} (JSON):\n"
+        f"{serialized}\n"
+        "Use these results to continue. If more tool actions are required, emit new tool calls."
+    )
+
+
+def _build_tool_trace_entries(
+    *,
+    provider: str,
+    cycle_index: int,
+    tool_results: list[FrontierToolResult],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for item in tool_results:
+        output = item.output if isinstance(item.output, dict) else {}
+        trace_envelope = (
+            output.get("trace_envelope")
+            if isinstance(output.get("trace_envelope"), dict)
+            else {}
+        )
+        warnings = output.get("warnings")
+        warnings_list = list(warnings) if isinstance(warnings, list) else []
+        entries.append(
+            {
+                "provider": str(provider or "").strip().lower(),
+                "cycle": int(cycle_index),
+                "call_id": item.call_id,
+                "tool_name": item.tool_name,
+                "is_error": bool(item.is_error),
+                "tool_domain": str(output.get("tool_domain") or "").strip(),
+                "operation": str(output.get("operation") or "").strip(),
+                "execution_status": str(output.get("execution_status") or "").strip(),
+                "fallback_used": bool(output.get("fallback_used")),
+                "warnings": warnings_list,
+                "warning_count": len(warnings_list),
+                "trace_envelope": trace_envelope,
+            }
+        )
+    return entries
+
+
+def _tool_loop_error_completed_process(
+    *,
+    provider: str,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    retryable: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    envelope = _tool_loop_error_envelope(
+        code=code,
+        message=message,
+        details=details,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        retryable=retryable,
+    )
+    return subprocess.CompletedProcess(
+        [f"sdk:{provider}"],
+        1,
+        "",
+        f"{message}\n{json.dumps(envelope, sort_keys=True)}".strip(),
+    )
+
+
+def _tool_loop_error_envelope(
+    *,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    retryable: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "code": str(code or "").strip() or "tool_loop_error",
+        "message": str(message or "").strip() or "SDK tool loop failed.",
+        "details": dict(details or {}),
+        "retryable": bool(retryable),
+        "request_id": request_id,
+        "correlation_id": correlation_id,
+    }
+    return payload
 
 
 def _extract_list_config(value: Any, label: str) -> list[str]:

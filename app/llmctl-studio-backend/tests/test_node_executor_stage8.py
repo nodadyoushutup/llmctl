@@ -343,6 +343,260 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         self.assertEqual(task_payload.get("flowchart_run_id"), int(flowchart_run.id))
         self.assertEqual(task_payload.get("flowchart_node_id"), int(flowchart_node.id))
 
+    def test_node_detail_api_includes_incoming_connector_context(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(
+                session,
+                name="Node context flowchart",
+            )
+            flowchart_node = FlowchartNode.create(
+                session,
+                flowchart_id=int(flowchart.id),
+                node_type=FLOWCHART_NODE_TYPE_START,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=int(flowchart.id),
+                status="succeeded",
+            )
+            task = AgentTask.create(
+                session,
+                status="succeeded",
+                kind="flowchart_task",
+                flowchart_id=int(flowchart.id),
+                flowchart_run_id=int(flowchart_run.id),
+                flowchart_node_id=int(flowchart_node.id),
+                prompt=json.dumps({"input_context": {}}, sort_keys=True),
+                output="{}",
+            )
+            FlowchartRunNode.create(
+                session,
+                flowchart_run_id=int(flowchart_run.id),
+                flowchart_node_id=int(flowchart_node.id),
+                agent_task_id=int(task.id),
+                execution_index=1,
+                status="succeeded",
+                output_state_json="{}",
+                routing_state_json="{}",
+                input_context_json=json.dumps(
+                    {
+                        "upstream_nodes": [
+                            {
+                                "source_edge_id": 11,
+                                "source_node_id": 4,
+                                "source_node_type": "task",
+                                "edge_mode": "solid",
+                                "condition_key": "connector_1",
+                                "output_state": {"name": "James"},
+                            }
+                        ],
+                        "dotted_upstream_nodes": [
+                            {
+                                "source_edge_id": 12,
+                                "source_node_id": 5,
+                                "source_node_type": "memory",
+                                "edge_mode": "dotted",
+                                "condition_key": "context_only",
+                                "output_state": {"facts": ["James lives in LA"]},
+                            }
+                        ],
+                    },
+                    sort_keys=True,
+                ),
+            )
+            task_id = int(task.id)
+
+        response = self.client.get(f"/nodes/{task_id}?format=json")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        connector_context = payload.get("incoming_connector_context") or {}
+        self.assertEqual("flowchart_run_node", connector_context.get("source"))
+        self.assertTrue(connector_context.get("has_connector_context"))
+        self.assertEqual(1, int(connector_context.get("trigger_source_count") or 0))
+        self.assertEqual(1, int(connector_context.get("pulled_dotted_source_count") or 0))
+        self.assertEqual(1, int(connector_context.get("context_only_source_count") or 0))
+        upstream_nodes = connector_context.get("upstream_nodes") or []
+        dotted_upstream_nodes = connector_context.get("dotted_upstream_nodes") or []
+        context_only_nodes = connector_context.get("context_only_upstream_nodes") or []
+        self.assertEqual(1, len(upstream_nodes))
+        self.assertEqual(1, len(dotted_upstream_nodes))
+        self.assertEqual(1, len(context_only_nodes))
+        self.assertEqual("James", ((upstream_nodes[0].get("output_state") or {}).get("name")))
+        self.assertEqual(
+            "James lives in LA",
+            (((dotted_upstream_nodes[0].get("output_state") or {}).get("facts") or [""])[0]),
+        )
+
+    def test_node_detail_api_includes_left_panel_contract(self) -> None:
+        with session_scope() as session:
+            agent = Agent.create(
+                session,
+                name="Node Detail Agent",
+                prompt_json="{}",
+            )
+            mcp_server = MCPServer.create(
+                session,
+                name="Node Detail MCP",
+                server_key=f"node-detail-mcp-{uuid.uuid4().hex[:8]}",
+                config_json={"command": "echo", "args": ["ok"]},
+            )
+            flowchart = Flowchart.create(
+                session,
+                name="Node left panel flowchart",
+            )
+            flowchart_node = FlowchartNode.create(
+                session,
+                flowchart_id=int(flowchart.id),
+                node_type=FLOWCHART_NODE_TYPE_START,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=int(flowchart.id),
+                status="succeeded",
+            )
+            task = AgentTask.create(
+                session,
+                status="succeeded",
+                kind="flowchart_task",
+                agent_id=int(agent.id),
+                flowchart_id=int(flowchart.id),
+                flowchart_run_id=int(flowchart_run.id),
+                flowchart_node_id=int(flowchart_node.id),
+                prompt=json.dumps(
+                    {
+                        "flowchart_node_type": "memory",
+                        "prompt": "Capture a durable memory from context.",
+                        "task_context": {
+                            "rag_quick_run": {
+                                "collection": "docs",
+                            }
+                        },
+                        "input_context": {},
+                    },
+                    sort_keys=True,
+                ),
+                output=json.dumps(
+                    {
+                        "node_type": "memory",
+                        "action": "add",
+                        "message": "Stored memory.",
+                        "action_results": ["memory_1", "memory_2"],
+                        "collections": ["docs", "ops"],
+                    },
+                    sort_keys=True,
+                ),
+            )
+            task.mcp_servers = [mcp_server]
+            FlowchartRunNode.create(
+                session,
+                flowchart_run_id=int(flowchart_run.id),
+                flowchart_node_id=int(flowchart_node.id),
+                agent_task_id=int(task.id),
+                execution_index=1,
+                status="succeeded",
+                output_state_json="{}",
+                routing_state_json="{}",
+                input_context_json=json.dumps(
+                    {
+                        "upstream_nodes": [
+                            {
+                                "source_edge_id": 11,
+                                "source_node_id": 4,
+                                "source_node_type": "task",
+                                "edge_mode": "solid",
+                                "condition_key": "connector_1",
+                                "output_state": {"name": "James"},
+                            }
+                        ],
+                        "dotted_upstream_nodes": [
+                            {
+                                "source_edge_id": 12,
+                                "source_node_id": 5,
+                                "source_node_type": "memory",
+                                "edge_mode": "dotted",
+                                "condition_key": "context_only",
+                                "output_state": {"facts": ["James lives in LA"]},
+                            }
+                        ],
+                    },
+                    sort_keys=True,
+                ),
+            )
+            task_id = int(task.id)
+            agent_id = int(agent.id)
+
+        response = self.client.get(f"/nodes/{task_id}?format=json")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        left_panel = payload.get("left_panel") or {}
+        self.assertEqual(
+            {
+                "input",
+                "results",
+                "prompt",
+                "agent",
+                "mcp_servers",
+                "collections",
+                "raw_json",
+                "details",
+            },
+            set(left_panel.keys()),
+        )
+
+        input_panel = left_panel.get("input") or {}
+        self.assertEqual("flowchart_run_node", input_panel.get("source"))
+        self.assertEqual(1, int(input_panel.get("trigger_source_count") or 0))
+        self.assertEqual(1, int(input_panel.get("context_only_source_count") or 0))
+        connector_blocks = input_panel.get("connector_blocks") or []
+        self.assertEqual(2, len(connector_blocks))
+        self.assertEqual("trigger", connector_blocks[0].get("classification"))
+        self.assertEqual("context_only", connector_blocks[1].get("classification"))
+
+        results_panel = left_panel.get("results") or {}
+        self.assertEqual("Stored memory.", results_panel.get("primary_text"))
+        self.assertEqual(
+            ["memory_1", "memory_2"],
+            list(results_panel.get("action_results") or []),
+        )
+        summary_rows = results_panel.get("summary_rows") or []
+        summary_row_keys = [str(item.get("key") or "") for item in summary_rows if isinstance(item, dict)]
+        self.assertIn("message", summary_row_keys)
+        self.assertIn("action_results", summary_row_keys)
+
+        prompt_panel = left_panel.get("prompt") or {}
+        self.assertTrue(bool(prompt_panel.get("no_inferred_prompt_in_deterministic_mode")))
+        self.assertEqual(
+            "No inferred prompt in deterministic mode.",
+            prompt_panel.get("notice"),
+        )
+        provided_prompt_fields = prompt_panel.get("provided_prompt_fields") or {}
+        self.assertEqual("memory", provided_prompt_fields.get("flowchart_node_type"))
+
+        agent_panel = left_panel.get("agent") or {}
+        self.assertEqual(agent_id, int(agent_panel.get("id") or 0))
+        self.assertEqual("Node Detail Agent", agent_panel.get("name"))
+        self.assertEqual(f"/agents/{agent_id}", agent_panel.get("link_href"))
+
+        mcp_panel = left_panel.get("mcp_servers") or {}
+        mcp_items = mcp_panel.get("items") or []
+        self.assertEqual(1, len(mcp_items))
+        self.assertEqual("Node Detail MCP", mcp_items[0].get("name"))
+
+        collections_panel = left_panel.get("collections") or {}
+        collection_items = collections_panel.get("items") or []
+        collection_names = [str(item.get("name") or "") for item in collection_items if isinstance(item, dict)]
+        self.assertEqual(["docs", "ops"], collection_names)
+
+        raw_json_panel = left_panel.get("raw_json") or {}
+        self.assertTrue(bool(raw_json_panel.get("is_json")))
+        self.assertIn('"message": "Stored memory."', str(raw_json_panel.get("formatted_output") or ""))
+
+        details_panel = left_panel.get("details") or {}
+        detail_rows = details_panel.get("rows") or []
+        detail_row_keys = [str(item.get("key") or "") for item in detail_rows if isinstance(item, dict)]
+        self.assertIn("kind", detail_row_keys)
+        self.assertIn("node_type", detail_row_keys)
+
     def test_node_status_api_includes_runtime_evidence_metadata(self) -> None:
         with session_scope() as session:
             task = AgentTask.create(

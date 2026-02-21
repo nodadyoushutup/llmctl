@@ -101,7 +101,10 @@ export default function ChromaCollectionDetailPage() {
           <div className="table-actions">
             <Link to="/chroma/collections" className="btn-link btn-secondary">Back to Collections</Link>
             <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-            <button type="button" className="btn-link" onClick={handleDelete}>Delete</button>
+            <button type="button" className="btn-link" onClick={handleDelete}>
+              <i className="fa-solid fa-trash" aria-hidden="true" />
+              Delete
+            </button>
           </div>
         </div>
         {state.loading ? <p>Loading collection...</p> : null}

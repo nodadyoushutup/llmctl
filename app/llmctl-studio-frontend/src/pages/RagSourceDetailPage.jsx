@@ -140,7 +140,10 @@ export default function RagSourceDetailPage() {
             <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
             <button type="button" className="btn-link" disabled={busy} onClick={() => queueQuick('fresh')}>Quick Index</button>
             <button type="button" className="btn-link" disabled={busy} onClick={() => queueQuick('delta')}>Quick Delta</button>
-            <button type="button" className="btn-link" disabled={busy} onClick={handleDelete}>Delete</button>
+            <button type="button" className="btn-link" disabled={busy} onClick={handleDelete}>
+              <i className="fa-solid fa-trash" aria-hidden="true" />
+              Delete
+            </button>
           </div>
         </div>
         {state.loading ? <p>Loading source detail...</p> : null}
