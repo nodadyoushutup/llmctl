@@ -9,6 +9,7 @@ import {
   providerUsesFreeformModelInput,
   resolveProviderModelName,
 } from '../lib/modelFormOptions'
+import { parseAdvancedConfigInput } from '../lib/modelAdvancedConfig'
 import { resolveModelsListHref } from '../lib/modelsListState'
 import { createModel, getModelMeta } from '../lib/studioApi'
 
@@ -31,8 +32,10 @@ export default function ModelNewPage() {
   const flash = useFlash()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [busy, setBusy] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState({ name: '' })
+  const [fieldErrors, setFieldErrors] = useState({ name: '', advancedConfig: '' })
   const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '' })
+  const [advancedConfigText, setAdvancedConfigText] = useState('{}')
+  const [initialSnapshot, setInitialSnapshot] = useState(null)
   const listHref = useMemo(() => resolveModelsListHref(location.state?.from), [location.state])
 
   useEffect(() => {
@@ -54,6 +57,18 @@ export default function ModelNewPage() {
             modelOptions,
           }),
         }))
+        const initialModelName = resolveProviderModelName({
+          provider,
+          currentModelName: '',
+          modelOptions,
+        })
+        setInitialSnapshot({
+          name: '',
+          description: '',
+          provider,
+          modelName: initialModelName,
+          advancedConfig: '{}',
+        })
         setState({ loading: false, payload, error: '' })
       })
       .catch((error) => {
@@ -76,21 +91,42 @@ export default function ModelNewPage() {
     return Array.isArray(options) ? options : []
   }, [form.provider, modelOptions])
   const modelInputIsFreeform = providerUsesFreeformModelInput(form.provider)
+  const advancedConfigValidation = useMemo(
+    () => parseAdvancedConfigInput(advancedConfigText),
+    [advancedConfigText],
+  )
+  const isDirty = useMemo(() => {
+    if (!initialSnapshot) {
+      return false
+    }
+    return (
+      form.name !== initialSnapshot.name
+      || form.description !== initialSnapshot.description
+      || form.provider !== initialSnapshot.provider
+      || form.modelName !== initialSnapshot.modelName
+      || advancedConfigValidation.normalized !== initialSnapshot.advancedConfig
+    )
+  }, [advancedConfigValidation.normalized, form, initialSnapshot])
+  const isFormValid = Boolean(String(form.name || '').trim()) && !advancedConfigValidation.error
+  const canSubmit = !busy && !state.loading && !state.error && isDirty && isFormValid
 
   async function handleSubmit(event) {
     event.preventDefault()
     setBusy(true)
-    const nextFieldErrors = { name: '' }
+    const nextFieldErrors = { name: '', advancedConfig: '' }
     if (!String(form.name || '').trim()) {
       nextFieldErrors.name = 'Name is required.'
     }
+    if (advancedConfigValidation.error) {
+      nextFieldErrors.advancedConfig = advancedConfigValidation.error
+    }
     try {
       setFieldErrors(nextFieldErrors)
-      if (nextFieldErrors.name) {
+      if (nextFieldErrors.name || nextFieldErrors.advancedConfig) {
         setBusy(false)
         return
       }
-      const config = {}
+      const config = { ...advancedConfigValidation.config }
       if (form.modelName) {
         config.model = form.modelName
       }
@@ -112,6 +148,13 @@ export default function ModelNewPage() {
       flash.error(message)
       setBusy(false)
     }
+  }
+
+  function handleCancel() {
+    if (isDirty && !window.confirm('Discard unsaved changes?')) {
+      return
+    }
+    navigate(listHref)
   }
 
   return (
@@ -159,6 +202,10 @@ export default function ModelNewPage() {
                       modelOptions,
                     }),
                   }))
+                  setAdvancedConfigText('{}')
+                  if (fieldErrors.advancedConfig) {
+                    setFieldErrors((current) => ({ ...current, advancedConfig: '' }))
+                  }
                 }}
               >
                 {providerOptions.map((option) => (
@@ -196,6 +243,30 @@ export default function ModelNewPage() {
                 </select>
               )}
             </label>
+            <div className="field field-span">
+              <details>
+                <summary>Advanced provider settings</summary>
+                <div className="stack-sm" style={{ marginTop: '8px' }}>
+                  <label className="field">
+                    <span>Provider config JSON</span>
+                    <textarea
+                      rows={6}
+                      value={advancedConfigText}
+                      onChange={(event) => {
+                        setAdvancedConfigText(event.target.value)
+                        if (fieldErrors.advancedConfig) {
+                          setFieldErrors((current) => ({ ...current, advancedConfig: '' }))
+                        }
+                      }}
+                    />
+                    {fieldErrors.advancedConfig ? <span className="error-text">{fieldErrors.advancedConfig}</span> : null}
+                  </label>
+                  <p className="muted">
+                    Optional provider-specific overrides. Leave as <code>{'{}'}</code> to use defaults.
+                  </p>
+                </div>
+              </details>
+            </div>
             <label className="field field-span">
               <span>Description (optional)</span>
               <input
@@ -205,7 +276,8 @@ export default function ModelNewPage() {
               />
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={busy}>Create Model</button>
+              <button type="button" className="btn-link btn-secondary" onClick={handleCancel}>Cancel</button>
+              <button type="submit" className="btn-link" disabled={!canSubmit}>Create Model</button>
             </div>
           </form>
         ) : null}

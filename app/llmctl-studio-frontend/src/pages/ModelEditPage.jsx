@@ -9,6 +9,7 @@ import {
   providerUsesFreeformModelInput,
   resolveProviderModelName,
 } from '../lib/modelFormOptions'
+import { parseAdvancedConfigInput } from '../lib/modelAdvancedConfig'
 import { resolveModelsListHref } from '../lib/modelsListState'
 import { getModelEdit, updateModel } from '../lib/studioApi'
 
@@ -38,9 +39,10 @@ export default function ModelEditPage() {
   const parsedModelId = useMemo(() => parseId(modelId), [modelId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [busy, setBusy] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState({ name: '' })
+  const [fieldErrors, setFieldErrors] = useState({ name: '', advancedConfig: '' })
   const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '' })
-  const [configSeed, setConfigSeed] = useState({})
+  const [advancedConfigText, setAdvancedConfigText] = useState('{}')
+  const [initialSnapshot, setInitialSnapshot] = useState(null)
   const listHref = useMemo(() => resolveModelsListHref(location.state?.from), [location.state])
 
   useEffect(() => {
@@ -60,16 +62,25 @@ export default function ModelEditPage() {
         const modelOptions = normalizeProviderModelOptions(payload?.model_options)
         const restConfig = { ...config }
         delete restConfig.model
-        setConfigSeed(restConfig)
+        const advancedConfig = JSON.stringify(restConfig, null, 2)
+        const resolvedModelName = resolveProviderModelName({
+          provider,
+          currentModelName: String(config.model || ''),
+          modelOptions,
+        })
+        setAdvancedConfigText(advancedConfig)
         setForm({
           name: String(model.name || ''),
           description: String(model.description || ''),
           provider,
-          modelName: resolveProviderModelName({
-            provider,
-            currentModelName: String(config.model || ''),
-            modelOptions,
-          }),
+          modelName: resolvedModelName,
+        })
+        setInitialSnapshot({
+          name: String(model.name || ''),
+          description: String(model.description || ''),
+          provider,
+          modelName: resolvedModelName,
+          advancedConfig,
         })
         setState({ loading: false, payload, error: '' })
       })
@@ -96,6 +107,24 @@ export default function ModelEditPage() {
     return Array.isArray(options) ? options : []
   }, [form.provider, modelOptions])
   const modelInputIsFreeform = providerUsesFreeformModelInput(form.provider)
+  const advancedConfigValidation = useMemo(
+    () => parseAdvancedConfigInput(advancedConfigText),
+    [advancedConfigText],
+  )
+  const isDirty = useMemo(() => {
+    if (!initialSnapshot) {
+      return false
+    }
+    return (
+      form.name !== initialSnapshot.name
+      || form.description !== initialSnapshot.description
+      || form.provider !== initialSnapshot.provider
+      || form.modelName !== initialSnapshot.modelName
+      || advancedConfigValidation.normalized !== initialSnapshot.advancedConfig
+    )
+  }, [advancedConfigValidation.normalized, form, initialSnapshot])
+  const isFormValid = Boolean(String(form.name || '').trim()) && !advancedConfigValidation.error
+  const canSubmit = !busy && !loading && !error && isDirty && isFormValid
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -103,17 +132,20 @@ export default function ModelEditPage() {
       return
     }
     setBusy(true)
-    const nextFieldErrors = { name: '' }
+    const nextFieldErrors = { name: '', advancedConfig: '' }
     if (!String(form.name || '').trim()) {
       nextFieldErrors.name = 'Name is required.'
     }
+    if (advancedConfigValidation.error) {
+      nextFieldErrors.advancedConfig = advancedConfigValidation.error
+    }
     try {
       setFieldErrors(nextFieldErrors)
-      if (nextFieldErrors.name) {
+      if (nextFieldErrors.name || nextFieldErrors.advancedConfig) {
         setBusy(false)
         return
       }
-      const config = { ...configSeed }
+      const config = { ...advancedConfigValidation.config }
       if (form.modelName) {
         config.model = form.modelName
       } else {
@@ -132,6 +164,13 @@ export default function ModelEditPage() {
       flash.error(message)
       setBusy(false)
     }
+  }
+
+  function handleCancel() {
+    if (isDirty && !window.confirm('Discard unsaved changes?')) {
+      return
+    }
+    navigate(listHref)
   }
 
   return (
@@ -173,7 +212,10 @@ export default function ModelEditPage() {
                 value={form.provider}
                 onChange={(event) => {
                   const provider = event.target.value
-                  setConfigSeed({})
+                  setAdvancedConfigText('{}')
+                  if (fieldErrors.advancedConfig) {
+                    setFieldErrors((current) => ({ ...current, advancedConfig: '' }))
+                  }
                   setForm((current) => ({
                     ...current,
                     provider,
@@ -220,6 +262,30 @@ export default function ModelEditPage() {
                 </select>
               )}
             </label>
+            <div className="field field-span">
+              <details>
+                <summary>Advanced provider settings</summary>
+                <div className="stack-sm" style={{ marginTop: '8px' }}>
+                  <label className="field">
+                    <span>Provider config JSON</span>
+                    <textarea
+                      rows={6}
+                      value={advancedConfigText}
+                      onChange={(event) => {
+                        setAdvancedConfigText(event.target.value)
+                        if (fieldErrors.advancedConfig) {
+                          setFieldErrors((current) => ({ ...current, advancedConfig: '' }))
+                        }
+                      }}
+                    />
+                    {fieldErrors.advancedConfig ? <span className="error-text">{fieldErrors.advancedConfig}</span> : null}
+                  </label>
+                  <p className="muted">
+                    Optional provider-specific overrides. Leave as <code>{'{}'}</code> to use defaults.
+                  </p>
+                </div>
+              </details>
+            </div>
             <label className="field field-span">
               <span>Description (optional)</span>
               <input
@@ -229,7 +295,8 @@ export default function ModelEditPage() {
               />
             </label>
             <div className="form-actions">
-              <button type="submit" className="btn-link" disabled={busy}>Save Model</button>
+              <button type="button" className="btn-link btn-secondary" onClick={handleCancel}>Cancel</button>
+              <button type="submit" className="btn-link" disabled={!canSubmit}>Save Model</button>
             </div>
           </form>
         ) : null}

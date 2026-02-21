@@ -28,6 +28,23 @@ from services.execution.tooling import (  # noqa: E402
 
 
 class DeterministicToolingStage6Tests(unittest.TestCase):
+    def test_resolve_base_tool_scaffold_covers_all_special_node_types(self) -> None:
+        decision = resolve_base_tool_scaffold(node_type="decision")
+        self.assertEqual("deterministic.decision", decision.get("tool_name"))
+        self.assertEqual("evaluate", decision.get("operation"))
+
+        memory = resolve_base_tool_scaffold(node_type="memory")
+        self.assertEqual("deterministic.memory", memory.get("tool_name"))
+        self.assertEqual("add", memory.get("operation"))
+
+        milestone = resolve_base_tool_scaffold(node_type="milestone")
+        self.assertEqual("deterministic.milestone", milestone.get("tool_name"))
+        self.assertEqual("create_or_update", milestone.get("operation"))
+
+        plan = resolve_base_tool_scaffold(node_type="plan")
+        self.assertEqual("deterministic.plan", plan.get("tool_name"))
+        self.assertEqual("create_or_update_plan", plan.get("operation"))
+
     def test_resolve_base_tool_scaffold_falls_back_to_default_operation(self) -> None:
         scaffold = resolve_base_tool_scaffold(
             node_type="memory",

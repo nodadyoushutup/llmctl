@@ -11,6 +11,7 @@ const SORT_KEYS = new Set(['name', 'provider', 'model', 'default'])
 const SORT_DIRECTIONS = new Set(['asc', 'desc'])
 const PER_PAGE_OPTIONS = [10, 25, 50]
 const EMPTY_MODELS = []
+const MODEL_LOADING_SKELETON_ROWS = 5
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -81,6 +82,13 @@ export default function ModelsPage() {
   const [pendingDeleteById, setPendingDeleteById] = useState({})
   const [searchDraft, setSearchDraft] = useState(searchQuery)
   const [scrollRestoreAttempted, setScrollRestoreAttempted] = useState(false)
+  const [isNarrowScreen, setIsNarrowScreen] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false
+    }
+    return window.matchMedia('(max-width: 980px)').matches
+  })
+  const [capabilityPopoverModelId, setCapabilityPopoverModelId] = useState(null)
 
   useEffect(() => {
     setSearchDraft(searchQuery)
@@ -104,6 +112,42 @@ export default function ModelsPage() {
     setScrollRestoreAttempted(false)
   }, [location.search])
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined
+    }
+    const media = window.matchMedia('(max-width: 980px)')
+    const handleChange = (event) => {
+      setIsNarrowScreen(Boolean(event.matches))
+    }
+    setIsNarrowScreen(Boolean(media.matches))
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', handleChange)
+      return () => media.removeEventListener('change', handleChange)
+    }
+    media.addListener(handleChange)
+    return () => media.removeListener(handleChange)
+  }, [])
+
+  useEffect(() => {
+    if (capabilityPopoverModelId == null) {
+      return undefined
+    }
+    const handlePointerDown = (event) => {
+      if (!(event.target instanceof Element)) {
+        return
+      }
+      if (event.target.closest('.models-capability-overflow-wrap')) {
+        return
+      }
+      setCapabilityPopoverModelId(null)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [capabilityPopoverModelId])
+
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
       setState((current) => ({ ...current, loading: true, error: '' }))
@@ -125,6 +169,7 @@ export default function ModelsPage() {
   }, [refresh])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
+  const hasInitialLoadError = !state.loading && !payload && Boolean(state.error)
   const models = useMemo(
     () => (payload && Array.isArray(payload.models) ? payload.models : EMPTY_MODELS),
     [payload],
@@ -192,6 +237,10 @@ export default function ModelsPage() {
   const currentPage = Math.min(page, totalPages)
   const pageStart = (currentPage - 1) * perPage
   const visibleModels = sortedModels.slice(pageStart, pageStart + perPage)
+
+  useEffect(() => {
+    setCapabilityPopoverModelId(null)
+  }, [currentPage, defaultFilter, perPage, providerFilter, searchQuery, sortDirection, sortKey])
 
   const updateParams = useCallback((nextParams) => {
     const updated = new URLSearchParams(searchParams)
@@ -337,6 +386,62 @@ export default function ModelsPage() {
     navigate(href, { state: { from: listHref } })
   }
 
+  function renderFilterControls(idPrefix) {
+    return (
+      <>
+        <div className="toolbar-group">
+          <label htmlFor={`${idPrefix}-provider-filter`}>Provider</label>
+          <select
+            id={`${idPrefix}-provider-filter`}
+            value={providerFilter}
+            onChange={(event) => updateParams({ provider: event.target.value, page: 1 })}
+          >
+            <option value="">All providers</option>
+            {providerOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="toolbar-group">
+          <label htmlFor={`${idPrefix}-default-filter`}>Default</label>
+          <select
+            id={`${idPrefix}-default-filter`}
+            value={defaultFilter}
+            onChange={(event) => updateParams({ default: event.target.value, page: 1 })}
+          >
+            <option value="">All</option>
+            <option value="default">Default only</option>
+            <option value="non_default">Non-default only</option>
+          </select>
+        </div>
+        <div className="toolbar-group">
+          <label htmlFor={`${idPrefix}-sort-key`}>Sort</label>
+          <select
+            id={`${idPrefix}-sort-key`}
+            value={sortKey}
+            onChange={(event) => updateParams({ sort: event.target.value, page: 1 })}
+          >
+            <option value="name">Name</option>
+            <option value="provider">Provider</option>
+            <option value="model">Model</option>
+            <option value="default">Default</option>
+          </select>
+        </div>
+        <div className="toolbar-group">
+          <label htmlFor={`${idPrefix}-sort-direction`}>Direction</label>
+          <select
+            id={`${idPrefix}-sort-direction`}
+            value={sortDirection}
+            onChange={(event) => updateParams({ dir: event.target.value, page: 1 })}
+          >
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+        </div>
+      </>
+    )
+  }
+
   return (
     <section className="stack" aria-label="Models">
       <article className="card">
@@ -356,117 +461,119 @@ export default function ModelsPage() {
             New Model
           </Link>
         </div>
-        <div className="toolbar toolbar-wrap">
-          <div className="toolbar-group">
-            <label htmlFor="models-search">Search</label>
-            <input
-              id="models-search"
-              type="search"
-              value={searchDraft}
-              onChange={(event) => setSearchDraft(event.target.value)}
-              placeholder="Name, provider, model..."
-            />
+        <div className="models-list-controls" data-testid="models-list-controls">
+          <div className="models-list-controls-left">
+            <div className="toolbar-group">
+              <label htmlFor="models-search">Search</label>
+              <input
+                id="models-search"
+                type="search"
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
+                placeholder="Name, provider, model..."
+              />
+            </div>
+            {isNarrowScreen ? (
+              <details className="models-filters-popover">
+                <summary className="models-filters-summary">Filters</summary>
+                <div className="models-filters-popover-body">
+                  {renderFilterControls('models-mobile')}
+                </div>
+              </details>
+            ) : (
+              <div className="models-inline-filters">
+                {renderFilterControls('models')}
+              </div>
+            )}
           </div>
-          <div className="toolbar-group">
-            <label htmlFor="models-provider-filter">Provider</label>
-            <select
-              id="models-provider-filter"
-              value={providerFilter}
-              onChange={(event) => updateParams({ provider: event.target.value, page: 1 })}
-            >
-              <option value="">All providers</option>
-              {providerOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <label htmlFor="models-default-filter">Default</label>
-            <select
-              id="models-default-filter"
-              value={defaultFilter}
-              onChange={(event) => updateParams({ default: event.target.value, page: 1 })}
-            >
-              <option value="">All</option>
-              <option value="default">Default only</option>
-              <option value="non_default">Non-default only</option>
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <label htmlFor="models-sort-key">Sort</label>
-            <select
-              id="models-sort-key"
-              value={sortKey}
-              onChange={(event) => updateParams({ sort: event.target.value, page: 1 })}
-            >
-              <option value="name">Name</option>
-              <option value="provider">Provider</option>
-              <option value="model">Model</option>
-              <option value="default">Default</option>
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <label htmlFor="models-sort-direction">Direction</label>
-            <select
-              id="models-sort-direction"
-              value={sortDirection}
-              onChange={(event) => updateParams({ dir: event.target.value, page: 1 })}
-            >
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </select>
-          </div>
-          <div className="toolbar-group">
-            <label htmlFor="models-per-page">Rows per page</label>
-            <select
-              id="models-per-page"
-              value={String(perPage)}
-              onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
-            >
-              {PER_PAGE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!state.loading && !hasInitialLoadError ? (
+            <div className="models-list-controls-right">
+              <p className="toolbar-meta">Total models: {totalModels}</p>
+              <div className="pagination-size">
+                <label htmlFor="models-per-page">Rows per page</label>
+                <select
+                  id="models-per-page"
+                  value={String(perPage)}
+                  onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
+                >
+                  {PER_PAGE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <nav className="pagination" aria-label="Models pages">
+                {currentPage > 1 ? (
+                  <button
+                    type="button"
+                    className="pagination-btn"
+                    onClick={() => updateParams({ page: currentPage - 1 })}
+                  >
+                    Prev
+                  </button>
+                ) : (
+                  <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+                )}
+                <span className="pagination-link is-active" aria-current="page">
+                  {currentPage}
+                </span>
+                <span className="muted">/ {totalPages}</span>
+                {currentPage < totalPages ? (
+                  <button
+                    type="button"
+                    className="pagination-btn"
+                    onClick={() => updateParams({ page: currentPage + 1 })}
+                  >
+                    Next
+                  </button>
+                ) : (
+                  <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+                )}
+              </nav>
+            </div>
+          ) : null}
         </div>
-        {!state.loading && !state.error ? (
-          <div className="title-row" style={{ marginTop: '4px' }}>
-            <p className="toolbar-meta">Total models: {totalModels}</p>
-            <nav className="pagination" aria-label="Models pages">
-              {currentPage > 1 ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ page: currentPage - 1 })}
-                >
-                  Prev
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-              )}
-              <span className="pagination-link is-active" aria-current="page">
-                {currentPage}
-              </span>
-              <span className="muted">/ {totalPages}</span>
-              {currentPage < totalPages ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ page: currentPage + 1 })}
-                >
-                  Next
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-              )}
-            </nav>
+        {state.loading ? (
+          <div className="table-wrap" data-testid="models-loading-skeleton">
+            <table className="data-table models-loading-table" aria-label="Loading models">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Provider</th>
+                  <th>Default Alias</th>
+                  <th>Capability Tags</th>
+                  <th className="table-actions-cell">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: MODEL_LOADING_SKELETON_ROWS }).map((_, index) => (
+                  <tr key={`models-loading-row-${index}`} data-testid="models-skeleton-row">
+                    <td><span className="models-skeleton-line models-skeleton-line-primary" /></td>
+                    <td><span className="models-skeleton-line" /></td>
+                    <td><span className="models-skeleton-line" /></td>
+                    <td><span className="models-skeleton-line models-skeleton-line-tags" /></td>
+                    <td className="table-actions-cell">
+                      <div className="table-actions">
+                        <span className="models-skeleton-icon" />
+                        <span className="models-skeleton-icon" />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : null}
-        {state.loading ? <p>Loading models...</p> : null}
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-        {!state.loading && !state.error && visibleModels.length === 0 ? (
+        {hasInitialLoadError ? (
+          <div className="models-error-state" role="alert">
+            <p className="error-text">{state.error}</p>
+            <button type="button" className="btn-link" onClick={() => { void refresh() }}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {!state.loading && !hasInitialLoadError && visibleModels.length === 0 ? (
           <div className="stack" style={{ marginTop: '8px' }}>
             <p>No models matched the current filters.</p>
             <div>
@@ -481,7 +588,7 @@ export default function ModelsPage() {
             </div>
           </div>
         ) : null}
-        {!state.loading && !state.error && visibleModels.length > 0 ? (
+        {!state.loading && !hasInitialLoadError && visibleModels.length > 0 ? (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -528,7 +635,37 @@ export default function ModelsPage() {
                       </td>
                       <td>{model.provider_label || model.provider || '-'}</td>
                       <td>{String(model?.default_alias || '').trim() || '-'}</td>
-                      <td>{capabilityTags.length ? capabilityTags.join(', ') : '-'}</td>
+                      <td>
+                        {capabilityTags.length ? (
+                          <div className="models-capability-cell">
+                            {capabilityTags.slice(0, 2).map((tag) => (
+                              <span key={`${model.id}-${tag}`} className="chip models-capability-chip">{tag}</span>
+                            ))}
+                            {capabilityTags.length > 2 ? (
+                              <span className="models-capability-overflow-wrap">
+                                <button
+                                  type="button"
+                                  className="chip models-capability-overflow-btn"
+                                  aria-label={`Show ${capabilityTags.length - 2} more capability tags`}
+                                  title={capabilityTags.join(', ')}
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    setCapabilityPopoverModelId((current) => (current === model.id ? null : model.id))
+                                  }}
+                                >
+                                  +{capabilityTags.length - 2}
+                                </button>
+                                {capabilityPopoverModelId === model.id ? (
+                                  <div className="models-capability-popover" role="tooltip">
+                                    {capabilityTags.slice(2).join(', ')}
+                                  </div>
+                                ) : null}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : '-'}
+                      </td>
                       <td className="table-actions-cell">
                         <div className="table-actions">
                           <button

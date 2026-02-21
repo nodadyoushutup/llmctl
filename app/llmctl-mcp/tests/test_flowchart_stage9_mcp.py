@@ -907,6 +907,286 @@ class FlowchartStage9McpToolTests(unittest.TestCase):
             (detail_item.get("payload") or {}).get("matched_connector_ids") or [],
         )
 
+    def test_decision_tool_coverage_includes_core_operations(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="Decision Coverage Flowchart")
+            decision_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                title="Decision Coverage Node",
+                x=120,
+                y=0,
+                config_json=json.dumps(
+                    {
+                        "decision_conditions": [
+                            {
+                                "connector_id": "approve_connector",
+                                "condition_text": "risk_score < 0.5",
+                                "label": "Approve",
+                            },
+                            {
+                                "connector_id": "reject_connector",
+                                "condition_text": "risk_score >= 0.5",
+                                "label": "Reject",
+                            },
+                        ]
+                    },
+                    sort_keys=True,
+                ),
+            )
+            run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="completed",
+            )
+            run_node = FlowchartRunNode.create(
+                session,
+                flowchart_run_id=run.id,
+                flowchart_node_id=decision_node.id,
+                execution_index=1,
+                status="succeeded",
+                output_state_json=json.dumps(
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_DECISION,
+                        "matched_connector_ids": [],
+                        "evaluations": [],
+                        "no_match": True,
+                    },
+                    sort_keys=True,
+                ),
+            )
+            flowchart_id = flowchart.id
+            flowchart_node_id = decision_node.id
+            flowchart_run_id = run.id
+            flowchart_run_node_id = run_node.id
+
+        list_options = self.mcp.tools["llmctl_list_decision_options"]
+        score_options = self.mcp.tools["llmctl_score_decision_options"]
+        evaluate_decision = self.mcp.tools["llmctl_evaluate_decision"]
+        create_decision = self.mcp.tools["llmctl_create_decision"]
+        record_outcome = self.mcp.tools["llmctl_record_decision_outcome"]
+        get_decision = self.mcp.tools["llmctl_get_decision"]
+
+        listed_options = list_options(
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+        )
+        self.assertTrue(listed_options["ok"])
+        self.assertEqual(2, listed_options.get("count"))
+        self.assertEqual(
+            {"approve_connector", "reject_connector"},
+            {
+                str(item.get("option_id") or "")
+                for item in (listed_options.get("options") or [])
+            },
+        )
+
+        scored_options = score_options(
+            options=listed_options.get("options") or [],
+            matched_option_ids=["approve_connector"],
+        )
+        self.assertTrue(scored_options["ok"])
+        self.assertEqual(2, scored_options.get("count"))
+        self.assertEqual("approve_connector", (scored_options.get("scores") or [])[0].get("option_id"))
+
+        evaluated = evaluate_decision(
+            option_scores=scored_options.get("scores") or [],
+            min_score=0.5,
+        )
+        self.assertTrue(evaluated["ok"])
+        evaluated_routing_state = evaluated.get("routing_state") or {}
+        self.assertEqual("approve_connector", evaluated_routing_state.get("route_key"))
+        self.assertFalse(bool(evaluated_routing_state.get("no_match")))
+
+        created_decision = create_decision(
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+            matched_connector_ids=evaluated_routing_state.get("matched_connector_ids") or [],
+            evaluations=evaluated_routing_state.get("evaluations") or [],
+            route_key=evaluated_routing_state.get("route_key"),
+            no_match=evaluated_routing_state.get("no_match"),
+            options=listed_options.get("options") or [],
+            option_scores=scored_options.get("scores") or [],
+        )
+        self.assertTrue(created_decision["ok"])
+        decision_id = int((created_decision.get("item") or {}).get("id") or 0)
+        self.assertGreater(decision_id, 0)
+
+        recorded = record_outcome(
+            decision_id=decision_id,
+            outcome="approved",
+            selected_option_id="approve_connector",
+            notes="Recorded by stage9 MCP coverage test",
+        )
+        self.assertTrue(recorded["ok"])
+        recorded_payload = (recorded.get("item") or {}).get("payload") or {}
+        self.assertEqual("approved", recorded_payload.get("outcome"))
+        self.assertEqual("approve_connector", recorded_payload.get("selected_option_id"))
+
+        detail = get_decision(decision_id=decision_id)
+        self.assertTrue(detail["ok"])
+        self.assertEqual(decision_id, int((detail.get("item") or {}).get("id") or 0))
+
+        listed = get_decision(flowchart_run_id=flowchart_run_id)
+        self.assertTrue(listed["ok"])
+        listed_ids = {int(item.get("id") or 0) for item in (listed.get("items") or [])}
+        self.assertIn(decision_id, listed_ids)
+
+    def test_memory_tool_coverage_includes_crud_and_search(self) -> None:
+        create_memory = self.mcp.tools["llmctl_create_memory"]
+        get_memory = self.mcp.tools["llmctl_get_memory"]
+        update_memory = self.mcp.tools["llmctl_update_memory"]
+        delete_memory = self.mcp.tools["llmctl_delete_memory"]
+        search_memory = self.mcp.tools["llmctl_search_memory"]
+
+        first = create_memory(description="Alpha memory item")
+        second = create_memory(description="Beta memory note")
+        self.assertTrue(first["ok"])
+        self.assertTrue(second["ok"])
+        first_id = int((first.get("item") or {}).get("id") or 0)
+        second_id = int((second.get("item") or {}).get("id") or 0)
+        self.assertGreater(first_id, 0)
+        self.assertGreater(second_id, 0)
+
+        listed = get_memory(limit=20, include_artifacts=False)
+        self.assertTrue(listed["ok"])
+        listed_ids = {int(item.get("id") or 0) for item in (listed.get("items") or [])}
+        self.assertIn(first_id, listed_ids)
+        self.assertIn(second_id, listed_ids)
+
+        found = search_memory(query="alpha")
+        self.assertTrue(found["ok"])
+        found_ids = {int(item.get("id") or 0) for item in (found.get("items") or [])}
+        self.assertIn(first_id, found_ids)
+        self.assertNotIn(second_id, found_ids)
+
+        updated = update_memory(memory_id=first_id, description="Alpha memory item updated")
+        self.assertTrue(updated["ok"])
+        detail = get_memory(memory_id=first_id, include_artifacts=False)
+        self.assertTrue(detail["ok"])
+        self.assertEqual("Alpha memory item updated", (detail.get("item") or {}).get("description"))
+
+        deleted = delete_memory(memory_id=second_id)
+        self.assertTrue(deleted["ok"])
+        missing = get_memory(memory_id=second_id, include_artifacts=False)
+        self.assertFalse(missing["ok"])
+
+    def test_plan_tool_coverage_includes_reorder_and_stage_status(self) -> None:
+        create_plan = self.mcp.tools["llmctl_create_plan"]
+        get_plan = self.mcp.tools["llmctl_get_plan"]
+        update_plan = self.mcp.tools["llmctl_update_plan"]
+        delete_plan = self.mcp.tools["llmctl_delete_plan"]
+        create_stage = self.mcp.tools["llmctl_create_plan_stage"]
+        reorder_stages = self.mcp.tools["llmctl_reorder_plan_stages"]
+        set_stage_status = self.mcp.tools["llmctl_set_plan_stage_status"]
+
+        created = create_plan(name="Coverage Plan", description="Initial")
+        self.assertTrue(created["ok"])
+        plan_id = int((created.get("item") or {}).get("id") or 0)
+        self.assertGreater(plan_id, 0)
+
+        stage_a = create_stage(plan_id=plan_id, name="Stage A")
+        stage_b = create_stage(plan_id=plan_id, name="Stage B")
+        self.assertTrue(stage_a["ok"])
+        self.assertTrue(stage_b["ok"])
+        stage_a_id = int((stage_a.get("item") or {}).get("id") or 0)
+        stage_b_id = int((stage_b.get("item") or {}).get("id") or 0)
+
+        reordered = reorder_stages(plan_id=plan_id, stage_ids=[stage_b_id, stage_a_id])
+        self.assertTrue(reordered["ok"])
+        reordered_ids = [
+            int(stage.get("id") or 0)
+            for stage in ((reordered.get("item") or {}).get("stages") or [])
+        ]
+        self.assertEqual([stage_b_id, stage_a_id], reordered_ids)
+
+        completed = set_stage_status(stage_id=stage_b_id, status="completed", plan_id=plan_id)
+        self.assertTrue(completed["ok"])
+        self.assertEqual("completed", ((completed.get("item") or {}).get("status")))
+        self.assertTrue(bool((completed.get("item") or {}).get("completed_at")))
+
+        in_progress = set_stage_status(stage_id=stage_b_id, status="in_progress", plan_id=plan_id)
+        self.assertTrue(in_progress["ok"])
+        self.assertEqual("in_progress", ((in_progress.get("item") or {}).get("status")))
+        self.assertIsNone((in_progress.get("item") or {}).get("completed_at"))
+
+        updated = update_plan(plan_id=plan_id, patch={"description": "Updated description"})
+        self.assertTrue(updated["ok"])
+        self.assertEqual("Updated description", ((updated.get("item") or {}).get("description")))
+
+        listed = get_plan(limit=20, include_stages=True, include_tasks=True, include_artifacts=False)
+        self.assertTrue(listed["ok"])
+        listed_ids = {int(item.get("id") or 0) for item in (listed.get("items") or [])}
+        self.assertIn(plan_id, listed_ids)
+
+        detail = get_plan(plan_id=plan_id, include_stages=True, include_tasks=True, include_artifacts=False)
+        self.assertTrue(detail["ok"])
+        self.assertEqual(plan_id, int(((detail.get("item") or {}).get("id") or 0)))
+
+        deleted = delete_plan(plan_id=plan_id)
+        self.assertTrue(deleted["ok"])
+        missing = get_plan(plan_id=plan_id, include_artifacts=False)
+        self.assertFalse(missing["ok"])
+
+    def test_milestone_tool_coverage_includes_set_status_and_attach_evidence(self) -> None:
+        create_milestone = self.mcp.tools["llmctl_create_milestone"]
+        get_milestone = self.mcp.tools["llmctl_get_milestone"]
+        update_milestone = self.mcp.tools["llmctl_update_milestone"]
+        delete_milestone = self.mcp.tools["llmctl_delete_milestone"]
+        set_milestone_status = self.mcp.tools["llmctl_set_milestone_status"]
+        attach_milestone_evidence = self.mcp.tools["llmctl_attach_milestone_evidence"]
+
+        created = create_milestone(name="Coverage Milestone")
+        self.assertTrue(created["ok"])
+        milestone_id = int((created.get("item") or {}).get("id") or 0)
+        self.assertGreater(milestone_id, 0)
+
+        listed = get_milestone(limit=20, include_artifacts=False)
+        self.assertTrue(listed["ok"])
+        listed_ids = {int(item.get("id") or 0) for item in (listed.get("items") or [])}
+        self.assertIn(milestone_id, listed_ids)
+
+        updated = update_milestone(
+            milestone_id=milestone_id,
+            patch={"description": "Updated milestone description"},
+        )
+        self.assertTrue(updated["ok"])
+        self.assertEqual(
+            "Updated milestone description",
+            ((updated.get("item") or {}).get("description")),
+        )
+
+        status_update = set_milestone_status(milestone_id=milestone_id, status="done")
+        self.assertTrue(status_update["ok"])
+        status_item = status_update.get("item") or {}
+        self.assertEqual("done", status_item.get("status"))
+        self.assertTrue(bool(status_item.get("completed")))
+
+        evidence_update = attach_milestone_evidence(
+            milestone_id=milestone_id,
+            evidence="Verified in deterministic tooling coverage test.",
+        )
+        self.assertTrue(evidence_update["ok"])
+        self.assertIn(
+            "Verified in deterministic tooling coverage test.",
+            str((evidence_update.get("item") or {}).get("latest_update") or ""),
+        )
+
+        detail = get_milestone(milestone_id=milestone_id, include_artifacts=False)
+        self.assertTrue(detail["ok"])
+        self.assertIn(
+            "Verified in deterministic tooling coverage test.",
+            str((detail.get("item") or {}).get("latest_update") or ""),
+        )
+
+        deleted = delete_milestone(milestone_id=milestone_id)
+        self.assertTrue(deleted["ok"])
+        missing = get_milestone(milestone_id=milestone_id, include_artifacts=False)
+        self.assertFalse(missing["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

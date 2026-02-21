@@ -34,6 +34,15 @@ function normalizeBasePath(value, fallback = '/') {
   return `/${effective.replace(/^\/+|\/+$/g, '')}/`
 }
 
+function normalizeAllowedHosts(value) {
+  const defaults = ['localhost', '127.0.0.1', 'k8s.nodadyoushutup.com', '.nodadyoushutup.com']
+  const configured = String(value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return Array.from(new Set([...defaults, ...configured]))
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const devApiProxyTarget = normalizeProxyTarget(env.VITE_DEV_API_PROXY_TARGET)
@@ -44,6 +53,7 @@ export default defineConfig(({ mode }) => {
   const watchInterval = normalizePositiveInt(env.VITE_DEV_WATCH_POLL_INTERVAL, 300)
 
   const server = {
+    allowedHosts: normalizeAllowedHosts(env.VITE_DEV_ALLOWED_HOSTS),
     watch: {
       // Containerized bind mounts can emit unstable fs events; polling avoids chokidar EIO crashes.
       usePolling,

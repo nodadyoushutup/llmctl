@@ -52,6 +52,28 @@ Required remediation items (hard-gated):
 - [x] Add frontier executor integration smoke test proving `llm_call` + flowchart task node succeeds without CLI binaries on PATH.
 - [x] Add claim-evidence row in the matrix marking previous SDK-only claim as failed-until-remediated.
 
+## Critical Incident Addendum (2026-02-20): Agent Abstraction Evidence Gap
+
+Observed audit gap:
+
+- Claim `RMC-0075` was previously marked `pass` using behavior-only prompt composition evidence.
+- The source requirement on `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md:55` explicitly references executor-time config assembly from experiment agent classes.
+- Production runtime currently assembles `agent_profile` through dict payload helpers, not typed runtime abstraction classes.
+
+Why this was missed:
+
+- Claim decomposition treated the requirement as prompt/payload behavior parity, not architecture-port parity.
+- Evidence mapping accepted runtime behavior/tests without a matching static code-structure requirement.
+- Guardrail stages for claim-to-test linkage and architecture-proof gating are still incomplete.
+
+Required remediation items (hard-gated):
+
+- [x] Reclassify `RMC-0075` from `pass` to `insufficient_evidence` until typed runtime abstraction proof exists.
+- [x] Add explicit architecture claims for production typed agent abstraction adoption and SDK-path wiring through that abstraction.
+- [ ] Implement production `AgentInfo`/agent runtime abstraction classes in Studio backend runtime modules and replace dict-first assembly at runtime entry points.
+- [ ] Wire frontier SDK execution path (`_run_frontier_llm_sdk` and prompt envelope assembly callsites) through the production typed abstraction.
+- [ ] Add/enable hard gate so architecture/runtime invariant claims cannot be marked `pass` without both static code evidence and runtime test evidence.
+
 ## Stage 2 - Claim Inventory + Normalization
 
 - [x] Enumerate every checked claim across active runtime migration planning docs.
@@ -159,3 +181,17 @@ Required remediation items (hard-gated):
     - `.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_executor_context_uses_sdk_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_frontier_executor_smoke_llm_call_and_task_node_succeed_without_cli_binaries app.llmctl-studio-backend.tests.test_claude_provider_stage8.ClaudeProviderRuntimeStage8UnitTests.test_run_llm_claude_executor_context_uses_frontier_sdk_path`
     - `python3 -m compileall -q app/llmctl-studio-backend/src/core/config.py app/llmctl-studio-backend/src/services/execution/kubernetes_executor.py app/llmctl-studio-backend/src/services/integrations.py app/llmctl-studio-backend/src/web/views.py app/llmctl-studio-backend/tests/test_node_executor_stage2.py app/llmctl-studio-backend/tests/test_executor_harbor_stage5.py`
   - Matrix impact: closed executor claims `RMC-0215`, `RMC-0216`, and `RMC-0218` to `pass` with linked evidence.
+- Frontend routing-inspector evidence batch completed for claim closure:
+  - Claims closed to `pass`: `RMC-0011`, `RMC-0177`, `RMC-0178`, `RMC-0181`, `RMC-0183`, `RMC-0185`, `RMC-0186`, `RMC-0191`, `RMC-0234`.
+  - Added focused routing test coverage in `app/llmctl-studio-frontend/src/components/FlowchartWorkspaceEditor.test.jsx` for contextual routing visibility and default-collapsed routing details.
+  - Validation command:
+    - `npm --prefix app/llmctl-studio-frontend test -- src/components/FlowchartWorkspaceEditor.test.jsx -t \"routing|fallback\"`
+  - Result: `1` file passed; `3` tests passed; `20` tests skipped.
+- Runtime claim remediation batch completed (6 claims):
+  - Claims closed to `pass`: `RMC-0046`, `RMC-0140`, `RMC-0188`, `RMC-0189`, `RMC-0194`, `RMC-0227`.
+  - Added focused routing draft-persistence coverage:
+    - `app/llmctl-studio-frontend/src/components/FlowchartWorkspaceEditor.test.jsx` (`preserves invalid routing draft edits across collapse and reopen`).
+  - Validation commands:
+    - `npm --prefix app/llmctl-studio-frontend test -- src/components/FlowchartWorkspaceEditor.test.jsx`
+    - `.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_deterministic_tooling_stage6.DeterministicToolingStage6Tests.test_invoke_deterministic_tool_uses_success_with_warning_fallback app.llmctl-studio-backend.tests.test_special_node_tooling_stage10.SpecialNodeToolingStage10Tests.test_memory_wrapper_conflict_only_fallback_handles_conflict app.llmctl-studio-backend.tests.test_flowchart_stage12.FlowchartStage12Tests.test_trace_and_status_surface_warning_and_trace_ids app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts.ModelProviderStage7ContractTests.test_models_list_supports_query_contract app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts.ModelProviderStage7ContractTests.test_model_create_validation_uses_error_envelope app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts.ModelProviderStage7ContractTests.test_model_detail_reports_compatibility_drift`
+  - Result: frontend `24` tests passed; backend `6` tests passed (`OK`).

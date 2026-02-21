@@ -83,5 +83,84 @@ describe('ModelEditPage', () => {
         }),
       }))
     })
+    expect(await screen.findByText('Saved model Existing Profile.')).toBeInTheDocument()
+    expect(screen.getByText('Model detail route')).toBeInTheDocument()
+  })
+
+  test('save stays disabled until form is both dirty and valid', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(getModelEdit).toHaveBeenCalledWith(12)
+    })
+
+    const saveButton = screen.getByRole('button', { name: 'Save Model' })
+    expect(saveButton).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '' } })
+    expect(saveButton).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Updated Profile' } })
+    expect(saveButton).not.toBeDisabled()
+  })
+
+  test('advanced provider settings are collapsed by default and included in update payload', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(getModelEdit).toHaveBeenCalledWith(12)
+    })
+
+    fireEvent.click(screen.getByText('Advanced provider settings'))
+    fireEvent.change(screen.getByLabelText('Provider config JSON'), {
+      target: { value: '{\n  "model_reasoning_effort": "low"\n}' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Model' }))
+
+    await waitFor(() => {
+      expect(updateModel).toHaveBeenCalledWith(12, expect.objectContaining({
+        config: expect.objectContaining({
+          model: 'gpt-5-codex',
+          model_reasoning_effort: 'low',
+        }),
+      }))
+    })
+  })
+
+  test('cancel returns to model list route when there are no unsaved changes', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(getModelEdit).toHaveBeenCalledWith(12)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('Models list route')).toBeInTheDocument()
+  })
+
+  test('prompts before leaving when there are unsaved changes', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPage()
+    await waitFor(() => {
+      expect(getModelEdit).toHaveBeenCalledWith(12)
+    })
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unsaved Existing Profile' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith('Discard unsaved changes?')
+    expect(screen.queryByText('Models list route')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save Model' })).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+  test('update failures report through flash viewport', async () => {
+    updateModel.mockRejectedValueOnce(new Error('Update failed in test'))
+    renderPage()
+    await waitFor(() => {
+      expect(getModelEdit).toHaveBeenCalledWith(12)
+    })
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Updated Existing Profile' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Model' }))
+
+    expect(await screen.findByText('Update failed in test')).toBeInTheDocument()
   })
 })

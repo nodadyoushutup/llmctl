@@ -339,6 +339,15 @@ class ToolDomainsStage11Tests(unittest.TestCase):
             )
             self.assertIn("stopped", stop_outcome.output_state["result"])
 
+            limits_outcome = run_command_tool(
+                context=context,
+                operation="resource_limits",
+                args={},
+            )
+            limits_result = limits_outcome.output_state["result"]
+            self.assertGreaterEqual(int(limits_result.get("cpu_count") or 0), 1)
+            self.assertIn("limits", limits_result)
+
     def test_rag_tool_suite_contracts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="stage11-rag-") as tmpdir:
             context = self._context(Path(tmpdir))

@@ -240,6 +240,7 @@ from services.skills import (
     load_skill_bundle,
     serialize_skill_bundle,
 )
+from services.agent_runtime import build_agent_payload as build_runtime_agent_payload
 from services.tasks import (
     build_one_off_output_contract,
     claude_runtime_diagnostics,
@@ -939,12 +940,7 @@ def _build_role_payload(role: Role) -> dict[str, object]:
 
 
 def _build_agent_payload(agent: Agent) -> dict[str, object]:
-    description = agent.description or agent.name or ""
-    return {
-        "id": agent.id,
-        "name": agent.name,
-        "description": description,
-    }
+    return build_runtime_agent_payload(agent)
 
 
 def _serialize_agent_priority(priority: AgentPriority) -> dict[str, object]:

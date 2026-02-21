@@ -166,7 +166,7 @@ from core.task_kinds import (
     is_quick_task_kind,
 )
 from core.quick_node import (
-    build_quick_node_agent_profile,
+    build_quick_node_agent_info,
     build_quick_node_system_contract,
 )
 from services.skill_adapters import (
@@ -175,6 +175,15 @@ from services.skill_adapters import (
     resolve_agent_skills,
     skill_ids_payload,
     skill_versions_payload,
+)
+from services.execution.agent_info import (
+    AgentInfo,
+    coerce_agent_profile_payload,
+)
+from services.execution.agent_runtime import (
+    FrontierAgent,
+    FrontierAgentDependencies,
+    FrontierAgentRequest,
 )
 from services.instructions.compiler import (
     InstructionCompileInput,
@@ -3375,13 +3384,12 @@ def _merge_attachments(
     return merged
 
 
+def _build_agent_info(agent: Agent) -> AgentInfo:
+    return AgentInfo.from_model(agent)
+
+
 def _build_agent_payload(agent: Agent) -> dict[str, object]:
-    description = agent.description or agent.name or ""
-    return {
-        "id": agent.id,
-        "name": agent.name,
-        "description": description,
-    }
+    return _build_agent_info(agent).to_payload()
 
 
 def _build_agent_prompt_payload(agent: Agent) -> dict[str, object]:
@@ -3446,7 +3454,7 @@ def _build_run_prompt_payload(agent: Agent) -> str:
     envelope = build_prompt_envelope(
         user_request=_build_autorun_user_request(agent),
         system_contract=_build_system_contract(agent),
-        agent_profile=_build_agent_payload(agent),
+        agent_profile=_build_agent_info(agent),
         task_context={"kind": "autorun"},
         output_contract=_build_output_contract(),
     )
@@ -3457,7 +3465,7 @@ def _render_prompt(agent: Agent) -> str:
     envelope = build_prompt_envelope(
         user_request=_build_default_task_user_request(agent),
         system_contract=_build_system_contract(agent),
-        agent_profile=_build_agent_payload(agent),
+        agent_profile=_build_agent_info(agent),
         task_context={"kind": "task"},
         output_contract=_build_output_contract(),
     )
@@ -3912,7 +3920,7 @@ def _inject_envelope_core_sections(
     prompt: str,
     *,
     system_contract: dict[str, object] | None = None,
-    agent_profile: dict[str, object] | None = None,
+    agent_profile: object | None = None,
     task_kind: str | None = None,
 ) -> str:
     payload = _load_prompt_dict(prompt)
@@ -3925,7 +3933,9 @@ def _inject_envelope_core_sections(
         else:
             payload["system_contract"] = system_contract
     if agent_profile:
-        payload["agent_profile"] = agent_profile
+        resolved_agent_profile = coerce_agent_profile_payload(agent_profile)
+        if resolved_agent_profile:
+            payload["agent_profile"] = resolved_agent_profile
     task_context = _ensure_task_context(payload)
     if task_kind:
         task_context["kind"] = task_kind
@@ -4033,188 +4043,6 @@ def _is_upstream_500(stdout: str, stderr: str) -> bool:
     return any(marker in haystack for marker in markers)
 
 
-def _optional_positive_int(value: Any) -> int | None:
-    try:
-        parsed = int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
-
-
-def _optional_float(value: Any) -> float | None:
-    try:
-        return float(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _error_status_code(exc: Exception) -> int:
-    for attr in ("status_code", "status"):
-        value = getattr(exc, attr, None)
-        try:
-            code = int(value)
-        except (TypeError, ValueError):
-            continue
-        if code > 0:
-            return code
-    return 1
-
-
-def _extract_openai_response_text(payload: Any) -> str:
-    output_text = str(getattr(payload, "output_text", "") or "").strip()
-    if output_text:
-        return output_text
-    if hasattr(payload, "model_dump"):
-        try:
-            payload = payload.model_dump()
-        except Exception:
-            payload = None
-    if not isinstance(payload, dict):
-        return str(payload or "").strip()
-    outputs = payload.get("output")
-    if not isinstance(outputs, list):
-        return str(payload).strip()
-    chunks: list[str] = []
-    for item in outputs:
-        if not isinstance(item, dict):
-            continue
-        content = item.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            text_value = str(block.get("text") or block.get("output_text") or "").strip()
-            if text_value:
-                chunks.append(text_value)
-    if chunks:
-        return "\n".join(chunks).strip()
-    return str(payload).strip()
-
-
-def _extract_google_response_text(payload: Any) -> str:
-    direct = str(getattr(payload, "text", "") or "").strip()
-    if direct:
-        return direct
-    candidates = list(getattr(payload, "candidates", None) or [])
-    chunks: list[str] = []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        parts = list(getattr(content, "parts", None) or [])
-        for part in parts:
-            text_value = str(getattr(part, "text", "") or "").strip()
-            if text_value:
-                chunks.append(text_value)
-    if chunks:
-        return "\n".join(chunks).strip()
-    return str(payload or "").strip()
-
-
-def _extract_claude_response_text(payload: Any) -> str:
-    blocks = list(getattr(payload, "content", None) or [])
-    chunks: list[str] = []
-    for block in blocks:
-        text_value = str(getattr(block, "text", "") or "").strip()
-        if text_value:
-            chunks.append(text_value)
-            continue
-        if isinstance(block, dict):
-            fallback = str(block.get("text") or "").strip()
-            if fallback:
-                chunks.append(fallback)
-    if chunks:
-        return "\n".join(chunks).strip()
-    return str(payload or "").strip()
-
-
-def _build_codex_sdk_mcp_tools(
-    mcp_configs: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    tools: list[dict[str, Any]] = []
-    allowed_keys = {
-        "authorization",
-        "description",
-        "headers",
-        "include_tools",
-        "require_approval",
-        "transport",
-        "url",
-    }
-    for server_key in sorted(mcp_configs):
-        config = dict(mcp_configs.get(server_key) or {})
-        server_url = str(config.get("url") or "").strip()
-        if not server_url:
-            raise ValueError(
-                f"Codex MCP config for '{server_key}' must include a non-empty url."
-            )
-
-        transport = str(config.get("transport") or "").strip().lower()
-        if transport and transport not in {"streamable-http", "http", "sse"}:
-            raise ValueError(
-                "Codex SDK MCP only supports remote HTTP/SSE servers; "
-                f"server '{server_key}' has unsupported transport '{transport}'."
-            )
-
-        unsupported_keys = sorted(
-            key
-            for key, value in config.items()
-            if key not in allowed_keys
-            and value not in (None, "", [], {})
-        )
-        if unsupported_keys:
-            raise ValueError(
-                "Codex SDK MCP does not support these config fields for "
-                f"'{server_key}': {', '.join(unsupported_keys)}."
-            )
-
-        require_approval = str(config.get("require_approval") or "").strip().lower()
-        if require_approval and require_approval not in {"always", "never"}:
-            raise ValueError(
-                "Codex MCP config for "
-                f"'{server_key}' has invalid require_approval='{require_approval}'."
-            )
-        tool: dict[str, Any] = {
-            "type": "mcp",
-            "server_label": str(server_key),
-            "server_url": server_url,
-            "require_approval": require_approval or "never",
-        }
-        description = str(config.get("description") or "").strip()
-        if description:
-            tool["server_description"] = description
-
-        headers = _extract_mapping_config(config.get("headers"), "headers")
-        explicit_authorization = str(config.get("authorization") or "").strip()
-        header_authorization = ""
-        for header_key, header_value in headers.items():
-            if header_key.lower() == "authorization":
-                header_authorization = str(header_value).strip()
-                break
-        if explicit_authorization and header_authorization and (
-            explicit_authorization != header_authorization
-        ):
-            raise ValueError(
-                "Codex MCP config for "
-                f"'{server_key}' defines conflicting authorization values."
-            )
-        authorization = explicit_authorization or header_authorization
-        if authorization:
-            tool["authorization"] = authorization
-        forwarded_headers = {
-            key: value
-            for key, value in headers.items()
-            if key.lower() != "authorization"
-        }
-        if forwarded_headers:
-            tool["headers"] = forwarded_headers
-
-        include_tools = _extract_list_config(config.get("include_tools"), "include_tools")
-        if include_tools:
-            tool["allowed_tools"] = include_tools
-        tools.append(tool)
-    return tools
-
-
 def _run_frontier_llm_sdk(
     *,
     provider: str,
@@ -4225,225 +4053,31 @@ def _run_frontier_llm_sdk(
     on_log: Callable[[str], None] | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    provider_label = _provider_label(provider)
-    env_map = dict(env or os.environ.copy())
-    prompt_text = str(prompt or "")
-    config_map = model_config if isinstance(model_config, dict) else {}
-    timeout_seconds = max(1.0, _safe_float(config_map.get("request_timeout_seconds"), 300.0))
-    if mcp_configs and provider != "codex":
-        return subprocess.CompletedProcess(
-            [f"sdk:{provider}"],
-            1,
-            "",
-            (
-                f"{provider_label} SDK runtime does not support MCP transport config. "
-                "MCP server wiring via CLI has been removed; unbind MCP servers for this run."
-            ),
+    runtime = FrontierAgent(
+        FrontierAgentDependencies(
+            provider_label=_provider_label,
+            codex_settings_from_model_config=_codex_settings_from_model_config,
+            gemini_settings_from_model_config=_gemini_settings_from_model_config,
+            load_codex_auth_key=_load_codex_auth_key,
+            load_gemini_auth_key=_load_gemini_auth_key,
+            resolve_claude_auth_key=_resolve_claude_auth_key,
+            default_codex_model=Config.CODEX_MODEL or "gpt-5",
+            default_gemini_model=Config.GEMINI_MODEL or "gemini-2.5-flash",
+            default_claude_model=Config.CLAUDE_MODEL or "claude-sonnet-4-0",
+            require_claude_api_key=bool(Config.CLAUDE_AUTH_REQUIRE_API_KEY),
         )
-
-    def _emit_result(result: subprocess.CompletedProcess[str]) -> subprocess.CompletedProcess[str]:
-        if on_update is not None:
-            on_update(str(result.stdout or ""), str(result.stderr or ""))
-        return result
-
-    def _run_once() -> subprocess.CompletedProcess[str]:
-        if provider == "codex":
-            try:
-                from openai import OpenAI
-            except Exception as exc:  # pragma: no cover
-                return subprocess.CompletedProcess(
-                    ["sdk:codex"],
-                    1,
-                    "",
-                    f"OpenAI Python SDK is required for codex provider: {exc}",
-                )
-            codex_settings = _codex_settings_from_model_config(config_map)
-            model_name = str(codex_settings.get("model") or "").strip() or (Config.CODEX_MODEL or "gpt-5")
-            api_key = (
-                _load_codex_auth_key()
-                or str(env_map.get("OPENAI_API_KEY") or "").strip()
-                or str(env_map.get("CODEX_API_KEY") or "").strip()
-            )
-            if not api_key:
-                return subprocess.CompletedProcess(
-                    ["sdk:codex"],
-                    1,
-                    "",
-                    "Codex runtime requires OPENAI_API_KEY or CODEX_API_KEY.",
-                )
-            try:
-                mcp_tools = _build_codex_sdk_mcp_tools(mcp_configs)
-            except ValueError as exc:
-                return subprocess.CompletedProcess(
-                    ["sdk:codex"],
-                    1,
-                    "",
-                    str(exc),
-                )
-            if on_log:
-                on_log(
-                    f"Running {provider_label}: OpenAI SDK responses model={model_name}."
-                )
-            request: dict[str, Any] = {
-                "model": model_name,
-                "input": prompt_text,
-            }
-            if mcp_tools:
-                request["tools"] = mcp_tools
-            max_output_tokens = _optional_positive_int(config_map.get("max_output_tokens"))
-            if max_output_tokens is not None:
-                request["max_output_tokens"] = max_output_tokens
-            temperature = _optional_float(config_map.get("temperature"))
-            if temperature is not None:
-                request["temperature"] = temperature
-            top_p = _optional_float(config_map.get("top_p"))
-            if top_p is not None:
-                request["top_p"] = top_p
-            try:
-                response_payload = OpenAI(api_key=api_key).responses.create(**request)
-            except Exception as exc:
-                return subprocess.CompletedProcess(
-                    ["sdk:codex"],
-                    _error_status_code(exc),
-                    "",
-                    str(exc),
-                )
-            output_text = _extract_openai_response_text(response_payload)
-            return subprocess.CompletedProcess(["sdk:codex"], 0, output_text, "")
-
-        if provider == "gemini":
-            try:
-                from google import genai
-            except Exception as exc:  # pragma: no cover
-                return subprocess.CompletedProcess(
-                    ["sdk:gemini"],
-                    1,
-                    "",
-                    f"google-genai Python SDK is required for gemini provider: {exc}",
-                )
-            gemini_settings = _gemini_settings_from_model_config(config_map)
-            model_name = str(gemini_settings.get("model") or "").strip() or (
-                Config.GEMINI_MODEL or "gemini-2.5-flash"
-            )
-            api_key = (
-                _load_gemini_auth_key()
-                or str(env_map.get("GEMINI_API_KEY") or "").strip()
-                or str(env_map.get("GOOGLE_API_KEY") or "").strip()
-            )
-            if not api_key:
-                return subprocess.CompletedProcess(
-                    ["sdk:gemini"],
-                    1,
-                    "",
-                    "Gemini runtime requires GEMINI_API_KEY or GOOGLE_API_KEY.",
-                )
-            if on_log:
-                on_log(
-                    f"Running {provider_label}: Google SDK generate_content model={model_name}."
-                )
-            request_config: dict[str, Any] = {}
-            max_output_tokens = _optional_positive_int(config_map.get("max_output_tokens"))
-            if max_output_tokens is not None:
-                request_config["max_output_tokens"] = max_output_tokens
-            temperature = _optional_float(config_map.get("temperature"))
-            if temperature is not None:
-                request_config["temperature"] = temperature
-            top_p = _optional_float(config_map.get("top_p"))
-            if top_p is not None:
-                request_config["top_p"] = top_p
-            top_k = _optional_positive_int(config_map.get("top_k"))
-            if top_k is not None:
-                request_config["top_k"] = top_k
-            try:
-                response_payload = genai.Client(api_key=api_key).models.generate_content(
-                    model=model_name,
-                    contents=prompt_text,
-                    config=request_config if request_config else None,
-                )
-            except Exception as exc:
-                return subprocess.CompletedProcess(
-                    ["sdk:gemini"],
-                    _error_status_code(exc),
-                    "",
-                    str(exc),
-                )
-            output_text = _extract_google_response_text(response_payload)
-            return subprocess.CompletedProcess(["sdk:gemini"], 0, output_text, "")
-
-        if provider == "claude":
-            try:
-                from anthropic import Anthropic
-            except Exception as exc:  # pragma: no cover
-                return subprocess.CompletedProcess(
-                    ["sdk:claude"],
-                    1,
-                    "",
-                    f"Anthropic Python SDK is required for claude provider: {exc}",
-                )
-            model_name = str(config_map.get("model") or "").strip() or (Config.CLAUDE_MODEL or "claude-sonnet-4-0")
-            claude_api_key, _ = _resolve_claude_auth_key(env_map)
-            if not claude_api_key:
-                if Config.CLAUDE_AUTH_REQUIRE_API_KEY:
-                    return subprocess.CompletedProcess(
-                        ["sdk:claude"],
-                        1,
-                        "",
-                        (
-                            "Claude runtime requires ANTHROPIC_API_KEY. "
-                            "Set it in Settings -> Provider -> Claude or via environment."
-                        ),
-                    )
-                if on_log:
-                    on_log(
-                        "Claude auth key not set. Continuing because "
-                        "CLAUDE_AUTH_REQUIRE_API_KEY=false."
-                    )
-            if on_log:
-                on_log(
-                    f"Running {provider_label}: Anthropic SDK messages model={model_name}."
-                )
-            request: dict[str, Any] = {
-                "model": model_name,
-                "max_tokens": _safe_int(config_map.get("max_tokens"), 2048),
-                "messages": [{"role": "user", "content": prompt_text}],
-            }
-            temperature = _optional_float(config_map.get("temperature"))
-            if temperature is not None:
-                request["temperature"] = temperature
-            top_p = _optional_float(config_map.get("top_p"))
-            if top_p is not None:
-                request["top_p"] = top_p
-            system_prompt = str(config_map.get("system") or "").strip()
-            if system_prompt:
-                request["system"] = system_prompt
-            try:
-                response_payload = Anthropic(api_key=claude_api_key).messages.create(**request)
-            except Exception as exc:
-                return subprocess.CompletedProcess(
-                    ["sdk:claude"],
-                    _error_status_code(exc),
-                    "",
-                    str(exc),
-                )
-            output_text = _extract_claude_response_text(response_payload)
-            return subprocess.CompletedProcess(["sdk:claude"], 0, output_text, "")
-
-        return subprocess.CompletedProcess(
-            [f"sdk:{provider}"],
-            1,
-            "",
-            f"Unknown frontier provider '{provider}'.",
-        )
-
-    result = _run_once()
-    if result.returncode != 0 and (
-        result.returncode >= 500 or _is_upstream_500(result.stdout, result.stderr)
-    ):
-        if on_log:
-            on_log(f"{provider_label} returned upstream 500; retrying once.")
-        time.sleep(1.0)
-        result = _run_once()
-    return _emit_result(result)
+    )
+    return runtime.run(
+        FrontierAgentRequest(
+            provider=provider,
+            prompt=prompt,
+            mcp_configs=mcp_configs,
+            model_config=model_config,
+            env=env,
+        ),
+        on_update=on_update,
+        on_log=on_log,
+    )
 
 
 def _run_frontier_llm_via_execution_router(
@@ -5322,10 +4956,10 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             github_repo = (github_settings.get("repo") or "").strip()
         payload = _build_task_payload(task.kind, prompt)
         system_contract = _build_system_contract(agent)
-        agent_profile = _build_agent_payload(agent) if agent is not None else None
+        agent_profile = _build_agent_info(agent) if agent is not None else None
         if agent is None and is_quick_task_kind(task_kind):
             system_contract = build_quick_node_system_contract()
-            agent_profile = build_quick_node_agent_profile()
+            agent_profile = build_quick_node_agent_info()
         payload = _inject_envelope_core_sections(
             payload,
             system_contract=system_contract,
@@ -7950,15 +7584,21 @@ def _resolve_flowchart_outgoing_edges(
             f"Decision route '{route_key}' has no matching outgoing edge and no fallback."
         )
 
+    conditioned_solid_edges = [
+        edge
+        for edge in solid_edges
+        if str(edge.get("condition_key") or "").strip()
+    ]
     if route_key:
         matched_edges: list[dict[str, Any]] = []
-        for edge in solid_edges:
+        for edge in conditioned_solid_edges:
             condition_key = str(edge.get("condition_key") or "").strip()
             if condition_key == route_key:
                 matched_edges.append(edge)
         if matched_edges:
             return matched_edges
-        raise ValueError(f"Route key '{route_key}' has no matching solid outgoing edge.")
+        if conditioned_solid_edges:
+            raise ValueError(f"Route key '{route_key}' has no matching solid outgoing edge.")
     return list(solid_edges)
 
 
@@ -8124,7 +7764,7 @@ def _execute_flowchart_task_node(
     selected_agent_role_version: str | None = None
     selected_agent_version: str | None = None
     selected_agent_name: str | None = None
-    selected_agent_profile: dict[str, object] | None = None
+    selected_agent_profile: AgentInfo | None = None
     selected_system_contract: dict[str, object] | None = None
     selected_agent_source: str | None = None
     selected_agent_role_markdown = ""
@@ -8170,7 +7810,7 @@ def _execute_flowchart_task_node(
             selected_agent_role_version = _resolve_updated_at_version(
                 selected_agent.role.updated_at if selected_agent.role is not None else None
             )
-            selected_agent_profile = _build_agent_payload(selected_agent)
+            selected_agent_profile = _build_agent_info(selected_agent)
             selected_system_contract = _build_system_contract(selected_agent)
             selected_agent_role_markdown = _build_role_markdown(selected_agent.role)
             selected_agent_markdown = _build_agent_markdown(selected_agent)
@@ -9494,15 +9134,6 @@ def _execute_flowchart_memory_node(
     input_context: dict[str, Any],
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    normalized_mcp_keys = {
-        str(item or "").strip().lower() for item in (mcp_server_keys or [])
-    }
-    required_mcp_key = INTEGRATED_MCP_LLMCTL_KEY.strip().lower()
-    if required_mcp_key not in normalized_mcp_keys:
-        raise ValueError(
-            "Memory nodes require the system-managed LLMCTL MCP server (llmctl-mcp)."
-        )
-
     action_value = node_config.get("action")
     action = _normalize_memory_node_action(action_value)
     if not action:
@@ -10210,15 +9841,18 @@ def _execute_flowchart_node(
             ),
         )
     if node_type == FLOWCHART_NODE_TYPE_MEMORY:
+        resolved_memory_node_config = dict(node_config)
+        if not str(resolved_memory_node_config.get("action") or "").strip():
+            resolved_memory_node_config["action"] = MEMORY_NODE_ACTION_RETRIEVE
         return _execute_deterministic_special_node_with_framework(
             node_type=node_type,
-            node_config=node_config,
+            node_config=resolved_memory_node_config,
             input_context=input_context,
             execution_id=execution_id,
             invoke=lambda: _execute_flowchart_memory_node(
                 node_id=node_id,
                 node_ref_id=node_ref_id,
-                node_config=node_config,
+                node_config=resolved_memory_node_config,
                 input_context=input_context,
                 mcp_server_keys=mcp_server_keys,
             ),

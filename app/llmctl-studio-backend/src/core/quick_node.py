@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from services.execution.agent_info import AgentInfo
 
 QUICK_NODE_FALLBACK_ROLE_NAME = "Quick"
 QUICK_NODE_FALLBACK_ROLE_DESCRIPTION = (
@@ -77,3 +80,13 @@ def build_quick_node_system_contract() -> dict[str, Any]:
 
 def build_quick_node_agent_profile() -> dict[str, Any]:
     return deepcopy(QUICK_NODE_FALLBACK_AGENT_PROFILE)
+
+
+def build_quick_node_agent_info() -> "AgentInfo":
+    from services.execution.agent_info import AgentInfo
+
+    return AgentInfo(
+        id=None,
+        name=str(QUICK_NODE_FALLBACK_AGENT_PROFILE.get("name") or ""),
+        description=str(QUICK_NODE_FALLBACK_AGENT_PROFILE.get("description") or ""),
+    )

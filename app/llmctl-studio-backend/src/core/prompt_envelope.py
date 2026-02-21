@@ -54,7 +54,7 @@ def build_prompt_envelope(
     *,
     user_request: str,
     system_contract: dict[str, Any] | None = None,
-    agent_profile: dict[str, Any] | None = None,
+    agent_profile: Any = None,
     task_context: dict[str, Any] | None = None,
     output_contract: dict[str, Any] | None = None,
     source_payload: dict[str, Any] | None = None,
@@ -88,7 +88,7 @@ def build_prompt_envelope(
     if system_contract:
         resolved_system_contract.update(system_contract)
     if agent_profile:
-        resolved_agent_profile.update(agent_profile)
+        resolved_agent_profile.update(_coerce_payload_mapping(agent_profile))
     if task_context:
         resolved_task_context.update(task_context)
     if output_contract:
@@ -105,3 +105,14 @@ def build_prompt_envelope(
 
 def serialize_prompt_envelope(payload: dict[str, Any]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _coerce_payload_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    to_payload = getattr(value, "to_payload", None)
+    if callable(to_payload):
+        payload = to_payload()
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}

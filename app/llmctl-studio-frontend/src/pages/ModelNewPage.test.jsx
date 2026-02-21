@@ -67,8 +67,11 @@ describe('ModelNewPage', () => {
       expect(getModelMeta).toHaveBeenCalledTimes(1)
     })
 
+    const createButton = screen.getByRole('button', { name: 'Create Model' })
+    expect(createButton).toBeDisabled()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Primary Codex' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create Model' }))
+    expect(createButton).not.toBeDisabled()
+    fireEvent.click(createButton)
 
     await waitFor(() => {
       expect(createModel).toHaveBeenCalledWith(expect.objectContaining({
@@ -79,5 +82,69 @@ describe('ModelNewPage', () => {
         }),
       }))
     })
+    expect(await screen.findByText('Created model Primary Codex.')).toBeInTheDocument()
+    expect(screen.getByText('Model detail route')).toBeInTheDocument()
+  })
+
+  test('advanced provider settings are collapsed by default and included in create payload', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(getModelMeta).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByText('Advanced provider settings'))
+    fireEvent.change(screen.getByLabelText('Provider config JSON'), {
+      target: { value: '{\n  "model_reasoning_effort": "medium"\n}' },
+    })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Configured Model' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Model' }))
+
+    await waitFor(() => {
+      expect(createModel).toHaveBeenCalledWith(expect.objectContaining({
+        config: expect.objectContaining({
+          model: 'gpt-5-codex',
+          model_reasoning_effort: 'medium',
+        }),
+      }))
+    })
+  })
+
+  test('cancel returns to model list route when there are no unsaved changes', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(getModelMeta).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('Models list route')).toBeInTheDocument()
+  })
+
+  test('prompts before leaving when there are unsaved changes', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPage()
+    await waitFor(() => {
+      expect(getModelMeta).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unsaved model' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith('Discard unsaved changes?')
+    expect(screen.queryByText('Models list route')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create Model' })).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+  test('create failures report through flash viewport', async () => {
+    createModel.mockRejectedValueOnce(new Error('Create failed in test'))
+    renderPage()
+    await waitFor(() => {
+      expect(getModelMeta).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Broken Model' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Model' }))
+
+    expect(await screen.findByText('Create failed in test')).toBeInTheDocument()
   })
 })

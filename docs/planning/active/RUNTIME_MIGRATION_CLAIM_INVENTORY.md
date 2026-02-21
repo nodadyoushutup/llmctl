@@ -5,7 +5,10 @@ Status: Draft (Stage 2 in progress)
 
 Source note: Runtime migration docs were archived under `docs/planning/archive/`; this inventory uses those archived files as the canonical source set plus active critical-incident addendum claims.
 
-Total checked claims inventoried: **345**
+Total checked claims inventoried: **348**
+
+Remediation progress (matrix): **94.8% pass** (330/348) and **97.4% reviewed** (339/348, pass+fail).
+Remediation process completion (claims reviewed): **97.4%**.
 
 ## Source Coverage
 
@@ -20,21 +23,21 @@ Total checked claims inventoried: **345**
 - `CLI_TO_STUDIO_AGENT_RUNTIME_STAGE2_ARCHITECTURE_FREEZE.md`: 4 checked claims
 - `CLI_TO_STUDIO_AGENT_RUNTIME_STAGE3_CONTRACTS_PERSISTENCE_FREEZE.md`: 4 checked claims
 - `CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md`: 4 checked claims
-- `RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md`: 1 checked claim
+- `RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md`: 4 checked claims
 
 ## Domain Classification Summary
 
-- `backend_runtime`: 133
+- `backend_runtime`: 136
 - `contracts_api`: 33
 - `docs`: 27
-- `frontend`: 70
+- `frontend`: 69
 - `ops_runtime`: 45
-- `testing`: 37
+- `testing`: 38
 
 ## Invariant Summary
 
-- `invariant`: 52
-- `non_invariant`: 293
+- `invariant`: 56
+- `non_invariant`: 292
 
 ## Canonical Claim Inventory
 
@@ -114,7 +117,7 @@ Total checked claims inventoried: **345**
 | RMC-0072 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 52 | `ops_runtime` | `no` | Migration scope boundary selected: `full replacement` (day-one cutover target). |
 | RMC-0073 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 53 | `ops_runtime` | `no` | Tool execution trust model selected: `isolated worker tools` (retain Kubernetes executor model). |
 | RMC-0074 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 54 | `backend_runtime` | `no` | Executor workspace lifecycle selected: `isolated ephemeral per run` (clean workspace, teardown on executor termination). |
-| RMC-0075 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 55 | `frontend` | `no` | Prompt/policy composition selected: `retrieval + composition`, aligned with existing runtime assembly (node MCP selection + agent skill/role selection + executor-time config build from experiment agent classes). |
+| RMC-0075 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 55 | `backend_runtime` | `yes` | Prompt/policy composition selected: `retrieval + composition`, aligned with existing runtime assembly (node MCP selection + agent skill/role selection + executor-time config build from experiment agent classes) and requiring production typed agent abstraction parity. |
 | RMC-0076 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 56 | `backend_runtime` | `yes` | Data access model selected: `hybrid` with internal tools as primary path and MCP retained as optional/canonical interoperability surface (including use by other tools/services). |
 | RMC-0077 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 57 | `contracts_api` | `yes` | Flowchart output contract selected: `strict schema JSON` with validation-enforced node/agent outputs. |
 | RMC-0078 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md` | 58 | `frontend` | `no` | Rollout strategy selected: `big-bang cutover + hard rollback` after extended internal build/iteration period. |
@@ -385,3 +388,6 @@ Total checked claims inventoried: **345**
 | RMC-0343 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md` | 10 | `backend_runtime` | `no` | Implement shared tracing/audit envelope for tool calls, errors, and correlation propagation. |
 | RMC-0344 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md` | 11 | `frontend` | `yes` | Deliver cutover-critical base tool scaffolding required before domain fan-out implementation begins. |
 | RMC-0345 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 48 | `backend_runtime` | `yes` | Replace frontier provider execution in `services/tasks.py` with SDK/router execution path (no CLI binary invocation). |
+| RMC-0346 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 73 | `backend_runtime` | `yes` | Implement production typed `AgentInfo`/agent runtime abstraction classes in Studio backend runtime modules and replace dict-first agent metadata assembly at runtime entry points. |
+| RMC-0347 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 74 | `backend_runtime` | `yes` | Wire frontier SDK execution path (`_run_frontier_llm_sdk`) and prompt-envelope assembly callsites through the production typed agent abstraction. |
+| RMC-0348 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 75 | `testing` | `yes` | Add architecture/runtime hard gate so invariant claims cannot be marked `pass` without both static code evidence and runtime test evidence. |

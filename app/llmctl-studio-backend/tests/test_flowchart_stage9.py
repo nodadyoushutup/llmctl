@@ -370,6 +370,18 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         )
         self.assertEqual([1], [edge["id"] for edge in selected])
 
+    def test_non_decision_route_resolution_ignores_route_key_without_condition_keys(self) -> None:
+        selected = studio_tasks._resolve_flowchart_outgoing_edges(
+            node_type=FLOWCHART_NODE_TYPE_TASK,
+            node_config={},
+            outgoing_edges=[
+                {"id": 1, "edge_mode": "solid", "condition_key": ""},
+                {"id": 2, "edge_mode": "solid", "condition_key": ""},
+            ],
+            routing_state={"route_key": "continue"},
+        )
+        self.assertEqual([1, 2], [edge["id"] for edge in selected])
+
     def test_non_decision_route_resolution_fails_for_unknown_route_key(self) -> None:
         with self.assertRaises(ValueError):
             studio_tasks._resolve_flowchart_outgoing_edges(

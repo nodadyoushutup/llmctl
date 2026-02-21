@@ -27,7 +27,7 @@
 
 - Store in-progress plans in `docs/planning/active/`.
 - Store completed plans in `docs/planning/archive/`.
-- Store audit inventory markdown for audits in `docs/planning/audit/`.
+- Store audit inventory markdown for audits in `docs/planning/audit/` when an audit is requested.
 - When a plan reaches completion, move it from `docs/planning/active/` to `docs/planning/archive/` immediately without waiting for explicit instruction.
 - Plans must be multi-stage and written as task lists with checkboxes (`[ ]` for pending, `[x]` for complete).
 - Update plan checkboxes as work is completed; keep status current during execution.
@@ -41,30 +41,31 @@
 - Do not start Stage 1 while Stage 0 is incomplete; continue interviewing until Stage 0 is sound.
 - When Stage 0 appears complete, explicitly tell the user planning can start and ask whether to continue interviewing or proceed.
 - Stage 1 is always **Code Planning**.
-- Stage 2 is always **Audit Plan Creation** and must produce an audit plan against the agreed work scope.
-- Stage 2 audit plans must closely follow the existing repository audit-plan format (for example `docs/planning/archive/FLASH_MESSAGE_AREA_NOTIFICATION_AUDIT_PLAN.md` and `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md`): clear title/goal metadata, stage-based checkbox tasks, explicit decisions/evidence notes, and concrete file references.
-- When the scope is claim-based auditing, Stage 2 must also produce or update:
+- Stage 2 is **Scope-Specific Planning**.
+- If and only if the user explicitly requests an audit/inventory workflow, Stage 2 becomes **Audit Plan Creation** and must produce an audit plan against the agreed work scope.
+- Stage 2 audit plans (when requested) must closely follow the existing repository audit-plan format (for example `docs/planning/archive/FLASH_MESSAGE_AREA_NOTIFICATION_AUDIT_PLAN.md` and `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md`): clear title/goal metadata, stage-based checkbox tasks, explicit decisions/evidence notes, and concrete file references.
+- When the scope is claim-based auditing, Stage 2 (audit mode) must also produce or update:
   - `docs/planning/audit/<WORKSTREAM>_CLAIM_INVENTORY.md`
   - `docs/planning/active/<WORKSTREAM>_CLAIM_EVIDENCE_MATRIX.md`
-- Claim-based Stage 2 artifacts should mirror the structure used by `docs/planning/audit/RUNTIME_MIGRATION_CLAIM_INVENTORY.md` and `docs/planning/active/RUNTIME_MIGRATION_CLAIM_EVIDENCE_MATRIX.md`.
-- Claim inventory requirements:
+- Claim-based Stage 2 artifacts (audit mode) should mirror the structure used by `docs/planning/audit/RUNTIME_MIGRATION_CLAIM_INVENTORY.md` and `docs/planning/active/RUNTIME_MIGRATION_CLAIM_EVIDENCE_MATRIX.md`.
+- Claim inventory requirements (audit mode):
   - Include metadata (`Date`, `Status`, source note), source coverage summary, domain summary, and invariant summary.
   - Use stable claim IDs (`<PREFIX>-NNNN`) and do not renumber existing IDs after publication.
   - Keep claims atomic (one verifiable behavior/assertion per claim row).
   - Include source traceability for every claim (`source` path plus line number).
-- Claim evidence matrix requirements:
+- Claim evidence matrix requirements (audit mode):
   - Include at least these columns: `claim_id`, `source`, `line`, `domain`, `invariant`, `code_evidence`, `test_evidence`, `ui_api_evidence`, `status`, `severity`, `notes`.
   - Allowed `status` values are only `pass`, `fail`, or `insufficient_evidence`.
   - Any `pass` or `fail` entry must cite concrete file references with line numbers; `TBD` is only valid for `insufficient_evidence`.
   - Any `fail` entry must include a short remediation note that can be translated into an execution-stage task.
-- Claim audit closure rules:
+- Claim audit closure rules (audit mode):
   - During **Audit Plan Review**, reconcile Stage 3+ implementation status against the claim evidence matrix, not just checklist completion.
   - During **Audit Remediation Planning**, create explicit correction stages for all `critical` and `high` failed claims before **Automated Testing**.
   - Do not mark the plan complete while unresolved `critical` claim failures remain.
 - Stage 3 through Stage X are execution stages for implementation work; create as many as needed to complete the task.
-- Before **Automated Testing**, include a required **Audit Plan Review** stage that evaluates implementation progress against the Stage 2 audit plan.
-- After **Audit Plan Review**, include a required **Audit Remediation Planning** stage that determines required code actions and creates additional correction stages as needed.
-- Execute all correction stages created by **Audit Remediation Planning** before proceeding to **Automated Testing**.
+- If Stage 2 is in audit mode, before **Automated Testing**, include a required **Audit Plan Review** stage that evaluates implementation progress against the Stage 2 audit plan.
+- If Stage 2 is in audit mode, after **Audit Plan Review**, include a required **Audit Remediation Planning** stage that determines required code actions and creates additional correction stages as needed.
+- If Stage 2 is in audit mode, execute all correction stages created by **Audit Remediation Planning** before proceeding to **Automated Testing**.
 - The final two stages are always:
   - **Automated Testing**
   - **Docs Updates** (including Sphinx and Read the Docs documentation updates)
@@ -72,10 +73,10 @@
 - Workflow order:
   - Complete Stage 0 first.
   - Then complete Stage 1 to define planning/execution stages.
-  - Complete Stage 2 (**Audit Plan Creation**) against the work scope.
+  - Complete Stage 2 (**Scope-Specific Planning**). Use **Audit Plan Creation** only when explicitly requested by the user.
   - Execute Stage 3 through Stage X implementation stages.
-  - Before testing, run **Audit Plan Review**.
-  - Then run **Audit Remediation Planning** and create/execute any additional correction stages it defines.
+  - If Stage 2 is in audit mode, before testing run **Audit Plan Review**.
+  - If Stage 2 is in audit mode, then run **Audit Remediation Planning** and create/execute any additional correction stages it defines.
   - Always finish with **Automated Testing**, then **Docs Updates**.
 
 # Frontend Visual Testing

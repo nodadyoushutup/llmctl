@@ -18,6 +18,8 @@ if str(STUDIO_SRC) not in sys.path:
 from core.models import (  # noqa: E402
     FLOWCHART_NODE_TYPE_DECISION,
     FLOWCHART_NODE_TYPE_MEMORY,
+    FLOWCHART_NODE_TYPE_MILESTONE,
+    FLOWCHART_NODE_TYPE_PLAN,
 )
 from services import tasks as studio_tasks  # noqa: E402
 from services.execution.tooling import (  # noqa: E402
@@ -217,6 +219,52 @@ class SpecialNodeToolingStage10Tests(unittest.TestCase):
                 execution_id=9013,
                 invoke=lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")),
             )
+
+    def test_milestone_wrapper_uses_mark_complete_operation(self) -> None:
+        output_state, _routing_state = (
+            studio_tasks._execute_deterministic_special_node_with_framework(
+                node_type=FLOWCHART_NODE_TYPE_MILESTONE,
+                node_config={"action": "mark_complete"},
+                input_context={},
+                execution_id=9015,
+                invoke=lambda: (
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_MILESTONE,
+                        "action": "mark_complete",
+                        "action_results": ["completed milestone"],
+                    },
+                    {},
+                ),
+            )
+        )
+
+        trace = output_state.get("deterministic_tooling") or {}
+        self.assertEqual("mark_complete", trace.get("operation"))
+        self.assertEqual("deterministic.milestone", trace.get("tool_name"))
+        self.assertEqual(DETERMINISTIC_TOOL_STATUS_SUCCESS, trace.get("execution_status"))
+
+    def test_plan_wrapper_uses_complete_plan_item_operation(self) -> None:
+        output_state, _routing_state = (
+            studio_tasks._execute_deterministic_special_node_with_framework(
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                node_config={"action": "complete_plan_item"},
+                input_context={},
+                execution_id=9016,
+                invoke=lambda: (
+                    {
+                        "node_type": FLOWCHART_NODE_TYPE_PLAN,
+                        "action": "complete_plan_item",
+                        "action_results": ["completed plan task"],
+                    },
+                    {},
+                ),
+            )
+        )
+
+        trace = output_state.get("deterministic_tooling") or {}
+        self.assertEqual("complete_plan_item", trace.get("operation"))
+        self.assertEqual("deterministic.plan", trace.get("tool_name"))
+        self.assertEqual(DETERMINISTIC_TOOL_STATUS_SUCCESS, trace.get("execution_status"))
 
 
 if __name__ == "__main__":

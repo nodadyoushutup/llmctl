@@ -1424,6 +1424,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     [ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT]: null,
     [ROUTING_FOCUS_FIELD_FALLBACK_CONNECTOR]: null,
   })
+  const previousSolidIncomingConnectorCountByNodeTokenRef = useRef(new Map())
 
   const [nodes, setNodes] = useState(() => initialWorkspace.nodes)
   const [edges, setEdges] = useState(() => initialWorkspace.edges)
@@ -1885,6 +1886,72 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       onNotice(String(message || ''))
     }
   }, [onNotice])
+
+  useEffect(() => {
+    const clampTargets = []
+    const previousCounts = previousSolidIncomingConnectorCountByNodeTokenRef.current
+    const nextCounts = new Map()
+    for (const node of nodes) {
+      if (!nodeSupportsRoutingConfig(node.node_type)) {
+        continue
+      }
+      const nextConfig = node.config && typeof node.config === 'object' ? node.config : {}
+      if (normalizeFanInMode(nextConfig.fan_in_mode) !== FAN_IN_MODE_CUSTOM) {
+        const solidIncomingConnectorCount = solidIncomingConnectorCountByNodeToken.get(node.token) || 0
+        nextCounts.set(node.token, solidIncomingConnectorCount)
+        continue
+      }
+      const currentCustomCount = parsePositiveInt(nextConfig.fan_in_custom_count)
+      const solidIncomingConnectorCount = solidIncomingConnectorCountByNodeToken.get(node.token) || 0
+      nextCounts.set(node.token, solidIncomingConnectorCount)
+      const previousSolidIncomingConnectorCount = previousCounts.get(node.token)
+      const incomingShrinkDetected = (
+        Number.isInteger(previousSolidIncomingConnectorCount)
+        && previousSolidIncomingConnectorCount > solidIncomingConnectorCount
+      )
+      if (
+        currentCustomCount == null
+        || solidIncomingConnectorCount < 1
+        || currentCustomCount <= solidIncomingConnectorCount
+        || !incomingShrinkDetected
+      ) {
+        continue
+      }
+      clampTargets.push({
+        token: node.token,
+        nodeType: node.node_type,
+        title: node.title,
+        previousCount: currentCustomCount,
+        nextCount: solidIncomingConnectorCount,
+      })
+    }
+    previousSolidIncomingConnectorCountByNodeTokenRef.current = nextCounts
+
+    if (clampTargets.length === 0) {
+      return
+    }
+
+    const clampByToken = new Map(clampTargets.map((item) => [item.token, item]))
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNodes((current) => current.map((node) => {
+      const target = clampByToken.get(node.token)
+      if (!target) {
+        return node
+      }
+      const nextConfig = node.config && typeof node.config === 'object' ? { ...node.config } : {}
+      nextConfig.fan_in_mode = FAN_IN_MODE_CUSTOM
+      nextConfig.fan_in_custom_count = target.nextCount
+      return {
+        ...node,
+        config: nextConfig,
+      }
+    }))
+
+    for (const target of clampTargets) {
+      const label = String(target.title || titleForType(target.nodeType) || 'node').trim() || 'node'
+      emitNotice(`Routing warning: ${label} custom N auto-clamped from ${target.previousCount} to ${target.nextCount}.`)
+    }
+  }, [emitNotice, nodes, solidIncomingConnectorCountByNodeToken])
 
   const focusRoutingField = useCallback((fieldKey) => {
     const field = routingFieldRefs.current[fieldKey]

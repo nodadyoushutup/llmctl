@@ -70,6 +70,7 @@ COMMAND_OPERATIONS = {
     "background_status",
     "background_wait",
     "background_stop",
+    "resource_limits",
 }
 RAG_OPERATIONS = {
     "index",
@@ -1284,6 +1285,59 @@ def _command_background_stop(_root: Path, args: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _read_mem_total_bytes() -> int | None:
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.startswith("MemTotal:"):
+                    continue
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                return int(parts[1]) * 1024
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _normalize_rlimit_value(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def _command_resource_limits(_root: Path, _args: dict[str, Any]) -> dict[str, Any]:
+    limits: dict[str, dict[str, int | None]] = {}
+    try:
+        import resource
+    except ImportError:  # pragma: no cover - non-POSIX environments only
+        resource = None  # type: ignore[assignment]
+    if resource is not None:
+        for key, label in (
+            ("RLIMIT_CPU", "cpu_seconds"),
+            ("RLIMIT_AS", "virtual_memory_bytes"),
+            ("RLIMIT_DATA", "data_segment_bytes"),
+            ("RLIMIT_FSIZE", "file_size_bytes"),
+            ("RLIMIT_NOFILE", "open_files"),
+        ):
+            if not hasattr(resource, key):
+                continue
+            soft, hard = resource.getrlimit(getattr(resource, key))
+            limits[label] = {
+                "soft": _normalize_rlimit_value(soft),
+                "hard": _normalize_rlimit_value(hard),
+            }
+    return {
+        "cpu_count": int(os.cpu_count() or 1),
+        "memory_total_bytes": _read_mem_total_bytes(),
+        "limits": limits,
+    }
+
+
 def _command_operation_dispatch(root: Path, operation: str, args: dict[str, Any]) -> dict[str, Any]:
     if operation == "run":
         return _command_run(root, args)
@@ -1303,6 +1357,8 @@ def _command_operation_dispatch(root: Path, operation: str, args: dict[str, Any]
         return _command_background_wait(root, args)
     if operation == "background_stop":
         return _command_background_stop(root, args)
+    if operation == "resource_limits":
+        return _command_resource_limits(root, args)
     raise ToolDomainError(f"Unsupported command operation: {operation}")
 
 

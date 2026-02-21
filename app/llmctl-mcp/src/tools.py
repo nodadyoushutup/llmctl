@@ -248,6 +248,183 @@ def _parse_json_dict(raw: str | None) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _normalize_decision_option_id(value: Any, *, field_name: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        raise ValueError(f"{field_name} is required.")
+    return cleaned
+
+
+def _normalize_decision_options_payload(
+    raw_options: Any,
+    *,
+    field_name: str = "options",
+) -> list[dict[str, Any]]:
+    if raw_options is None:
+        return []
+    if not isinstance(raw_options, list):
+        raise ValueError(f"{field_name} must be an array.")
+    normalized: list[dict[str, Any]] = []
+    seen_option_ids: set[str] = set()
+    for index, raw_option in enumerate(raw_options):
+        if isinstance(raw_option, dict):
+            option_id = _normalize_decision_option_id(
+                raw_option.get("option_id")
+                or raw_option.get("connector_id")
+                or raw_option.get("id"),
+                field_name=f"{field_name}[{index}].option_id",
+            )
+            label = str(
+                raw_option.get("label")
+                or raw_option.get("name")
+                or option_id
+            ).strip() or option_id
+            condition_text = str(raw_option.get("condition_text") or "").strip()
+            normalized_option: dict[str, Any] = {
+                "option_id": option_id,
+                "label": label,
+            }
+            if condition_text:
+                normalized_option["condition_text"] = condition_text
+            if raw_option.get("metadata") is not None:
+                if not isinstance(raw_option.get("metadata"), dict):
+                    raise ValueError(f"{field_name}[{index}].metadata must be an object.")
+                normalized_option["metadata"] = raw_option["metadata"]
+        else:
+            option_id = _normalize_decision_option_id(
+                raw_option,
+                field_name=f"{field_name}[{index}]",
+            )
+            normalized_option = {
+                "option_id": option_id,
+                "label": option_id,
+            }
+        if option_id in seen_option_ids:
+            raise ValueError(f"{field_name} contains duplicate option_id '{option_id}'.")
+        seen_option_ids.add(option_id)
+        normalized.append(normalized_option)
+    return normalized
+
+
+def _normalize_decision_scores_payload(
+    raw_scores: Any,
+    *,
+    field_name: str = "option_scores",
+) -> list[dict[str, Any]]:
+    if raw_scores is None:
+        return []
+    if not isinstance(raw_scores, list):
+        raise ValueError(f"{field_name} must be an array.")
+    normalized: list[dict[str, Any]] = []
+    seen_option_ids: set[str] = set()
+    for index, raw_score in enumerate(raw_scores):
+        if not isinstance(raw_score, dict):
+            raise ValueError(f"{field_name}[{index}] must be an object.")
+        option_id = _normalize_decision_option_id(
+            raw_score.get("option_id")
+            or raw_score.get("connector_id")
+            or raw_score.get("id"),
+            field_name=f"{field_name}[{index}].option_id",
+        )
+        score = _coerce_float(
+            raw_score.get("score"),
+            field_name=f"{field_name}[{index}].score",
+            default=0.0,
+        )
+        if option_id in seen_option_ids:
+            raise ValueError(f"{field_name} contains duplicate option_id '{option_id}'.")
+        seen_option_ids.add(option_id)
+        normalized.append(
+            {
+                "option_id": option_id,
+                "score": score,
+                "label": str(raw_score.get("label") or option_id).strip() or option_id,
+            }
+        )
+    return normalized
+
+
+def _normalize_decision_evaluations_payload(
+    raw_evaluations: Any,
+    *,
+    field_name: str = "evaluations",
+) -> list[dict[str, Any]]:
+    if raw_evaluations is None:
+        return []
+    if not isinstance(raw_evaluations, list):
+        raise ValueError(f"{field_name} must be an array.")
+    normalized: list[dict[str, Any]] = []
+    for index, raw_evaluation in enumerate(raw_evaluations):
+        if not isinstance(raw_evaluation, dict):
+            raise ValueError(f"{field_name}[{index}] must be an object.")
+        connector_id = _normalize_decision_option_id(
+            raw_evaluation.get("connector_id") or raw_evaluation.get("option_id"),
+            field_name=f"{field_name}[{index}].connector_id",
+        )
+        condition_text = str(raw_evaluation.get("condition_text") or "").strip()
+        reason = str(raw_evaluation.get("reason") or "").strip() or "evaluated"
+        matched = _coerce_bool(raw_evaluation.get("matched"))
+        normalized.append(
+            {
+                "connector_id": connector_id,
+                "condition_text": condition_text,
+                "matched": matched,
+                "reason": reason,
+            }
+        )
+    return normalized
+
+
+def _extract_decision_options_from_node_config(config_payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(config_payload, dict):
+        return []
+    raw_conditions = config_payload.get("decision_conditions")
+    if not isinstance(raw_conditions, list):
+        return []
+    options: list[dict[str, Any]] = []
+    for item in raw_conditions:
+        if not isinstance(item, dict):
+            continue
+        connector_id = str(item.get("connector_id") or "").strip()
+        if not connector_id:
+            continue
+        options.append(
+            {
+                "option_id": connector_id,
+                "label": str(item.get("label") or connector_id).strip() or connector_id,
+                "condition_text": str(item.get("condition_text") or "").strip(),
+            }
+        )
+    deduped: list[dict[str, Any]] = []
+    seen_option_ids: set[str] = set()
+    for option in options:
+        option_id = str(option.get("option_id") or "").strip()
+        if not option_id or option_id in seen_option_ids:
+            continue
+        seen_option_ids.add(option_id)
+        deduped.append(option)
+    return deduped
+
+
+def _normalize_decision_connector_ids(raw_connector_ids: Any) -> list[str]:
+    if raw_connector_ids is None:
+        return []
+    if not isinstance(raw_connector_ids, list):
+        raise ValueError("matched_connector_ids must be an array.")
+    connector_ids: list[str] = []
+    seen_connector_ids: set[str] = set()
+    for index, raw_value in enumerate(raw_connector_ids):
+        connector_id = _normalize_decision_option_id(
+            raw_value,
+            field_name=f"matched_connector_ids[{index}]",
+        )
+        if connector_id in seen_connector_ids:
+            continue
+        seen_connector_ids.add(connector_id)
+        connector_ids.append(connector_id)
+    return connector_ids
+
+
 def _normalize_milestone_node_action(value: Any, *, field_name: str) -> str:
     cleaned = str(value or "").strip().lower()
     if cleaned in {"update", "checkpoint", "read", "create", "create_or_update", "create/update"}:
@@ -1964,6 +2141,367 @@ def register(mcp: FastMCP) -> None:
             return {"ok": True, "count": len(payload), "items": payload}
 
     @mcp.tool()
+    def llmctl_get_decision(
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+        decision_id: int | None = None,
+        flowchart_id: int | None = None,
+        flowchart_node_id: int | None = None,
+        flowchart_run_id: int | None = None,
+        flowchart_run_node_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Read/list decision records."""
+        return llmctl_get_decision_artifact(
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+            descending=descending,
+            artifact_id=decision_id,
+            flowchart_id=flowchart_id,
+            flowchart_node_id=flowchart_node_id,
+            flowchart_run_id=flowchart_run_id,
+            flowchart_run_node_id=flowchart_run_node_id,
+        )
+
+    @mcp.tool()
+    def llmctl_list_decision_options(
+        flowchart_id: int | None = None,
+        flowchart_node_id: int | None = None,
+        decision_id: int | None = None,
+        options: list[dict[str, Any]] | list[str] | None = None,
+    ) -> dict[str, Any]:
+        """List normalized decision options from node config, decision record, or inline payload."""
+        try:
+            if options is not None:
+                normalized_options = _normalize_decision_options_payload(options)
+                return {
+                    "ok": True,
+                    "count": len(normalized_options),
+                    "options": normalized_options,
+                }
+            if decision_id is not None:
+                with session_scope() as session:
+                    artifact = session.get(NodeArtifact, decision_id)
+                    if artifact is None or artifact.artifact_type != NODE_ARTIFACT_TYPE_DECISION:
+                        return {"ok": False, "error": f"Decision {decision_id} not found."}
+                    payload = _parse_json_dict(artifact.payload_json)
+                    raw_options = payload.get("options")
+                    if isinstance(raw_options, list):
+                        normalized_options = _normalize_decision_options_payload(raw_options)
+                    else:
+                        normalized_options = [
+                            {
+                                "option_id": str(entry.get("option_id") or "").strip(),
+                                "label": str(
+                                    entry.get("label") or entry.get("option_id") or ""
+                                ).strip(),
+                            }
+                            for entry in _normalize_decision_scores_payload(
+                                payload.get("option_scores")
+                            )
+                            if str(entry.get("option_id") or "").strip()
+                        ]
+                    return {
+                        "ok": True,
+                        "decision_id": artifact.id,
+                        "count": len(normalized_options),
+                        "options": normalized_options,
+                    }
+            if flowchart_id is None or flowchart_node_id is None:
+                return {
+                    "ok": False,
+                    "error": (
+                        "Provide options, decision_id, or both flowchart_id and flowchart_node_id."
+                    ),
+                }
+            with session_scope() as session:
+                node = session.get(FlowchartNode, flowchart_node_id)
+                if node is None or node.flowchart_id != flowchart_id:
+                    return {
+                        "ok": False,
+                        "error": (
+                            f"Flowchart node {flowchart_node_id} was not found in flowchart "
+                            f"{flowchart_id}."
+                        ),
+                    }
+                if node.node_type != FLOWCHART_NODE_TYPE_DECISION:
+                    return {
+                        "ok": False,
+                        "error": f"Flowchart node {flowchart_node_id} is not a decision node.",
+                    }
+                normalized_options = _extract_decision_options_from_node_config(
+                    _parse_json_dict(node.config_json)
+                )
+                return {
+                    "ok": True,
+                    "flowchart_id": flowchart_id,
+                    "flowchart_node_id": flowchart_node_id,
+                    "count": len(normalized_options),
+                    "options": normalized_options,
+                }
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @mcp.tool()
+    def llmctl_score_decision_options(
+        options: list[dict[str, Any]] | list[str],
+        matched_option_ids: list[str] | None = None,
+        selected_option_id: str | None = None,
+        score_boost: float = 0.0,
+    ) -> dict[str, Any]:
+        """Score decision options using deterministic matching hints."""
+        try:
+            normalized_options = _normalize_decision_options_payload(options)
+            normalized_matched_option_ids = _normalize_decision_connector_ids(
+                matched_option_ids or []
+            )
+            selected = str(selected_option_id or "").strip() or None
+            boost = _coerce_float(score_boost, field_name="score_boost", default=0.0)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        scored: list[dict[str, Any]] = []
+        for option in normalized_options:
+            option_id = str(option.get("option_id") or "").strip()
+            base_score = 1.0 if option_id in normalized_matched_option_ids else 0.0
+            if selected and option_id == selected:
+                base_score = max(base_score, 1.0)
+            scored.append(
+                {
+                    "option_id": option_id,
+                    "label": str(option.get("label") or option_id).strip() or option_id,
+                    "score": base_score + boost,
+                }
+            )
+        scored.sort(key=lambda item: (-float(item.get("score") or 0.0), str(item.get("option_id") or "")))
+        for rank, item in enumerate(scored, start=1):
+            item["rank"] = rank
+        return {"ok": True, "count": len(scored), "scores": scored}
+
+    @mcp.tool()
+    def llmctl_evaluate_decision(
+        option_scores: list[dict[str, Any]] | None = None,
+        matched_option_ids: list[str] | None = None,
+        route_key: str | None = None,
+        min_score: float = 0.5,
+        decision_conditions: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate decision routing outputs from deterministic option scores and conditions."""
+        try:
+            normalized_scores = _normalize_decision_scores_payload(option_scores)
+            normalized_matched_option_ids = _normalize_decision_connector_ids(
+                matched_option_ids or []
+            )
+            normalized_conditions = _normalize_decision_options_payload(
+                decision_conditions or [],
+                field_name="decision_conditions",
+            )
+            resolved_min_score = _coerce_float(min_score, field_name="min_score", default=0.5)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        matched: list[str] = list(normalized_matched_option_ids)
+        seen_matched = set(matched)
+        evaluations: list[dict[str, Any]] = []
+        for score in normalized_scores:
+            option_id = str(score.get("option_id") or "").strip()
+            score_value = float(score.get("score") or 0.0)
+            is_match = score_value >= resolved_min_score
+            if is_match and option_id not in seen_matched:
+                seen_matched.add(option_id)
+                matched.append(option_id)
+            evaluations.append(
+                {
+                    "connector_id": option_id,
+                    "condition_text": "score >= min_score",
+                    "matched": is_match,
+                    "reason": f"score={score_value:.4f}, min_score={resolved_min_score:.4f}",
+                }
+            )
+
+        for condition in normalized_conditions:
+            connector_id = str(condition.get("option_id") or "").strip()
+            condition_text = str(condition.get("condition_text") or "").strip()
+            is_match = connector_id in seen_matched
+            evaluations.append(
+                {
+                    "connector_id": connector_id,
+                    "condition_text": condition_text,
+                    "matched": is_match,
+                    "reason": "matched" if is_match else "not_matched",
+                }
+            )
+
+        requested_route_key = str(route_key or "").strip()
+        if requested_route_key:
+            if requested_route_key not in seen_matched:
+                seen_matched.add(requested_route_key)
+                matched.append(requested_route_key)
+        resolved_route_key = requested_route_key or (matched[0] if matched else "")
+        no_match = len(matched) == 0
+        routing_state: dict[str, Any] = {
+            "matched_connector_ids": matched,
+            "evaluations": evaluations,
+            "no_match": no_match,
+        }
+        if resolved_route_key:
+            routing_state["route_key"] = resolved_route_key
+        output_state: dict[str, Any] = {
+            "node_type": FLOWCHART_NODE_TYPE_DECISION,
+            "matched_connector_ids": matched,
+            "evaluations": evaluations,
+            "no_match": no_match,
+            "action": "evaluate",
+            "action_results": ["Deterministic decision evaluation completed."],
+        }
+        return {"ok": True, "output_state": output_state, "routing_state": routing_state}
+
+    @mcp.tool()
+    def llmctl_create_decision(
+        flowchart_id: int,
+        flowchart_node_id: int,
+        flowchart_run_id: int,
+        flowchart_run_node_id: int | None = None,
+        matched_connector_ids: list[str] | None = None,
+        evaluations: list[dict[str, Any]] | None = None,
+        no_match: bool | None = None,
+        route_key: str | None = None,
+        options: list[dict[str, Any]] | list[str] | None = None,
+        option_scores: list[dict[str, Any]] | None = None,
+        execution_index: int | None = None,
+        variant_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a persisted decision record as a decision node artifact."""
+        try:
+            normalized_connector_ids = _normalize_decision_connector_ids(
+                matched_connector_ids or []
+            )
+            normalized_evaluations = _normalize_decision_evaluations_payload(
+                evaluations or []
+            )
+            normalized_options = _normalize_decision_options_payload(options or [])
+            normalized_scores = _normalize_decision_scores_payload(option_scores or [])
+            resolved_execution_index = _coerce_optional_int(
+                execution_index,
+                field_name="execution_index",
+                minimum=1,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        resolved_route_key = str(route_key or "").strip() or (
+            normalized_connector_ids[0] if normalized_connector_ids else ""
+        )
+        resolved_no_match = (
+            _coerce_bool(no_match) if no_match is not None else len(normalized_connector_ids) == 0
+        )
+        routing_state: dict[str, Any] = {
+            "matched_connector_ids": list(normalized_connector_ids),
+            "evaluations": list(normalized_evaluations),
+            "no_match": resolved_no_match,
+        }
+        if resolved_route_key:
+            routing_state["route_key"] = resolved_route_key
+        payload: dict[str, Any] = {
+            "matched_connector_ids": list(normalized_connector_ids),
+            "evaluations": list(normalized_evaluations),
+            "no_match": resolved_no_match,
+            "routing_state": routing_state,
+            "options": normalized_options,
+            "option_scores": normalized_scores,
+            "route_key": resolved_route_key or None,
+        }
+
+        with session_scope() as session:
+            node = session.get(FlowchartNode, flowchart_node_id)
+            if node is None or node.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart node {flowchart_node_id} was not found in flowchart {flowchart_id}.",
+                }
+            if node.node_type != FLOWCHART_NODE_TYPE_DECISION:
+                return {"ok": False, "error": f"Flowchart node {flowchart_node_id} is not a decision node."}
+            flowchart_run = session.get(FlowchartRun, flowchart_run_id)
+            if flowchart_run is None or flowchart_run.flowchart_id != flowchart_id:
+                return {
+                    "ok": False,
+                    "error": f"Flowchart run {flowchart_run_id} was not found in flowchart {flowchart_id}.",
+                }
+            run_execution_index: int | None = None
+            if flowchart_run_node_id is not None:
+                run_node = session.get(FlowchartRunNode, flowchart_run_node_id)
+                if (
+                    run_node is None
+                    or run_node.flowchart_run_id != flowchart_run_id
+                    or run_node.flowchart_node_id != flowchart_node_id
+                ):
+                    return {
+                        "ok": False,
+                        "error": (
+                            f"Flowchart run node {flowchart_run_node_id} was not found for "
+                            f"run {flowchart_run_id} and node {flowchart_node_id}."
+                        ),
+                    }
+                run_execution_index = (
+                    _coerce_optional_int(
+                        run_node.execution_index,
+                        field_name="flowchart_run_node.execution_index",
+                        minimum=1,
+                    )
+                    or None
+                )
+            artifact = NodeArtifact.create(
+                session,
+                flowchart_id=flowchart_id,
+                flowchart_node_id=flowchart_node_id,
+                flowchart_run_id=flowchart_run_id,
+                flowchart_run_node_id=flowchart_run_node_id,
+                node_type=FLOWCHART_NODE_TYPE_DECISION,
+                artifact_type=NODE_ARTIFACT_TYPE_DECISION,
+                ref_id=None,
+                execution_index=(
+                    resolved_execution_index
+                    if resolved_execution_index is not None
+                    else run_execution_index
+                ),
+                variant_key=(
+                    str(variant_key or "").strip()
+                    or f"run-{flowchart_run_id}-node-{flowchart_node_id}-{int(utcnow().timestamp())}"
+                ),
+                retention_mode=NODE_ARTIFACT_RETENTION_TTL,
+                payload_json=json.dumps(payload, sort_keys=True),
+            )
+            return {"ok": True, "item": _serialize_node_artifact_item(artifact)}
+
+    @mcp.tool()
+    def llmctl_record_decision_outcome(
+        decision_id: int,
+        outcome: str,
+        selected_option_id: str | None = None,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Record decision outcome metadata on a persisted decision record."""
+        cleaned_outcome = str(outcome or "").strip()
+        if not cleaned_outcome:
+            return {"ok": False, "error": "outcome is required."}
+        with session_scope() as session:
+            artifact = session.get(NodeArtifact, decision_id)
+            if artifact is None or artifact.artifact_type != NODE_ARTIFACT_TYPE_DECISION:
+                return {"ok": False, "error": f"Decision {decision_id} not found."}
+            payload = _parse_json_dict(artifact.payload_json)
+            payload["outcome"] = cleaned_outcome
+            if selected_option_id is not None:
+                payload["selected_option_id"] = str(selected_option_id or "").strip() or None
+            cleaned_notes = str(notes or "").strip()
+            if cleaned_notes:
+                payload["notes"] = cleaned_notes
+            payload["recorded_at"] = utcnow().isoformat()
+            artifact.payload_json = json.dumps(payload, sort_keys=True)
+            return {"ok": True, "item": _serialize_node_artifact_item(artifact)}
+
+    @mcp.tool()
     def llmctl_set_flowchart_node_model(
         flowchart_id: int,
         node_id: int,
@@ -2555,6 +3093,37 @@ def register(mcp: FastMCP) -> None:
             return response
 
     @mcp.tool()
+    def llmctl_search_memory(
+        query: str,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by: str | None = "id",
+        descending: bool = False,
+    ) -> dict[str, Any]:
+        """Search memories by description substring (case-insensitive)."""
+        cleaned_query = str(query or "").strip()
+        if not cleaned_query:
+            return {"ok": False, "error": "query is required."}
+        columns = _column_map(Memory)
+        stmt = select(Memory).where(
+            func.lower(func.coalesce(Memory.description, "")).like(f"%{cleaned_query.lower()}%")
+        )
+        if order_by:
+            if order_by not in columns:
+                raise ValueError(f"Unknown order_by column '{order_by}'.")
+            order_col = columns[order_by]
+            stmt = stmt.order_by(order_col.desc() if descending else order_col.asc())
+        limit = _clamp_limit(DEFAULT_LIMIT if limit is None else limit, MAX_LIMIT)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        if offset:
+            stmt = stmt.offset(max(0, int(offset)))
+        with session_scope() as session:
+            items = session.execute(stmt).scalars().all()
+            payload = [_serialize_model(item, include_relationships=False) for item in items]
+            return {"ok": True, "count": len(payload), "items": payload}
+
+    @mcp.tool()
     def llmctl_create_memory(description: str) -> dict[str, Any]:
         """Create a memory record."""
         cleaned = (description or "").strip()
@@ -2856,6 +3425,51 @@ def register(mcp: FastMCP) -> None:
         return {"ok": True, "milestone_id": milestone_id}
 
     @mcp.tool()
+    def llmctl_set_milestone_status(
+        milestone_id: int,
+        status: str,
+    ) -> dict[str, Any]:
+        """Set milestone status directly."""
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status not in MILESTONE_STATUS_CHOICES:
+            return {
+                "ok": False,
+                "error": "status must be one of: " + ", ".join(MILESTONE_STATUS_CHOICES) + ".",
+            }
+        with session_scope() as session:
+            item = session.get(Milestone, milestone_id)
+            if item is None:
+                return {"ok": False, "error": f"Milestone {milestone_id} not found."}
+            item.status = normalized_status
+            item.completed = normalized_status == MILESTONE_STATUS_DONE
+            if item.completed:
+                item.progress_percent = max(int(item.progress_percent or 0), 100)
+            return {"ok": True, "item": _serialize_model(item, include_relationships=False)}
+
+    @mcp.tool()
+    def llmctl_attach_milestone_evidence(
+        milestone_id: int,
+        evidence: str,
+        append: bool = True,
+    ) -> dict[str, Any]:
+        """Attach a human-readable evidence entry to milestone latest_update."""
+        cleaned_evidence = str(evidence or "").strip()
+        if not cleaned_evidence:
+            return {"ok": False, "error": "evidence is required."}
+        evidence_entry = f"[{utcnow().isoformat()}] {cleaned_evidence}"
+        with session_scope() as session:
+            item = session.get(Milestone, milestone_id)
+            if item is None:
+                return {"ok": False, "error": f"Milestone {milestone_id} not found."}
+            existing = str(item.latest_update or "").strip()
+            if append and existing:
+                item.latest_update = f"{existing}\n{evidence_entry}"
+            else:
+                item.latest_update = evidence_entry
+            payload = _serialize_model(item, include_relationships=False)
+            return {"ok": True, "item": payload, "evidence_entry": evidence_entry}
+
+    @mcp.tool()
     def llmctl_get_plan(
         limit: int | None = None,
         offset: int = 0,
@@ -3042,6 +3656,103 @@ def register(mcp: FastMCP) -> None:
             session.execute(delete(PlanStage).where(PlanStage.plan_id == plan_id))
             session.delete(item)
         return {"ok": True, "plan_id": plan_id}
+
+    @mcp.tool()
+    def llmctl_reorder_plan_stages(plan_id: int, stage_ids: list[int]) -> dict[str, Any]:
+        """Reorder all stages for a plan by explicit stage-id order."""
+        if not isinstance(stage_ids, list) or not stage_ids:
+            return {"ok": False, "error": "stage_ids must be a non-empty list."}
+        normalized_stage_ids: list[int] = []
+        seen_stage_ids: set[int] = set()
+        try:
+            for value in stage_ids:
+                stage_id = _coerce_optional_int(value, field_name="stage_id", minimum=1)
+                if stage_id is None:
+                    return {"ok": False, "error": "stage_ids must contain positive integers."}
+                if stage_id in seen_stage_ids:
+                    return {"ok": False, "error": "stage_ids must not contain duplicates."}
+                seen_stage_ids.add(stage_id)
+                normalized_stage_ids.append(stage_id)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        with session_scope() as session:
+            plan = session.get(Plan, plan_id)
+            if plan is None:
+                return {"ok": False, "error": f"Plan {plan_id} not found."}
+            plan_stages = (
+                session.execute(select(PlanStage).where(PlanStage.plan_id == plan_id))
+                .scalars()
+                .all()
+            )
+            if not plan_stages:
+                return {"ok": False, "error": f"Plan {plan_id} has no stages to reorder."}
+            existing_stage_ids = {int(stage.id) for stage in plan_stages}
+            if set(normalized_stage_ids) != existing_stage_ids:
+                return {
+                    "ok": False,
+                    "error": "stage_ids must include every stage in the plan exactly once.",
+                }
+            stages_by_id = {int(stage.id): stage for stage in plan_stages}
+            for position, stage_id in enumerate(normalized_stage_ids, start=1):
+                stages_by_id[stage_id].position = position
+            refreshed = (
+                session.execute(
+                    select(Plan)
+                    .options(selectinload(Plan.stages).selectinload(PlanStage.tasks))
+                    .where(Plan.id == plan_id)
+                )
+                .scalars()
+                .first()
+            )
+            if refreshed is None:
+                return {"ok": False, "error": f"Plan {plan_id} not found."}
+            return {
+                "ok": True,
+                "item": _serialize_plan_item(
+                    refreshed,
+                    include_stages=True,
+                    include_tasks=True,
+                ),
+            }
+
+    @mcp.tool()
+    def llmctl_set_plan_stage_status(
+        stage_id: int,
+        status: str,
+        plan_id: int | None = None,
+        completed_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Set stage status using completed_at semantics (`pending`, `in_progress`, `completed`)."""
+        normalized = str(status or "").strip().lower()
+        if normalized in {"pending", "todo", "not_started", "planned"}:
+            stage_status = "pending"
+        elif normalized in {"in_progress", "active", "started"}:
+            stage_status = "in_progress"
+        elif normalized in {"completed", "complete", "done"}:
+            stage_status = "completed"
+        else:
+            return {
+                "ok": False,
+                "error": "status must be one of: pending, in_progress, completed.",
+            }
+        try:
+            completed_value = _parse_optional_datetime(completed_at, "completed_at")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        with session_scope() as session:
+            item = session.get(PlanStage, stage_id)
+            if item is None:
+                return {"ok": False, "error": f"Plan stage {stage_id} not found."}
+            if plan_id is not None and item.plan_id != plan_id:
+                return {"ok": False, "error": f"Plan stage {stage_id} is not in plan {plan_id}."}
+            if stage_status == "completed":
+                item.completed_at = completed_value or utcnow()
+            else:
+                item.completed_at = None
+            payload = _serialize_model(item, include_relationships=False)
+            payload["status"] = stage_status
+            return {"ok": True, "item": payload}
 
     @mcp.tool()
     def llmctl_create_plan_stage(

@@ -810,6 +810,155 @@ select[size]:not([size='1']) {
   color: var(--muted);
 }
 
+.models-list-controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.models-list-controls-left {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.models-inline-filters {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.models-list-controls-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.models-filters-popover {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(24, 33, 43, 0.6);
+}
+
+.models-filters-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+
+.models-filters-summary::-webkit-details-marker {
+  display: none;
+}
+
+.models-filters-popover-body {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.models-capability-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.models-capability-chip {
+  padding: 4px 10px;
+  letter-spacing: 0.12em;
+}
+
+.models-capability-overflow-wrap {
+  position: relative;
+}
+
+.models-capability-overflow-btn {
+  cursor: pointer;
+  padding: 4px 10px;
+  letter-spacing: 0.12em;
+}
+
+.models-capability-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  max-width: 320px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(11, 15, 20, 0.98);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+.models-error-state {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.models-loading-table .table-actions {
+  justify-content: center;
+}
+
+.models-skeleton-row td {
+  vertical-align: middle;
+}
+
+.models-skeleton-line {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  animation: models-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.models-skeleton-line-primary {
+  width: min(220px, 80%);
+}
+
+.models-skeleton-line-tags {
+  width: min(180px, 70%);
+}
+
+.models-skeleton-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  display: inline-block;
+  animation: models-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes models-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
 .btn,
 .btn-link {
   display: inline-flex;
@@ -1037,6 +1186,22 @@ select[size]:not([size='1']) {
   text-transform: uppercase;
   letter-spacing: 0.2em;
   color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .models-list-controls {
+    align-items: stretch;
+  }
+
+  .models-list-controls-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .models-list-controls-right {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .chip {
