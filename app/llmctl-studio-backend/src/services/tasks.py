@@ -140,6 +140,14 @@ from core.models import (
     flowchart_node_skills,
 )
 from services.instruction_adapters import resolve_instruction_adapter
+from services.task_utils.json_utils import (
+    coerce_bool as _coerce_bool,
+    extract_path_value as _extract_path_value,
+    json_dumps as _json_dumps,
+    json_safe as _json_safe,
+    parse_json_object as _parse_json_object,
+    parse_optional_int as _parse_optional_int,
+)
 from rag.domain import (
     RAG_FLOWCHART_MODE_DELTA_INDEX,
     RAG_FLOWCHART_MODE_FRESH_INDEX,
@@ -5765,89 +5773,6 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         _cleanup_workspace(task_id, runtime_home, label="runtime home")
         _cleanup_workspace(task_id, staging_dir, label="script staging")
         _cleanup_workspace(task_id, workspace)
-
-
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, tuple):
-        return [_json_safe(item) for item in value]
-    return value
-
-
-def _json_dumps(value: Any) -> str:
-    return json.dumps(_json_safe(value), sort_keys=True)
-
-
-def _parse_json_object(raw: str | None) -> dict[str, Any]:
-    if not raw:
-        return {}
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _extract_path_value(payload: Any, path: str) -> Any:
-    cleaned_path = (path or "").strip()
-    if not cleaned_path:
-        return None
-    current = payload
-    for token in cleaned_path.split("."):
-        segment = token.strip()
-        if not segment:
-            continue
-        if isinstance(current, dict):
-            if segment not in current:
-                return None
-            current = current[segment]
-            continue
-        if isinstance(current, list):
-            if not segment.isdigit():
-                return None
-            index = int(segment)
-            if index < 0 or index >= len(current):
-                return None
-            current = current[index]
-            continue
-        return None
-    return current
-
-
-def _parse_optional_int(
-    value: Any,
-    *,
-    default: int = 0,
-    minimum: int | None = None,
-) -> int:
-    parsed = default
-    if isinstance(value, bool):
-        parsed = int(value)
-    elif isinstance(value, int):
-        parsed = value
-    elif isinstance(value, str):
-        raw = value.strip()
-        if raw:
-            try:
-                parsed = int(raw)
-            except ValueError:
-                parsed = default
-    if minimum is not None and parsed < minimum:
-        return minimum
-    return parsed
-
-
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return bool(value)
 
 
 def _allow_skill_adapter_fallback(node_config: dict[str, Any]) -> bool:

@@ -72,4 +72,25 @@ describe('ArtifactExplorerPage', () => {
     expect(row).toBeTruthy()
     expect(row?.getAttribute('data-href')).toBe('/artifacts/item/101')
   })
+
+  test('keeps fixed-height layout and renders centered empty state when list is empty', async () => {
+    getNodeArtifacts.mockResolvedValueOnce({
+      total_count: 0,
+      items: [],
+    })
+    const { container } = renderPage('/artifacts/type/milestone')
+
+    expect(await screen.findByText('No artifacts found for this filter set.')).toBeInTheDocument()
+    const pageSection = container.querySelector('section[aria-label="Milestone Artifacts"]')
+    const panelBody = container.querySelector('.panel-card-body')
+    const emptyState = container.querySelector('.artifact-explorer-empty-state')
+    const headerActions = container.querySelector('.panel-header .artifact-explorer-header-actions')
+
+    expect(pageSection?.classList.contains('workflow-fixed-page')).toBe(true)
+    expect(panelBody?.classList.contains('workflow-fixed-panel-body')).toBe(true)
+    expect(emptyState).toBeTruthy()
+    expect(headerActions).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'filter' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'reset' })).toBeInTheDocument()
+  })
 })

@@ -135,6 +135,7 @@ export default function ArtifactExplorerPage() {
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const items = payload && Array.isArray(payload.items) ? payload.items : []
   const totalCount = parsePositiveInt(payload?.total_count, 0) || 0
+  const hasItems = !state.loading && !state.error && items.length > 0
   const canGoPrev = offset > 0
   const canGoNext = offset + items.length < totalCount
 
@@ -181,36 +182,47 @@ export default function ArtifactExplorerPage() {
           title={title}
           actionsClassName="workflow-list-panel-header-actions"
           actions={(
-            <nav className="pagination" aria-label="Artifact pages">
-              {canGoPrev ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ offset: Math.max(0, offset - limit), limit })}
-                >
-                  Prev
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-              )}
-              {canGoNext ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ offset: offset + limit, limit })}
-                >
-                  Next
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-              )}
-            </nav>
+            <div className="artifact-explorer-header-actions">
+              <span className="panel-header-meta artifact-explorer-header-count">{`${items.length} shown / ${totalCount} total`}</span>
+              <button type="submit" form="artifact-explorer-filter-form" className="btn-link btn-secondary">
+                <i className="fa-solid fa-filter" />
+                filter
+              </button>
+              <button type="button" className="btn-link" onClick={resetFilters}>
+                <i className="fa-solid fa-rotate-right" />
+                reset
+              </button>
+              <nav className="pagination" aria-label="Artifact pages">
+                {canGoPrev ? (
+                  <button
+                    type="button"
+                    className="pagination-btn"
+                    onClick={() => updateParams({ offset: Math.max(0, offset - limit), limit })}
+                  >
+                    Prev
+                  </button>
+                ) : (
+                  <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
+                )}
+                {canGoNext ? (
+                  <button
+                    type="button"
+                    className="pagination-btn"
+                    onClick={() => updateParams({ offset: offset + limit, limit })}
+                  >
+                    Next
+                  </button>
+                ) : (
+                  <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
+                )}
+              </nav>
+            </div>
           )}
         />
 
         <div className="panel-card-body workflow-fixed-panel-body">
-          <form className="form-grid" onSubmit={applyFilters}>
-            <div className="toolbar toolbar-wrap" style={{ margin: 0 }}>
+          <form id="artifact-explorer-filter-form" className="form-grid artifact-explorer-filter-form" onSubmit={applyFilters}>
+            <div className="toolbar toolbar-wrap artifact-explorer-filter-controls">
               <div className="toolbar-group">
                 <label htmlFor="artifact-node-type-filter">Node type</label>
                 <select
@@ -236,69 +248,63 @@ export default function ArtifactExplorerPage() {
                 />
               </div>
             </div>
-            <div className="toolbar" style={{ justifyContent: 'flex-start', margin: 0 }}>
-              <button type="submit" className="btn-link btn-secondary">
-                <i className="fa-solid fa-filter" />
-                filter
-              </button>
-              <button type="button" className="btn-link" onClick={resetFilters}>
-                <i className="fa-solid fa-rotate-right" />
-                reset
-              </button>
-              <span className="muted">{`${items.length} shown / ${totalCount} total`}</span>
-            </div>
           </form>
 
           {state.loading ? <p>Loading artifacts...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
-          {!state.loading && !state.error && items.length === 0 ? (
-            <p className="muted">No artifacts found for this filter set.</p>
-          ) : null}
 
-          {!state.loading && !state.error && items.length > 0 ? (
-            <div className="table-wrap workflow-list-table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Artifact</th>
-                    <th>Type</th>
-                    <th>Node type</th>
-                    <th>Ref</th>
-                    <th>Flowchart</th>
-                    <th>Run</th>
-                    <th>Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((artifact) => {
-                    const artifactId = parsePositiveInt(artifact?.id)
-                    if (!artifactId) {
-                      return null
-                    }
-                    const href = `/artifacts/item/${artifactId}`
-                    const action = String((artifact?.payload || {}).action || '').trim()
-                    return (
-                      <tr
-                        key={`artifact-${artifactId}`}
-                        className="table-row-link"
-                        data-href={href}
-                        onClick={(event) => handleRowClick(event, href)}
-                      >
-                        <td>
-                          <Link to={href}>{`Artifact ${artifactId}`}</Link>
-                          {action ? <p className="table-note">{action}</p> : null}
-                        </td>
-                        <td>{artifact.artifact_type || '-'}</td>
-                        <td>{artifact.node_type || '-'}</td>
-                        <td>{artifact.ref_id || '-'}</td>
-                        <td>{artifact.flowchart_id || '-'}</td>
-                        <td>{artifact.flowchart_run_id || '-'}</td>
-                        <td>{artifact.created_at || '-'}</td>
+          {!state.loading && !state.error ? (
+            <div className="workflow-list-table-shell artifact-explorer-results-shell">
+              {hasItems ? (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Artifact</th>
+                        <th>Type</th>
+                        <th>Node type</th>
+                        <th>Ref</th>
+                        <th>Flowchart</th>
+                        <th>Run</th>
+                        <th>Created</th>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {items.map((artifact) => {
+                        const artifactId = parsePositiveInt(artifact?.id)
+                        if (!artifactId) {
+                          return null
+                        }
+                        const href = `/artifacts/item/${artifactId}`
+                        const action = String((artifact?.payload || {}).action || '').trim()
+                        return (
+                          <tr
+                            key={`artifact-${artifactId}`}
+                            className="table-row-link"
+                            data-href={href}
+                            onClick={(event) => handleRowClick(event, href)}
+                          >
+                            <td>
+                              <Link to={href}>{`Artifact ${artifactId}`}</Link>
+                              {action ? <p className="table-note">{action}</p> : null}
+                            </td>
+                            <td>{artifact.artifact_type || '-'}</td>
+                            <td>{artifact.node_type || '-'}</td>
+                            <td>{artifact.ref_id || '-'}</td>
+                            <td>{artifact.flowchart_id || '-'}</td>
+                            <td>{artifact.flowchart_run_id || '-'}</td>
+                            <td>{artifact.created_at || '-'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="artifact-explorer-empty-state" role="status" aria-live="polite">
+                  <p className="muted">No artifacts found for this filter set.</p>
+                </div>
+              )}
             </div>
           ) : null}
         </div>

@@ -13,7 +13,6 @@ on:
           - llmctl-studio-backend
           - llmctl-studio-frontend
           - llmctl-celery-worker
-          - llmctl-rag
           - llmctl-mcp
           - llmctl-github-mcp
           - llmctl-chromadb-mcp
@@ -69,11 +68,6 @@ jobs:
                   "image_name": "llmctl-celery-worker",
                   "dockerfile": "app/llmctl-celery-worker/docker/Dockerfile",
                   "build_args": "DOCKER_GID=999",
-              },
-              {
-                  "image_name": "llmctl-rag",
-                  "dockerfile": "app/llmctl-rag/docker/llmctl-rag.Dockerfile",
-                  "build_args": "",
               },
               {
                   "image_name": "llmctl-mcp",

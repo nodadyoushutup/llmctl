@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import ArtifactDetailPage from './ArtifactDetailPage'
@@ -35,7 +35,23 @@ describe('ArtifactDetailPage', () => {
         flowchart_run_id: 42,
         flowchart_run_node_id: 88,
         variant_key: 'run-42-node-run-88',
-        payload: { action: 'retrieve', value: 'sample' },
+        payload: {
+          action: 'retrieve',
+          stored_memory: {
+            id: 55,
+            description: 'Primary memory row',
+            created_at: '2026-02-18 11:00',
+            updated_at: '2026-02-18 11:01',
+          },
+          retrieved_memories: [
+            {
+              id: 56,
+              description: 'Retrieved memory row',
+              created_at: '2026-02-18 10:00',
+              updated_at: '2026-02-18 10:01',
+            },
+          ],
+        },
         request_id: 'req-memory-artifact',
         correlation_id: 'corr-memory-artifact',
         created_at: '2026-02-18 11:00',
@@ -51,7 +67,21 @@ describe('ArtifactDetailPage', () => {
         flowchart_run_id: 51,
         flowchart_run_node_id: 92,
         variant_key: 'run-51-node-run-92',
-        payload: { action: 'create_or_update_plan' },
+        payload: {
+          action: 'create_or_update_plan',
+          plan: {
+            id: 17,
+            name: 'Launch Plan',
+            description: 'Deliver launch milestones',
+            completed_at: '',
+            created_at: '2026-02-18 09:00',
+            updated_at: '2026-02-18 12:05',
+            stages: [
+              { id: 1, tasks: [{ id: 1 }, { id: 2 }] },
+              { id: 2, tasks: [{ id: 3 }] },
+            ],
+          },
+        },
         created_at: '2026-02-18 12:00',
         updated_at: '2026-02-18 12:05',
       },
@@ -81,10 +111,22 @@ describe('ArtifactDetailPage', () => {
     })
     expect(await screen.findByText('Artifact 55')).toBeInTheDocument()
     expect(screen.getByText('retrieve')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'run detail' })).toHaveAttribute('href', '/flowcharts/runs/42')
+    expect(screen.getByRole('link', { name: 'Open run detail' })).toHaveAttribute('href', '/flowcharts/runs/42')
     expect(getMilestoneArtifact).not.toHaveBeenCalled()
     expect(getPlanArtifact).not.toHaveBeenCalled()
     expect(getNodeArtifact).not.toHaveBeenCalled()
+  })
+
+  test('renders layman structured fields on data tab', async () => {
+    renderPage('/memories/7/artifacts/55')
+
+    expect(await screen.findByText('Artifact 55')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Data' }))
+
+    expect(screen.getByRole('heading', { name: 'Stored Memory' })).toBeInTheDocument()
+    expect(screen.getByText('Primary memory row')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Retrieved Memory 1' })).toBeInTheDocument()
+    expect(screen.getByText('Retrieved memory row')).toBeInTheDocument()
   })
 
   test('loads plan artifact details for plan route', async () => {
@@ -99,6 +141,17 @@ describe('ArtifactDetailPage', () => {
     expect(getNodeArtifact).not.toHaveBeenCalled()
   })
 
+  test('renders readable plan content on data tab', async () => {
+    renderPage('/plans/5/artifacts/17')
+
+    expect(await screen.findByText('Artifact 17')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Data' }))
+
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(screen.getByText(/Plan: Launch Plan/)).toBeInTheDocument()
+    expect(screen.getByText(/Description: Deliver launch milestones/)).toBeInTheDocument()
+  })
+
   test('loads generic node artifact details for artifact explorer route', async () => {
     renderPage('/artifacts/item/101')
 
@@ -106,7 +159,7 @@ describe('ArtifactDetailPage', () => {
       expect(getNodeArtifact).toHaveBeenCalledWith(101)
     })
     expect(await screen.findByText('Artifact 101')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'back' })).toHaveAttribute('href', '/artifacts/type/task')
+    expect(screen.getByRole('link', { name: 'Back to artifact list' })).toHaveAttribute('href', '/artifacts/type/task')
     expect(getMemoryArtifact).not.toHaveBeenCalled()
     expect(getMilestoneArtifact).not.toHaveBeenCalled()
     expect(getPlanArtifact).not.toHaveBeenCalled()
