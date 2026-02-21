@@ -3152,6 +3152,7 @@ fieldset.field {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
   cursor: grab;
@@ -3182,6 +3183,8 @@ fieldset.field {
   left: 0;
   top: 0;
   transform-origin: top left;
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 .flow-ws-edge-layer {
@@ -3221,6 +3224,26 @@ fieldset.field {
   fill: none;
   pointer-events: stroke;
   cursor: pointer;
+}
+
+.flow-ws-edge-control-hit {
+  fill: transparent;
+  stroke: transparent;
+  pointer-events: all;
+  cursor: grab;
+}
+
+.flow-ws-edge-control {
+  fill: rgba(255, 122, 24, 0.95);
+  stroke: rgba(248, 250, 252, 0.96);
+  stroke-width: 1.4;
+  pointer-events: all;
+  cursor: grab;
+}
+
+.flow-ws-edge-control-hit:active,
+.flow-ws-edge-control:active {
+  cursor: grabbing;
 }
 
 .flow-ws-edge-label {

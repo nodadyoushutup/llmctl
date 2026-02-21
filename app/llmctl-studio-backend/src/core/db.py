@@ -250,6 +250,7 @@ def _ensure_schema() -> None:
             "edge_mode": "VARCHAR(16) NOT NULL DEFAULT 'solid'",
             "condition_key": "VARCHAR(128)",
             "label": "VARCHAR(255)",
+            "control_points_json": "TEXT",
         }
         _ensure_columns(connection, "flowchart_edges", flowchart_edge_columns)
         _migrate_flowchart_edge_modes(connection)

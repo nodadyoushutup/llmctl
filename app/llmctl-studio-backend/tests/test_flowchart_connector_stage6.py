@@ -864,6 +864,8 @@ class FlowchartConnectorStage6ApiTests(StudioDbTestCase):
                         "source_handle_id": "r1",
                         "target_handle_id": "l1",
                         "label": "pull context",
+                        "control_point_style": "curved",
+                        "control_points": [{"x": 80.5, "y": -25.25}, {"x": 156.0, "y": -5.0}],
                     }
                 ],
             },
@@ -884,6 +886,11 @@ class FlowchartConnectorStage6ApiTests(StudioDbTestCase):
         self.assertEqual("r1", dotted_edges[0].get("source_handle_id"))
         self.assertEqual("l1", dotted_edges[0].get("target_handle_id"))
         self.assertEqual("pull context", dotted_edges[0].get("label"))
+        self.assertEqual("curved", dotted_edges[0].get("control_point_style"))
+        self.assertEqual(
+            [{"x": 80.5, "y": -25.25}, {"x": 156.0, "y": -5.0}],
+            dotted_edges[0].get("control_points"),
+        )
 
 
 if __name__ == "__main__":

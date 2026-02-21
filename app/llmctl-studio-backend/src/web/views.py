@@ -6089,6 +6089,18 @@ def _parse_json_dict(raw: str | dict[str, object] | None) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _parse_json_list(raw: str | list[object] | None) -> list[object]:
+    if isinstance(raw, list):
+        return raw
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return payload if isinstance(payload, list) else []
+
+
 def _format_json_object_for_display(raw: str | dict[str, object] | None) -> str:
     payload = _parse_json_dict(raw)
     return json.dumps(payload, indent=2, sort_keys=True)
@@ -6259,6 +6271,81 @@ def _coerce_float(value: object, *, field_name: str, default: float = 0.0) -> fl
         return float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{field_name} must be a number.") from exc
+
+
+def _coerce_flowchart_edge_control_points(
+    value: object, *, field_name: str
+) -> list[dict[str, float]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be an array.")
+    normalized: list[dict[str, float]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"{field_name}[{index}] must be an object.")
+        x = _coerce_float(item.get("x"), field_name=f"{field_name}[{index}].x")
+        y = _coerce_float(item.get("y"), field_name=f"{field_name}[{index}].y")
+        normalized.append({"x": round(x, 2), "y": round(y, 2)})
+        if len(normalized) >= 24:
+            break
+    return normalized
+
+
+FLOWCHART_EDGE_CONTROL_STYLE_HARD = "hard"
+FLOWCHART_EDGE_CONTROL_STYLE_CURVED = "curved"
+FLOWCHART_EDGE_CONTROL_STYLE_CHOICES = {
+    FLOWCHART_EDGE_CONTROL_STYLE_HARD,
+    FLOWCHART_EDGE_CONTROL_STYLE_CURVED,
+}
+
+
+def _coerce_flowchart_edge_control_style(value: object, *, field_name: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return FLOWCHART_EDGE_CONTROL_STYLE_HARD
+    if cleaned not in FLOWCHART_EDGE_CONTROL_STYLE_CHOICES:
+        raise ValueError(
+            f"{field_name} must be one of {', '.join(sorted(FLOWCHART_EDGE_CONTROL_STYLE_CHOICES))}."
+        )
+    return cleaned
+
+
+def _flowchart_edge_control_geometry(
+    value: object,
+) -> tuple[list[dict[str, float]], str]:
+    payload = value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return [], FLOWCHART_EDGE_CONTROL_STYLE_HARD
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            return [], FLOWCHART_EDGE_CONTROL_STYLE_HARD
+    if isinstance(payload, dict):
+        raw_points = payload.get("points")
+        raw_style = payload.get("style")
+    elif isinstance(payload, list):
+        raw_points = payload
+        raw_style = FLOWCHART_EDGE_CONTROL_STYLE_HARD
+    else:
+        return [], FLOWCHART_EDGE_CONTROL_STYLE_HARD
+    try:
+        points = _coerce_flowchart_edge_control_points(
+            raw_points,
+            field_name="edge.control_points",
+        )
+    except ValueError:
+        points = []
+    try:
+        style = _coerce_flowchart_edge_control_style(
+            raw_style,
+            field_name="edge.control_point_style",
+        )
+    except ValueError:
+        style = FLOWCHART_EDGE_CONTROL_STYLE_HARD
+    return points, style
 
 
 def _coerce_optional_handle_id(value: object, *, field_name: str) -> str | None:
@@ -6459,6 +6546,9 @@ def _serialize_flowchart_node(node: FlowchartNode) -> dict[str, object]:
 
 
 def _serialize_flowchart_edge(edge: FlowchartEdge) -> dict[str, object]:
+    control_points, control_point_style = _flowchart_edge_control_geometry(
+        edge.control_points_json
+    )
     return {
         "id": edge.id,
         "flowchart_id": edge.flowchart_id,
@@ -6469,6 +6559,8 @@ def _serialize_flowchart_edge(edge: FlowchartEdge) -> dict[str, object]:
         "edge_mode": edge.edge_mode,
         "condition_key": edge.condition_key,
         "label": edge.label,
+        "control_points": control_points,
+        "control_point_style": control_point_style,
         "created_at": _human_time(edge.created_at),
         "updated_at": _human_time(edge.updated_at),
     }
@@ -8321,13 +8413,25 @@ def _validate_flowchart_graph_snapshot(
     solid_parent_ids_by_target: dict[int, set[int]] = {}
     edge_modes_by_pair: dict[tuple[int, int], set[str]] = {}
     for edge in edges:
+        edge_token = edge.get("id")
+        if edge_token is None:
+            edge_token = f"{edge.get('source_node_id')}->{edge.get('target_node_id')}"
+        try:
+            _coerce_flowchart_edge_control_points(
+                edge.get("control_points"),
+                field_name=f"edges[{edge_token}].control_points",
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+        try:
+            _coerce_flowchart_edge_control_style(
+                edge.get("control_point_style"),
+                field_name=f"edges[{edge_token}].control_point_style",
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
         edge_mode = str(edge.get("edge_mode") or "").strip().lower()
         if edge_mode not in FLOWCHART_EDGE_MODE_CHOICES:
-            edge_token = edge.get("id")
-            if edge_token is None:
-                edge_token = (
-                    f"{edge.get('source_node_id')}->{edge.get('target_node_id')}"
-                )
             errors.append(
                 f"Edge {edge_token} must define edge_mode as solid or dotted."
             )
@@ -8502,19 +8606,25 @@ def _flowchart_graph_state(
         }
         for node in flowchart_nodes
     ]
-    edges = [
-        {
-            "id": edge.id,
-            "source_node_id": edge.source_node_id,
-            "target_node_id": edge.target_node_id,
-            "source_handle_id": edge.source_handle_id,
-            "target_handle_id": edge.target_handle_id,
-            "edge_mode": edge.edge_mode,
-            "condition_key": edge.condition_key,
-            "label": edge.label,
-        }
-        for edge in flowchart_edges
-    ]
+    edges: list[dict[str, object]] = []
+    for edge in flowchart_edges:
+        control_points, control_point_style = _flowchart_edge_control_geometry(
+            edge.control_points_json
+        )
+        edges.append(
+            {
+                "id": edge.id,
+                "source_node_id": edge.source_node_id,
+                "target_node_id": edge.target_node_id,
+                "source_handle_id": edge.source_handle_id,
+                "target_handle_id": edge.target_handle_id,
+                "edge_mode": edge.edge_mode,
+                "condition_key": edge.condition_key,
+                "label": edge.label,
+                "control_points": control_points,
+                "control_point_style": control_point_style,
+            }
+        )
     return nodes, edges
 
 
@@ -13736,6 +13846,14 @@ def upsert_flowchart_graph(flowchart_id: int):
                     raw_edge.get("edge_mode"),
                     field_name=f"edges[{index}].edge_mode",
                 )
+                control_points = _coerce_flowchart_edge_control_points(
+                    raw_edge.get("control_points"),
+                    field_name=f"edges[{index}].control_points",
+                )
+                control_point_style = _coerce_flowchart_edge_control_style(
+                    raw_edge.get("control_point_style"),
+                    field_name=f"edges[{index}].control_point_style",
+                )
                 condition_key = str(raw_edge.get("condition_key") or "").strip() or None
                 source_node_type = node_type_by_id.get(source_node_id, "")
                 if (
@@ -13763,6 +13881,18 @@ def upsert_flowchart_graph(flowchart_id: int):
                     edge_mode=edge_mode,
                     condition_key=condition_key,
                     label=label,
+                    control_points_json=(
+                        json.dumps(
+                            {
+                                "points": control_points,
+                                "style": control_point_style,
+                            },
+                            sort_keys=True,
+                        )
+                        if control_points
+                        or control_point_style != FLOWCHART_EDGE_CONTROL_STYLE_HARD
+                        else None
+                    ),
                 )
 
             for node_id, flowchart_node in flowchart_nodes_by_id.items():

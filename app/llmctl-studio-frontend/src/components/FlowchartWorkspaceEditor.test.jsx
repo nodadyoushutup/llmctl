@@ -165,6 +165,56 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
+  test('adds and drags connector bend points for selected edges', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, config: { task_prompt: 'run' } },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1' }]}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-edge-hit')).toBeTruthy()
+    })
+
+    const edgeHit = container.querySelector('.flow-ws-edge-hit')
+    fireEvent.doubleClick(edgeHit, { clientX: 280, clientY: 240 })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      expect(payload?.edges?.[0]?.control_points).toHaveLength(1)
+      expect(payload?.edges?.[0]?.control_point_style).toBe('hard')
+      expect(container.querySelectorAll('.flow-ws-edge-control')).toHaveLength(1)
+    })
+
+    const bendStyleField = screen.getByText('bend style').closest('label')
+    const bendStyleSelect = bendStyleField?.querySelector('select')
+    expect(bendStyleSelect).toBeTruthy()
+    fireEvent.change(bendStyleSelect, { target: { value: 'curved' } })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      expect(payload?.edges?.[0]?.control_point_style).toBe('curved')
+    })
+
+    const firstPoint = lastGraphPayload(onGraphChange)?.edges?.[0]?.control_points?.[0]
+    const controlHandle = container.querySelector('.flow-ws-edge-control-hit')
+    fireEvent.pointerDown(controlHandle, { button: 0, clientX: 280, clientY: 240 })
+    fireEvent.pointerMove(window, { clientX: 360, clientY: 300 })
+    fireEvent.pointerUp(window, { clientX: 360, clientY: 300 })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      expect(payload?.edges?.[0]?.control_points).toHaveLength(1)
+      expect(payload?.edges?.[0]?.control_points?.[0]).not.toEqual(firstPoint)
+    })
+  })
+
   test('zooms the graph on plain mouse wheel over viewport', async () => {
     const { container } = render(<FlowchartWorkspaceEditor />)
     const viewport = container.querySelector('.flow-ws-viewport')
@@ -176,6 +226,27 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     await waitFor(() => {
       expect(container.querySelector('.flow-ws-zoom-label')?.textContent).toBe('110%')
     })
+  })
+
+  test('prevents default wheel scrolling while applying viewport zoom', () => {
+    const { container } = render(<FlowchartWorkspaceEditor />)
+    const viewport = container.querySelector('.flow-ws-viewport')
+    expect(viewport).toBeTruthy()
+
+    const wheelEvent = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -120,
+      clientX: 300,
+      clientY: 200,
+    })
+    let dispatchResult = true
+    act(() => {
+      dispatchResult = viewport.dispatchEvent(wheelEvent)
+    })
+
+    expect(dispatchResult).toBe(false)
+    expect(wheelEvent.defaultPrevented).toBe(true)
   })
 
   test('applies consecutive wheel zoom events without dropping steps', async () => {
@@ -190,7 +261,10 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
 
     await waitFor(() => {
-      expect(container.querySelector('.flow-ws-zoom-label')?.textContent).toBe('120%')
+      const zoomLabel = String(container.querySelector('.flow-ws-zoom-label')?.textContent || '0').replace('%', '')
+      const zoomPercent = Number.parseInt(zoomLabel, 10)
+      expect(Number.isNaN(zoomPercent)).toBe(false)
+      expect(zoomPercent).toBeGreaterThanOrEqual(120)
     })
   })
 

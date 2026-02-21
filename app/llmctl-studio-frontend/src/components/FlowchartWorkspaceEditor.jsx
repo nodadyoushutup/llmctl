@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import PanelHeader from './PanelHeader'
 import PersistedDetails from './PersistedDetails'
 
@@ -8,6 +8,12 @@ const NODE_TYPE_WITH_EDITABLE_REF = new Set(['flowchart'])
 const NODE_TYPE_REQUIRES_REF = new Set(['flowchart'])
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left']
 const EDGE_MODE_OPTIONS = ['solid', 'dotted']
+const EDGE_CONTROL_STYLE_HARD = 'hard'
+const EDGE_CONTROL_STYLE_CURVED = 'curved'
+const EDGE_CONTROL_STYLE_OPTIONS = [
+  { value: EDGE_CONTROL_STYLE_HARD, label: 'hard bends' },
+  { value: EDGE_CONTROL_STYLE_CURVED, label: 'curved' },
+]
 const FAN_IN_MODE_ALL = 'all'
 const FAN_IN_MODE_ANY = 'any'
 const FAN_IN_MODE_CUSTOM = 'custom'
@@ -73,7 +79,13 @@ const WORLD_ORIGIN_Y = WORLD_HEIGHT / 2
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 1.8
 const ZOOM_STEP = 0.1
+const WHEEL_ZOOM_SENSITIVITY = 0.0008
 const PALETTE_DRAG_TYPE = 'application/x-llmctl-flow-node-type'
+const MAX_EDGE_CONTROL_POINTS = 24
+const EDGE_POINT_MIN_X = -WORLD_ORIGIN_X + WORLD_PADDING
+const EDGE_POINT_MIN_Y = -WORLD_ORIGIN_Y + WORLD_PADDING
+const EDGE_POINT_MAX_X = WORLD_ORIGIN_X - WORLD_PADDING
+const EDGE_POINT_MAX_Y = WORLD_ORIGIN_Y - WORLD_PADDING
 
 const NODE_DIMENSIONS = {
   start: { width: 108, height: 108 },
@@ -360,6 +372,37 @@ function worldToGraphX(value) {
 
 function worldToGraphY(value) {
   return toNumber(value, WORLD_ORIGIN_Y) - WORLD_ORIGIN_Y
+}
+
+function clampEdgeControlPoint(point) {
+  return {
+    x: Number(clamp(toNumber(point?.x, 0), EDGE_POINT_MIN_X, EDGE_POINT_MAX_X).toFixed(2)),
+    y: Number(clamp(toNumber(point?.y, 0), EDGE_POINT_MIN_Y, EDGE_POINT_MAX_Y).toFixed(2)),
+  }
+}
+
+function normalizeEdgeControlPoints(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const points = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+    points.push(clampEdgeControlPoint(item))
+    if (points.length >= MAX_EDGE_CONTROL_POINTS) {
+      break
+    }
+  }
+  return points
+}
+
+function normalizeEdgeControlPointStyle(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return normalized === EDGE_CONTROL_STYLE_CURVED
+    ? EDGE_CONTROL_STYLE_CURVED
+    : EDGE_CONTROL_STYLE_HARD
 }
 
 function clampNodePosition(nodeType, x, y) {
@@ -650,7 +693,132 @@ function sideVector(side) {
   return { x: 0, y: 1 }
 }
 
-function edgePath(start, end) {
+function pointToSegmentDistance(point, start, end) {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared <= 0.0001) {
+    return Math.hypot(point.x - start.x, point.y - start.y)
+  }
+  const t = clamp(
+    ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared,
+    0,
+    1,
+  )
+  const projectedX = start.x + dx * t
+  const projectedY = start.y + dy * t
+  return Math.hypot(point.x - projectedX, point.y - projectedY)
+}
+
+function controlPointInsertIndex(start, end, controlPoints, point) {
+  const worldControlPoints = Array.isArray(controlPoints) ? controlPoints : []
+  const route = [start, ...worldControlPoints, end]
+  if (route.length < 2) {
+    return 0
+  }
+  let bestSegmentIndex = 0
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (let segmentIndex = 0; segmentIndex < route.length - 1; segmentIndex += 1) {
+    const distance = pointToSegmentDistance(point, route[segmentIndex], route[segmentIndex + 1])
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestSegmentIndex = segmentIndex
+    }
+  }
+  return clamp(bestSegmentIndex, 0, worldControlPoints.length)
+}
+
+function polylinePathMeta(points) {
+  const route = Array.isArray(points) ? points : []
+  if (route.length < 2) {
+    const fallback = route[0] || { x: 0, y: 0 }
+    return {
+      d: `M ${fallback.x} ${fallback.y}`,
+      labelX: fallback.x,
+      labelY: fallback.y,
+    }
+  }
+  let d = `M ${route[0].x} ${route[0].y}`
+  let totalLength = 0
+  const segments = []
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const segmentStart = route[index]
+    const segmentEnd = route[index + 1]
+    d += ` L ${segmentEnd.x} ${segmentEnd.y}`
+    const dx = segmentEnd.x - segmentStart.x
+    const dy = segmentEnd.y - segmentStart.y
+    const length = Math.hypot(dx, dy)
+    segments.push({ segmentStart, segmentEnd, dx, dy, length })
+    totalLength += length
+  }
+  if (totalLength <= 0.001) {
+    return {
+      d,
+      labelX: route[0].x,
+      labelY: route[0].y - 10,
+    }
+  }
+  const midpointOffset = totalLength / 2
+  let traversed = 0
+  let labelBaseX = route[0].x
+  let labelBaseY = route[0].y
+  let normalX = 0
+  let normalY = -1
+  for (const segment of segments) {
+    if (segment.length <= 0.001) {
+      continue
+    }
+    if (traversed + segment.length >= midpointOffset) {
+      const localOffset = midpointOffset - traversed
+      const t = localOffset / segment.length
+      labelBaseX = segment.segmentStart.x + segment.dx * t
+      labelBaseY = segment.segmentStart.y + segment.dy * t
+      normalX = -segment.dy / segment.length
+      normalY = segment.dx / segment.length
+      break
+    }
+    traversed += segment.length
+  }
+  return {
+    d,
+    labelX: labelBaseX + normalX * 10,
+    labelY: labelBaseY + normalY * 10,
+  }
+}
+
+function curvedPathMeta(points) {
+  const route = Array.isArray(points) ? points : []
+  if (route.length < 2) {
+    return polylinePathMeta(route)
+  }
+  let d = `M ${route[0].x} ${route[0].y}`
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const point0 = index > 0 ? route[index - 1] : route[index]
+    const point1 = route[index]
+    const point2 = route[index + 1]
+    const point3 = (index + 2) < route.length ? route[index + 2] : route[index + 1]
+    const c1x = point1.x + (point2.x - point0.x) / 6
+    const c1y = point1.y + (point2.y - point0.y) / 6
+    const c2x = point2.x - (point3.x - point1.x) / 6
+    const c2y = point2.y - (point3.y - point1.y) / 6
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${point2.x} ${point2.y}`
+  }
+  const labelMeta = polylinePathMeta(route)
+  return {
+    d,
+    labelX: labelMeta.labelX,
+    labelY: labelMeta.labelY,
+  }
+}
+
+function edgePath(start, end, controlPoints = [], controlPointStyle = EDGE_CONTROL_STYLE_HARD) {
+  if (Array.isArray(controlPoints) && controlPoints.length > 0) {
+    const route = [start, ...controlPoints, end]
+    if (normalizeEdgeControlPointStyle(controlPointStyle) === EDGE_CONTROL_STYLE_CURVED) {
+      return curvedPathMeta(route)
+    }
+    return polylinePathMeta(route)
+  }
   const distance = Math.hypot(end.x - start.x, end.y - start.y)
   const bend = Math.max(44, Math.min(220, distance * 0.42))
   const sourceVector = sideVector(start.side)
@@ -1164,6 +1332,8 @@ function buildEdgePayload(edge, nodesByToken) {
     edge_mode: normalizeEdgeMode(edge.edge_mode),
     condition_key: String(edge.condition_key || '').trim() || null,
     label: String(edge.label || '').trim() || null,
+    control_points: normalizeEdgeControlPoints(edge.controlPoints),
+    control_point_style: normalizeEdgeControlPointStyle(edge.controlPointStyle),
   }
 }
 
@@ -1267,6 +1437,8 @@ function buildInitialWorkspace(initialNodes, initialEdges) {
       edge_mode: normalizeEdgeMode(raw?.edge_mode),
       condition_key: String(raw?.condition_key || '').trim(),
       label: String(raw?.label || '').trim(),
+      controlPoints: normalizeEdgeControlPoints(raw?.control_points),
+      controlPointStyle: normalizeEdgeControlPointStyle(raw?.control_point_style),
     })
   }
 
@@ -1350,6 +1522,8 @@ function buildEdgeSelectionSnapshot(edge, nodesByToken) {
     edgeMode: normalizeEdgeMode(edge.edge_mode),
     conditionKey: String(edge.condition_key || ''),
     label: String(edge.label || ''),
+    controlPoints: normalizeEdgeControlPoints(edge.controlPoints),
+    controlPointStyle: normalizeEdgeControlPointStyle(edge.controlPointStyle),
   }
 }
 
@@ -1390,6 +1564,8 @@ function resolveEdgeIdFromSnapshot(edges, nodesByToken, snapshot) {
       && normalizeEdgeMode(edge.edge_mode) === snapshot.edgeMode
       && String(edge.condition_key || '') === snapshot.conditionKey
       && String(edge.label || '') === snapshot.label
+      && JSON.stringify(normalizeEdgeControlPoints(edge.controlPoints)) === JSON.stringify(snapshot.controlPoints || [])
+      && normalizeEdgeControlPointStyle(edge.controlPointStyle) === normalizeEdgeControlPointStyle(snapshot.controlPointStyle)
     )
   })
   return byShape ? byShape.localId : ''
@@ -1416,9 +1592,13 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const nextClientNodeIdRef = useRef(initialWorkspace.nextClientNodeId)
   const nextClientEdgeIdRef = useRef(initialWorkspace.nextClientEdgeId)
   const connectDragRef = useRef(null)
+  const edgePointDragRef = useRef(null)
   const viewportPanRef = useRef(null)
   const zoomRef = useRef(1)
   const wheelZoomFrameRef = useRef(0)
+  const wheelZoomTargetRef = useRef(null)
+  const wheelZoomAnchorRef = useRef(null)
+  const wheelZoomCommitRef = useRef(null)
   const routingFieldRefs = useRef({
     [ROUTING_FOCUS_FIELD_FAN_IN_MODE]: null,
     [ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT]: null,
@@ -1432,6 +1612,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const [selectedEdgeId, setSelectedEdgeId] = useState('')
   const [connectStart, setConnectStart] = useState(null)
   const [connectDrag, setConnectDrag] = useState(null)
+  const [edgePointDrag, setEdgePointDrag] = useState(null)
   const [dragging, setDragging] = useState(null)
   const [isViewportPanning, setIsViewportPanning] = useState(false)
   const [zoom, setZoom] = useState(1)
@@ -1439,6 +1620,10 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   useEffect(() => {
     connectDragRef.current = connectDrag
   }, [connectDrag])
+
+  useEffect(() => {
+    edgePointDragRef.current = edgePointDrag
+  }, [edgePointDrag])
 
   useEffect(() => {
     zoomRef.current = zoom
@@ -1449,8 +1634,35 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       if (wheelZoomFrameRef.current) {
         window.cancelAnimationFrame(wheelZoomFrameRef.current)
       }
+      wheelZoomTargetRef.current = null
+      wheelZoomAnchorRef.current = null
+      wheelZoomCommitRef.current = null
     }
   }, [])
+
+  useLayoutEffect(() => {
+    const commit = wheelZoomCommitRef.current
+    const viewport = viewportRef.current
+    if (!commit || !viewport) {
+      return
+    }
+    if (Math.abs(commit.zoom - zoom) >= 0.0001) {
+      return
+    }
+    wheelZoomCommitRef.current = null
+    const maxScrollLeft = Math.max(0, WORLD_WIDTH * zoom - viewport.clientWidth)
+    const maxScrollTop = Math.max(0, WORLD_HEIGHT * zoom - viewport.clientHeight)
+    viewport.scrollLeft = clamp(
+      commit.anchor.pointerWorldX * zoom - commit.anchor.pointerViewportX,
+      0,
+      maxScrollLeft,
+    )
+    viewport.scrollTop = clamp(
+      commit.anchor.pointerWorldY * zoom - commit.anchor.pointerViewportY,
+      0,
+      maxScrollTop,
+    )
+  }, [zoom])
 
   const runningNodeIdSet = useMemo(() => {
     const values = Array.isArray(runningNodeIds) ? runningNodeIds : []
@@ -1592,14 +1804,15 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     if (!viewport) {
       return null
     }
+    const currentZoom = zoomRef.current
     const rect = viewport.getBoundingClientRect()
-    const worldX = (clientX - rect.left + viewport.scrollLeft) / zoom
-    const worldY = (clientY - rect.top + viewport.scrollTop) / zoom
+    const worldX = (clientX - rect.left + viewport.scrollLeft) / currentZoom
+    const worldY = (clientY - rect.top + viewport.scrollTop) / currentZoom
     return {
       x: worldToGraphX(worldX),
       y: worldToGraphY(worldY),
     }
-  }, [zoom])
+  }, [])
 
   const connectorAtClientPoint = useCallback((clientX, clientY) => {
     if (typeof document.elementFromPoint !== 'function') {
@@ -1653,6 +1866,52 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     }
   }, [dragging, graphPointFromClient])
 
+  useEffect(() => {
+    if (!edgePointDragRef.current) {
+      return undefined
+    }
+
+    function onPointerMove(event) {
+      const currentDrag = edgePointDragRef.current
+      if (!currentDrag) {
+        return
+      }
+      const pointer = graphPointFromClient(event.clientX, event.clientY)
+      if (!pointer) {
+        return
+      }
+      const nextPoint = clampEdgeControlPoint(pointer)
+      setEdges((currentEdges) => currentEdges.map((edge) => {
+        if (edge.localId !== currentDrag.edgeLocalId) {
+          return edge
+        }
+        const controlPoints = normalizeEdgeControlPoints(edge.controlPoints)
+        if (!controlPoints[currentDrag.pointIndex]) {
+          return edge
+        }
+        const nextControlPoints = [...controlPoints]
+        nextControlPoints[currentDrag.pointIndex] = nextPoint
+        return {
+          ...edge,
+          controlPoints: nextControlPoints,
+        }
+      }))
+    }
+
+    function onPointerUp() {
+      setEdgePointDrag(null)
+    }
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerUp)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
+    }
+  }, [edgePointDrag, graphPointFromClient])
+
   const selectedNode = selectedNodeToken ? nodesByToken.get(selectedNodeToken) || null : null
   const selectedNodeType = selectedNode ? normalizeNodeType(selectedNode.node_type) : ''
   const canSaveGraph = typeof onSaveGraph === 'function'
@@ -1660,6 +1919,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const selectedEdge = selectedEdgeId
     ? edges.find((edge) => edge.localId === selectedEdgeId) || null
     : null
+  const selectedEdgeControlPointCount = selectedEdge
+    ? normalizeEdgeControlPoints(selectedEdge.controlPoints).length
+    : 0
   const decisionConditionLookupByNodeToken = useMemo(() => {
     const lookup = new Map()
     for (const node of nodes) {
@@ -2039,8 +2301,75 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       if (edge.localId !== localId) {
         return edge
       }
-      return typeof updater === 'function' ? updater(edge) : { ...edge, ...updater }
+      const nextEdge = typeof updater === 'function' ? updater(edge) : { ...edge, ...updater }
+      return {
+        ...nextEdge,
+        controlPoints: normalizeEdgeControlPoints(nextEdge.controlPoints),
+        controlPointStyle: normalizeEdgeControlPointStyle(nextEdge.controlPointStyle),
+      }
     }))
+  }
+
+  function addEdgeControlPoint(localId, clientX, clientY) {
+    const pointer = graphPointFromClient(clientX, clientY)
+    if (!pointer) {
+      return
+    }
+    const edge = edges.find((item) => item.localId === localId)
+    if (!edge) {
+      return
+    }
+    const sourceNode = nodesByToken.get(edge.sourceToken)
+    const targetNode = nodesByToken.get(edge.targetToken)
+    if (!sourceNode || !targetNode) {
+      return
+    }
+    const start = connectorPosition(sourceNode, edge.sourceHandleId)
+    const end = connectorPosition(targetNode, edge.targetHandleId)
+    const controlPoints = normalizeEdgeControlPoints(edge.controlPoints)
+    const worldControlPoints = controlPoints.map((point) => ({
+      x: graphToWorldX(point.x),
+      y: graphToWorldY(point.y),
+    }))
+    const insertAt = controlPointInsertIndex(
+      start,
+      end,
+      worldControlPoints,
+      { x: graphToWorldX(pointer.x), y: graphToWorldY(pointer.y) },
+    )
+    const nextControlPoints = [...controlPoints]
+    if (nextControlPoints.length < MAX_EDGE_CONTROL_POINTS) {
+      nextControlPoints.splice(insertAt, 0, clampEdgeControlPoint(pointer))
+      updateEdge(localId, { controlPoints: nextControlPoints })
+    }
+    setSelectedEdgeId(localId)
+    setSelectedNodeToken('')
+  }
+
+  function removeEdgeControlPoint(localId, pointIndex) {
+    updateEdge(localId, (edge) => {
+      const controlPoints = normalizeEdgeControlPoints(edge.controlPoints)
+      if (!controlPoints[pointIndex]) {
+        return edge
+      }
+      const nextControlPoints = [...controlPoints]
+      nextControlPoints.splice(pointIndex, 1)
+      return {
+        ...edge,
+        controlPoints: nextControlPoints,
+      }
+    })
+  }
+
+  function beginEdgeControlPointDrag(event, edgeLocalId, pointIndex) {
+    if (event.button !== 0) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    setSelectedEdgeId(edgeLocalId)
+    setSelectedNodeToken('')
+    setEdgePointDrag({ edgeLocalId, pointIndex })
   }
 
   function addNodeAt(nodeType, centerX, centerY) {
@@ -2097,6 +2426,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     setNodes((current) => current.filter((item) => item.token !== token))
     setEdges((current) => current.filter((edge) => edge.sourceToken !== token && edge.targetToken !== token))
     setSelectedNodeToken('')
+    setEdgePointDrag(null)
   }, [emitNotice, nodesByToken])
 
   const confirmAndRemoveNode = useCallback((node) => {
@@ -2114,6 +2444,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const removeEdge = useCallback((localId) => {
     setEdges((current) => current.filter((edge) => edge.localId !== localId))
     setSelectedEdgeId('')
+    setEdgePointDrag(null)
   }, [])
 
   function applyServerGraph(nextNodesRaw, nextEdgesRaw) {
@@ -2137,6 +2468,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     setEdges(nextWorkspace.edges)
     setSelectedNodeToken(nextSelectedNodeToken)
     setSelectedEdgeId(nextSelectedEdgeId)
+    setEdgePointDrag(null)
     return true
   }
 
@@ -2240,6 +2572,8 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       edge_mode: 'solid',
       condition_key: '',
       label: '',
+      controlPoints: [],
+      controlPointStyle: EDGE_CONTROL_STYLE_HARD,
     }
     setEdges((current) => [...current, edge])
     setSelectedEdgeId(edge.localId)
@@ -2561,8 +2895,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       }
       const deltaX = event.clientX - panState.startClientX
       const deltaY = event.clientY - panState.startClientY
-      const maxScrollLeft = Math.max(0, WORLD_WIDTH * zoom - viewport.clientWidth)
-      const maxScrollTop = Math.max(0, WORLD_HEIGHT * zoom - viewport.clientHeight)
+      const currentZoom = zoomRef.current
+      const maxScrollLeft = Math.max(0, WORLD_WIDTH * currentZoom - viewport.clientWidth)
+      const maxScrollTop = Math.max(0, WORLD_HEIGHT * currentZoom - viewport.clientHeight)
       viewport.scrollLeft = clamp(panState.startScrollLeft - deltaX, 0, maxScrollLeft)
       viewport.scrollTop = clamp(panState.startScrollTop - deltaY, 0, maxScrollTop)
       if (!panState.moved && Math.hypot(deltaX, deltaY) > 2) {
@@ -2587,7 +2922,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       window.removeEventListener('pointerup', clearViewportPan)
       window.removeEventListener('pointercancel', clearViewportPan)
     }
-  }, [zoom])
+  }, [])
 
   function beginViewportPan(event) {
     if (event.button !== 0) {
@@ -2597,7 +2932,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       return
     }
     const interactiveElement = event.target?.closest?.(
-      '.flow-ws-node, .flow-ws-node-connector, .flow-ws-edge-hit, a, button, input, select, textarea, label, summary, details',
+      '.flow-ws-node, .flow-ws-node-connector, .flow-ws-edge-hit, .flow-ws-edge-control, .flow-ws-edge-control-hit, a, button, input, select, textarea, label, summary, details',
     )
     if (interactiveElement) {
       return
@@ -2616,7 +2951,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     }
   }
 
-  function handleViewportWheel(event) {
+  const handleViewportWheel = useCallback((event) => {
     const viewport = viewportRef.current
     if (!viewport) {
       return
@@ -2625,10 +2960,12 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       return
     }
     event.preventDefault()
+    event.stopPropagation()
     const currentZoom = zoomRef.current
-    const direction = event.deltaY < 0 ? 1 : -1
-    const nextZoom = normalizeZoom(currentZoom + direction * ZOOM_STEP)
-    if (Math.abs(nextZoom - currentZoom) < 0.001) {
+    const baseZoom = wheelZoomTargetRef.current != null ? wheelZoomTargetRef.current : currentZoom
+    const zoomFactor = Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY)
+    const nextZoom = normalizeZoom(baseZoom * zoomFactor)
+    if (Math.abs(nextZoom - baseZoom) < 0.001) {
       return
     }
     const rect = viewport.getBoundingClientRect()
@@ -2636,23 +2973,41 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     const pointerViewportY = event.clientY - rect.top
     const pointerWorldX = (pointerViewportX + viewport.scrollLeft) / currentZoom
     const pointerWorldY = (pointerViewportY + viewport.scrollTop) / currentZoom
-    zoomRef.current = nextZoom
-    setZoom(nextZoom)
+    wheelZoomTargetRef.current = nextZoom
+    wheelZoomAnchorRef.current = {
+      pointerViewportX,
+      pointerViewportY,
+      pointerWorldX,
+      pointerWorldY,
+    }
     if (wheelZoomFrameRef.current) {
-      window.cancelAnimationFrame(wheelZoomFrameRef.current)
+      return
     }
     wheelZoomFrameRef.current = window.requestAnimationFrame(() => {
       wheelZoomFrameRef.current = 0
-      const currentViewport = viewportRef.current
-      if (!currentViewport) {
+      const pendingZoom = wheelZoomTargetRef.current
+      const anchor = wheelZoomAnchorRef.current
+      wheelZoomTargetRef.current = null
+      wheelZoomAnchorRef.current = null
+      if (pendingZoom == null || !anchor) {
         return
       }
-      const maxScrollLeft = Math.max(0, WORLD_WIDTH * nextZoom - currentViewport.clientWidth)
-      const maxScrollTop = Math.max(0, WORLD_HEIGHT * nextZoom - currentViewport.clientHeight)
-      currentViewport.scrollLeft = clamp(pointerWorldX * nextZoom - pointerViewportX, 0, maxScrollLeft)
-      currentViewport.scrollTop = clamp(pointerWorldY * nextZoom - pointerViewportY, 0, maxScrollTop)
+      wheelZoomCommitRef.current = { zoom: pendingZoom, anchor }
+      zoomRef.current = pendingZoom
+      setZoom(pendingZoom)
     })
-  }
+  }, [])
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) {
+      return undefined
+    }
+    viewport.addEventListener('wheel', handleViewportWheel, { passive: false })
+    return () => {
+      viewport.removeEventListener('wheel', handleViewportWheel)
+    }
+  }, [handleViewportWheel])
 
   function handlePaletteDragStart(event, nodeType) {
     if (!event.dataTransfer) {
@@ -2745,7 +3100,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
           className={`flow-ws-viewport${isViewportPanning ? ' is-panning' : ''}`}
           ref={viewportRef}
           onPointerDown={beginViewportPan}
-          onWheel={handleViewportWheel}
           onDragOver={handleViewportDragOver}
           onDrop={handleViewportDrop}
         >
@@ -2802,7 +3156,13 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   )
                   const start = connectorPosition(sourceNode, edge.sourceHandleId)
                   const end = connectorPosition(targetNode, edge.targetHandleId)
-                  const pathMeta = edgePath(start, end)
+                  const controlPoints = normalizeEdgeControlPoints(edge.controlPoints)
+                  const controlPointStyle = normalizeEdgeControlPointStyle(edge.controlPointStyle)
+                  const worldControlPoints = controlPoints.map((point) => ({
+                    x: graphToWorldX(point.x),
+                    y: graphToWorldY(point.y),
+                  }))
+                  const pathMeta = edgePath(start, end, worldControlPoints, controlPointStyle)
                   const selected = edge.localId === selectedEdgeId
                   return (
                     <g key={edge.localId}>
@@ -2834,7 +3194,40 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                           setSelectedEdgeId(edge.localId)
                           setSelectedNodeToken('')
                         }}
+                        onDoubleClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          addEdgeControlPoint(edge.localId, event.clientX, event.clientY)
+                        }}
                       />
+                      {selected ? worldControlPoints.map((point, pointIndex) => (
+                        <g key={`${edge.localId}:point:${pointIndex}`}>
+                          <circle
+                            cx={point.x}
+                            cy={point.y}
+                            r="9"
+                            className="flow-ws-edge-control-hit"
+                            onPointerDown={(event) => beginEdgeControlPointDrag(event, edge.localId, pointIndex)}
+                            onDoubleClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              removeEdgeControlPoint(edge.localId, pointIndex)
+                            }}
+                          />
+                          <circle
+                            cx={point.x}
+                            cy={point.y}
+                            r="4.5"
+                            className="flow-ws-edge-control"
+                            onPointerDown={(event) => beginEdgeControlPointDrag(event, edge.localId, pointIndex)}
+                            onDoubleClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              removeEdgeControlPoint(edge.localId, pointIndex)
+                            }}
+                          />
+                        </g>
+                      )) : null}
                     </g>
                   )
                 })}
@@ -3695,6 +4088,37 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 onChange={(event) => updateEdge(selectedEdge.localId, { label: event.target.value })}
               />
             </label>
+            <label className="field">
+              <span>bend points</span>
+              <input type="text" value={String(selectedEdgeControlPointCount)} readOnly />
+            </label>
+            <label className="field">
+              <span>bend style</span>
+              <select
+                value={normalizeEdgeControlPointStyle(selectedEdge.controlPointStyle)}
+                onChange={(event) => updateEdge(
+                  selectedEdge.localId,
+                  { controlPointStyle: normalizeEdgeControlPointStyle(event.target.value) },
+                )}
+              >
+                {EDGE_CONTROL_STYLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedEdgeControlPointCount > 0 ? (
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => updateEdge(selectedEdge.localId, { controlPoints: [] })}
+                >
+                  reset bends
+                </button>
+              </div>
+            ) : null}
             <div className="form-actions">
               <button
                 type="button"

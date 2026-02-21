@@ -151,12 +151,14 @@ export default function FlowchartDetailPage() {
       } else {
         setCatalogWarning('')
       }
-      const graph = detail?.graph && typeof detail.graph === 'object' ? detail.graph : { nodes: [], edges: [] }
-      const nextNodes = Array.isArray(graph.nodes) ? graph.nodes : []
-      const nextEdges = Array.isArray(graph.edges) ? graph.edges : []
-      setEditorGraph({ nodes: nextNodes, edges: nextEdges })
-      setEditorRevision((current) => current + 1)
-      setValidationState(detail?.validation && typeof detail.validation === 'object' ? detail.validation : null)
+      if (!silent) {
+        const graph = detail?.graph && typeof detail.graph === 'object' ? detail.graph : { nodes: [], edges: [] }
+        const nextNodes = Array.isArray(graph.nodes) ? graph.nodes : []
+        const nextEdges = Array.isArray(graph.edges) ? graph.edges : []
+        setEditorGraph({ nodes: nextNodes, edges: nextEdges })
+        setEditorRevision((current) => current + 1)
+        setValidationState(detail?.validation && typeof detail.validation === 'object' ? detail.validation : null)
+      }
     } catch (error) {
       setState((current) => ({
         loading: false,

@@ -1125,6 +1125,7 @@ class FlowchartEdge(BaseModel):
     )
     condition_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    control_points_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
