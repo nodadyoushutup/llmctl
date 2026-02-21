@@ -1321,10 +1321,20 @@ export function updateSettingsProviderCodex({ apiKey = '' } = {}) {
   })
 }
 
-export function updateSettingsProviderGemini({ apiKey = '' } = {}) {
+export function updateSettingsProviderGemini({
+  apiKey = '',
+  useVertexAi = false,
+  project = '',
+  location = '',
+} = {}) {
   return requestJson('/settings/provider/gemini', {
     method: 'POST',
-    body: { gemini_api_key: apiKey },
+    body: {
+      gemini_api_key: apiKey,
+      gemini_use_vertex_ai: Boolean(useVertexAi),
+      gemini_project: project,
+      gemini_location: location,
+    },
   })
 }
 

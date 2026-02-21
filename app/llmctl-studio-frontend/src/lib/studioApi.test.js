@@ -816,7 +816,12 @@ describe('studioApi', () => {
       enabledProviders: ['codex', 'gemini'],
     })
     updateSettingsProviderCodex({ apiKey: 'c-key' })
-    updateSettingsProviderGemini({ apiKey: 'g-key' })
+    updateSettingsProviderGemini({
+      apiKey: 'g-key',
+      useVertexAi: true,
+      project: 'vertex-proj',
+      location: 'us-central1',
+    })
     updateSettingsProviderClaude({ apiKey: 'a-key' })
     updateSettingsProviderVllmLocal({ model: 'custom/qwen', huggingfaceToken: 'hf-key' })
     updateSettingsProviderVllmRemote({
@@ -910,7 +915,12 @@ describe('studioApi', () => {
     })
     expect(requestJson).toHaveBeenNthCalledWith(7, '/settings/provider/gemini', {
       method: 'POST',
-      body: { gemini_api_key: 'g-key' },
+      body: {
+        gemini_api_key: 'g-key',
+        gemini_use_vertex_ai: true,
+        gemini_project: 'vertex-proj',
+        gemini_location: 'us-central1',
+      },
     })
     expect(requestJson).toHaveBeenNthCalledWith(8, '/settings/provider/claude', {
       method: 'POST',

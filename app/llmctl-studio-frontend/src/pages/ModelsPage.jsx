@@ -29,8 +29,8 @@ function parseSortDirection(value) {
 }
 
 function parsePerPage(value) {
-  const parsed = parsePositiveInt(value, 10)
-  return PER_PAGE_OPTIONS.includes(parsed) ? parsed : 10
+  const parsed = parsePositiveInt(value, 25)
+  return PER_PAGE_OPTIONS.includes(parsed) ? parsed : 25
 }
 
 function parseDefaultFilter(value) {
@@ -82,6 +82,7 @@ export default function ModelsPage() {
   const [pendingDeleteById, setPendingDeleteById] = useState({})
   const [searchDraft, setSearchDraft] = useState(searchQuery)
   const [scrollRestoreAttempted, setScrollRestoreAttempted] = useState(false)
+  const [driftNoticeSignature, setDriftNoticeSignature] = useState('')
   const [isNarrowScreen, setIsNarrowScreen] = useState(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return false
@@ -239,6 +240,30 @@ export default function ModelsPage() {
   const visibleModels = sortedModels.slice(pageStart, pageStart + perPage)
 
   useEffect(() => {
+    if (state.loading || !payload || hasInitialLoadError) {
+      return
+    }
+    const compatibilitySummary = payload.compatibility_summary
+      && typeof payload.compatibility_summary === 'object'
+      ? payload.compatibility_summary
+      : {}
+    const driftedCount = Number(compatibilitySummary.drifted_count || 0)
+    if (!Number.isFinite(driftedCount) || driftedCount <= 0) {
+      return
+    }
+    const signature = `${driftedCount}:${location.search}`
+    if (signature === driftNoticeSignature) {
+      return
+    }
+    const profileLabel = driftedCount === 1 ? 'model profile' : 'model profiles'
+    const verb = driftedCount === 1 ? 'needs' : 'need'
+    flash.warning(
+      `${driftedCount} ${profileLabel} ${verb} review settings to align with current provider capabilities.`,
+    )
+    setDriftNoticeSignature(signature)
+  }, [driftNoticeSignature, flash, hasInitialLoadError, location.search, payload, state.loading])
+
+  useEffect(() => {
     setCapabilityPopoverModelId(null)
   }, [currentPage, defaultFilter, perPage, providerFilter, searchQuery, sortDirection, sortKey])
 
@@ -254,7 +279,7 @@ export default function ModelsPage() {
     if (parsePositiveInt(updated.get('page'), 1) === 1) {
       updated.delete('page')
     }
-    if (parsePerPage(updated.get('per_page')) === 10) {
+    if (parsePerPage(updated.get('per_page')) === 25) {
       updated.delete('per_page')
     }
     if (parseSortKey(updated.get('sort')) === 'name') {
@@ -610,6 +635,10 @@ export default function ModelsPage() {
                         .map((value) => String(value || '').trim())
                         .filter(Boolean)
                     : []
+                  const compatibility = model?.compatibility && typeof model.compatibility === 'object'
+                    ? model.compatibility
+                    : null
+                  const driftDetected = Boolean(compatibility?.drift_detected)
                   return (
                     <tr
                       key={model.id}
@@ -630,6 +659,19 @@ export default function ModelsPage() {
                         {model.description ? (
                           <p className="muted" style={{ marginTop: '6px', fontSize: '12px' }}>
                             {model.description}
+                          </p>
+                        ) : null}
+                        {driftDetected ? (
+                          <p className="muted" style={{ marginTop: '6px', fontSize: '12px' }}>
+                            Provider capabilities changed.{' '}
+                            <Link
+                              to={`/models/${model.id}/edit`}
+                              state={{ from: listHref }}
+                              onClick={rememberListState}
+                            >
+                              Review settings
+                            </Link>
+                            .
                           </p>
                         ) : null}
                       </td>

@@ -166,6 +166,28 @@ class ModelProviderStage7ContractTests(unittest.TestCase):
         self.assertTrue(bool(compatibility.get("drift_detected")))
         self.assertIn("approval_policy", compatibility.get("missing_keys") or [])
 
+    def test_model_detail_reports_gemini_vertex_compatibility_drift(self) -> None:
+        model = self._create_model(
+            name="Drifted Gemini Model",
+            provider="gemini",
+            config={"model": "gemini-2.5-pro"},
+        )
+
+        response = self.client.get(
+            f"/api/models/{model.id}",
+            headers={"X-Request-ID": "req-stage7-gemini-drift", "X-Correlation-ID": "corr-stage7-gemini-drift"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        model_payload = payload.get("model") or {}
+        compatibility = model_payload.get("compatibility") or {}
+        self.assertTrue(bool(compatibility.get("drift_detected")))
+        missing_keys = compatibility.get("missing_keys") or []
+        self.assertIn("use_vertex_ai", missing_keys)
+        self.assertIn("project", missing_keys)
+        self.assertIn("location", missing_keys)
+
     def test_model_create_validation_uses_error_envelope(self) -> None:
         response = self.client.post(
             "/api/models",
@@ -208,6 +230,53 @@ class ModelProviderStage7ContractTests(unittest.TestCase):
         providers = payload.get("providers") or []
         self.assertGreaterEqual(len(providers), 1)
         self.assertTrue(all(bool(item.get("enabled")) for item in providers))
+
+    def test_gemini_provider_settings_contract_supports_vertex_fields(self) -> None:
+        update_response = self.client.post(
+            "/api/settings/provider/gemini",
+            json={
+                "gemini_api_key": "g-key",
+                "gemini_use_vertex_ai": True,
+                "gemini_project": "vertex-proj",
+                "gemini_location": "us-central1",
+            },
+            headers={"X-Request-ID": "req-stage7-gemini-update", "X-Correlation-ID": "corr-stage7-gemini-update"},
+        )
+
+        self.assertEqual(200, update_response.status_code)
+        update_payload = update_response.get_json() or {}
+        self.assertEqual("gemini", update_payload.get("provider"))
+        updated_settings = update_payload.get("provider_settings") or {}
+        self.assertTrue(bool(updated_settings.get("use_vertex_ai")))
+        self.assertEqual("vertex-proj", updated_settings.get("project"))
+        self.assertEqual("us-central1", updated_settings.get("location"))
+
+        read_response = self.client.get(
+            "/api/providers/gemini",
+            headers={"X-Request-ID": "req-stage7-gemini-read", "X-Correlation-ID": "corr-stage7-gemini-read"},
+        )
+        self.assertEqual(200, read_response.status_code)
+        read_payload = read_response.get_json() or {}
+        provider_settings = read_payload.get("provider_settings") or {}
+        self.assertTrue(bool(provider_settings.get("use_vertex_ai")))
+        self.assertEqual("vertex-proj", provider_settings.get("project"))
+        self.assertEqual("us-central1", provider_settings.get("location"))
+
+    def test_model_meta_includes_gemini_vertex_config_defaults(self) -> None:
+        response = self.client.get(
+            "/api/models/new",
+            headers={"X-Request-ID": "req-stage7-model-meta", "X-Correlation-ID": "corr-stage7-model-meta"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        gemini_config = payload.get("gemini_config") or {}
+        self.assertIn("use_vertex_ai", gemini_config)
+        self.assertIn("project", gemini_config)
+        self.assertIn("location", gemini_config)
+        self.assertEqual("", gemini_config.get("use_vertex_ai"))
+        self.assertEqual("", gemini_config.get("project"))
+        self.assertEqual("", gemini_config.get("location"))
 
     def test_model_create_emits_contract_event_with_request_and_correlation_ids(self) -> None:
         with patch("web.views.emit_contract_event") as emit_contract_event:

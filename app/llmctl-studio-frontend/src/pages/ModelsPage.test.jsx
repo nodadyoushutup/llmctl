@@ -18,6 +18,7 @@ function renderPage(initialEntry = '/models') {
         <Routes>
           <Route path="/models" element={<ModelsPageRouteProbe />} />
           <Route path="/models/new" element={<p>New model route</p>} />
+          <Route path="/models/:modelId/edit" element={<ModelEditRouteProbe />} />
           <Route path="/models/:modelId" element={<ModelDetailRouteProbe />} />
         </Routes>
       </FlashProvider>
@@ -41,6 +42,16 @@ function ModelDetailRouteProbe() {
     <>
       <p>Model detail route</p>
       <p data-testid="model-detail-from">{String(location.state?.from || '')}</p>
+    </>
+  )
+}
+
+function ModelEditRouteProbe() {
+  const location = useLocation()
+  return (
+    <>
+      <p>Model edit route</p>
+      <p data-testid="model-edit-from">{String(location.state?.from || '')}</p>
     </>
   )
 }
@@ -248,9 +259,9 @@ describe('ModelsPage', () => {
       is_default: index === 0,
     }))
     getModels.mockResolvedValueOnce({ models: manyModels, default_model_id: 1 })
-    renderPage('/models?page=2')
+    renderPage('/models?page=2&per_page=10')
     await screen.findByRole('link', { name: 'Model 8' })
-    expect(screen.getByTestId('models-route-search')).toHaveTextContent('?page=2')
+    expect(screen.getByTestId('models-route-search')).toHaveTextContent('?page=2&per_page=10')
 
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'Focus target' } })
 
@@ -312,6 +323,55 @@ describe('ModelsPage', () => {
     expect(screen.getByTestId('models-list-controls')).toBeInTheDocument()
     expect(screen.getByLabelText('Models pages')).toBeInTheDocument()
     expect(screen.getByLabelText('Rows per page')).toBeInTheDocument()
+  })
+
+  test('defaults to 25 rows per page and name ascending when query params are omitted', async () => {
+    const manyModels = Array.from({ length: 30 }, (_, index) => ({
+      id: index + 1,
+      name: `Model ${String(index + 1).padStart(2, '0')}`,
+      description: `Model ${index + 1} description`,
+      provider: 'codex',
+      provider_label: 'Codex',
+      model_name: `model-${index + 1}`,
+      is_default: index === 0,
+      capability_tags: [],
+    }))
+    getModels.mockResolvedValueOnce({ models: manyModels, default_model_id: 1 })
+
+    renderPage('/models')
+
+    expect(await screen.findByRole('link', { name: 'Model 01' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Model 25' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Model 26' })).not.toBeInTheDocument()
+    expect(screen.getByText('/ 2')).toBeInTheDocument()
+  })
+
+  test('surfaces compatibility drift notice through flash and exposes review settings hint', async () => {
+    getModels.mockResolvedValueOnce({
+      models: [
+        {
+          ...MODEL_ROWS[0],
+          compatibility: { drift_detected: true, missing_keys: ['project'] },
+        },
+        {
+          ...MODEL_ROWS[1],
+          compatibility: { drift_detected: false, missing_keys: [] },
+        },
+      ],
+      default_model_id: 7,
+      compatibility_summary: {
+        drifted_count: 1,
+        in_sync_count: 1,
+      },
+    })
+
+    renderPage('/models')
+
+    expect(await screen.findByText('1 model profile needs review settings to align with current provider capabilities.')).toBeInTheDocument()
+    const reviewLink = screen.getByRole('link', { name: 'Review settings' })
+    fireEvent.click(reviewLink)
+    expect(await screen.findByText('Model edit route')).toBeInTheDocument()
+    expect(screen.getByTestId('model-edit-from')).toHaveTextContent('/models')
   })
 
   test('uses a Filters popover on narrow screens while keeping search and pagination visible', async () => {

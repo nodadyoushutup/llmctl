@@ -43,3 +43,23 @@
   start_time_utc: 2026-02-21T01:05:37Z
   end_time_utc: 2026-02-21T01:10:40Z
   status: complete
+
+- agent_id: agent-c
+  claims:
+    - RMC-0104
+    - RMC-0121
+    - RMC-0122
+    - RMC-0124
+    - RMC-0132
+  allowed_files:
+    - app/llmctl-studio-backend/src/web/views.py
+    - app/llmctl-studio-backend/tests/test_model_provider_stage7_contracts.py
+    - app/llmctl-studio-frontend/src/pages/ModelsPage.jsx
+    - app/llmctl-studio-frontend/src/pages/ModelsPage.test.jsx
+    - app/llmctl-studio-frontend/src/lib/studioApi.js
+    - app/llmctl-studio-frontend/src/lib/studioApi.test.js
+    - docs/planning/active/MULTI_AGENT_LOCKS.md
+    - docs/planning/active/agent-handoffs/agent-c.md
+  start_time_utc: 2026-02-21T01:14:27Z
+  end_time_utc: 2026-02-21T01:21:40Z
+  status: complete

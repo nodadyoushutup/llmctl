@@ -320,7 +320,15 @@ MODEL_COMPATIBILITY_KEYS: dict[str, tuple[str, ...]] = {
         "notice_migration_from",
         "notice_migration_to",
     ),
-    "gemini": ("model", "approval_mode", "sandbox", "extra_args"),
+    "gemini": (
+        "model",
+        "approval_mode",
+        "sandbox",
+        "use_vertex_ai",
+        "project",
+        "location",
+        "extra_args",
+    ),
     "claude": ("model",),
     "vllm_local": (
         "model",
@@ -2543,6 +2551,9 @@ def _gemini_model_config_defaults(config: dict[str, object]) -> dict[str, object
         "model": config.get("model") or "",
         "approval_mode": config.get("approval_mode") or "",
         "sandbox": _normalize_optional_bool(config.get("sandbox")),
+        "use_vertex_ai": _normalize_optional_bool(config.get("use_vertex_ai")),
+        "project": str(config.get("project") or ""),
+        "location": str(config.get("location") or ""),
         "extra_args": _normalize_args_text(config.get("extra_args")),
     }
 
@@ -2796,10 +2807,19 @@ def _model_config_payload(provider: str, form: dict[str, str]) -> dict[str, obje
             sandbox_value = True
         elif sandbox_raw == "false":
             sandbox_value = False
+        use_vertex_raw = form.get("gemini_use_vertex_ai", "").strip().lower()
+        use_vertex_value = None
+        if use_vertex_raw == "true":
+            use_vertex_value = True
+        elif use_vertex_raw == "false":
+            use_vertex_value = False
         return {
             "model": form.get("gemini_model", "").strip(),
             "approval_mode": form.get("gemini_approval_mode", "").strip(),
             "sandbox": sandbox_value,
+            "use_vertex_ai": use_vertex_value,
+            "project": form.get("gemini_project", "").strip(),
+            "location": form.get("gemini_location", "").strip(),
             "extra_args": form.get("gemini_extra_args", "").strip(),
         }
     if provider == "claude":
@@ -2856,6 +2876,9 @@ def _codex_settings_payload(settings: dict[str, str]) -> dict[str, object]:
 def _gemini_settings_payload(settings: dict[str, str]) -> dict[str, object]:
     return {
         "api_key": settings.get("gemini_api_key") or "",
+        "use_vertex_ai": _as_bool(settings.get("gemini_use_vertex_ai")),
+        "project": settings.get("gemini_project") or "",
+        "location": settings.get("gemini_location") or "",
     }
 
 
@@ -19810,12 +19833,21 @@ def update_gemini_settings():
     request_id = _workflow_request_id()
     correlation_id = _workflow_correlation_id()
     api_key = _settings_form_value(payload, "gemini_api_key")
+    use_vertex_ai = _as_bool(_settings_form_value(payload, "gemini_use_vertex_ai"))
+    project = _settings_form_value(payload, "gemini_project").strip()
+    location = _settings_form_value(payload, "gemini_location").strip()
     payload = {
         "gemini_api_key": api_key,
+        "gemini_use_vertex_ai": "true" if use_vertex_ai else "",
+        "gemini_project": project,
+        "gemini_location": location,
     }
     _save_integration_settings("llm", payload)
     if is_api_request:
-        response_payload = {"provider": "gemini"}
+        response_payload = {
+            "provider": "gemini",
+            "provider_settings": _gemini_settings_payload(payload),
+        }
         _emit_model_provider_event(
             event_type="config:provider:updated",
             entity_kind="provider",
