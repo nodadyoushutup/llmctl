@@ -140,6 +140,15 @@
 - For Python-only Studio live-code changes, use the `llmctl-studio-live-redeploy` skill workflow to restart the Kubernetes deployment.
 - For Python-only RAG changes, restart the corresponding Kubernetes deployment instead of Docker Compose.
 
+# Local Runtime Process Safety
+
+- Do not terminate or interfere with user-managed local runtime processes unless explicitly requested in the current prompt.
+- Treat the following as protected by default:
+  - `scripts/port_forward_local.sh` sessions and any active `kubectl port-forward` processes.
+  - Livecode mount sessions (for example Minikube mounts used for `/workspace/llmctl`).
+- Never run broad kill commands (`pkill`, `killall`, `kill -9`) targeting Kubernetes, port-forward, mount, Docker, or Minikube processes as part of normal troubleshooting.
+- If a task appears blocked by an existing protected process, ask the user before stopping or replacing it.
+
 # Image Build Command Policy
 
 - When giving image build/push instructions, always provide `scripts/build/harbor.sh` commands first.

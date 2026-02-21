@@ -6,7 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_SRC = REPO_ROOT / "app" / "llmctl-studio-backend" / "src"
@@ -25,6 +25,7 @@ from services.execution.agent_runtime import (
     FrontierAgent,
     FrontierAgentDependencies,
     FrontierAgentRequest,
+    _error_status_code,
 )
 import services.tasks as studio_tasks
 
@@ -213,6 +214,81 @@ class AgentRuntimeAbstractionTests(unittest.TestCase):
             "gemini-2.5-flash",
             dict(captured.get("generate_content_kwargs") or {}).get("model"),
         )
+
+    def test_frontier_agent_codex_retries_mcp_tool_list_failed_dependency(self) -> None:
+        runtime = FrontierAgent(self._build_frontier_dependencies())
+        request = FrontierAgentRequest(
+            provider="codex",
+            prompt="hello",
+            mcp_configs={
+                "llmctl-mcp": {
+                    "url": "http://llmctl-mcp.llmctl.svc.cluster.local:9020/mcp",
+                    "transport": "streamable-http",
+                }
+            },
+            model_config={},
+            env={"OPENAI_API_KEY": "env-key"},
+        )
+        transient_error = (
+            "Error code: 424 - {'error': {'message': \"Error retrieving tool list from MCP "
+            "server: 'llmctl-mcp'. Http status code: 424 (Failed Dependency)\", 'type': "
+            "'external_connector_error', 'param': 'tools', 'code': 'http_error'}}"
+        )
+        with patch.object(
+            runtime,
+            "_run_codex",
+            side_effect=[
+                subprocess.CompletedProcess(["sdk:codex"], 424, "", transient_error),
+                subprocess.CompletedProcess(["sdk:codex"], 0, "recovered", ""),
+            ],
+        ) as run_mock, patch("services.execution.agent_runtime.time.sleep") as sleep_mock:
+            logs: list[str] = []
+            result = runtime.run(request, on_log=logs.append)
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("recovered", result.stdout)
+        self.assertEqual(2, run_mock.call_count)
+        sleep_mock.assert_called_once_with(1.0)
+        self.assertTrue(
+            any("MCP tools/list returned failed dependency" in line for line in logs)
+        )
+
+    def test_frontier_agent_codex_mcp_retry_is_bounded(self) -> None:
+        runtime = FrontierAgent(self._build_frontier_dependencies())
+        request = FrontierAgentRequest(
+            provider="codex",
+            prompt="hello",
+            mcp_configs={"llmctl-mcp": {"url": "http://example.invalid/mcp"}},
+            model_config={},
+            env={"OPENAI_API_KEY": "env-key"},
+        )
+        transient_error = (
+            "Error code: 424 - {'error': {'message': \"Error retrieving tool list from MCP "
+            "server: 'llmctl-mcp'. Http status code: 424 (Failed Dependency)\"}}"
+        )
+        with patch.object(
+            runtime,
+            "_run_codex",
+            side_effect=[
+                subprocess.CompletedProcess(["sdk:codex"], 424, "", transient_error),
+                subprocess.CompletedProcess(["sdk:codex"], 424, "", transient_error),
+                subprocess.CompletedProcess(["sdk:codex"], 424, "", transient_error),
+            ],
+        ) as run_mock, patch("services.execution.agent_runtime.time.sleep") as sleep_mock:
+            result = runtime.run(request)
+
+        self.assertEqual(424, result.returncode)
+        self.assertEqual(3, run_mock.call_count)
+        sleep_mock.assert_has_calls([call(1.0), call(2.0)])
+
+    def test_error_status_code_parses_embedded_error_code(self) -> None:
+        exc = Exception(
+            "Error code: 424 - {'error': {'message': 'simulated failed dependency'}}"
+        )
+
+        status_code = _error_status_code(exc)
+
+        self.assertEqual(424, status_code)
 
     def test_gemini_settings_from_model_config_falls_back_to_provider_settings(self) -> None:
         with patch.object(

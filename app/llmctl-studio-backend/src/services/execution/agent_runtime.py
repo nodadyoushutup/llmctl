@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import re
 import subprocess
 import time
 from typing import Any, Callable
+
+_UPSTREAM_500_MAX_ATTEMPTS = 2
+_MCP_TOOL_LIST_FAILED_DEPENDENCY_MAX_ATTEMPTS = 3
 
 
 @dataclass(slots=True, frozen=True)
@@ -97,13 +101,38 @@ class FrontierAgent:
             )
 
         result = _run_once()
-        if result.returncode != 0 and (
-            result.returncode >= 500 or _is_upstream_500(result.stdout, result.stderr)
-        ):
-            if on_log:
-                on_log(f"{provider_label} returned upstream 500; retrying once.")
-            time.sleep(1.0)
-            result = _run_once()
+        attempt = 1
+        while result.returncode != 0:
+            if _is_retryable_mcp_tool_list_failed_dependency(
+                provider=provider,
+                mcp_configs=request.mcp_configs,
+                returncode=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            ):
+                if attempt >= _MCP_TOOL_LIST_FAILED_DEPENDENCY_MAX_ATTEMPTS:
+                    break
+                retry_delay_seconds = float(attempt)
+                if on_log:
+                    on_log(
+                        f"{provider_label} MCP tools/list returned failed dependency "
+                        f"(attempt {attempt}/{_MCP_TOOL_LIST_FAILED_DEPENDENCY_MAX_ATTEMPTS}); "
+                        f"retrying in {retry_delay_seconds:.1f}s."
+                    )
+                time.sleep(retry_delay_seconds)
+                attempt += 1
+                result = _run_once()
+                continue
+            if result.returncode >= 500 or _is_upstream_500(result.stdout, result.stderr):
+                if attempt >= _UPSTREAM_500_MAX_ATTEMPTS:
+                    break
+                if on_log:
+                    on_log(f"{provider_label} returned upstream 500; retrying once.")
+                time.sleep(1.0)
+                attempt += 1
+                result = _run_once()
+                continue
+            break
         return self._emit_result(result, on_update=on_update)
 
     @staticmethod
@@ -410,6 +439,21 @@ def _error_status_code(exc: Exception) -> int:
             continue
         if code > 0:
             return code
+    message = str(exc or "")
+    for pattern in (
+        r"\berror code:\s*(\d{3})\b",
+        r"\bhttp status code:\s*(\d{3})\b",
+        r"\bstatus code:\s*(\d{3})\b",
+    ):
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            parsed = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return parsed
     return 1
 
 
@@ -598,3 +642,24 @@ def _is_upstream_500(stdout: str, stderr: str) -> bool:
         "internal server error",
     )
     return any(marker in haystack for marker in markers)
+
+
+def _is_retryable_mcp_tool_list_failed_dependency(
+    *,
+    provider: str,
+    mcp_configs: dict[str, dict[str, Any]],
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> bool:
+    if provider != "codex" or not mcp_configs:
+        return False
+    haystack = f"{stdout}\n{stderr}".lower()
+    if "error retrieving tool list from mcp server" not in haystack:
+        return False
+    return (
+        returncode == 424
+        or "error code: 424" in haystack
+        or "http status code: 424" in haystack
+        or "failed dependency" in haystack
+    )
