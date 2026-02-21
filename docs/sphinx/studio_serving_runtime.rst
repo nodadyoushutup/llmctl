@@ -13,6 +13,22 @@ backend-to-frontend updates. The runtime is designed for:
 - PostgreSQL-backed persistent metadata (SQLite is not supported)
 - React-only Studio UI served by ``llmctl-studio-frontend``
 
+Backend Module Layout
+---------------------
+
+The backend now uses package decomposition for formerly monolithic modules:
+
+- ``app/llmctl-studio-backend/src/web/views/`` is split by route domain
+  (agents/runs, chat/nodes, plans/milestones, flowcharts, models/mcps,
+  settings/providers/integrations, artifacts/attachments) plus ``shared.py``
+  helpers.
+- ``app/llmctl-studio-backend/src/core/models/`` is package-based.
+- ``app/llmctl-studio-backend/src/services/task_utils/`` and
+  ``app/llmctl-studio-backend/src/web/view_helpers/`` hold extracted helper
+  modules.
+
+The public route contract remains stable through ``web.views`` package exports.
+
 Database Configuration
 ----------------------
 
@@ -175,6 +191,9 @@ Backend policy:
 - Legacy backend static/template GUI assets are removed.
 - Legacy GUI assets are retained for reference under ``_legacy/llmctl-studio-backend/src/web/``.
 - Non-API GUI routes are blocked in React-only runtime mode.
+- Legacy backend CLI-era entrypoints under
+  ``app/llmctl-studio-backend/src/__main__.py`` and
+  ``app/llmctl-studio-backend/src/cli/*`` are removed from runtime paths.
 
 Frontend nginx policy:
 

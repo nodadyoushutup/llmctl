@@ -4,6 +4,9 @@ Changelog
 2026-02-21
 ----------
 
+- Documented final Studio backend structural module layout after decomposition of ``web.views`` into package modules and package-based ``core.models`` layout.
+- Documented removal of vestigial backend CLI-era entrypoints (``src/__main__.py`` and ``src/cli/*``) from active runtime paths.
+- Updated Sphinx API generation excludes for package-based ``web/views`` and ``core/models`` paths.
 - Closed runtime migration claim audit remediation with full claim matrix closure (``pass: 348``, ``fail: 0``, ``insufficient_evidence: 0``).
 - Added frontier CLI runtime guardrail script and CI gate to fail on direct ``codex|gemini|claude`` command execution in Studio runtime paths.
 - Updated Stage 9 flowchart backend tests for current graph-save contract semantics (structural violations ``400`` vs semantic validation via ``validation.errors``).

@@ -242,6 +242,17 @@ Goal: Perform a structural-only refactor of `app/llmctl-studio-backend/src` by s
 
 ## Stage 9 - Docs Updates
 
-- [ ] Update Sphinx/Read the Docs docs for backend module layout and any removed CLI vestiges.
-- [ ] Update internal planning notes with final package map and extraction summary.
-- [ ] If no docs updates are needed for a touched area, record explicit no-op decision.
+- [x] Update Sphinx/Read the Docs docs for backend module layout and any removed CLI vestiges.
+  - [x] Added dedicated backend layout guide: `docs/sphinx/studio_backend_module_layout.rst`.
+  - [x] Added guide to docs navigation: `docs/sphinx/index.rst` runtime guides toctree.
+  - [x] Updated runtime architecture guide with package-decomposition and CLI-removal notes: `docs/sphinx/studio_serving_runtime.rst`.
+  - [x] Updated docs changelog entries for structural module layout and vestigial CLI removal: `docs/sphinx/changelog.rst`.
+  - [x] Updated Sphinx apidoc exclusions for package-based paths and set docs-build default DB URI for import safety: `docs/sphinx/conf.py`.
+  - [x] Sphinx HTML build verification passed:
+    - [x] `LLMCTL_STUDIO_DATABASE_URI='postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio' .venv/bin/sphinx-build -b html docs/sphinx docs/sphinx/_build/html-stage9-structural-refactor-docs`
+    - [x] Result: `build succeeded, 2 warnings` (cross-reference ambiguity warnings unrelated to this structural refactor stage).
+- [x] Update internal planning notes with final package map and extraction summary.
+  - [x] Stage 7 and Stage 8 sections record final extraction map, parity gates, and test/static evidence.
+  - [x] Stage 9 section now records final docs-update artifacts and build verification.
+- [x] If no docs updates are needed for a touched area, record explicit no-op decision.
+  - [x] No-op not applicable: docs updates were required and completed for touched backend layout/runtime surfaces.

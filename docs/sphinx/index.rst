@@ -12,6 +12,7 @@ Technical reference for llmctl runtime surfaces.
    node_executor_runtime
    agent_runtime_migration_runbook
    studio_serving_runtime
+   studio_backend_module_layout
    agent_skill_binding
    codex_host_skills
    rag_flowchart_node

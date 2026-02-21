@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ APIDOC_EXCLUDES = {
     "core": [
         STUDIO_SRC / "core" / "integrated_mcp.py",
         STUDIO_SRC / "core" / "migrations.py",
-        STUDIO_SRC / "core" / "models.py",
+        STUDIO_SRC / "core" / "models",
         STUDIO_SRC / "core" / "seed.py",
     ],
     "rag": [
@@ -31,9 +32,14 @@ APIDOC_EXCLUDES = {
     ],
     "web": [
         STUDIO_SRC / "web" / "app.py",
-        STUDIO_SRC / "web" / "views.py",
+        STUDIO_SRC / "web" / "views",
     ],
 }
+
+os.environ.setdefault(
+    "LLMCTL_STUDIO_DATABASE_URI",
+    "postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio",
+)
 
 sys.path.insert(0, str(STUDIO_SRC))
 
