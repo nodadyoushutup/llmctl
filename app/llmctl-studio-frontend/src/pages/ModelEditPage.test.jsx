@@ -3,9 +3,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import FlashProvider from '../components/FlashProvider'
 import ModelEditPage from './ModelEditPage'
-import { getModelEdit, updateModel } from '../lib/studioApi'
+import { deleteModel, getModelEdit, updateModel } from '../lib/studioApi'
 
 vi.mock('../lib/studioApi', () => ({
+  deleteModel: vi.fn(),
   getModelEdit: vi.fn(),
   updateModel: vi.fn(),
 }))
@@ -44,6 +45,7 @@ describe('ModelEditPage', () => {
         claude: ['claude-4', 'claude-3.7-sonnet'],
       },
     })
+    deleteModel.mockResolvedValue({ ok: true })
     updateModel.mockResolvedValue({ ok: true })
   })
 
@@ -103,6 +105,17 @@ describe('ModelEditPage', () => {
     expect(saveButton).not.toBeDisabled()
   })
 
+  test('keeps save and cancel actions in the header action area', async () => {
+    const { container } = renderPage()
+    await waitFor(() => {
+      expect(getModelEdit).toHaveBeenCalledWith(12)
+    })
+
+    expect(screen.getByRole('button', { name: 'Save Model' }).closest('.title-row')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel' }).closest('.title-row')).toBeTruthy()
+    expect(container.querySelector('.form-actions')).toBeNull()
+  })
+
   test('advanced provider settings are collapsed by default and included in update payload', async () => {
     renderPage()
     await waitFor(() => {
@@ -135,6 +148,26 @@ describe('ModelEditPage', () => {
     expect(await screen.findByText('Models list route')).toBeInTheDocument()
   })
 
+  test('deletes from a header-level control near save/cancel actions', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      renderPage()
+      await waitFor(() => {
+        expect(getModelEdit).toHaveBeenCalledWith(12)
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete model' }))
+
+      await waitFor(() => {
+        expect(deleteModel).toHaveBeenCalledWith(12)
+      })
+      expect(await screen.findByText('Deleted model Existing Profile.')).toBeInTheDocument()
+      expect(screen.getByText('Models list route')).toBeInTheDocument()
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
   test('prompts before leaving when there are unsaved changes', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderPage()
@@ -162,5 +195,21 @@ describe('ModelEditPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Model' }))
 
     expect(await screen.findByText('Update failed in test')).toBeInTheDocument()
+  })
+
+  test('delete failures report through flash viewport', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    deleteModel.mockRejectedValueOnce(new Error('Delete failed in test'))
+    try {
+      renderPage()
+      await waitFor(() => {
+        expect(getModelEdit).toHaveBeenCalledWith(12)
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Delete model' }))
+      expect(await screen.findByText('Delete failed in test')).toBeInTheDocument()
+    } finally {
+      confirmSpy.mockRestore()
+    }
   })
 })

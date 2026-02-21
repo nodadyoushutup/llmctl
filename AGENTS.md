@@ -128,7 +128,9 @@
 - Multiple agents may work in this repository at the same time; unrelated or unexpected file changes can be assumed to come from other active agents.
 - Do not treat unrelated git diffs or untracked files as immediate blockers while executing assigned work.
 - Do not revert or delete unrelated changes unless explicitly instructed.
+- Do not create new git branches for agent work; use the current branch unless the user explicitly instructs otherwise.
 - If a workflow requires committing the current workspace state, it is acceptable to include unrelated/unknown files in the commit when necessary.
+- When an audit is requested or multiple agents are assigned to the same plan, create and maintain an agent lock file for that plan so each agent can see ownership and avoid duplicating work.
 
 # Kubernetes Reload Behavior
 

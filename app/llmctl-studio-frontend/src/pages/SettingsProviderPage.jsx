@@ -136,7 +136,12 @@ export default function SettingsProviderPage() {
     enabledByProvider: {},
   })
   const [codexApiKey, setCodexApiKey] = useState('')
-  const [geminiApiKey, setGeminiApiKey] = useState('')
+  const [geminiForm, setGeminiForm] = useState({
+    apiKey: '',
+    useVertexAi: false,
+    project: '',
+    location: '',
+  })
   const [claudeApiKey, setClaudeApiKey] = useState('')
   const [vllmLocalForm, setVllmLocalForm] = useState({ model: '', huggingfaceToken: '' })
   const [vllmRemoteForm, setVllmRemoteForm] = useState({
@@ -168,7 +173,12 @@ export default function SettingsProviderPage() {
         enabledByProvider,
       })
       setCodexApiKey(String(payload?.codex_settings?.api_key || ''))
-      setGeminiApiKey(String(payload?.gemini_settings?.api_key || ''))
+      setGeminiForm({
+        apiKey: String(payload?.gemini_settings?.api_key || ''),
+        useVertexAi: Boolean(payload?.gemini_settings?.use_vertex_ai),
+        project: String(payload?.gemini_settings?.project || ''),
+        location: String(payload?.gemini_settings?.location || ''),
+      })
       setClaudeApiKey(String(payload?.claude_settings?.api_key || ''))
       setVllmLocalForm({
         model: String(payload?.vllm_local_settings?.model || ''),
@@ -376,7 +386,12 @@ export default function SettingsProviderPage() {
                     type="button"
                     className="btn-link"
                     disabled={busy}
-                    onClick={() => save(() => updateSettingsProviderGemini({ apiKey: geminiApiKey }))}
+                    onClick={() => save(() => updateSettingsProviderGemini({
+                      apiKey: geminiForm.apiKey,
+                      useVertexAi: geminiForm.useVertexAi,
+                      project: geminiForm.project,
+                      location: geminiForm.location,
+                    }))}
                   >
                     Save Gemini
                   </button>
@@ -386,8 +401,33 @@ export default function SettingsProviderPage() {
                   <span>Gemini API key</span>
                   <input
                     type="password"
-                    value={geminiApiKey}
-                    onChange={(event) => setGeminiApiKey(event.target.value)}
+                    value={geminiForm.apiKey}
+                    onChange={(event) => setGeminiForm((current) => ({ ...current, apiKey: event.target.value }))}
+                  />
+                </label>
+                <label className="provider-inline-switch">
+                  <input
+                    type="checkbox"
+                    checked={geminiForm.useVertexAi}
+                    onChange={(event) => setGeminiForm((current) => ({ ...current, useVertexAi: event.target.checked }))}
+                  />
+                  <span className="provider-inline-switch-track" aria-hidden="true" />
+                  <span>Use Vertex AI</span>
+                </label>
+                <label className="field">
+                  <span>Vertex project</span>
+                  <input
+                    type="text"
+                    value={geminiForm.project}
+                    onChange={(event) => setGeminiForm((current) => ({ ...current, project: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Vertex location</span>
+                  <input
+                    type="text"
+                    value={geminiForm.location}
+                    onChange={(event) => setGeminiForm((current) => ({ ...current, location: event.target.value }))}
                   />
                 </label>
               </ProviderSectionCard>

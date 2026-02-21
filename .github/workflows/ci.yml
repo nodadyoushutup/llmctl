@@ -21,5 +21,8 @@ jobs:
       - name: Run invariant claim guardrails
         run: python3 scripts/audit/claim_guardrails.py
 
-      - name: Run claim guardrail unit tests
-        run: python3 -m unittest discover -s app/llmctl-studio-backend/tests -p "test_claim_guardrails.py"
+      - name: Run frontier runtime CLI guardrail
+        run: python3 scripts/audit/frontier_cli_runtime_guardrail.py
+
+      - name: Run guardrail unit tests
+        run: python3 -m unittest discover -s app/llmctl-studio-backend/tests -p "test_*guardrail*.py"

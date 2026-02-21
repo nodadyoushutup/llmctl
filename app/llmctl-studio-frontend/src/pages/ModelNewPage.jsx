@@ -165,12 +165,30 @@ export default function ModelNewPage() {
             <h2>New Model</h2>
             <p>Bind a provider with model and reasoning policies.</p>
           </div>
-          <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
+          <div className="table-actions">
+            <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
+            <button
+              type="button"
+              className="btn-link btn-secondary"
+              onClick={handleCancel}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="model-new-form"
+              className="btn-link"
+              disabled={!canSubmit}
+            >
+              Create Model
+            </button>
+          </div>
         </div>
         {state.loading ? <p>Loading model options...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form id="model-new-form" className="form-grid" onSubmit={handleSubmit}>
             <label className="field">
               <span>Name</span>
               <input
@@ -275,10 +293,6 @@ export default function ModelNewPage() {
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               />
             </label>
-            <div className="form-actions">
-              <button type="button" className="btn-link btn-secondary" onClick={handleCancel}>Cancel</button>
-              <button type="submit" className="btn-link" disabled={!canSubmit}>Create Model</button>
-            </div>
           </form>
         ) : null}
       </article>

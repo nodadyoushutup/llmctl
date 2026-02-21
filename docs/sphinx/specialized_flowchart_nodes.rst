@@ -24,6 +24,22 @@ for specialized behavior fields):
   solid connectors maps to ``N`` condition entries) and has no MCP dependency
   for evaluation.
 
+Graph Save Validation Semantics
+-------------------------------
+
+``POST /flowcharts/<flowchart_id>/graph`` accepts graph snapshots and returns:
+
+- ``400`` for structural contract violations (for example missing required
+  payload fields, invalid IDs, or invalid edge-mode values),
+- ``200`` for accepted snapshots with semantic validation surfaced under
+  ``validation.valid``/``validation.errors``.
+
+For specialized nodes:
+
+- memory-node graph writes require ``config.action`` (``add`` or ``retrieve``),
+- memory nodes are system-bound to ``llmctl-mcp`` during graph persistence,
+- runtime memory-node execution rejects explicit non-system MCP key sets.
+
 Node Artifact Retention
 -----------------------
 

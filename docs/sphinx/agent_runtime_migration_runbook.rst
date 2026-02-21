@@ -139,19 +139,29 @@ Rollback Procedure
 4. Keep strict policy mode enabled unless policy-only warnings are explicitly
    accepted for emergency continuity.
 
-Known Sign-Off Gaps (Stage 15 Inventory)
-----------------------------------------
+Current Sign-Off Status (2026-02-21)
+------------------------------------
 
-From Stage 15 automated testing evidence, unresolved environment-coupled
-failures remain in the full Stage 9 suite and must be accounted for in
-production cutover readiness checks:
+Stage 15 gap inventory items are now closed for runtime migration audit
+sign-off:
 
-- system-managed MCP prerequisite failures,
-- missing legacy template route dependency in one API view path,
-- route-key mismatch case in a node-type behavior test,
-- missing Redis broker in local test harness producing publish warnings.
+- Full backend runtime validation command passed:
 
-Authoritative references:
+  .. code-block:: bash
 
-- ``docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE14_RECONVERGENCE_FREEZE.md``
-- ``docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE15_AUTOMATED_TESTING_FREEZE.md``
+     ~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh -- \
+       .venv/bin/python3 -m unittest \
+       app.llmctl-studio-backend.tests.test_runtime_contracts_stage3 \
+       app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts \
+       app.llmctl-studio-backend.tests.test_flowchart_stage12 \
+       app.llmctl-studio-backend.tests.test_flowchart_stage9
+
+  Result: ``Ran 126 tests ... OK``.
+
+- Guardrails are active in CI for claim/evidence integrity and frontier CLI
+  runtime prohibition:
+  ``scripts/audit/claim_guardrails.py`` and
+  ``scripts/audit/frontier_cli_runtime_guardrail.py``.
+
+- Claim evidence matrix status is fully closed:
+  ``pass: 348``, ``fail: 0``, ``insufficient_evidence: 0``.

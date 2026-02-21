@@ -23,11 +23,13 @@ ArgoCD tracks this as one application (`llmctl-studio`) for core services. pgAdm
 
 ## Quick start
 
-One-command local Minikube restore (profile start/resume + live-code mount + dev overlay apply + rollout wait):
+One-command local Minikube start/resume:
 
 ```bash
-scripts/minikube-up.sh
+scripts/minikube/minikube-up.sh
 ```
+
+Live-code mount and dev overlay apply are now managed separately (see "Live code mount (Minikube dev only)" below).
 
 Create secrets before applying manifests:
 

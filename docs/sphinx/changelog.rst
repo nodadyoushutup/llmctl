@@ -1,6 +1,14 @@
 Changelog
 =========
 
+2026-02-21
+----------
+
+- Closed runtime migration claim audit remediation with full claim matrix closure (``pass: 348``, ``fail: 0``, ``insufficient_evidence: 0``).
+- Added frontier CLI runtime guardrail script and CI gate to fail on direct ``codex|gemini|claude`` command execution in Studio runtime paths.
+- Updated Stage 9 flowchart backend tests for current graph-save contract semantics (structural violations ``400`` vs semantic validation via ``validation.errors``).
+- Updated migration runbook and specialized flowchart node docs to reflect current cutover status, guardrails, and memory-node/system-MCP enforcement behavior.
+
 2026-02-20
 ----------
 

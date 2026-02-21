@@ -86,6 +86,17 @@ describe('ModelNewPage', () => {
     expect(screen.getByText('Model detail route')).toBeInTheDocument()
   })
 
+  test('keeps create and cancel actions in the header action area', async () => {
+    const { container } = renderPage()
+    await waitFor(() => {
+      expect(getModelMeta).toHaveBeenCalledTimes(1)
+    })
+
+    expect(screen.getByRole('button', { name: 'Create Model' }).closest('.title-row')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel' }).closest('.title-row')).toBeTruthy()
+    expect(container.querySelector('.form-actions')).toBeNull()
+  })
+
   test('advanced provider settings are collapsed by default and included in create payload', async () => {
     renderPage()
     await waitFor(() => {

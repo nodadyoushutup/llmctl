@@ -126,7 +126,7 @@ def _has_runtime_test_anchor(path: Path, line_number: int) -> bool:
 def run_guardrails(*, matrix_path: Path, inventory_path: Path, repo_root: Path) -> list[str]:
     matrix_rows = parse_markdown_table(
         matrix_path,
-        {"claim_id", "invariant", "code_evidence", "test_evidence", "status"},
+        {"claim_id", "invariant", "code_evidence", "test_evidence", "status", "severity"},
     )
     inventory_rows = parse_markdown_table(inventory_path, {"claim_id"})
     inventory_claim_ids = {_strip_ticks(row.values["claim_id"]) for row in inventory_rows}
@@ -135,6 +135,7 @@ def run_guardrails(*, matrix_path: Path, inventory_path: Path, repo_root: Path) 
     for row in matrix_rows:
         claim_id = _strip_ticks(row.values.get("claim_id", ""))
         status = _strip_ticks(row.values.get("status", "")).lower()
+        severity = _strip_ticks(row.values.get("severity", "")).lower()
         invariant = _strip_ticks(row.values.get("invariant", "")).lower()
         code_refs = parse_evidence_refs(row.values.get("code_evidence", ""))
         test_refs = parse_evidence_refs(row.values.get("test_evidence", ""))
@@ -148,6 +149,11 @@ def run_guardrails(*, matrix_path: Path, inventory_path: Path, repo_root: Path) 
         if claim_id not in inventory_claim_ids:
             failures.append(
                 f"{matrix_path}:{row.line_number} {claim_id}: missing inventory linkage in {inventory_path}."
+            )
+
+        if severity in {"critical", "high"} and status != "pass":
+            failures.append(
+                f"{matrix_path}:{row.line_number} {claim_id}: {severity} claim is unresolved with status '{status}'."
             )
 
         if invariant != "yes" or status != "pass":

@@ -7,7 +7,7 @@ Source note: Runtime migration docs were archived under `docs/planning/archive/`
 
 Total checked claims inventoried: **348**
 
-Remediation progress (matrix): **94.8% pass** (330/348) and **97.4% reviewed** (339/348, pass+fail).
+Remediation progress (matrix): **95.7% pass** (333/348) and **97.4% reviewed** (339/348, pass+fail).
 Remediation process completion (claims reviewed): **97.4%**.
 
 ## Source Coverage
@@ -387,7 +387,7 @@ Remediation process completion (claims reviewed): **97.4%**.
 | RMC-0342 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md` | 9 | `contracts_api` | `yes` | Implement standard fallback contract (`success_with_warning`, `fallback_used`) when required deterministic tools fail/conflict. |
 | RMC-0343 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md` | 10 | `backend_runtime` | `no` | Implement shared tracing/audit envelope for tool calls, errors, and correlation propagation. |
 | RMC-0344 | `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_STAGE6_DETERMINISTIC_TOOLING_FREEZE.md` | 11 | `frontend` | `yes` | Deliver cutover-critical base tool scaffolding required before domain fan-out implementation begins. |
-| RMC-0345 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 48 | `backend_runtime` | `yes` | Replace frontier provider execution in `services/tasks.py` with SDK/router execution path (no CLI binary invocation). |
-| RMC-0346 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 73 | `backend_runtime` | `yes` | Implement production typed `AgentInfo`/agent runtime abstraction classes in Studio backend runtime modules and replace dict-first agent metadata assembly at runtime entry points. |
-| RMC-0347 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 74 | `backend_runtime` | `yes` | Wire frontier SDK execution path (`_run_frontier_llm_sdk`) and prompt-envelope assembly callsites through the production typed agent abstraction. |
-| RMC-0348 | `docs/planning/active/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 75 | `testing` | `yes` | Add architecture/runtime hard gate so invariant claims cannot be marked `pass` without both static code evidence and runtime test evidence. |
+| RMC-0345 | `docs/planning/archive/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 48 | `backend_runtime` | `yes` | Replace frontier provider execution in `services/tasks.py` with SDK/router execution path (no CLI binary invocation). |
+| RMC-0346 | `docs/planning/archive/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 73 | `backend_runtime` | `yes` | Implement production typed `AgentInfo`/agent runtime abstraction classes in Studio backend runtime modules and replace dict-first agent metadata assembly at runtime entry points. |
+| RMC-0347 | `docs/planning/archive/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 74 | `backend_runtime` | `yes` | Wire frontier SDK execution path (`_run_frontier_llm_sdk`) and prompt-envelope assembly callsites through the production typed agent abstraction. |
+| RMC-0348 | `docs/planning/archive/RUNTIME_MIGRATION_FULL_CLAIM_AUDIT_REMEDIATION_PLAN.md` | 75 | `testing` | `yes` | Add architecture/runtime hard gate so invariant claims cannot be marked `pass` without both static code evidence and runtime test evidence. |

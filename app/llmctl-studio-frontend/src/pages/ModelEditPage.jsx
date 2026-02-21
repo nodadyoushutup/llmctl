@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFlash } from '../lib/flashMessages'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
+import ActionIcon from '../components/ActionIcon'
 import {
   modelFieldLabel,
   normalizeProviderModelOptions,
@@ -11,7 +12,7 @@ import {
 } from '../lib/modelFormOptions'
 import { parseAdvancedConfigInput } from '../lib/modelAdvancedConfig'
 import { resolveModelsListHref } from '../lib/modelsListState'
-import { getModelEdit, updateModel } from '../lib/studioApi'
+import { deleteModel, getModelEdit, updateModel } from '../lib/studioApi'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -39,6 +40,7 @@ export default function ModelEditPage() {
   const parsedModelId = useMemo(() => parseId(modelId), [modelId])
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [busy, setBusy] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [fieldErrors, setFieldErrors] = useState({ name: '', advancedConfig: '' })
   const [form, setForm] = useState({ name: '', description: '', provider: 'codex', modelName: '' })
   const [advancedConfigText, setAdvancedConfigText] = useState('{}')
@@ -166,7 +168,29 @@ export default function ModelEditPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!parsedModelId || busy || deleteBusy || loading || error) {
+      return
+    }
+    if (!window.confirm('Delete this model?')) {
+      return
+    }
+    setDeleteBusy(true)
+    try {
+      await deleteModel(parsedModelId)
+      flash.success(`Deleted model ${String(form.name || '').trim() || parsedModelId}.`)
+      navigate(listHref)
+    } catch (deleteError) {
+      const message = errorMessage(deleteError, deleteError instanceof Error ? deleteError.message : 'Failed to delete model.')
+      flash.error(message)
+      setDeleteBusy(false)
+    }
+  }
+
   function handleCancel() {
+    if (busy || deleteBusy) {
+      return
+    }
     if (isDirty && !window.confirm('Discard unsaved changes?')) {
       return
     }
@@ -184,12 +208,38 @@ export default function ModelEditPage() {
           <div className="table-actions">
             {parsedModelId ? <Link to={`/models/${parsedModelId}`} state={{ from: listHref }} className="btn-link btn-secondary">Back to Model</Link> : null}
             <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
+            <button
+              type="button"
+              className="icon-button icon-button-danger"
+              aria-label="Delete model"
+              title="Delete model"
+              onClick={() => { void handleDelete() }}
+              disabled={busy || deleteBusy || loading || Boolean(error)}
+            >
+              <ActionIcon name="trash" />
+            </button>
+            <button
+              type="button"
+              className="btn-link btn-secondary"
+              onClick={handleCancel}
+              disabled={busy || deleteBusy}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="model-edit-form"
+              className="btn-link"
+              disabled={!canSubmit || deleteBusy}
+            >
+              Save Model
+            </button>
           </div>
         </div>
         {loading ? <p>Loading model...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {!loading && !error ? (
-          <form className="form-grid" onSubmit={handleSubmit}>
+          <form id="model-edit-form" className="form-grid" onSubmit={handleSubmit}>
             <label className="field">
               <span>Name</span>
               <input
@@ -294,10 +344,6 @@ export default function ModelEditPage() {
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               />
             </label>
-            <div className="form-actions">
-              <button type="button" className="btn-link btn-secondary" onClick={handleCancel}>Cancel</button>
-              <button type="submit" className="btn-link" disabled={!canSubmit}>Save Model</button>
-            </div>
           </form>
         ) : null}
       </article>

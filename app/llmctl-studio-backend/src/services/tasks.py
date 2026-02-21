@@ -246,6 +246,12 @@ FLOWCHART_FAN_IN_MODE_CHOICES = (
     FLOWCHART_FAN_IN_MODE_CUSTOM,
 )
 AGENT_RUNTIME_CUTOVER_FLAG_KEY = "__agent_runtime_cutover_enabled"
+TASK_SCHEMA_VALIDATION_FLAG_KEY = "__task_schema_validation_enabled"
+TASK_SCHEMA_VALIDATION_SETTINGS_KEY = "task_schema_validation_enabled"
+TASK_SCHEMA_RETRY_ATTEMPTS_KEY = "task_schema_retry_attempts"
+TASK_SCHEMA_RETRY_BACKOFF_MS_KEY = "task_schema_retry_backoff_ms"
+DEFAULT_TASK_SCHEMA_RETRY_ATTEMPTS = 2
+DEFAULT_TASK_SCHEMA_RETRY_BACKOFF_MS = 0
 FRONTIER_LLM_PROVIDERS = {"codex", "gemini", "claude"}
 LLMCTL_EXECUTOR_PAYLOAD_FILE_ENV = "LLMCTL_EXECUTOR_PAYLOAD_FILE"
 
@@ -472,6 +478,29 @@ def _agent_runtime_cutover_enabled_from_settings(
     if not isinstance(settings, dict):
         return default
     return _parse_bool_flag(settings.get("agent_runtime_cutover_enabled"), default=default)
+
+
+def _task_schema_validation_enabled(node_config: dict[str, Any] | None = None) -> bool:
+    if isinstance(node_config, dict):
+        if TASK_SCHEMA_VALIDATION_FLAG_KEY in node_config:
+            return _parse_bool_flag(
+                node_config.get(TASK_SCHEMA_VALIDATION_FLAG_KEY),
+                default=False,
+            )
+        if TASK_SCHEMA_VALIDATION_SETTINGS_KEY in node_config:
+            return _parse_bool_flag(
+                node_config.get(TASK_SCHEMA_VALIDATION_SETTINGS_KEY),
+                default=False,
+            )
+    return False
+
+
+def _task_schema_validation_enabled_from_settings(
+    settings: dict[str, str] | None,
+) -> bool:
+    if not isinstance(settings, dict):
+        return True
+    return _parse_bool_flag(settings.get(TASK_SCHEMA_VALIDATION_SETTINGS_KEY), default=True)
 
 
 def _resolve_special_node_tool_operation(
@@ -1918,6 +1947,21 @@ def _as_optional_bool(value: Any) -> bool | None:
     return bool(value)
 
 
+def _parse_optional_bool_setting(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+        return None
+    return bool(value)
+
+
 def _codex_settings_from_model_config(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "model": str(config.get("model") or "").strip(),
@@ -1954,10 +1998,25 @@ def _parse_gemini_extra_args(value: Any) -> list[str]:
 
 
 def _gemini_settings_from_model_config(config: dict[str, Any]) -> dict[str, Any]:
+    llm_settings = load_integration_settings("llm")
+    use_vertex_ai = _parse_optional_bool_setting(config.get("use_vertex_ai"))
+    if use_vertex_ai is None:
+        use_vertex_ai = _parse_optional_bool_setting(
+            llm_settings.get("gemini_use_vertex_ai")
+        )
+    project = str(config.get("project") or "").strip()
+    if not project:
+        project = str(llm_settings.get("gemini_project") or "").strip()
+    location = str(config.get("location") or "").strip()
+    if not location:
+        location = str(llm_settings.get("gemini_location") or "").strip()
     return {
         "model": str(config.get("model") or "").strip(),
         "approval_mode": str(config.get("approval_mode") or "").strip(),
         "sandbox": _as_optional_bool(config.get("sandbox")),
+        "use_vertex_ai": use_vertex_ai,
+        "project": project,
+        "location": location,
         "extra_args": _parse_gemini_extra_args(config.get("extra_args")),
     }
 
@@ -6550,6 +6609,9 @@ def _persist_plan_node_artifact(
         "action": output_state.get("action"),
         "action_results": output_state.get("action_results") or [],
         "additive_prompt": output_state.get("additive_prompt") or "",
+        PLAN_LLM_TRANSFORM_SUMMARY_KEY: str(
+            output_state.get(PLAN_LLM_TRANSFORM_SUMMARY_KEY) or ""
+        ).strip(),
         "completion_target": output_state.get("completion_target") or {},
         "touched": output_state.get("touched") or {},
         "plan": plan_payload if isinstance(plan_payload, dict) else {},
@@ -6828,6 +6890,125 @@ def _parse_structured_output(raw_output: str) -> Any:
         except json.JSONDecodeError:
             pass
     return {"text": cleaned}
+
+
+def _parse_strict_json_object_output(raw_output: str) -> dict[str, Any]:
+    cleaned = (raw_output or "").strip()
+    if not cleaned:
+        raise ValueError("LLM response was empty; expected JSON object.")
+
+    parse_errors: list[str] = []
+
+    def _parse_candidate(candidate: str) -> dict[str, Any] | None:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            parse_errors.append(str(exc))
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError(
+            "LLM response must be a JSON object (received "
+            f"{type(parsed).__name__})."
+        )
+
+    parsed = _parse_candidate(cleaned)
+    if parsed is not None:
+        return parsed
+
+    fenced_match = re.search(
+        r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```",
+        cleaned,
+        flags=re.DOTALL,
+    )
+    if fenced_match:
+        parsed = _parse_candidate(fenced_match.group(1))
+        if parsed is not None:
+            return parsed
+
+    error_detail = parse_errors[0] if parse_errors else "invalid JSON payload"
+    raise ValueError(
+        "LLM response must be valid JSON object output; "
+        f"parse failed: {error_detail}."
+    )
+
+
+def _schema_repair_output_excerpt(raw_output: str, *, limit: int = 1200) -> str:
+    cleaned = str(raw_output or "").strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[:limit]}\n...(truncated)"
+
+
+def _format_task_schema_repair_block(
+    *,
+    attempt: int,
+    max_attempts: int,
+    validation_error: str,
+    previous_output: str,
+) -> str:
+    lines = [
+        "Task output schema repair instructions:",
+        f"- Attempt: {attempt}/{max_attempts}",
+        "- The previous response failed strict JSON object validation.",
+        f"- Validation error: {validation_error}",
+        "- Return ONLY a valid JSON object (no markdown fences, no prose).",
+        "- Include a string route_key when routing is required.",
+        "Previous invalid output (for repair context):",
+        "```",
+        _schema_repair_output_excerpt(previous_output),
+        "```",
+    ]
+    return "\n".join(lines)
+
+
+def _inject_task_schema_repair_prompt(
+    prompt: str,
+    *,
+    attempt: int,
+    max_attempts: int,
+    validation_error: str,
+    previous_output: str,
+) -> str:
+    repair_block = _format_task_schema_repair_block(
+        attempt=attempt,
+        max_attempts=max_attempts,
+        validation_error=validation_error,
+        previous_output=previous_output,
+    )
+    payload = _load_prompt_dict(prompt)
+    if payload is not None and is_prompt_envelope(payload):
+        task_context = _ensure_task_context(payload)
+        task_context["schema_repair"] = {
+            "attempt": int(attempt),
+            "max_attempts": int(max_attempts),
+            "validation_error": str(validation_error),
+            "previous_output_excerpt": _schema_repair_output_excerpt(previous_output),
+        }
+        user_request = str(payload.get("user_request") or "").strip()
+        payload["user_request"] = (
+            f"{user_request}\n\n{repair_block}".strip() if user_request else repair_block
+        )
+        return serialize_prompt_envelope(payload)
+
+    if payload is not None:
+        prompt_value = payload.get("prompt")
+        if isinstance(prompt_value, str):
+            payload["prompt"] = (
+                f"{repair_block}\n\n{prompt_value}".strip()
+                if prompt_value.strip()
+                else repair_block
+            )
+        else:
+            payload["schema_repair"] = {
+                "attempt": int(attempt),
+                "max_attempts": int(max_attempts),
+                "validation_error": str(validation_error),
+                "previous_output_excerpt": _schema_repair_output_excerpt(previous_output),
+            }
+        return json.dumps(payload, indent=2, sort_keys=True)
+
+    return f"{repair_block}\n\n{prompt}".strip() if prompt.strip() else repair_block
 
 
 def _build_flowchart_input_context(
@@ -8123,6 +8304,8 @@ def _execute_flowchart_task_node(
     instruction_materialized_paths: list[str] = []
     instructions_materialized = False
     llm_result: subprocess.CompletedProcess[str] | None = None
+    structured_output: dict[str, Any] | None = None
+    schema_validation_failure: str | None = None
     instruction_adapter_mode: str | None = None
     instruction_adapter_name: str | None = None
     skill_adapter_mode: str | None = None
@@ -8398,22 +8581,77 @@ def _execute_flowchart_task_node(
             request_id
             or f"flowchart-node-{int(node_id)}-run-{int(execution_id)}"
         )
-        with _llm_dispatch_scope(
-            request_id=dispatch_request_id,
-            node_id=max(1, int(node_id)),
-            execution_id=max(1, int(execution_id)),
-            mcp_server_keys=sorted(mcp_configs),
-        ):
-            llm_result = _run_llm(
-                provider,
-                payload,
-                mcp_configs=mcp_configs,
-                model_config=model_config,
-                on_update=_capture_llm_updates,
-                on_log=_append_script_log,
-                cwd=llm_cwd,
-                env=llm_env,
-            )
+        schema_validation_enabled = _task_schema_validation_enabled(node_config)
+        schema_retry_attempts = _parse_optional_int(
+            node_config.get(TASK_SCHEMA_RETRY_ATTEMPTS_KEY),
+            default=DEFAULT_TASK_SCHEMA_RETRY_ATTEMPTS,
+            minimum=1,
+        )
+        schema_retry_backoff_ms = _parse_optional_int(
+            node_config.get(TASK_SCHEMA_RETRY_BACKOFF_MS_KEY),
+            default=DEFAULT_TASK_SCHEMA_RETRY_BACKOFF_MS,
+            minimum=0,
+        )
+        llm_payload = payload
+        for attempt in range(1, schema_retry_attempts + 1):
+            last_llm_output = ""
+            last_llm_error = ""
+            with _llm_dispatch_scope(
+                request_id=dispatch_request_id,
+                node_id=max(1, int(node_id)),
+                execution_id=max(1, int(execution_id)),
+                mcp_server_keys=sorted(mcp_configs),
+            ):
+                llm_result = _run_llm(
+                    provider,
+                    llm_payload,
+                    mcp_configs=mcp_configs,
+                    model_config=model_config,
+                    on_update=_capture_llm_updates,
+                    on_log=_append_script_log,
+                    cwd=llm_cwd,
+                    env=llm_env,
+                )
+            if llm_result.returncode != 0:
+                schema_validation_failure = None
+                break
+            if not schema_validation_enabled:
+                structured_output = _parse_structured_output(llm_result.stdout)
+                schema_validation_failure = None
+                break
+            try:
+                structured_output = _parse_strict_json_object_output(llm_result.stdout)
+                schema_validation_failure = None
+                if attempt > 1:
+                    _append_script_log(
+                        f"Task output schema repaired on attempt {attempt}/{schema_retry_attempts}."
+                    )
+                break
+            except ValueError as exc:
+                schema_validation_failure = (
+                    "Task node schema validation failed on attempt "
+                    f"{attempt}/{schema_retry_attempts}: {str(exc)}"
+                )
+                _append_script_log(schema_validation_failure)
+                if attempt >= schema_retry_attempts:
+                    schema_validation_failure = (
+                        "Task node schema validation failed after "
+                        f"{schema_retry_attempts} attempt(s): {str(exc)}"
+                    )
+                    break
+                llm_payload = _inject_task_schema_repair_prompt(
+                    llm_payload,
+                    attempt=attempt + 1,
+                    max_attempts=schema_retry_attempts,
+                    validation_error=str(exc),
+                    previous_output=llm_result.stdout,
+                )
+                _append_script_log(
+                    "Retrying task node after schema-repair prompt injection "
+                    f"({attempt + 1}/{schema_retry_attempts})."
+                )
+                if schema_retry_backoff_ms > 0:
+                    time.sleep(schema_retry_backoff_ms / 1000.0)
 
         _set_stage("post_run")
         _run_stage_scripts(
@@ -8434,8 +8672,10 @@ def _execute_flowchart_task_node(
     if llm_result.returncode != 0:
         message = llm_result.stderr.strip() or f"LLM exited with code {llm_result.returncode}."
         raise RuntimeError(message)
-
-    structured_output = _parse_structured_output(llm_result.stdout)
+    if schema_validation_failure:
+        raise RuntimeError(schema_validation_failure)
+    if structured_output is None:
+        structured_output = _parse_structured_output(llm_result.stdout)
     route_key = _extract_path_value(structured_output, "route_key")
 
     stage_logs = _serialize_stage_logs()
@@ -8729,6 +8969,42 @@ def _apply_plan_completion_patch(
         action_results.append(f"Marked task {task_id} as completed.")
 
 
+PLAN_COMPLETION_PATCH_KEYS = {
+    "mark_plan_complete",
+    "complete_stage_ids",
+    "complete_task_ids",
+    "task_ids",
+}
+PLAN_LLM_TRANSFORM_SUMMARY_KEY = "llm_transform_summary"
+
+
+def _extract_plan_llm_transform_summary(transform_output: Any) -> str:
+    if isinstance(transform_output, str):
+        return transform_output.strip()
+    if not isinstance(transform_output, dict):
+        return ""
+    for key in ("summary", "human_summary", "text"):
+        value = transform_output.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _extract_plan_llm_transform_patch(transform_output: Any) -> dict[str, Any] | None:
+    if not isinstance(transform_output, dict):
+        return None
+    patch_candidate = transform_output.get("patch")
+    if isinstance(patch_candidate, dict):
+        patch = patch_candidate
+    else:
+        patch = transform_output
+    if not isinstance(patch, dict):
+        return None
+    if not any(key in patch for key in PLAN_COMPLETION_PATCH_KEYS):
+        return None
+    return patch
+
+
 def _execute_flowchart_plan_node(
     *,
     node_id: int,
@@ -8778,6 +9054,7 @@ def _execute_flowchart_plan_node(
         touched_stage_ids: set[int] = set()
         touched_task_ids: set[int] = set()
         completion_target: dict[str, Any] = {}
+        llm_transform_summary = ""
 
         if action == PLAN_NODE_ACTION_CREATE_OR_UPDATE:
             direct_patch = node_config.get("patch")
@@ -8823,16 +9100,20 @@ def _execute_flowchart_plan_node(
                         mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
                         attachments=list(node.attachments),
                     )
-                    if isinstance(llm_patch, dict):
+                    llm_transform_summary = _extract_plan_llm_transform_summary(llm_patch)
+                    normalized_llm_patch = _extract_plan_llm_transform_patch(llm_patch)
+                    if normalized_llm_patch is not None:
                         _apply_plan_completion_patch(
                             plan=plan,
-                            patch=llm_patch,
+                            patch=normalized_llm_patch,
                             action_results=action_results,
                             now=now,
                             touched_stage_ids=touched_stage_ids,
                             touched_task_ids=touched_task_ids,
                         )
                         action_results.append("Applied LLM transform patch to plan.")
+                    if llm_transform_summary:
+                        action_results.append("Captured optional LLM transform summary.")
         elif action == PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM:
             completion_source_path = str(
                 node_config.get("completion_source_path") or ""
@@ -8937,6 +9218,8 @@ def _execute_flowchart_plan_node(
             "attachments": _build_attachment_entries(list(node.attachments)),
             "plan": _serialize_plan_for_node(plan),
         }
+        if llm_transform_summary:
+            output_state[PLAN_LLM_TRANSFORM_SUMMARY_KEY] = llm_transform_summary
 
     route_key = str(node_config.get("route_key") or "").strip()
     route_key_on_complete = str(node_config.get("route_key_on_complete") or "").strip()
@@ -9134,6 +9417,12 @@ def _execute_flowchart_memory_node(
     input_context: dict[str, Any],
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    normalized_mcp_server_keys = {
+        str(item or "").strip() for item in (mcp_server_keys or []) if str(item or "").strip()
+    }
+    if normalized_mcp_server_keys and INTEGRATED_MCP_LLMCTL_KEY not in normalized_mcp_server_keys:
+        raise ValueError("Memory node requires system-managed LLMCTL MCP server.")
+
     action_value = node_config.get("action")
     action = _normalize_memory_node_action(action_value)
     if not action:
@@ -10090,6 +10379,9 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
     agent_runtime_cutover_enabled = _agent_runtime_cutover_enabled_from_settings(
         node_executor_runtime_settings
     )
+    task_schema_validation_enabled = _task_schema_validation_enabled_from_settings(
+        node_executor_runtime_settings
+    )
     execution_router = ExecutionRouter(runtime_settings=node_executor_runtime_settings)
 
     node_execution_counts: dict[int, int] = {}
@@ -10375,6 +10667,9 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                 runtime_node_config = dict(node_config)
                 runtime_node_config[AGENT_RUNTIME_CUTOVER_FLAG_KEY] = (
                     "true" if agent_runtime_cutover_enabled else "false"
+                )
+                runtime_node_config[TASK_SCHEMA_VALIDATION_FLAG_KEY] = (
+                    "true" if task_schema_validation_enabled else "false"
                 )
                 execution_request = ExecutionRequest(
                     node_id=node_id,

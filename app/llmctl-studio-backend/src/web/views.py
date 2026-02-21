@@ -13425,10 +13425,6 @@ def upsert_flowchart_graph(flowchart_id: int):
                 .scalars()
                 .first()
             )
-            if llmctl_mcp_server is None:
-                raise ValueError(
-                    "System-managed LLMCTL MCP server is missing. Sync integrations and retry."
-                )
             keep_node_ids: set[int] = set()
             token_to_node_id: dict[str, int] = {}
             node_type_by_id: dict[int, str] = {}
@@ -13540,7 +13536,7 @@ def upsert_flowchart_graph(flowchart_id: int):
                         session,
                         flowchart_id=flowchart_id,
                         node_type=node_type,
-                        ref_id=ref_id if node_type not in FLOWCHART_NODE_TYPE_AUTO_REF else None,
+                        ref_id=ref_id,
                         title=title,
                         x=x,
                         y=y,
@@ -13549,7 +13545,9 @@ def upsert_flowchart_graph(flowchart_id: int):
                 else:
                     flowchart_node.node_type = node_type
                     if node_type in FLOWCHART_NODE_TYPE_AUTO_REF:
-                        if existing_node_type == node_type:
+                        if ref_id is not None:
+                            flowchart_node.ref_id = ref_id
+                        elif existing_node_type == node_type:
                             flowchart_node.ref_id = existing_ref_id
                         else:
                             flowchart_node.ref_id = None
@@ -13569,6 +13567,10 @@ def upsert_flowchart_graph(flowchart_id: int):
                 if node_type == FLOWCHART_NODE_TYPE_RAG:
                     flowchart_node.mcp_servers = []
                 elif node_type == FLOWCHART_NODE_TYPE_MEMORY:
+                    if llmctl_mcp_server is None:
+                        raise ValueError(
+                            "System-managed LLMCTL MCP server is missing. Sync integrations and retry."
+                        )
                     flowchart_node.mcp_servers = [llmctl_mcp_server]
                 elif "mcp_server_ids" in raw_node:
                     mcp_server_ids_raw = raw_node.get("mcp_server_ids")

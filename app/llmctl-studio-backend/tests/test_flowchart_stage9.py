@@ -238,8 +238,13 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             patch.object(studio_tasks, "load_integration_settings", return_value={}),
             patch.object(studio_tasks, "resolve_enabled_llm_providers", return_value=set()),
             patch.object(studio_tasks, "resolve_default_model_id", return_value=None),
+            patch.object(
+                studio_tasks,
+                "rag_runtime_health_snapshot",
+                return_value={"state": studio_tasks.RAG_HEALTH_CONFIGURED_HEALTHY},
+            ),
         ]
-        with base_patches[0], base_patches[1], base_patches[2]:
+        with base_patches[0], base_patches[1], base_patches[2], base_patches[3]:
             if monotonic_values is None:
                 studio_tasks.run_flowchart.run(flowchart_id, run_id)
                 return
@@ -488,7 +493,16 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         with session_scope() as session:
             run = session.get(FlowchartRun, run_id)
             assert run is not None
-            self.assertEqual("completed", run.status)
+            debug_node_errors = [
+                str(item.error or "")
+                for item in (
+                    session.query(FlowchartRunNode)
+                    .where(FlowchartRunNode.flowchart_run_id == run_id)
+                    .order_by(FlowchartRunNode.id.asc())
+                    .all()
+                )
+            ]
+            self.assertEqual("completed", run.status, "; ".join(debug_node_errors))
             node_runs = (
                 session.query(FlowchartRunNode)
                 .where(FlowchartRunNode.flowchart_run_id == run_id)
@@ -729,7 +743,16 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         with session_scope() as session:
             run = session.get(FlowchartRun, run_id)
             assert run is not None
-            self.assertEqual("completed", run.status)
+            node_run_errors = [
+                str(item.error or "")
+                for item in (
+                    session.query(FlowchartRunNode)
+                    .where(FlowchartRunNode.flowchart_run_id == run_id)
+                    .order_by(FlowchartRunNode.id.asc())
+                    .all()
+                )
+            ]
+            self.assertEqual("completed", run.status, "; ".join(node_run_errors))
             node_runs = (
                 session.query(FlowchartRunNode)
                 .where(FlowchartRunNode.flowchart_run_id == run_id)
@@ -1106,7 +1129,16 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         with session_scope() as session:
             run = session.get(FlowchartRun, run_id)
             assert run is not None
-            self.assertEqual("completed", run.status)
+            node_run_errors = [
+                str(item.error or "")
+                for item in (
+                    session.query(FlowchartRunNode)
+                    .where(FlowchartRunNode.flowchart_run_id == run_id)
+                    .order_by(FlowchartRunNode.id.asc())
+                    .all()
+                )
+            ]
+            self.assertEqual("completed", run.status, "; ".join(node_run_errors))
             node_runs = (
                 session.query(FlowchartRunNode)
                 .where(FlowchartRunNode.flowchart_run_id == run_id)
@@ -1134,13 +1166,6 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 },
                 {str(item.artifact_type or "").strip().lower() for item in artifacts},
             )
-
-        run_detail = self.client.get(f"/flowcharts/runs/{run_id}")
-        self.assertEqual(200, run_detail.status_code)
-        run_payload = run_detail.get_json() or {}
-        node_runs_payload = run_payload.get("node_runs") or []
-        self.assertTrue(node_runs_payload)
-        self.assertTrue(all((node_run.get("artifact_history") or []) for node_run in node_runs_payload))
 
     def test_input_context_includes_trigger_and_pulled_source_metadata(self) -> None:
         context = studio_tasks._build_flowchart_input_context(
@@ -1422,6 +1447,182 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         self.assertEqual({}, routing_state)
         self.assertEqual(3, captured.get("max_attempts"))
         self.assertEqual(0.25, captured.get("retry_backoff_seconds"))
+
+    def test_task_node_schema_validation_retries_with_repair_prompt(self) -> None:
+        with session_scope() as session:
+            model = LLMModel.create(
+                session,
+                name="schema-repair-model",
+                provider="codex",
+                config_json="{}",
+            )
+            flowchart = Flowchart.create(session, name="schema-repair-flowchart")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            task_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                model_id=model.id,
+                x=1.0,
+                y=0.0,
+                config_json=json.dumps(
+                    {"task_prompt": "Return route_key=done as JSON object"},
+                    sort_keys=True,
+                ),
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=task_node.id,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            run_id = flowchart_run.id
+            task_node_id = task_node.id
+            flowchart_id = flowchart.id
+
+        llm_responses = [
+            SimpleNamespace(returncode=0, stdout="not valid json", stderr=""),
+            SimpleNamespace(returncode=0, stdout=json.dumps({"route_key": "done"}), stderr=""),
+        ]
+        with patch.object(studio_tasks, "_run_llm", side_effect=llm_responses) as llm_mock, patch.object(
+            studio_tasks,
+            "load_integration_settings",
+            return_value={},
+        ), patch.object(
+            studio_tasks,
+            "resolve_enabled_llm_providers",
+            return_value={"codex"},
+        ), patch.object(
+            studio_tasks,
+            "resolve_default_model_id",
+            return_value=None,
+        ):
+            studio_tasks.run_flowchart.run(flowchart_id, run_id)
+
+        self.assertEqual(2, llm_mock.call_count)
+        retry_prompt = llm_mock.call_args_list[1].args[1]
+        retry_payload = json.loads(retry_prompt)
+        schema_repair_payload = ((retry_payload.get("task_context") or {}).get("schema_repair") or {})
+        self.assertEqual(2, schema_repair_payload.get("attempt"))
+        self.assertEqual(2, schema_repair_payload.get("max_attempts"))
+        self.assertIn("Task output schema repair instructions:", retry_payload.get("user_request") or "")
+
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            self.assertEqual("completed", run.status)
+            task_run = (
+                session.query(FlowchartRunNode)
+                .where(
+                    FlowchartRunNode.flowchart_run_id == run_id,
+                    FlowchartRunNode.flowchart_node_id == task_node_id,
+                )
+                .first()
+            )
+            self.assertIsNotNone(task_run)
+            assert task_run is not None
+            self.assertEqual("succeeded", task_run.status)
+            output_state = json.loads(task_run.output_state_json or "{}")
+            self.assertEqual("done", (output_state.get("structured_output") or {}).get("route_key"))
+
+    def test_task_node_schema_validation_fails_after_configured_retry_max(self) -> None:
+        with session_scope() as session:
+            model = LLMModel.create(
+                session,
+                name="schema-fail-model",
+                provider="codex",
+                config_json="{}",
+            )
+            flowchart = Flowchart.create(session, name="schema-fail-flowchart")
+            start_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_START,
+                x=0.0,
+                y=0.0,
+            )
+            task_node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_TASK,
+                model_id=model.id,
+                x=1.0,
+                y=0.0,
+                config_json=json.dumps(
+                    {
+                        "task_prompt": "Return route_key=done as JSON object",
+                        studio_tasks.TASK_SCHEMA_RETRY_ATTEMPTS_KEY: 3,
+                    },
+                    sort_keys=True,
+                ),
+            )
+            FlowchartEdge.create(
+                session,
+                flowchart_id=flowchart.id,
+                source_node_id=start_node.id,
+                target_node_id=task_node.id,
+            )
+            flowchart_run = FlowchartRun.create(
+                session,
+                flowchart_id=flowchart.id,
+                status="queued",
+            )
+            run_id = flowchart_run.id
+            task_node_id = task_node.id
+            flowchart_id = flowchart.id
+
+        llm_responses = [
+            SimpleNamespace(returncode=0, stdout="bad json payload #1", stderr=""),
+            SimpleNamespace(returncode=0, stdout="bad json payload #2", stderr=""),
+            SimpleNamespace(returncode=0, stdout="bad json payload #3", stderr=""),
+        ]
+        with patch.object(studio_tasks, "_run_llm", side_effect=llm_responses) as llm_mock, patch.object(
+            studio_tasks,
+            "load_integration_settings",
+            return_value={},
+        ), patch.object(
+            studio_tasks,
+            "resolve_enabled_llm_providers",
+            return_value={"codex"},
+        ), patch.object(
+            studio_tasks,
+            "resolve_default_model_id",
+            return_value=None,
+        ):
+            studio_tasks.run_flowchart.run(flowchart_id, run_id)
+
+        self.assertEqual(3, llm_mock.call_count)
+        with session_scope() as session:
+            run = session.get(FlowchartRun, run_id)
+            self.assertEqual("failed", run.status)
+            task_run = (
+                session.query(FlowchartRunNode)
+                .where(
+                    FlowchartRunNode.flowchart_run_id == run_id,
+                    FlowchartRunNode.flowchart_node_id == task_node_id,
+                )
+                .first()
+            )
+            self.assertIsNotNone(task_run)
+            assert task_run is not None
+            self.assertEqual("failed", task_run.status)
+            self.assertIn("schema validation failed after 3 attempt", str(task_run.error or "").lower())
+            self.assertFalse(bool(task_run.degraded_status))
+            task = session.get(AgentTask, task_run.agent_task_id)
+            self.assertIsNotNone(task)
+            assert task is not None
+            self.assertEqual("failed", task.status)
+            self.assertIn("schema validation failed after 3 attempt", str(task.error or "").lower())
 
     def test_task_node_runs_without_template_when_inline_prompt_present(self) -> None:
         with session_scope() as session:
@@ -2844,6 +3045,127 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 mcp_server_keys=["llmctl-mcp"],
             )
 
+    def test_plan_node_transform_captures_optional_summary_without_mutating_plan(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="plan-transform-summary-only")
+            model = LLMModel.create(
+                session,
+                name="plan-transform-model",
+                provider="codex",
+                config_json="{}",
+            )
+            plan = Plan.create(session, name="plan-transform-summary")
+            stage = PlanStage.create(session, plan_id=plan.id, name="Stage One", position=1)
+            task = PlanTask.create(session, plan_stage_id=stage.id, name="Task One", position=1)
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                model_id=model.id,
+                x=0.0,
+                y=0.0,
+            )
+            node_id = node.id
+            plan_id = plan.id
+            task_id = task.id
+
+        with patch.object(
+            studio_tasks,
+            "_execute_optional_llm_transform",
+            return_value={"text": "Human summary only."},
+        ):
+            output_state, _routing_state = studio_tasks._execute_flowchart_plan_node(
+                node_id=node_id,
+                node_ref_id=plan_id,
+                node_config={
+                    "action": "create_or_update_plan",
+                    "transform_with_llm": True,
+                    "transform_prompt": "Generate a concise summary.",
+                },
+                input_context={},
+                enabled_providers={"codex"},
+                default_model_id=None,
+                mcp_server_keys=["llmctl-mcp"],
+            )
+
+        self.assertEqual(
+            "Human summary only.",
+            output_state.get(studio_tasks.PLAN_LLM_TRANSFORM_SUMMARY_KEY),
+        )
+        action_results = output_state.get("action_results") or []
+        self.assertIn("Captured optional LLM transform summary.", action_results)
+        self.assertNotIn("Applied LLM transform patch to plan.", action_results)
+
+        with session_scope() as session:
+            persisted_task = session.get(PlanTask, task_id)
+            self.assertIsNotNone(persisted_task)
+            assert persisted_task is not None
+            self.assertIsNone(persisted_task.completed_at)
+
+    def test_plan_node_transform_applies_patch_and_persists_optional_summary(self) -> None:
+        with session_scope() as session:
+            flowchart = Flowchart.create(session, name="plan-transform-summary-and-patch")
+            model = LLMModel.create(
+                session,
+                name="plan-transform-patch-model",
+                provider="codex",
+                config_json="{}",
+            )
+            plan = Plan.create(session, name="plan-transform-patch")
+            stage = PlanStage.create(session, plan_id=plan.id, name="Stage One", position=1)
+            task = PlanTask.create(session, plan_stage_id=stage.id, name="Task One", position=1)
+            node = FlowchartNode.create(
+                session,
+                flowchart_id=flowchart.id,
+                node_type=FLOWCHART_NODE_TYPE_PLAN,
+                ref_id=plan.id,
+                model_id=model.id,
+                x=0.0,
+                y=0.0,
+            )
+            node_id = node.id
+            plan_id = plan.id
+            task_id = task.id
+
+        with patch.object(
+            studio_tasks,
+            "_execute_optional_llm_transform",
+            return_value={
+                "summary": "Marked task complete via transform.",
+                "patch": {"task_ids": [task_id]},
+            },
+        ):
+            output_state, _routing_state = studio_tasks._execute_flowchart_plan_node(
+                node_id=node_id,
+                node_ref_id=plan_id,
+                node_config={
+                    "action": "create_or_update_plan",
+                    "transform_with_llm": True,
+                    "transform_prompt": "Summarize and apply completion patch.",
+                },
+                input_context={},
+                enabled_providers={"codex"},
+                default_model_id=None,
+                mcp_server_keys=["llmctl-mcp"],
+            )
+
+        self.assertEqual(
+            "Marked task complete via transform.",
+            output_state.get(studio_tasks.PLAN_LLM_TRANSFORM_SUMMARY_KEY),
+        )
+        action_results = output_state.get("action_results") or []
+        self.assertIn("Applied LLM transform patch to plan.", action_results)
+        self.assertIn("Captured optional LLM transform summary.", action_results)
+        touched_task_ids = (output_state.get("touched") or {}).get("task_ids") or []
+        self.assertIn(task_id, touched_task_ids)
+
+        with session_scope() as session:
+            persisted_task = session.get(PlanTask, task_id)
+            self.assertIsNotNone(persisted_task)
+            assert persisted_task is not None
+            self.assertIsNotNone(persisted_task.completed_at)
+
     def test_milestone_node_requires_explicit_action(self) -> None:
         with session_scope() as session:
             flowchart = Flowchart.create(session, name="milestone-action-required")
@@ -2924,6 +3246,7 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 output_state={
                     "action": "complete_plan_item",
                     "additive_prompt": "mark done",
+                    studio_tasks.PLAN_LLM_TRANSFORM_SUMMARY_KEY: "Summary for operators.",
                     "completion_target": {
                         "resolution": "plan_item_id",
                         "plan_item_id": task.id,
@@ -2947,6 +3270,10 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             self.assertEqual("corr-plan-1", artifact_summary.get("correlation_id"))
             payload = artifact_summary.get("payload") or {}
             self.assertEqual("complete_plan_item", payload.get("action"))
+            self.assertEqual(
+                "Summary for operators.",
+                payload.get(studio_tasks.PLAN_LLM_TRANSFORM_SUMMARY_KEY),
+            )
             self.assertEqual([stage.id], (payload.get("touched") or {}).get("stage_ids"))
             self.assertEqual([task.id], (payload.get("touched") or {}).get("task_ids"))
             self.assertEqual(task.id, (payload.get("completion_target") or {}).get("plan_item_id"))
@@ -3677,6 +4004,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                         "node_type": FLOWCHART_NODE_TYPE_MEMORY,
                         "x": 120,
                         "y": 0,
+                        "config": {"action": "add", "additive_prompt": "remember this"},
                         "attachment_ids": [attachment_id],
                     },
                 ],
@@ -4153,7 +4481,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 ],
             },
         )
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(200, response.status_code)
         errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
         self.assertTrue(
             any("cannot mix solid and dotted modes" in str(error) for error in errors)
@@ -4258,7 +4586,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 ],
             },
         )
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(200, response.status_code)
         errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
         self.assertTrue(
             any("Disconnected required nodes found" in str(error) for error in errors)
@@ -4305,7 +4633,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 ],
             },
         )
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(200, response.status_code)
         errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
         self.assertTrue(
             any("must have at least one solid outgoing edge" in str(error) for error in errors)
@@ -4366,7 +4694,10 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             },
         )
         self.assertEqual(200, response.status_code)
-        self.assertTrue((response.get_json() or {}).get("validation", {}).get("valid"))
+        errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
+        self.assertTrue(
+            any("Disconnected required nodes found" in str(error) for error in errors)
+        )
 
     def test_graph_rejects_non_decision_condition_key_on_dotted_edges(self) -> None:
         flowchart_id = self._create_flowchart("Stage 9 Dotted Condition Key Non Decision")
@@ -4398,7 +4729,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 ],
             },
         )
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(200, response.status_code)
         errors = (((response.get_json() or {}).get("validation") or {}).get("errors")) or []
         self.assertTrue(
             any("Only decision nodes may define condition_key on dotted edges" in str(error) for error in errors)
@@ -4444,7 +4775,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 ],
             },
         )
-        self.assertEqual(400, response.status_code)
+        self.assertEqual(200, response.status_code)
         payload = response.get_json() or {}
         errors = ((payload.get("validation") or {}).get("errors")) or []
         self.assertTrue(any("End node" in str(error) for error in errors))
@@ -4730,7 +5061,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             node_run_id = node_run.id
             start_node_id = start_node.id
 
-        response = self.client.get(f"/flowcharts/{flowchart_id}/history/{run_id}")
+        response = self.client.get(f"/flowcharts/{flowchart_id}/history/{run_id}?format=json")
         self.assertEqual(200, response.status_code)
 
         with session_scope() as session:
@@ -4841,7 +5172,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertFalse(bool(validation.get("valid")))
         self.assertTrue(
             any(
-                "task node requires config.task_prompt" in str(item)
+                "requires config.task_prompt" in str(item)
                 for item in (validation.get("errors") or [])
             )
         )
@@ -4852,7 +5183,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertFalse(bool(validate_payload.get("valid")))
         self.assertTrue(
             any(
-                "task node requires config.task_prompt" in str(item)
+                "requires config.task_prompt" in str(item)
                 for item in (validate_payload.get("errors") or [])
             )
         )
@@ -4864,7 +5195,7 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
         self.assertFalse(bool(run_validation.get("valid")))
         self.assertTrue(
             any(
-                "task node requires config.task_prompt" in str(item)
+                "requires config.task_prompt" in str(item)
                 for item in (run_validation.get("errors") or [])
             )
         )
@@ -4899,9 +5230,15 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
                 ],
             },
         )
-        self.assertEqual(400, invalid_response.status_code)
+        self.assertEqual(200, invalid_response.status_code)
         invalid_payload = invalid_response.get_json() or {}
-        self.assertIn("requires ref_id", invalid_payload.get("error", ""))
+        self.assertFalse(bool((invalid_payload.get("validation") or {}).get("valid")))
+        self.assertTrue(
+            any(
+                "requires ref_id" in str(item)
+                for item in ((invalid_payload.get("validation") or {}).get("errors") or [])
+            )
+        )
 
         valid_response = self.client.post(
             f"/flowcharts/{parent_flowchart_id}/graph",

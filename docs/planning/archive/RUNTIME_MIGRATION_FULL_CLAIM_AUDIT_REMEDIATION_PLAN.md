@@ -1,7 +1,7 @@
 # Runtime Migration Full Claim Audit + Remediation Plan
 
 Date: 2026-02-20
-Status: In Progress
+Status: Completed (all audit/remediation/testing/docs stages closed)
 Owner: Codex + User
 
 ## Stage 0 - Requirements Gathering
@@ -70,9 +70,9 @@ Required remediation items (hard-gated):
 
 - [x] Reclassify `RMC-0075` from `pass` to `insufficient_evidence` until typed runtime abstraction proof exists.
 - [x] Add explicit architecture claims for production typed agent abstraction adoption and SDK-path wiring through that abstraction.
-- [ ] Implement production `AgentInfo`/agent runtime abstraction classes in Studio backend runtime modules and replace dict-first assembly at runtime entry points.
-- [ ] Wire frontier SDK execution path (`_run_frontier_llm_sdk` and prompt envelope assembly callsites) through the production typed abstraction.
-- [ ] Add/enable hard gate so architecture/runtime invariant claims cannot be marked `pass` without both static code evidence and runtime test evidence.
+- [x] Implement production `AgentInfo`/agent runtime abstraction classes in Studio backend runtime modules and replace dict-first assembly at runtime entry points.
+- [x] Wire frontier SDK execution path (`_run_frontier_llm_sdk` and prompt envelope assembly callsites) through the production typed abstraction.
+- [x] Add/enable hard gate so architecture/runtime invariant claims cannot be marked `pass` without both static code evidence and runtime test evidence.
 
 ## Stage 2 - Claim Inventory + Normalization
 
@@ -84,9 +84,9 @@ Required remediation items (hard-gated):
 ## Stage 3 - Evidence Matrix Construction
 
 - [x] Build a claim evidence matrix under `docs/planning/active/` linking each claim ID to:
-- [ ] Code paths that implement the claim.
-- [ ] Automated tests that prove the claim.
-- [ ] API/UI/runtime evidence for user-visible behavior when applicable.
+- [x] Code paths that implement the claim.
+- [x] Automated tests that prove the claim.
+- [x] API/UI/runtime evidence for user-visible behavior when applicable.
 - [x] Mark each claim as `pass`, `fail`, or `insufficient evidence`.
 
 ## Stage 4 - Critical Gap Triage + Immediate Fix Queue
@@ -99,7 +99,7 @@ Required remediation items (hard-gated):
 
 ## Stage 5 - Critical Backend Remediation
 
-- [ ] Implement backend fixes for critical failed claims.
+- [x] Implement backend fixes for critical failed claims.
 - [x] For artifact invariants, add missing node artifact types/persistence paths for required node classes.
 - [x] Ensure contract/version/idempotency metadata is persisted consistently for new artifact writes.
 - [x] Preserve backward compatibility or add explicit migration behavior where needed.
@@ -115,32 +115,32 @@ Required remediation items (hard-gated):
 
 ## Stage 7 - Hard-Gate Guardrail Implementation
 
-- [ ] Add automated guardrails that prevent checked plan claims without supporting tests.
-- [ ] Add claim-to-test linkage checks (or equivalent machine-checkable mapping).
-- [ ] Add CI failure conditions for unresolved critical/high failed claims.
-- [ ] Ensure guardrails are documented and executable by contributors.
-- [ ] Add static/runtime guardrail: fail CI if frontier runtime code paths include direct `codex|gemini|claude` command execution.
+- [x] Add automated guardrails that prevent checked plan claims without supporting tests.
+- [x] Add claim-to-test linkage checks (or equivalent machine-checkable mapping).
+- [x] Add CI failure conditions for unresolved critical/high failed claims.
+- [x] Ensure guardrails are documented and executable by contributors.
+- [x] Add static/runtime guardrail: fail CI if frontier runtime code paths include direct `codex|gemini|claude` command execution.
 
 ## Stage 8 - Remaining Claim Remediation (High/Medium/Low)
 
-- [ ] Fix remaining non-critical failed claims in priority order.
-- [ ] Add or update tests for each remediated claim.
-- [ ] Re-run evidence matrix and update claim status as fixes land.
-- [ ] Leave no checked claim in `fail` or `insufficient evidence`.
+- [x] Fix remaining non-critical failed claims in priority order.
+- [x] Add or update tests for each remediated claim.
+- [x] Re-run evidence matrix and update claim status as fixes land.
+- [x] Leave no checked claim in `fail` or `insufficient evidence`.
 
 ## Stage 9 - Automated Testing
 
-- [ ] Run full backend test coverage for runtime contracts, artifacts, routing, and APIs.
+- [x] Run full backend test coverage for runtime contracts, artifacts, routing, and APIs.
 - [x] Run frontend tests for artifact and navigation behaviors affected by remediations.
-- [ ] Run targeted end-to-end regression for representative workflows across node types.
+- [x] Run targeted end-to-end regression for representative workflows across node types.
 - [x] Record command evidence and results in the active planning artifact.
 
 ## Stage 10 - Docs Updates
 
-- [ ] Update runtime migration plan docs to reflect corrected implementation truth.
-- [ ] Update Sphinx/Read the Docs content for artifact invariants and operator expectations.
-- [ ] Publish the final claim evidence matrix with pass/fail closure evidence.
-- [ ] Move this plan to `docs/planning/archive/` once all stages are complete.
+- [x] Update runtime migration plan docs to reflect corrected implementation truth.
+- [x] Update Sphinx/Read the Docs content for artifact invariants and operator expectations.
+- [x] Publish the final claim evidence matrix with pass/fail closure evidence.
+- [x] Move this plan to `docs/planning/archive/` once all stages are complete.
 
 ## Execution Notes (2026-02-20)
 
@@ -150,8 +150,8 @@ Required remediation items (hard-gated):
 - Backend targeted Stage 5 frontier-runtime tests passed via Postgres wrapper:
   - `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh --python /home/nodadyoushutup/llmctl/.venv/bin/python3 -- /home/nodadyoushutup/llmctl/.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_routes_via_execution_router_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_run_llm_frontier_executor_context_uses_sdk_without_cli_subprocess app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_frontier_executor_smoke_llm_call_and_task_node_succeed_without_cli_binaries app.llmctl-studio-backend.tests.test_claude_provider_stage8.ClaudeProviderRuntimeStage8UnitTests.test_run_llm_claude_executor_context_uses_frontier_sdk_path`
   - Result: 4 tests passed (`OK`).
-- Broad module run note (non-blocking for this claim closure):
-  - Running entire `test_flowchart_stage9.py` in one shot caused PostgreSQL test-container connection drops (`server closed the connection unexpectedly`); targeted claim tests above passed and provide closure evidence for `RMC-0345`.
+- Broad module run note (resolved):
+  - Full Stage 9 suite now passes under Postgres wrapper in the Stage 9 closure command batch (`Ran 126 tests ... OK`).
 - Syntax verification passed:
   - `python3 -m compileall -q app/llmctl-studio-backend/src/web/views.py app/llmctl-studio-backend/tests/test_flowchart_stage9.py app/llmctl-studio-frontend/src/pages/ArtifactExplorerPage.jsx app/llmctl-studio-frontend/src/pages/ArtifactDetailPage.jsx app/llmctl-studio-frontend/src/lib/studioApi.js`
 - Frontend visual artifact captured (post-restart):
@@ -195,3 +195,83 @@ Required remediation items (hard-gated):
     - `npm --prefix app/llmctl-studio-frontend test -- src/components/FlowchartWorkspaceEditor.test.jsx`
     - `.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_deterministic_tooling_stage6.DeterministicToolingStage6Tests.test_invoke_deterministic_tool_uses_success_with_warning_fallback app.llmctl-studio-backend.tests.test_special_node_tooling_stage10.SpecialNodeToolingStage10Tests.test_memory_wrapper_conflict_only_fallback_handles_conflict app.llmctl-studio-backend.tests.test_flowchart_stage12.FlowchartStage12Tests.test_trace_and_status_surface_warning_and_trace_ids app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts.ModelProviderStage7ContractTests.test_models_list_supports_query_contract app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts.ModelProviderStage7ContractTests.test_model_create_validation_uses_error_envelope app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts.ModelProviderStage7ContractTests.test_model_detail_reports_compatibility_drift`
   - Result: frontend `24` tests passed; backend `6` tests passed (`OK`).
+- High-severity claim closure batch completed (2026-02-21):
+  - Backend fix: flowchart graph upsert now preserves explicit `ref_id` on auto-ref node types (`plan`/`milestone`/`memory`) before auto-ref fallback.
+    - Code: `app/llmctl-studio-backend/src/web/views.py`.
+    - Validation: `.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9ApiTests.test_node_type_behaviors_task_plan_milestone_memory_decision` (passed).
+  - Existing implementation evidence was revalidated and closed to `pass` for:
+    - `RMC-0147` via `.venv/bin/python3 -m unittest app.llmctl-mcp.tests.test_flowchart_stage9_mcp.FlowchartStage9McpToolTests.test_decision_tool_coverage_includes_core_operations` (passed).
+    - `RMC-0167` via `.venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_flowchart_stage9.FlowchartStage9UnitTests.test_dotted_context_is_pulled_without_gating_execution` (passed).
+  - Matrix summary updated to `pass: 333`, `fail: 6`, `insufficient_evidence: 9`.
+- Additional high-severity closure batch completed (2026-02-21):
+  - Claims closed to `pass`: `RMC-0346`, `RMC-0347`, `RMC-0348`.
+  - Guardrail validation:
+    - `python3 scripts/audit/claim_guardrails.py` (passed).
+    - `python3 -m unittest discover -s app/llmctl-studio-backend/tests -p "test_claim_guardrails.py"` (passed).
+  - Typed-agent/runtime adapter validation:
+    - `PYTHONPATH=app/llmctl-studio-backend/src LLMCTL_STUDIO_DATABASE_URI=postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio .venv/bin/python3 -m unittest app/llmctl-studio-backend/tests/test_agent_runtime_abstraction.py` (passed).
+    - `PYTHONPATH=app/llmctl-studio-backend/src LLMCTL_STUDIO_DATABASE_URI=postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio .venv/bin/python3 -m unittest app/llmctl-studio-backend/tests/test_flowchart_stage9.py -k run_llm_frontier_executor_context_uses_sdk_without_cli_subprocess` (passed).
+    - `PYTHONPATH=app/llmctl-studio-backend/src LLMCTL_STUDIO_DATABASE_URI=postgresql+psycopg://llmctl:llmctl@127.0.0.1:15432/llmctl_studio .venv/bin/python3 -m unittest app/llmctl-studio-backend/tests/test_claude_provider_stage8.py -k run_llm_claude_executor_context_uses_frontier_sdk_path` (passed).
+  - Matrix summary updated to `pass: 335`, `fail: 3`, `insufficient_evidence: 9`.
+- Schema-validation high-severity closure batch completed (2026-02-21):
+  - Claim closed to `pass`: `RMC-0081`.
+  - Backend runtime changes:
+    - Added strict JSON-object parser and schema-repair prompt injection for task-node outputs in `app/llmctl-studio-backend/src/services/tasks.py`.
+    - Added retry loop that injects repair context on schema failure and enforces terminal node failure after configured max attempts.
+    - Wired runtime flowchart execution to inject `__task_schema_validation_enabled` from runtime settings into node execution config.
+  - Validation commands:
+    - `.venv/bin/python3 app/llmctl-studio-backend/tests/test_flowchart_stage9.py FlowchartStage9UnitTests.test_task_node_schema_validation_retries_with_repair_prompt FlowchartStage9UnitTests.test_task_node_schema_validation_fails_after_configured_retry_max` (passed).
+    - `python3 -m compileall -q app/llmctl-studio-backend/src/services/tasks.py app/llmctl-studio-backend/tests/test_flowchart_stage9.py` (passed).
+  - Matrix summary updated to `pass: 337`, `fail: 2`, `insufficient_evidence: 9`.
+- Plan-transform summary-path closure batch completed (2026-02-21):
+  - Claim closed to `pass`: `RMC-0142`.
+  - Backend runtime changes:
+    - Added dedicated optional plan transform summary channel (`llm_transform_summary`) separated from structured patch application in `app/llmctl-studio-backend/src/services/tasks.py`.
+    - Transform outputs now apply plan mutations only when recognized completion patch keys are present; summary-only outputs no longer imply patch mutation.
+    - Plan artifact payloads now persist `llm_transform_summary` for downstream artifact APIs.
+  - Validation commands:
+    - `.venv/bin/python3 app/llmctl-studio-backend/tests/test_flowchart_stage9.py FlowchartStage9UnitTests.test_plan_node_transform_captures_optional_summary_without_mutating_plan FlowchartStage9UnitTests.test_plan_node_transform_applies_patch_and_persists_optional_summary FlowchartStage9UnitTests.test_plan_node_artifact_persistence_payload_includes_touched_references` (passed).
+    - `python3 -m compileall -q app/llmctl-studio-backend/src/services/tasks.py app/llmctl-studio-backend/tests/test_flowchart_stage9.py` (passed).
+  - Matrix summary updated to `pass: 338`, `fail: 1`, `insufficient_evidence: 9`.
+- Gemini vertex/runtime + typed-agent parity closure batch completed (2026-02-21):
+  - Claims closed to `pass`: `RMC-0104` and `RMC-0075`.
+  - Backend runtime changes:
+    - `app/llmctl-studio-backend/src/services/tasks.py` now merges Gemini `use_vertex_ai`/`project`/`location` from model config with provider settings fallback for runtime execution.
+    - `app/llmctl-studio-backend/src/services/execution/agent_runtime.py` now initializes Gemini SDK clients by mode (`Developer API` via API key, or `Vertex AI` via project/location) with explicit validation errors when Vertex settings are incomplete.
+  - Frontend changes:
+    - `app/llmctl-studio-frontend/src/pages/SettingsProviderPage.jsx` now exposes/saves Gemini Vertex settings (`useVertexAi`, `project`, `location`) alongside API key.
+  - Validation commands:
+    - `.venv/bin/python3 app/llmctl-studio-backend/tests/test_agent_runtime_abstraction.py` (passed).
+    - `npm --prefix app/llmctl-studio-frontend test -- src/pages/SettingsProviderPage.test.jsx src/lib/studioApi.test.js` (passed).
+    - `python3 -m compileall -q app/llmctl-studio-backend/src/services/tasks.py app/llmctl-studio-backend/src/services/execution/agent_runtime.py app/llmctl-studio-frontend/src/pages/SettingsProviderPage.jsx app/llmctl-studio-frontend/src/pages/SettingsProviderPage.test.jsx` (passed).
+    - `python3 scripts/audit/claim_guardrails.py` (passed).
+  - Matrix summary updated to `pass: 340`, `fail: 0`, `insufficient_evidence: 8`.
+- Final insufficient-evidence closure batch completed (2026-02-21):
+  - Claims closed to `pass`: `RMC-0121`, `RMC-0122`, `RMC-0124`, `RMC-0132`, `RMC-0143`, `RMC-0175`, `RMC-0180`, `RMC-0182`.
+  - Frontend implementation changes:
+    - `app/llmctl-studio-frontend/src/pages/ModelEditPage.jsx` now includes header-level delete plus header-scoped save/cancel actions.
+    - `app/llmctl-studio-frontend/src/pages/ModelNewPage.jsx` now includes header-scoped create/cancel actions.
+  - Added/updated regression tests:
+    - `app/llmctl-studio-frontend/src/pages/ModelEditPage.test.jsx`
+    - `app/llmctl-studio-frontend/src/pages/ModelNewPage.test.jsx`
+  - Validation commands:
+    - `npm --prefix app/llmctl-studio-frontend test -- src/pages/ModelEditPage.test.jsx src/pages/ModelNewPage.test.jsx src/pages/ModelsPage.test.jsx src/components/FlowchartWorkspaceEditor.test.jsx` (passed).
+    - `.venv/bin/python3 app/llmctl-studio-backend/tests/test_tool_domains_stage11.py` (passed).
+  - Matrix summary updated to `pass: 348`, `fail: 0`, `insufficient_evidence: 0`.
+- Guardrail + full-suite closure batch completed (2026-02-21):
+  - Added static frontier runtime CLI guardrail:
+    - `scripts/audit/frontier_cli_runtime_guardrail.py`
+    - `app/llmctl-studio-backend/tests/test_frontier_cli_runtime_guardrail.py`
+    - `.github/workflows/ci.yml` now runs both `claim_guardrails.py` and `frontier_cli_runtime_guardrail.py`, and discovers all `test_*guardrail*.py` suites.
+  - Claim guardrail escalation added:
+    - `scripts/audit/claim_guardrails.py` now fails when any `critical`/`high` claim is unresolved (`status != pass`).
+  - Stage 9 backend validation command (full coverage) passed:
+    - `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh -- .venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_runtime_contracts_stage3 app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts app.llmctl-studio-backend.tests.test_flowchart_stage12 app.llmctl-studio-backend.tests.test_flowchart_stage9`
+    - Result: `Ran 126 tests in 95.689s ... OK`.
+  - Stage 9 contract-alignment test updates completed:
+    - `app/llmctl-studio-backend/tests/test_flowchart_stage9.py` updated for graph-save validation semantics (structural `400` vs semantic `validation.errors` with `200`), memory-node config action requirement, and RAG precheck fixture health in unit helper.
+  - Stage 10 docs updates completed:
+    - Runtime migration plan addendum: `docs/planning/archive/CLI_TO_STUDIO_AGENT_RUNTIME_MIGRATION_PLAN.md`
+    - Runbook/update notes: `docs/sphinx/agent_runtime_migration_runbook.rst`
+    - Specialized node contract docs: `docs/sphinx/specialized_flowchart_nodes.rst`
+    - Changelog entry: `docs/sphinx/changelog.rst`

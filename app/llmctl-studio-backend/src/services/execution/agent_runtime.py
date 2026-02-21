@@ -222,23 +222,50 @@ class FrontierAgent:
         if not model_name:
             model_name = self._dependencies.default_gemini_model
 
-        api_key = (
-            self._dependencies.load_gemini_auth_key()
-            or str(env_map.get("GEMINI_API_KEY") or "").strip()
-            or str(env_map.get("GOOGLE_API_KEY") or "").strip()
-        )
-        if not api_key:
-            return subprocess.CompletedProcess(
-                ["sdk:gemini"],
-                1,
-                "",
-                "Gemini runtime requires GEMINI_API_KEY or GOOGLE_API_KEY.",
+        use_vertex_raw = gemini_settings.get("use_vertex_ai")
+        use_vertex_ai = False
+        if isinstance(use_vertex_raw, bool):
+            use_vertex_ai = use_vertex_raw
+        elif isinstance(use_vertex_raw, str):
+            use_vertex_ai = use_vertex_raw.strip().lower() == "true"
+
+        client_kwargs: dict[str, Any]
+        if use_vertex_ai:
+            project = str(gemini_settings.get("project") or "").strip()
+            location = str(gemini_settings.get("location") or "").strip()
+            if not project or not location:
+                return subprocess.CompletedProcess(
+                    ["sdk:gemini"],
+                    1,
+                    "",
+                    (
+                        "Gemini Vertex runtime requires both project and location when "
+                        "use_vertex_ai=true."
+                    ),
+                )
+            client_kwargs = {
+                "vertexai": True,
+                "project": project,
+                "location": location,
+            }
+        else:
+            api_key = (
+                self._dependencies.load_gemini_auth_key()
+                or str(env_map.get("GEMINI_API_KEY") or "").strip()
+                or str(env_map.get("GOOGLE_API_KEY") or "").strip()
             )
+            if not api_key:
+                return subprocess.CompletedProcess(
+                    ["sdk:gemini"],
+                    1,
+                    "",
+                    "Gemini runtime requires GEMINI_API_KEY or GOOGLE_API_KEY.",
+                )
+            client_kwargs = {"api_key": api_key}
 
         if on_log:
-            on_log(
-                f"Running {provider_label}: Google SDK generate_content model={model_name}."
-            )
+            mode = "Vertex AI" if use_vertex_ai else "Developer API"
+            on_log(f"Running {provider_label}: Google SDK ({mode}) model={model_name}.")
 
         request_config: dict[str, Any] = {}
         max_output_tokens = _optional_positive_int(config_map.get("max_output_tokens"))
@@ -255,7 +282,7 @@ class FrontierAgent:
             request_config["top_k"] = top_k
 
         try:
-            response_payload = genai.Client(api_key=api_key).models.generate_content(
+            response_payload = genai.Client(**client_kwargs).models.generate_content(
                 model=model_name,
                 contents=prompt,
                 config=request_config if request_config else None,

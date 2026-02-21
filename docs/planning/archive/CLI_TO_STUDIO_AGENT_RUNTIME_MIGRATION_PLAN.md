@@ -2,6 +2,18 @@
 
 Goal: migrate the current CLI-wrapper-driven agent execution model into Studio as the primary runtime while preserving flowchart context passing, tool-based operations, structured output contracts, and operational safety controls.
 
+## 2026-02-21 Closure Addendum
+
+- Runtime migration claim audit closure completed in
+  `docs/planning/archive/RUNTIME_MIGRATION_CLAIM_EVIDENCE_MATRIX.md`
+  with summary: `pass: 348`, `fail: 0`, `insufficient_evidence: 0`.
+- Frontier runtime guardrails are enforced in CI:
+  - `scripts/audit/claim_guardrails.py`
+  - `scripts/audit/frontier_cli_runtime_guardrail.py`
+- Full backend runtime verification passed:
+  - `~/.codex/skills/llmctl-studio-test-postgres/scripts/run_backend_tests_with_postgres.sh -- .venv/bin/python3 -m unittest app.llmctl-studio-backend.tests.test_runtime_contracts_stage3 app.llmctl-studio-backend.tests.test_model_provider_stage7_contracts app.llmctl-studio-backend.tests.test_flowchart_stage12 app.llmctl-studio-backend.tests.test_flowchart_stage9`
+  - Result: `Ran 126 tests ... OK`.
+
 ## Stage 0 - Requirements Gathering
 
 - [x] Run Stage 0 interview one question per turn with explicit options.
