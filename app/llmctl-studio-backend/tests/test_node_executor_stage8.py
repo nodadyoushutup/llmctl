@@ -427,7 +427,7 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
             (((dotted_upstream_nodes[0].get("output_state") or {}).get("facts") or [""])[0]),
         )
 
-    def test_node_detail_api_includes_left_panel_contract(self) -> None:
+    def test_node_detail_api_returns_canonical_payload_without_ui_projection(self) -> None:
         with session_scope() as session:
             agent = Agent.create(
                 session,
@@ -528,74 +528,74 @@ class NodeExecutorStage8ApiTests(StudioDbTestCase):
         response = self.client.get(f"/nodes/{task_id}?format=json")
         self.assertEqual(200, response.status_code)
         payload = response.get_json() or {}
-        left_panel = payload.get("left_panel") or {}
-        self.assertEqual(
-            {
-                "input",
-                "results",
-                "prompt",
-                "agent",
-                "mcp_servers",
-                "collections",
-                "raw_json",
-                "details",
-            },
-            set(left_panel.keys()),
+        self.assertNotIn("left_panel", payload)
+
+        task_payload = payload.get("task") or {}
+        self.assertEqual(task_id, int(task_payload.get("id") or 0))
+        self.assertEqual("succeeded", task_payload.get("status"))
+        self.assertEqual("flowchart_task", task_payload.get("kind"))
+        self.assertEqual("Stored memory.", json.loads(task_payload.get("output") or "{}").get("message"))
+
+        agent_payload = payload.get("agent") or {}
+        self.assertEqual(agent_id, int(agent_payload.get("id") or 0))
+        self.assertEqual("Node Detail Agent", agent_payload.get("name"))
+
+        prompt_json_payload = payload.get("prompt_json") or "{}"
+        self.assertEqual("memory", json.loads(prompt_json_payload).get("flowchart_node_type"))
+        self.assertIn(
+            "Capture a durable memory from context.",
+            str(payload.get("prompt_text") or ""),
         )
 
-        input_panel = left_panel.get("input") or {}
-        self.assertEqual("flowchart_run_node", input_panel.get("source"))
-        self.assertEqual(1, int(input_panel.get("trigger_source_count") or 0))
-        self.assertEqual(1, int(input_panel.get("context_only_source_count") or 0))
-        connector_blocks = input_panel.get("connector_blocks") or []
-        self.assertEqual(2, len(connector_blocks))
-        self.assertEqual("trigger", connector_blocks[0].get("classification"))
-        self.assertEqual("context_only", connector_blocks[1].get("classification"))
+        connector_context = payload.get("incoming_connector_context") or {}
+        self.assertEqual("flowchart_run_node", connector_context.get("source"))
+        self.assertEqual(1, int(connector_context.get("trigger_source_count") or 0))
+        self.assertEqual(1, int(connector_context.get("context_only_source_count") or 0))
+        self.assertEqual(1, len(connector_context.get("upstream_nodes") or []))
+        self.assertEqual(1, len(connector_context.get("dotted_upstream_nodes") or []))
 
-        results_panel = left_panel.get("results") or {}
-        self.assertEqual("Stored memory.", results_panel.get("primary_text"))
-        self.assertEqual(
-            ["memory_1", "memory_2"],
-            list(results_panel.get("action_results") or []),
-        )
-        summary_rows = results_panel.get("summary_rows") or []
-        summary_row_keys = [str(item.get("key") or "") for item in summary_rows if isinstance(item, dict)]
-        self.assertIn("message", summary_row_keys)
-        self.assertIn("action_results", summary_row_keys)
+        mcp_servers_payload = payload.get("mcp_servers") or []
+        self.assertEqual(1, len(mcp_servers_payload))
+        self.assertEqual("Node Detail MCP", mcp_servers_payload[0].get("name"))
 
-        prompt_panel = left_panel.get("prompt") or {}
-        self.assertTrue(bool(prompt_panel.get("no_inferred_prompt_in_deterministic_mode")))
-        self.assertEqual(
-            "No inferred prompt in deterministic mode.",
-            prompt_panel.get("notice"),
-        )
-        provided_prompt_fields = prompt_panel.get("provided_prompt_fields") or {}
-        self.assertEqual("memory", provided_prompt_fields.get("flowchart_node_type"))
+    def test_node_detail_api_resolves_mcp_servers_from_runtime_output_keys(self) -> None:
+        with session_scope() as session:
+            llmctl_mcp = MCPServer.create(
+                session,
+                name="LLMCTL MCP",
+                server_key="llmctl-mcp",
+                config_json={"url": "http://llmctl-mcp:9020/mcp", "transport": "streamable-http"},
+            )
+            task = AgentTask.create(
+                session,
+                status="succeeded",
+                kind="flowchart_memory",
+                prompt=json.dumps({"kind": "flowchart_node_activity"}, sort_keys=True),
+                output=json.dumps(
+                    {
+                        "node_type": "memory",
+                        "action": "add",
+                        "mcp_server_keys": ["llmctl-mcp"],
+                        "artifact": {
+                            "payload": {
+                                "mcp_server_keys": ["llmctl-mcp"],
+                            }
+                        },
+                    },
+                    sort_keys=True,
+                ),
+            )
+            task_id = int(task.id)
+            expected_id = int(llmctl_mcp.id)
 
-        agent_panel = left_panel.get("agent") or {}
-        self.assertEqual(agent_id, int(agent_panel.get("id") or 0))
-        self.assertEqual("Node Detail Agent", agent_panel.get("name"))
-        self.assertEqual(f"/agents/{agent_id}", agent_panel.get("link_href"))
-
-        mcp_panel = left_panel.get("mcp_servers") or {}
-        mcp_items = mcp_panel.get("items") or []
-        self.assertEqual(1, len(mcp_items))
-        self.assertEqual("Node Detail MCP", mcp_items[0].get("name"))
-
-        collections_panel = left_panel.get("collections") or {}
-        collection_items = collections_panel.get("items") or []
-        collection_names = [str(item.get("name") or "") for item in collection_items if isinstance(item, dict)]
-        self.assertEqual(["docs", "ops"], collection_names)
-
-        raw_json_panel = left_panel.get("raw_json") or {}
-        self.assertTrue(bool(raw_json_panel.get("is_json")))
-        self.assertIn('"message": "Stored memory."', str(raw_json_panel.get("formatted_output") or ""))
-
-        details_panel = left_panel.get("details") or {}
-        detail_rows = details_panel.get("rows") or []
-        detail_row_keys = [str(item.get("key") or "") for item in detail_rows if isinstance(item, dict)]
-        self.assertIn("kind", detail_row_keys)
-        self.assertIn("node_type", detail_row_keys)
+        response = self.client.get(f"/nodes/{task_id}?format=json")
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json() or {}
+        mcp_servers_payload = payload.get("mcp_servers") or []
+        self.assertEqual(1, len(mcp_servers_payload))
+        self.assertEqual(expected_id, int(mcp_servers_payload[0].get("id") or 0))
+        self.assertEqual("LLMCTL MCP", mcp_servers_payload[0].get("name"))
+        self.assertEqual("llmctl-mcp", mcp_servers_payload[0].get("server_key"))
 
     def test_node_status_api_includes_runtime_evidence_metadata(self) -> None:
         with session_scope() as session:

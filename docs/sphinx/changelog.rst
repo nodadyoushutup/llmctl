@@ -16,6 +16,7 @@ Changelog
 - Updated migration runbook and specialized flowchart node docs to reflect current cutover status, guardrails, and memory-node/system-MCP enforcement behavior.
 - Documented memory-node mode selection contracts (``llm_guided``/``deterministic``), failure controls (``retry_count``/``fallback_enabled``), startup backfill migration defaults, and degraded fallback status markers in specialized flowchart node docs.
 - Reworked Node Detail left-panel contract and React IA to fixed sections (``Input``, ``Results``, ``Prompt``, ``Agent``, ``MCP Servers``, ``Collections``, ``Raw JSON``, ``Details``), with context-only connector terminology, per-connector input blocks, and table-first metadata rendering.
+- Hard-cut Node Detail API UI projection removal: ``GET /api/nodes/<id>`` no longer emits ``left_panel`` and React now derives section data from canonical node payload fields.
 
 2026-02-20
 ----------

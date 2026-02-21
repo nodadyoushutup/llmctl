@@ -316,20 +316,12 @@ Node Detail stage assembly keeps canonical stage keys and remaps only
 
 Non-RAG nodes and missing/unknown modes keep existing ``LLM Query`` behavior.
 
-Node detail JSON payloads also expose a canonical ``left_panel`` object for
-React section rendering, with fixed section keys:
+Node detail JSON payloads expose canonical node/task fields. React composes
+Node Detail sections client-side from those canonical fields (no backend
+UI-projection object).
 
-- ``input``
-- ``results``
-- ``prompt``
-- ``agent``
-- ``mcp_servers``
-- ``collections``
-- ``raw_json``
-- ``details``
-
-``input`` includes connector-context contract fields used by the redesigned
-Node Detail panel:
+``incoming_connector_context`` includes connector-context contract fields used
+by the Node Detail panel:
 
 - ``source``
 - ``trigger_source_count``

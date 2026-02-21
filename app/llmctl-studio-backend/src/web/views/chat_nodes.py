@@ -97,400 +97,90 @@ def _task_incoming_connector_context(
     }
 
 
-_LEFT_PANEL_RESULTS_SUMMARY_KEYS = (
-    "message",
-    "answer",
-    "result",
-    "summary",
-    "content",
-    "action_results",
-)
-_LEFT_PANEL_OUTPUT_DETAIL_KEYS = (
-    "node_type",
-    "action",
-    "status",
-    "memory_id",
-    "execution_status",
-    "fallback_used",
-    "action_prompt_template",
-    "additive_prompt",
-    "effective_prompt",
-)
-_LEFT_PANEL_DETERMINISTIC_NODE_TYPES = {
-    "decision",
-    "milestone",
-    "memory",
-    "plan",
-    "rag",
-}
-_LEFT_PANEL_NO_INFERRED_PROMPT_NOTICE = "No inferred prompt in deterministic mode."
-
-
-def _left_panel_label(value: object) -> str:
-    return str(value or "").replace("_", " ").strip()
-
-
-def _left_panel_summary_value(value: object) -> str:
-    if value is None:
-        return "-"
-    if isinstance(value, list):
-        if not value:
-            return "-"
-        return "\n".join(str(item) for item in value)
-    if isinstance(value, dict):
-        return json.dumps(value, indent=2, sort_keys=True)
-    return str(value)
-
-
-def _left_panel_parse_record(raw_json: str | None) -> dict[str, object]:
-    raw_text = str(raw_json or "").strip()
-    if not raw_text or not raw_text.startswith("{"):
-        return {}
-    try:
-        payload = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    return payload
-
-
-def _left_panel_task_output_payload(task_output: str) -> dict[str, object]:
-    return _left_panel_parse_record(task_output)
-
-
-def _left_panel_prompt_payload(prompt_json: str | None) -> dict[str, object]:
-    return _left_panel_parse_record(prompt_json)
-
-
-def _left_panel_add_collection_values(
-    target: list[str],
-    seen: set[str],
-    raw_value: object,
-) -> None:
-    if isinstance(raw_value, str):
-        cleaned = raw_value.strip()
-        if not cleaned or cleaned in seen:
-            return
-        seen.add(cleaned)
-        target.append(cleaned)
-        return
-    if isinstance(raw_value, list):
-        for item in raw_value:
-            _left_panel_add_collection_values(target, seen, item)
-        return
-
-
-def _left_panel_extract_collections(
-    *,
-    prompt_payload: dict[str, object],
-    quick_context: dict[str, object],
-    task_output: str,
-) -> list[str]:
-    collections: list[str] = []
+def _task_output_mcp_server_keys(task_output: str) -> list[str]:
+    output_payload = _parse_json_dict(task_output)
+    keys: list[str] = []
     seen: set[str] = set()
 
-    _left_panel_add_collection_values(
-        collections, seen, quick_context.get("collection")
-    )
-    _left_panel_add_collection_values(
-        collections, seen, quick_context.get("collections")
-    )
+    def _add(raw_value: object) -> None:
+        if not isinstance(raw_value, list):
+            return
+        for item in raw_value:
+            key = str(item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            keys.append(key)
 
-    _left_panel_add_collection_values(collections, seen, prompt_payload.get("collections"))
-    _left_panel_add_collection_values(
-        collections, seen, prompt_payload.get("selected_collections")
-    )
-
-    task_context = (
-        prompt_payload.get("task_context")
-        if isinstance(prompt_payload.get("task_context"), dict)
+    _add(output_payload.get("mcp_server_keys"))
+    artifact_payload = (
+        ((output_payload.get("artifact") or {}).get("payload") or {})
+        if isinstance(output_payload.get("artifact"), dict)
         else {}
     )
-    if isinstance(task_context, dict):
-        rag_quick = (
-            task_context.get("rag_quick_run")
-            if isinstance(task_context.get("rag_quick_run"), dict)
-            else {}
-        )
-        if isinstance(rag_quick, dict):
-            _left_panel_add_collection_values(collections, seen, rag_quick.get("collection"))
-            _left_panel_add_collection_values(collections, seen, rag_quick.get("collections"))
-        flowchart_context = (
-            task_context.get("flowchart")
-            if isinstance(task_context.get("flowchart"), dict)
-            else {}
-        )
-        if isinstance(flowchart_context, dict):
-            _left_panel_add_collection_values(
-                collections, seen, flowchart_context.get("collections")
-            )
-            node_config = (
-                flowchart_context.get("node_config")
-                if isinstance(flowchart_context.get("node_config"), dict)
-                else {}
-            )
-            if isinstance(node_config, dict):
-                _left_panel_add_collection_values(
-                    collections, seen, node_config.get("collections")
-                )
-
-    node_config = (
-        prompt_payload.get("node_config")
-        if isinstance(prompt_payload.get("node_config"), dict)
-        else {}
-    )
-    if isinstance(node_config, dict):
-        _left_panel_add_collection_values(collections, seen, node_config.get("collections"))
-    flowchart_node_config = (
-        prompt_payload.get("flowchart_node_config")
-        if isinstance(prompt_payload.get("flowchart_node_config"), dict)
-        else {}
-    )
-    if isinstance(flowchart_node_config, dict):
-        _left_panel_add_collection_values(
-            collections, seen, flowchart_node_config.get("collections")
-        )
-
-    output_payload = _left_panel_task_output_payload(task_output)
-    _left_panel_add_collection_values(collections, seen, output_payload.get("collections"))
-    _left_panel_add_collection_values(
-        collections, seen, output_payload.get("selected_collections")
-    )
-    quick_output = (
-        output_payload.get("quick_rag")
-        if isinstance(output_payload.get("quick_rag"), dict)
-        else {}
-    )
-    if isinstance(quick_output, dict):
-        _left_panel_add_collection_values(collections, seen, quick_output.get("collection"))
-        _left_panel_add_collection_values(collections, seen, quick_output.get("collections"))
-
-    return collections
+    if isinstance(artifact_payload, dict):
+        _add(artifact_payload.get("mcp_server_keys"))
+    return keys
 
 
-def _left_panel_connector_blocks(
-    incoming_connector_context: dict[str, object],
-) -> list[dict[str, object]]:
-    trigger_nodes = [
-        item
-        for item in (incoming_connector_context.get("upstream_nodes") or [])
-        if isinstance(item, dict)
-    ]
-    context_only_nodes = [
-        item
-        for item in (incoming_connector_context.get("dotted_upstream_nodes") or [])
-        if isinstance(item, dict)
-    ]
-
-    blocks: list[dict[str, object]] = []
-
-    for index, node in enumerate(trigger_nodes, start=1):
-        blocks.append(
-            {
-                "id": f"trigger-{index}",
-                "label": str(node.get("condition_key") or f"Trigger connector {index}"),
-                "classification": "trigger",
-                "source_edge_id": node.get("source_edge_id"),
-                "source_node_id": node.get("source_node_id"),
-                "source_node_type": node.get("source_node_type"),
-                "condition_key": node.get("condition_key"),
-                "edge_mode": node.get("edge_mode"),
-                "output_state": node.get("output_state"),
-            }
-        )
-
-    for index, node in enumerate(context_only_nodes, start=1):
-        blocks.append(
-            {
-                "id": f"context-only-{index}",
-                "label": str(node.get("condition_key") or f"Context only connector {index}"),
-                "classification": "context_only",
-                "source_edge_id": node.get("source_edge_id"),
-                "source_node_id": node.get("source_node_id"),
-                "source_node_type": node.get("source_node_type"),
-                "condition_key": node.get("condition_key"),
-                "edge_mode": node.get("edge_mode"),
-                "output_state": node.get("output_state"),
-            }
-        )
-
-    return blocks
-
-
-def _left_panel_is_deterministic_prompt_mode(
-    *,
-    task: AgentTask,
-    prompt_payload: dict[str, object],
-    output_payload: dict[str, object],
-) -> bool:
-    node_type_candidates = [
-        str(prompt_payload.get("flowchart_node_type") or "").strip().lower(),
-        str(output_payload.get("node_type") or "").strip().lower(),
-    ]
-    for node_type in node_type_candidates:
-        if node_type in _LEFT_PANEL_DETERMINISTIC_NODE_TYPES:
-            return True
-    execution_mode = str(_task_execution_mode(task) or "").strip().lower()
-    if execution_mode in {"indexing", "delta_indexing", "query"}:
-        return True
-    return False
-
-
-def _left_panel_details_rows(
+def _task_mcp_servers_payload(
+    session,
     *,
     task: AgentTask,
     task_output: str,
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = [
-        {"key": "kind", "label": "Kind", "value": task.kind or "-"},
-        {"key": "flowchart_id", "label": "Flowchart", "value": task.flowchart_id or "-"},
-        {"key": "flowchart_run_id", "label": "Flowchart run", "value": task.flowchart_run_id or "-"},
-        {"key": "flowchart_node_id", "label": "Flowchart node", "value": task.flowchart_node_id or "-"},
-        {"key": "model_id", "label": "Model", "value": task.model_id or "-"},
-        {"key": "autorun_node", "label": "Autorun node", "value": task.run_task_id or "-"},
-        {"key": "celery_task_id", "label": "Celery task", "value": task.celery_task_id or "-"},
-        {"key": "current_stage", "label": "Current stage", "value": task.current_stage or "-"},
-        {"key": "status", "label": "Status", "value": task.status or "-"},
-        {"key": "created_at", "label": "Created", "value": _human_time(task.created_at) or "-"},
-        {"key": "started_at", "label": "Started", "value": _human_time(task.started_at) or "-"},
-        {"key": "finished_at", "label": "Finished", "value": _human_time(task.finished_at) or "-"},
-    ]
+    payload_by_key: dict[str, dict[str, object]] = {}
+    ordered_keys: list[str] = []
 
-    output_payload = _left_panel_task_output_payload(task_output)
-    for key in _LEFT_PANEL_OUTPUT_DETAIL_KEYS:
-        if key not in output_payload:
+    for server in list(task.mcp_servers or []):
+        key = str(server.server_key or "").strip()
+        if not key:
             continue
-        rows.append(
+        if key not in payload_by_key:
+            ordered_keys.append(key)
+        payload_by_key[key] = {
+            "id": server.id,
+            "name": server.name,
+            "server_key": key,
+        }
+
+    runtime_keys = _task_output_mcp_server_keys(task_output)
+    for key in runtime_keys:
+        if key not in payload_by_key:
+            ordered_keys.append(key)
+
+    missing_keys = [key for key in ordered_keys if key not in payload_by_key]
+    if missing_keys:
+        resolved_servers = (
+            session.execute(select(MCPServer).where(MCPServer.server_key.in_(missing_keys)))
+            .scalars()
+            .all()
+        )
+        for server in resolved_servers:
+            key = str(server.server_key or "").strip()
+            if not key:
+                continue
+            payload_by_key[key] = {
+                "id": server.id,
+                "name": server.name,
+                "server_key": key,
+            }
+
+    payload: list[dict[str, object]] = []
+    for key in ordered_keys:
+        row = payload_by_key.get(key)
+        if row is not None:
+            payload.append(row)
+            continue
+        payload.append(
             {
-                "key": key,
-                "label": _left_panel_label(key),
-                "value": _left_panel_summary_value(output_payload.get(key)),
+                "id": None,
+                "name": key,
+                "server_key": key,
             }
         )
-    return rows
+    return payload
 
-
-def _build_node_left_panel_payload(
-    *,
-    task: AgentTask,
-    agent: Agent | None,
-    prompt_text: str | None,
-    prompt_json: str | None,
-    task_output: str,
-    incoming_connector_context: dict[str, object],
-    mcp_servers_payload: list[dict[str, object]],
-    quick_context: dict[str, object],
-) -> dict[str, object]:
-    output_payload = _left_panel_task_output_payload(task_output)
-    prompt_payload = _left_panel_prompt_payload(prompt_json)
-
-    summary_rows: list[dict[str, object]] = []
-    primary_text = ""
-    for key in _LEFT_PANEL_RESULTS_SUMMARY_KEYS:
-        if key not in output_payload:
-            continue
-        value = output_payload.get(key)
-        summary_rows.append(
-            {
-                "key": key,
-                "label": _left_panel_label(key),
-                "value": _left_panel_summary_value(value),
-            }
-        )
-        if not primary_text and isinstance(value, str) and value.strip():
-            primary_text = value.strip()
-    action_results_value = output_payload.get("action_results")
-    action_results: list[str] = []
-    if isinstance(action_results_value, list):
-        action_results = [
-            str(item).strip()
-            for item in action_results_value
-            if str(item).strip()
-        ]
-    elif isinstance(action_results_value, str) and action_results_value.strip():
-        action_results = [action_results_value.strip()]
-    if not primary_text and action_results:
-        primary_text = action_results[0]
-
-    parsed_output_json = False
-    formatted_output = task_output
-    stripped_output = str(task_output or "").strip()
-    if stripped_output:
-        try:
-            parsed = json.loads(stripped_output)
-            formatted_output = json.dumps(parsed, indent=2, sort_keys=True)
-            parsed_output_json = True
-        except json.JSONDecodeError:
-            parsed_output_json = False
-
-    connector_blocks = _left_panel_connector_blocks(incoming_connector_context)
-    resolved_input_context = incoming_connector_context.get("input_context")
-    if not isinstance(resolved_input_context, dict):
-        resolved_input_context = {}
-
-    deterministic_prompt_mode = _left_panel_is_deterministic_prompt_mode(
-        task=task,
-        prompt_payload=prompt_payload,
-        output_payload=output_payload,
-    )
-    collections = _left_panel_extract_collections(
-        prompt_payload=prompt_payload,
-        quick_context=quick_context,
-        task_output=task_output,
-    )
-
-    return {
-        "input": {
-            "source": str(incoming_connector_context.get("source") or "none"),
-            "trigger_source_count": int(
-                incoming_connector_context.get("trigger_source_count") or 0
-            ),
-            "context_only_source_count": int(
-                incoming_connector_context.get("context_only_source_count")
-                or incoming_connector_context.get("pulled_dotted_source_count")
-                or 0
-            ),
-            "connector_blocks": connector_blocks,
-            "resolved_input_context": resolved_input_context,
-        },
-        "results": {
-            "summary_rows": summary_rows,
-            "primary_text": primary_text,
-            "action_results": action_results,
-        },
-        "prompt": {
-            "provided_prompt_text": prompt_text or "",
-            "provided_prompt_fields": prompt_payload,
-            "no_inferred_prompt_in_deterministic_mode": deterministic_prompt_mode,
-            "notice": (
-                _LEFT_PANEL_NO_INFERRED_PROMPT_NOTICE
-                if deterministic_prompt_mode
-                else ""
-            ),
-        },
-        "agent": {
-            "id": int(agent.id) if agent is not None else None,
-            "name": str(agent.name or "") if agent is not None else "",
-            "link_href": f"/agents/{int(agent.id)}" if agent is not None else "",
-        },
-        "mcp_servers": {
-            "items": mcp_servers_payload,
-        },
-        "collections": {
-            "items": [
-                {"id_or_key": collection_name, "name": collection_name}
-                for collection_name in collections
-            ],
-        },
-        "raw_json": {
-            "formatted_output": formatted_output,
-            "is_json": parsed_output_json,
-        },
-        "details": {
-            "rows": _left_panel_details_rows(task=task, task_output=task_output),
-        },
-    }
 
 @bp.get("/chat")
 def chat_page():
@@ -1221,6 +911,7 @@ def view_node(task_id: int):
     selected_integration_labels: list[str] = []
     task_integrations_legacy_default = False
     incoming_connector_context: dict[str, object] = {}
+    mcp_servers_payload: list[dict[str, object]] = []
     with session_scope() as session:
         task = (
             session.execute(
@@ -1269,27 +960,14 @@ def view_node(task_id: int):
                 for key in sorted(selected_integration_keys)
                 if key in TASK_INTEGRATION_LABELS
             ]
+        mcp_servers_payload = _task_mcp_servers_payload(
+            session,
+            task=task,
+            task_output=task_output,
+        )
     if _nodes_wants_json():
         task_runtime = _serialize_node_executor_metadata(task)
-        mcp_servers_payload = [
-            {
-                "id": server.id,
-                "name": server.name,
-                "server_key": server.server_key,
-            }
-            for server in task.mcp_servers
-        ]
         quick_context = _quick_rag_task_context(task)
-        left_panel = _build_node_left_panel_payload(
-            task=task,
-            agent=agent,
-            prompt_text=prompt_text,
-            prompt_json=prompt_json,
-            task_output=task_output,
-            incoming_connector_context=incoming_connector_context,
-            mcp_servers_payload=mcp_servers_payload,
-            quick_context=quick_context,
-        )
         return {
             "task": {
                 "id": task.id,
@@ -1324,7 +1002,6 @@ def view_node(task_id: int):
             "selected_integration_labels": selected_integration_labels,
             "task_integrations_legacy_default": task_integrations_legacy_default,
             "incoming_connector_context": incoming_connector_context,
-            "left_panel": left_panel,
             "scripts": [
                 {
                     "id": script.id,

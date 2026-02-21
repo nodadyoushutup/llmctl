@@ -11,6 +11,7 @@ import {
   inputConnectorSummaryRows,
   NODE_LEFT_DEFAULT_SECTION_KEY,
   nodeHistoryHref,
+  resolveNodeLeftPanelPayload,
   stageLogEmptyMessage,
 } from './NodeDetailPage.helpers'
 
@@ -332,9 +333,10 @@ export default function NodeDetailPage() {
   }, [expandedStageKey, stageEntries])
   const expandedStageLogs = String(expandedStage?.logs || '')
   const expandedStageRunning = isStageRunning(expandedStage)
+  const leftPanelPayload = useMemo(() => resolveNodeLeftPanelPayload(payload), [payload])
   const leftSectionEntries = useMemo(
-    () => buildNodeLeftPanelSections(payload?.left_panel),
-    [payload?.left_panel],
+    () => buildNodeLeftPanelSections(leftPanelPayload),
+    [leftPanelPayload],
   )
   const active = canCancel(task?.status)
   const status = nodeStatusMeta(task?.status)

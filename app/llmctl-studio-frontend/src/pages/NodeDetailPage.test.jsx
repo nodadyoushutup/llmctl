@@ -6,6 +6,7 @@ import {
   NODE_LEFT_DEFAULT_SECTION_KEY,
   nodeHistoryHref,
   presentNodeOutput,
+  resolveNodeLeftPanelPayload,
   stageLogEmptyMessage,
 } from './NodeDetailPage.helpers'
 
@@ -93,6 +94,70 @@ describe('NodeDetailPage left panel view model', () => {
     expect(sectionByKey.collections.emptyMessage).toBe('No collections selected.')
     expect(sectionByKey.raw_json.emptyMessage).toBe('No output yet.')
     expect(sectionByKey.details.emptyMessage).toBe('No details yet.')
+  })
+
+  test('builds left panel from canonical node payload fields', () => {
+    const panel = resolveNodeLeftPanelPayload({
+      task: {
+        id: 469,
+        kind: 'task',
+        flowchart_id: 1,
+        flowchart_run_id: 82,
+        flowchart_node_id: 13,
+        model_id: 7,
+        run_task_id: 29,
+        celery_task_id: 'abc-123',
+        current_stage: 'post_autorun',
+        status: 'succeeded',
+        created_at: '2026-02-21 20:52:20',
+        started_at: '2026-02-21 20:52:22',
+        finished_at: '2026-02-21 20:52:28',
+        output: '{"message":"Stored summary","action":"add","action_results":["Added memory."]}',
+      },
+      prompt_text: 'Summarize and store this.',
+      prompt_json: '{"collections":["engineering-notes"]}',
+      incoming_connector_context: {
+        source: 'flowchart_run_node',
+        input_context: { upstream_nodes: [{ source_node_id: 2 }] },
+        upstream_nodes: [
+          {
+            source_node_id: 2,
+            source_node_type: 'task',
+            condition_key: 'success',
+            edge_mode: 'solid',
+            output_state: { message: 'ok' },
+          },
+        ],
+        dotted_upstream_nodes: [],
+        trigger_source_count: 1,
+        context_only_source_count: 0,
+      },
+      mcp_servers: [{ id: 3, name: 'Memory', server_key: 'llmctl-memory' }],
+      agent: { id: 5, name: 'Project Manager' },
+      quick_context: { collection: 'engineering-notes' },
+    })
+
+    expect(panel.results.primary_text).toBe('Stored summary')
+    expect(panel.results.summary_rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'message', value: 'Stored summary' }),
+      ]),
+    )
+    expect(panel.prompt.provided_prompt_text).toBe('Summarize and store this.')
+    expect(panel.agent.link_href).toBe('/agents/5')
+    expect(panel.input.connector_blocks).toHaveLength(1)
+    expect(panel.raw_json.is_json).toBe(true)
+    expect(panel.collections.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'engineering-notes' }),
+      ]),
+    )
+    expect(panel.details.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'status', value: 'succeeded' }),
+        expect.objectContaining({ key: 'action', value: 'add' }),
+      ]),
+    )
   })
 })
 
