@@ -12,8 +12,10 @@ Specialized nodes use curated inspector controls (generic controls are hidden
 for specialized behavior fields):
 
 - ``memory`` requires ``action`` (``add`` or ``retrieve``), supports optional
-  ``additive_prompt`` (runtime infers when blank), includes retention controls,
-  and requires system-managed ``llmctl-mcp`` binding.
+  ``additive_prompt`` (runtime infers when blank), requires ``mode``
+  (``llm_guided`` or ``deterministic``), includes ``Failure`` controls
+  (``retry_count`` and ``fallback_enabled``), includes retention controls, and
+  requires system-managed ``llmctl-mcp`` binding.
 - ``plan`` requires ``action`` (``create_or_update_plan`` or
   ``complete_plan_item``), supports optional ``additive_prompt``, supports
   completion targeting via ``plan_item_id`` or ``stage_key`` + ``task_key`` or
@@ -37,8 +39,64 @@ Graph Save Validation Semantics
 For specialized nodes:
 
 - memory-node graph writes require ``config.action`` (``add`` or ``retrieve``),
+- memory-node graph writes normalize ``config.mode`` to canonical values
+  (``llm_guided`` or ``deterministic``) with default ``llm_guided``,
+- memory-node graph writes normalize failure controls:
+  ``retry_count`` defaults to ``1`` and clamps to ``0..5``,
+  ``fallback_enabled`` defaults to ``true``,
+- invalid non-empty memory ``config.mode`` values are rejected at save time,
 - memory nodes are system-bound to ``llmctl-mcp`` during graph persistence,
 - runtime memory-node execution rejects explicit non-system MCP key sets.
+
+Memory Node Mode Semantics
+--------------------------
+
+Memory-node mode is configured per node and applies to both ``add`` and
+``retrieve`` actions.
+
+Allowed values:
+
+- ``llm_guided``: primary path performs strict-JSON LLM inference and then
+  executes deterministic persistence/retrieval.
+- ``deterministic``: primary path executes existing deterministic behavior
+  directly.
+
+Defaults and migration behavior:
+
+- New memory nodes default to ``mode=llm_guided``.
+- New memory nodes default to ``retry_count=1`` and
+  ``fallback_enabled=true``.
+- Startup migration backfills existing ``flowchart_nodes`` rows where
+  ``node_type='memory'``:
+
+  - missing or invalid ``mode`` is set to ``llm_guided``,
+  - missing failure controls are set to canonical defaults,
+  - malformed/non-object ``config_json`` fails fast and aborts startup.
+
+Failure and degraded semantics:
+
+- Primary mode attempts execute ``1 + retry_count`` times.
+- Retries apply only to the primary mode.
+- If ``fallback_enabled=true`` and primary attempts are exhausted, runtime
+  attempts exactly one fallback in the opposite mode.
+- On fallback success, output is marked degraded with:
+
+  - ``execution_status=success_with_warning``,
+  - ``fallback_used=true``,
+  - ``failed_mode``,
+  - ``fallback_reason``.
+
+- On fallback failure, runtime raises a hard failure; no second fallback hop is
+  attempted.
+
+LLM-guided contracts:
+
+- ``add`` expects strict JSON object output:
+  ``text`` (required), optional ``store_mode`` (``append|replace``), optional
+  ``confidence`` (advisory ``0..1``).
+- ``retrieve`` expects strict JSON object output with optional ``query_text``,
+  optional positive ``memory_id``, optional ``limit`` (clamped ``1..50``), and
+  optional advisory ``confidence``.
 
 Node Artifact Retention
 -----------------------
@@ -108,6 +166,10 @@ Artifact Payload Schemas
 - ``action``, ``action_prompt_template``, ``internal_action_prompt``
 - ``action_results``, ``additive_prompt``, ``inferred_prompt``, ``effective_prompt``
 - ``stored_memory``, ``retrieved_memories``, ``mcp_server_keys``, ``routing_state``
+- ``execution_status`` (degraded path), ``fallback_used``, ``fallback_reason``,
+  ``failed_mode``, ``fallback_mode``
+- optional LLM-guided metadata:
+  ``llm_guided_add`` / ``llm_guided_retrieve``
 
 ``plan`` artifact payload:
 

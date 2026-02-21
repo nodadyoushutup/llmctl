@@ -106,6 +106,11 @@ NODE_EXECUTOR_AGENT_TASK_CHECKS: tuple[tuple[str, str], ...] = (
     ),
 )
 SCHEMA_MIGRATION_ADVISORY_LOCK_KEY = 958_203_417
+MEMORY_NODE_MODE_LLM_GUIDED = "llm_guided"
+MEMORY_NODE_MODE_DETERMINISTIC = "deterministic"
+MEMORY_NODE_RETRY_COUNT_DEFAULT = 1
+MEMORY_NODE_RETRY_COUNT_MAX = 5
+MEMORY_NODE_FALLBACK_ENABLED_DEFAULT = True
 
 
 def utcnow() -> datetime:
@@ -243,6 +248,7 @@ def _ensure_schema() -> None:
             "model_id": "INTEGER",
         }
         _ensure_columns(connection, "flowchart_nodes", flowchart_node_columns)
+        _migrate_memory_node_mode_defaults(connection)
 
         flowchart_edge_columns = {
             "source_handle_id": "VARCHAR(32)",
@@ -467,6 +473,123 @@ def _migrate_mcp_server_configs_to_jsonb(connection) -> None:
     connection.execute(
         text("ALTER TABLE mcp_servers ALTER COLUMN config_json SET NOT NULL")
     )
+
+
+def _parse_memory_node_config_for_migration(raw_config: object, *, node_id: int) -> dict[str, object]:
+    if raw_config is None:
+        return {}
+    if isinstance(raw_config, dict):
+        return dict(raw_config)
+    if not isinstance(raw_config, str):
+        raise RuntimeError(
+            "Failed to migrate memory node config for "
+            f"flowchart_nodes.id={node_id}: config_json must be JSON object text."
+        )
+    stripped = raw_config.strip()
+    if not stripped:
+        return {}
+    try:
+        parsed_payload = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Failed to migrate memory node config for "
+            f"flowchart_nodes.id={node_id}: config_json is not valid JSON."
+        ) from exc
+    if not isinstance(parsed_payload, dict):
+        raise RuntimeError(
+            "Failed to migrate memory node config for "
+            f"flowchart_nodes.id={node_id}: config_json must decode to a JSON object."
+        )
+    return dict(parsed_payload)
+
+
+def _normalize_memory_node_mode_for_migration(value: object) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned == MEMORY_NODE_MODE_DETERMINISTIC:
+        return MEMORY_NODE_MODE_DETERMINISTIC
+    return MEMORY_NODE_MODE_LLM_GUIDED
+
+
+def _normalize_memory_node_retry_count_for_migration(value: object) -> int:
+    if value is None:
+        return MEMORY_NODE_RETRY_COUNT_DEFAULT
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return MEMORY_NODE_RETRY_COUNT_DEFAULT
+        value = stripped
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return MEMORY_NODE_RETRY_COUNT_DEFAULT
+    if parsed < 0:
+        return 0
+    if parsed > MEMORY_NODE_RETRY_COUNT_MAX:
+        return MEMORY_NODE_RETRY_COUNT_MAX
+    return parsed
+
+
+def _normalize_memory_node_fallback_enabled_for_migration(value: object) -> bool:
+    if value is None:
+        return MEMORY_NODE_FALLBACK_ENABLED_DEFAULT
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return MEMORY_NODE_FALLBACK_ENABLED_DEFAULT
+    cleaned = str(value).strip().lower()
+    if not cleaned:
+        return MEMORY_NODE_FALLBACK_ENABLED_DEFAULT
+    if cleaned in {"1", "true", "yes", "on"}:
+        return True
+    if cleaned in {"0", "false", "no", "off"}:
+        return False
+    return MEMORY_NODE_FALLBACK_ENABLED_DEFAULT
+
+
+def _migrate_memory_node_mode_defaults(connection) -> None:
+    tables = _table_names(connection)
+    if "flowchart_nodes" not in tables:
+        return
+    columns = _table_columns(connection, "flowchart_nodes")
+    if "node_type" not in columns or "config_json" not in columns:
+        return
+    rows = connection.execute(
+        text(
+            "SELECT id, config_json "
+            "FROM flowchart_nodes "
+            "WHERE lower(trim(node_type)) = 'memory' "
+            "ORDER BY id ASC"
+        )
+    ).all()
+    for row in rows:
+        node_id = int(row[0])
+        config_payload = _parse_memory_node_config_for_migration(row[1], node_id=node_id)
+        migrated_payload = dict(config_payload)
+        migrated_payload["mode"] = _normalize_memory_node_mode_for_migration(
+            config_payload.get("mode")
+        )
+        migrated_payload["retry_count"] = _normalize_memory_node_retry_count_for_migration(
+            config_payload.get("retry_count")
+        )
+        migrated_payload["fallback_enabled"] = (
+            _normalize_memory_node_fallback_enabled_for_migration(
+                config_payload.get("fallback_enabled")
+            )
+        )
+        if migrated_payload == config_payload:
+            continue
+        connection.execute(
+            text(
+                "UPDATE flowchart_nodes "
+                "SET config_json = :config_json "
+                "WHERE id = :id"
+            ),
+            {"id": node_id, "config_json": json.dumps(migrated_payload, sort_keys=True)},
+        )
 
 
 def _parse_legacy_mcp_config_for_jsonb_migration(

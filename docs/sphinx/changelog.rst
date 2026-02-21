@@ -11,6 +11,7 @@ Changelog
 - Added frontier CLI runtime guardrail script and CI gate to fail on direct ``codex|gemini|claude`` command execution in Studio runtime paths.
 - Updated Stage 9 flowchart backend tests for current graph-save contract semantics (structural violations ``400`` vs semantic validation via ``validation.errors``).
 - Updated migration runbook and specialized flowchart node docs to reflect current cutover status, guardrails, and memory-node/system-MCP enforcement behavior.
+- Documented memory-node mode selection contracts (``llm_guided``/``deterministic``), failure controls (``retry_count``/``fallback_enabled``), startup backfill migration defaults, and degraded fallback status markers in specialized flowchart node docs.
 
 2026-02-20
 ----------

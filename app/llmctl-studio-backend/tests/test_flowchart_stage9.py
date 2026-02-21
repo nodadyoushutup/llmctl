@@ -1239,7 +1239,12 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
             studio_tasks._execute_flowchart_memory_node(
                 node_id=memory_node_id,
                 node_ref_id=None,
-                node_config={"action": "add", "additive_prompt": "persist this"},
+                node_config={
+                    "action": "add",
+                    "mode": "deterministic",
+                    "fallback_enabled": False,
+                    "additive_prompt": "persist this",
+                },
                 input_context={},
                 mcp_server_keys=["custom-mcp"],
             )
@@ -1262,7 +1267,11 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
         output_state, routing_state = studio_tasks._execute_flowchart_memory_node(
             node_id=memory_node_id,
             node_ref_id=memory_id,
-            node_config={"action": "add"},
+            node_config={
+                "action": "add",
+                "mode": "deterministic",
+                "fallback_enabled": False,
+            },
             input_context={
                 "node": {"execution_index": 2},
                 "latest_upstream": {"output_state": {"message": "capture deployment readiness"}},
@@ -1319,6 +1328,7 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
     def test_memory_node_exposes_internal_action_prompt_template(self) -> None:
         with session_scope() as session:
             flowchart = Flowchart.create(session, name="memory-internal-prompt")
+            memory = Memory.create(session, description="deployment readiness baseline")
             memory_node = FlowchartNode.create(
                 session,
                 flowchart_id=flowchart.id,
@@ -1327,12 +1337,15 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 y=0.0,
             )
             memory_node_id = memory_node.id
+            memory_id = memory.id
 
         output_state, _routing_state = studio_tasks._execute_flowchart_memory_node(
             node_id=memory_node_id,
-            node_ref_id=None,
+            node_ref_id=memory_id,
             node_config={
                 "action": "retrieve",
+                "mode": "deterministic",
+                "fallback_enabled": False,
                 "additive_prompt": "focus on deployment readiness",
             },
             input_context={},
@@ -2078,6 +2091,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=1.0,
                 y=1.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "left branch",
+                    },
+                    sort_keys=True,
+                ),
             )
             right_node = FlowchartNode.create(
                 session,
@@ -2085,6 +2106,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=2.0,
                 y=2.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "right branch",
+                    },
+                    sort_keys=True,
+                ),
             )
             join_node = FlowchartNode.create(
                 session,
@@ -2092,6 +2121,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=3.0,
                 y=3.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "join branch",
+                    },
+                    sort_keys=True,
+                ),
             )
             FlowchartEdge.create(
                 session,
@@ -2173,6 +2210,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=1.0,
                 y=1.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "left fanout",
+                    },
+                    sort_keys=True,
+                ),
             )
             right_node = FlowchartNode.create(
                 session,
@@ -2180,6 +2225,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=2.0,
                 y=1.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "right fanout",
+                    },
+                    sort_keys=True,
+                ),
             )
             FlowchartEdge.create(
                 session,
@@ -2248,6 +2301,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=1.0,
                 y=0.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "source branch",
+                    },
+                    sort_keys=True,
+                ),
             )
             target_node = FlowchartNode.create(
                 session,
@@ -2255,6 +2316,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=2.0,
                 y=0.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "target branch",
+                    },
+                    sort_keys=True,
+                ),
             )
             FlowchartEdge.create(
                 session,
@@ -2317,6 +2386,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=1.0,
                 y=-1.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "dotted source",
+                    },
+                    sort_keys=True,
+                ),
             )
             trigger_source_node = FlowchartNode.create(
                 session,
@@ -2324,6 +2401,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=1.0,
                 y=1.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "trigger source",
+                    },
+                    sort_keys=True,
+                ),
             )
             target_node = FlowchartNode.create(
                 session,
@@ -2331,6 +2416,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=2.0,
                 y=0.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "target node",
+                    },
+                    sort_keys=True,
+                ),
             )
             FlowchartEdge.create(
                 session,
@@ -2413,6 +2506,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=1.0,
                 y=0.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "handoff",
+                    },
+                    sort_keys=True,
+                ),
             )
             FlowchartEdge.create(
                 session,
@@ -2562,6 +2663,14 @@ class FlowchartStage9UnitTests(StudioDbTestCase):
                 node_type=FLOWCHART_NODE_TYPE_MEMORY,
                 x=1.0,
                 y=0.0,
+                config_json=json.dumps(
+                    {
+                        "action": "add",
+                        "mode": "deterministic",
+                        "additive_prompt": "stop no followup",
+                    },
+                    sort_keys=True,
+                ),
             )
             FlowchartEdge.create(
                 session,
@@ -5826,6 +5935,96 @@ class FlowchartStage9ApiTests(StudioDbTestCase):
             "config.action is required and must be add or retrieve.",
             str(payload.get("error") or ""),
         )
+
+    def test_flowchart_graph_defaults_memory_mode_and_failure_controls(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+
+        flowchart_id = self._create_flowchart("Memory Mode Defaults")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "memory",
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "x": 250,
+                        "y": 0,
+                        "config": {"action": "add", "additive_prompt": "remember this"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "memory",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(200, graph_response.status_code)
+        payload = graph_response.get_json() or {}
+        memory_node = next(
+            node
+            for node in (payload.get("nodes") or [])
+            if node.get("node_type") == FLOWCHART_NODE_TYPE_MEMORY
+        )
+        memory_config = memory_node.get("config") or {}
+        self.assertEqual("llm_guided", memory_config.get("mode"))
+        self.assertEqual(1, memory_config.get("retry_count"))
+        self.assertTrue(bool(memory_config.get("fallback_enabled")))
+
+    def test_flowchart_graph_rejects_memory_node_with_invalid_mode(self) -> None:
+        with session_scope() as session:
+            MCPServer.create(
+                session,
+                name="llmctl-mcp",
+                server_key="llmctl-mcp",
+                config_json='{"command":"echo"}',
+            )
+
+        flowchart_id = self._create_flowchart("Memory Mode Validation")
+        graph_response = self.client.post(
+            f"/flowcharts/{flowchart_id}/graph",
+            json={
+                "nodes": [
+                    {
+                        "client_id": "start",
+                        "node_type": FLOWCHART_NODE_TYPE_START,
+                        "x": 0,
+                        "y": 0,
+                    },
+                    {
+                        "client_id": "memory",
+                        "node_type": FLOWCHART_NODE_TYPE_MEMORY,
+                        "x": 250,
+                        "y": 0,
+                        "config": {"action": "add", "mode": "unsupported"},
+                    },
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "start",
+                        "target_node_id": "memory",
+                        "edge_mode": "solid",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(400, graph_response.status_code)
+        payload = graph_response.get_json() or {}
+        self.assertIn("config.mode must be one of", str(payload.get("error") or ""))
 
     def test_flowchart_graph_rejects_plan_node_without_required_action(self) -> None:
         with session_scope() as session:

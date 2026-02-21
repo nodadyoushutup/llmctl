@@ -41,6 +41,12 @@ const MEMORY_ACTION_OPTIONS = [
   { value: 'add', label: 'Add memory' },
   { value: 'retrieve', label: 'Retrieve memory' },
 ]
+const MEMORY_MODE_LLM_GUIDED = 'llm_guided'
+const MEMORY_MODE_DETERMINISTIC = 'deterministic'
+const MEMORY_MODE_OPTIONS = [
+  { value: MEMORY_MODE_LLM_GUIDED, label: 'LLM-guided' },
+  { value: MEMORY_MODE_DETERMINISTIC, label: 'Deterministic' },
+]
 const PLAN_ACTION_CREATE_OR_UPDATE = 'create_or_update_plan'
 const PLAN_ACTION_COMPLETE_PLAN_ITEM = 'complete_plan_item'
 const PLAN_ACTION_OPTIONS = [
@@ -57,6 +63,9 @@ const DEFAULT_MILESTONE_RETENTION_TTL_SECONDS = 3600
 const DEFAULT_MILESTONE_RETENTION_MAX_COUNT = 25
 const DEFAULT_PLAN_RETENTION_TTL_SECONDS = 3600
 const DEFAULT_PLAN_RETENTION_MAX_COUNT = 25
+const DEFAULT_MEMORY_RETRY_COUNT = 1
+const MAX_MEMORY_RETRY_COUNT = 5
+const DEFAULT_MEMORY_FALLBACK_ENABLED = true
 const TYPE_TO_REF_CATALOG_KEY = {
   flowchart: 'flowcharts',
   plan: 'plans',
@@ -912,7 +921,10 @@ function defaultConfigForType(nodeType) {
   if (normalized === 'memory') {
     return {
       action: 'add',
+      mode: MEMORY_MODE_LLM_GUIDED,
       additive_prompt: '',
+      retry_count: DEFAULT_MEMORY_RETRY_COUNT,
+      fallback_enabled: DEFAULT_MEMORY_FALLBACK_ENABLED,
       retention_mode: 'ttl',
       retention_ttl_seconds: DEFAULT_MILESTONE_RETENTION_TTL_SECONDS,
       retention_max_count: DEFAULT_MILESTONE_RETENTION_MAX_COUNT,
@@ -954,6 +966,48 @@ function normalizeMemoryAction(value) {
     return 'retrieve'
   }
   return 'add'
+}
+
+function normalizeMemoryMode(value) {
+  const cleaned = String(value || '').trim().toLowerCase()
+  if (cleaned === MEMORY_MODE_DETERMINISTIC) {
+    return MEMORY_MODE_DETERMINISTIC
+  }
+  return MEMORY_MODE_LLM_GUIDED
+}
+
+function normalizeMemoryRetryCount(value) {
+  const parsed = parseOptionalInt(value)
+  if (parsed == null) {
+    return DEFAULT_MEMORY_RETRY_COUNT
+  }
+  return clamp(parsed, 0, MAX_MEMORY_RETRY_COUNT)
+}
+
+function normalizeMemoryFallbackEnabled(value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'number') {
+    if (value === 1) {
+      return true
+    }
+    if (value === 0) {
+      return false
+    }
+    return DEFAULT_MEMORY_FALLBACK_ENABLED
+  }
+  const cleaned = String(value || '').trim().toLowerCase()
+  if (!cleaned) {
+    return DEFAULT_MEMORY_FALLBACK_ENABLED
+  }
+  if (['1', 'true', 'yes', 'on'].includes(cleaned)) {
+    return true
+  }
+  if (['0', 'false', 'no', 'off'].includes(cleaned)) {
+    return false
+  }
+  return DEFAULT_MEMORY_FALLBACK_ENABLED
 }
 
 const SPECIALIZED_NODE_CONTROL_REGISTRY = {
@@ -1067,10 +1121,19 @@ function normalizeNodeConfig(config, nodeType = '') {
   }
   if (normalizedType === 'memory') {
     nextConfig.action = normalizeMemoryAction(nextConfig.action)
+    nextConfig.mode = normalizeMemoryMode(nextConfig.mode)
     nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+    nextConfig.retry_count = normalizeMemoryRetryCount(nextConfig.retry_count)
+    nextConfig.fallback_enabled = normalizeMemoryFallbackEnabled(nextConfig.fallback_enabled)
     nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
     nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
     nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
+  } else {
+    delete nextConfig.retry_count
+    delete nextConfig.fallback_enabled
+  }
+  if (normalizedType !== 'rag' && normalizedType !== 'memory') {
+    delete nextConfig.mode
   }
   if (normalizedType === 'rag') {
     nextConfig.mode = normalizeRagMode(nextConfig.mode)
@@ -2708,6 +2771,10 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
         delete nextConfig.retention_ttl_seconds
         delete nextConfig.retention_max_count
       }
+      if (normalizedType !== 'memory') {
+        delete nextConfig.retry_count
+        delete nextConfig.fallback_enabled
+      }
       if (normalizedType !== 'plan') {
         delete nextConfig.plan_item_id
         delete nextConfig.stage_key
@@ -2737,7 +2804,10 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       }
       if (normalizedType === 'memory') {
         nextConfig.action = normalizeMemoryAction(nextConfig.action)
+        nextConfig.mode = normalizeMemoryMode(nextConfig.mode)
         nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+        nextConfig.retry_count = normalizeMemoryRetryCount(nextConfig.retry_count)
+        nextConfig.fallback_enabled = normalizeMemoryFallbackEnabled(nextConfig.fallback_enabled)
         nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
         nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
         nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
@@ -3600,6 +3670,27 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     ))}
                   </select>
                 </label>
+                {selectedNodeType === 'memory' ? (
+                  <label className="field">
+                    <span>mode</span>
+                    <select
+                      value={selectedSpecializedConfig.mode}
+                      onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                        ...current,
+                        config: {
+                          ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                          mode: normalizeMemoryMode(event.target.value),
+                        },
+                      }))}
+                    >
+                      {MEMORY_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="field">
                   <span>optional additive prompt</span>
                   <textarea
@@ -3613,6 +3704,44 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     }))}
                   />
                 </label>
+                {selectedNodeType === 'memory' ? (
+                  <div className="stack-sm" role="group" aria-label="Failure">
+                    <p className="toolbar-meta">Failure</p>
+                    <label className="field">
+                      <span>retry count</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={MAX_MEMORY_RETRY_COUNT}
+                        step="1"
+                        value={selectedSpecializedConfig.retry_count ?? DEFAULT_MEMORY_RETRY_COUNT}
+                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                          ...current,
+                          config: {
+                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                            retry_count: normalizeMemoryRetryCount(event.target.value),
+                          },
+                        }))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>fallback enabled</span>
+                      <select
+                        value={selectedSpecializedConfig.fallback_enabled ? 'true' : 'false'}
+                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
+                          ...current,
+                          config: {
+                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
+                            fallback_enabled: normalizeMemoryFallbackEnabled(event.target.value),
+                          },
+                        }))}
+                      >
+                        <option value="true">Enabled</option>
+                        <option value="false">Disabled</option>
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
                 <label className="field">
                   <span>artifact retention</span>
                   <select

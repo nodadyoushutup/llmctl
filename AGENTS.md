@@ -28,6 +28,8 @@
 - Store in-progress plans in `docs/planning/active/`.
 - Store completed plans in `docs/planning/archive/`.
 - Store audit inventory markdown for audits in `docs/planning/audit/` when an audit is requested.
+- When a user asks to make a plan, create the corresponding plan file in `docs/planning/active/` before asking the first Stage 0 interview question.
+- During Stage 0 interviewing, update the active plan file after each user answer before asking the next Stage 0 question.
 - When a plan reaches completion, move it from `docs/planning/active/` to `docs/planning/archive/` immediately without waiting for explicit instruction.
 - Plans must be multi-stage and written as task lists with checkboxes (`[ ]` for pending, `[x]` for complete).
 - Update plan checkboxes as work is completed; keep status current during execution.

@@ -638,6 +638,15 @@ MEMORY_NODE_ACTION_CHOICES = (
     MEMORY_NODE_ACTION_ADD,
     MEMORY_NODE_ACTION_RETRIEVE,
 )
+MEMORY_NODE_MODE_LLM_GUIDED = "llm_guided"
+MEMORY_NODE_MODE_DETERMINISTIC = "deterministic"
+MEMORY_NODE_MODE_CHOICES = (
+    MEMORY_NODE_MODE_LLM_GUIDED,
+    MEMORY_NODE_MODE_DETERMINISTIC,
+)
+MEMORY_NODE_RETRY_COUNT_DEFAULT = 1
+MEMORY_NODE_RETRY_COUNT_MAX = 5
+MEMORY_NODE_FALLBACK_ENABLED_DEFAULT = True
 PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
 PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
 PLAN_NODE_ACTION_CHOICES = (
@@ -6259,6 +6268,33 @@ def _coerce_optional_int(
     return parsed
 
 
+def _coerce_optional_bool(
+    value: object,
+    *,
+    field_name: str,
+) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if not cleaned:
+            return None
+        if cleaned in {"1", "true", "yes", "on"}:
+            return True
+        if cleaned in {"0", "false", "no", "off"}:
+            return False
+        raise ValueError(f"{field_name} must be a boolean.")
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        raise ValueError(f"{field_name} must be a boolean.")
+    raise ValueError(f"{field_name} must be a boolean.")
+
+
 def _coerce_float(value: object, *, field_name: str, default: float = 0.0) -> float:
     if value is None:
         return default
@@ -7844,6 +7880,17 @@ def _normalize_memory_node_action(value: object) -> str:
     return ""
 
 
+def _normalize_memory_node_mode(value: object) -> str:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return MEMORY_NODE_MODE_LLM_GUIDED
+    if cleaned in {MEMORY_NODE_MODE_LLM_GUIDED, "llm-guided"}:
+        return MEMORY_NODE_MODE_LLM_GUIDED
+    if cleaned == MEMORY_NODE_MODE_DETERMINISTIC:
+        return MEMORY_NODE_MODE_DETERMINISTIC
+    return ""
+
+
 def _sanitize_memory_node_config(config_payload: dict[str, object]) -> dict[str, object]:
     sanitized = dict(config_payload)
     action_value = config_payload.get("action")
@@ -7851,7 +7898,28 @@ def _sanitize_memory_node_config(config_payload: dict[str, object]) -> dict[str,
     if not action:
         raise ValueError("config.action is required and must be add or retrieve.")
     sanitized["action"] = action
+    mode = _normalize_memory_node_mode(config_payload.get("mode"))
+    if not mode:
+        raise ValueError(
+            "config.mode must be one of: " + ", ".join(MEMORY_NODE_MODE_CHOICES) + "."
+        )
+    sanitized["mode"] = mode
     sanitized["additive_prompt"] = str(config_payload.get("additive_prompt") or "").strip()
+    retry_count = _coerce_optional_int(
+        config_payload.get("retry_count"),
+        field_name="config.retry_count",
+        minimum=0,
+    )
+    if retry_count is None:
+        retry_count = MEMORY_NODE_RETRY_COUNT_DEFAULT
+    sanitized["retry_count"] = min(retry_count, MEMORY_NODE_RETRY_COUNT_MAX)
+    fallback_enabled = _coerce_optional_bool(
+        config_payload.get("fallback_enabled"),
+        field_name="config.fallback_enabled",
+    )
+    if fallback_enabled is None:
+        fallback_enabled = MEMORY_NODE_FALLBACK_ENABLED_DEFAULT
+    sanitized["fallback_enabled"] = fallback_enabled
 
     retention_mode = str(
         config_payload.get("retention_mode") or NODE_ARTIFACT_RETENTION_TTL

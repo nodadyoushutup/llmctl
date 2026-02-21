@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -233,6 +234,33 @@ PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
 PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
 MEMORY_NODE_ACTION_ADD = "add"
 MEMORY_NODE_ACTION_RETRIEVE = "retrieve"
+MEMORY_NODE_STORE_MODE_APPEND = "append"
+MEMORY_NODE_STORE_MODE_REPLACE = "replace"
+MEMORY_NODE_RETRIEVE_LIMIT_DEFAULT = 10
+MEMORY_NODE_RETRIEVE_LIMIT_MAX = 50
+MEMORY_NODE_RETRY_COUNT_DEFAULT = 1
+MEMORY_NODE_RETRY_COUNT_MAX = 5
+MEMORY_NODE_FALLBACK_ENABLED_DEFAULT = True
+MEMORY_NODE_MODE_LLM_GUIDED = "llm_guided"
+MEMORY_NODE_MODE_DETERMINISTIC = "deterministic"
+MEMORY_NODE_MODE_CHOICES = (
+    MEMORY_NODE_MODE_LLM_GUIDED,
+    MEMORY_NODE_MODE_DETERMINISTIC,
+)
+
+
+class _MemoryNodeEmptyResultError(RuntimeError):
+    pass
+
+
+class _MemoryNodeInvalidResultError(RuntimeError):
+    pass
+
+
+class _MemoryLlmGuidedValidationError(ValueError):
+    pass
+
+
 MEMORY_NODE_ACTION_PROMPT_TEMPLATES: dict[str, str] = {
     MEMORY_NODE_ACTION_ADD: (
         "Memory action: Add memory. Persist concise, durable facts from the current run "
@@ -1906,7 +1934,7 @@ def _build_runtime_payload(
 ) -> dict[str, object]:
     model_name = ""
     if provider == "codex":
-        config = model_config or _load_legacy_codex_model_config()
+        config = model_config if model_config is not None else _load_legacy_codex_model_config()
         model_name = str(config.get("model") or "").strip()
         if not model_name:
             model_name = Config.CODEX_MODEL or ""
@@ -5977,6 +6005,20 @@ def _normalize_memory_node_action(value: Any) -> str:
     return ""
 
 
+def _normalize_memory_node_mode(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {
+        MEMORY_NODE_MODE_DETERMINISTIC,
+    }:
+        return MEMORY_NODE_MODE_DETERMINISTIC
+    if cleaned in {
+        MEMORY_NODE_MODE_LLM_GUIDED,
+        "llm-guided",
+    }:
+        return MEMORY_NODE_MODE_LLM_GUIDED
+    return MEMORY_NODE_MODE_LLM_GUIDED
+
+
 def _memory_context_value_to_text(value: Any) -> str:
     if value is None:
         return ""
@@ -6044,6 +6086,303 @@ def _build_memory_internal_action_prompt(
     if instructions:
         prompt = f"{template}\n\nAdditional instructions:\n{instructions}"
     return template, prompt
+
+
+def _normalize_memory_store_mode(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned == MEMORY_NODE_STORE_MODE_REPLACE:
+        return MEMORY_NODE_STORE_MODE_REPLACE
+    return MEMORY_NODE_STORE_MODE_APPEND
+
+
+def _normalize_memory_inference_confidence(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(confidence) or math.isinf(confidence):
+        return None
+    return max(0.0, min(1.0, confidence))
+
+
+def _normalize_memory_llm_guided_add_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    text_raw = payload.get("text")
+    if not isinstance(text_raw, str):
+        raise ValueError("LLM-guided memory add response requires string field 'text'.")
+    text = text_raw.strip()
+    if not text:
+        raise ValueError("LLM-guided memory add response produced empty 'text'.")
+    normalized: dict[str, Any] = {
+        "text": text,
+        "store_mode": _normalize_memory_store_mode(payload.get("store_mode")),
+    }
+    confidence = _normalize_memory_inference_confidence(payload.get("confidence"))
+    if confidence is not None:
+        normalized["confidence"] = confidence
+    return normalized
+
+
+def _build_memory_llm_guided_add_inference_prompt(
+    *,
+    action_prompt_template: str,
+    additive_prompt: str,
+    inferred_prompt: str,
+    effective_prompt: str,
+    input_context: dict[str, Any],
+) -> str:
+    flowchart_context = _json_dumps(_json_safe(input_context))
+    sections = [
+        "You are executing a flowchart memory node in llm_guided mode for action 'add'.",
+        "Memory action template:",
+        action_prompt_template or "Memory action: Add memory.",
+        "Configured additive_prompt:",
+        additive_prompt or "(empty)",
+        "Inferred upstream prompt:",
+        inferred_prompt or "(empty)",
+        "Effective prompt guidance:",
+        effective_prompt or "(empty)",
+        "Flowchart input context (JSON):",
+        flowchart_context,
+        (
+            "Return only a strict JSON object with keys:\n"
+            "- text: string (required, non-empty)\n"
+            "- store_mode: string (optional, 'append' or 'replace', default 'append')\n"
+            "- confidence: number (optional, 0..1 advisory)\n"
+            "Do not return markdown, fences, or prose."
+        ),
+    ]
+    return "\n\n".join(sections)
+
+
+def _normalize_memory_retrieve_limit(value: Any, *, default: int) -> int:
+    limit = _parse_optional_int(value, default=default, minimum=1)
+    return min(limit, MEMORY_NODE_RETRIEVE_LIMIT_MAX)
+
+
+def _normalize_memory_llm_guided_retrieve_payload(
+    payload: dict[str, Any],
+    *,
+    default_limit: int,
+) -> dict[str, Any]:
+    normalized: dict[str, Any] = {
+        "limit": _normalize_memory_retrieve_limit(payload.get("limit"), default=default_limit),
+    }
+    if "query_text" in payload:
+        query_text_raw = payload.get("query_text")
+        if isinstance(query_text_raw, str):
+            normalized["query_text"] = query_text_raw.strip()
+        elif query_text_raw is None:
+            normalized["query_text"] = ""
+        else:
+            normalized["query_text"] = str(query_text_raw).strip()
+    inferred_memory_id = _parse_optional_int(
+        payload.get("memory_id"),
+        default=0,
+    )
+    if inferred_memory_id > 0:
+        normalized["memory_id"] = inferred_memory_id
+    confidence = _normalize_memory_inference_confidence(payload.get("confidence"))
+    if confidence is not None:
+        normalized["confidence"] = confidence
+    return normalized
+
+
+def _build_memory_llm_guided_retrieve_inference_prompt(
+    *,
+    action_prompt_template: str,
+    additive_prompt: str,
+    inferred_prompt: str,
+    effective_prompt: str,
+    default_limit: int,
+    input_context: dict[str, Any],
+) -> str:
+    flowchart_context = _json_dumps(_json_safe(input_context))
+    sections = [
+        "You are executing a flowchart memory node in llm_guided mode for action 'retrieve'.",
+        "Memory action template:",
+        action_prompt_template or "Memory action: Retrieve memory.",
+        "Configured additive_prompt:",
+        additive_prompt or "(empty)",
+        "Inferred upstream prompt:",
+        inferred_prompt or "(empty)",
+        "Effective prompt guidance:",
+        effective_prompt or "(empty)",
+        f"Default retrieval limit: {int(default_limit)}",
+        "Flowchart input context (JSON):",
+        flowchart_context,
+        (
+            "Return only a strict JSON object with keys:\n"
+            "- query_text: string (optional)\n"
+            "- memory_id: integer (optional, positive)\n"
+            "- limit: integer (optional, clamp to 1..50)\n"
+            "- confidence: number (optional, 0..1 advisory)\n"
+            "Do not return markdown, fences, or prose."
+        ),
+    ]
+    return "\n\n".join(sections)
+
+
+def _resolve_memory_llm_guided_runtime(
+    *,
+    node_id: int,
+    default_model_id: int | None,
+    enabled_providers: set[str] | None,
+) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]], dict[str, Any]]:
+    with session_scope() as session:
+        node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(
+                    selectinload(FlowchartNode.mcp_servers),
+                    selectinload(FlowchartNode.model),
+                )
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if node is None:
+            raise ValueError(f"Flowchart node {node_id} was not found.")
+        model = _resolve_node_model(
+            session,
+            node=node,
+            default_model_id=default_model_id,
+        )
+        mcp_configs = _build_mcp_config_map(list(node.mcp_servers))
+
+    provider = str(model.provider or "").strip().lower()
+    if provider not in LLM_PROVIDERS:
+        raise ValueError(f"Unknown model provider: {provider}.")
+    resolved_enabled_providers = (
+        set(enabled_providers) if enabled_providers is not None else set()
+    )
+    if not resolved_enabled_providers:
+        llm_settings = load_integration_settings("llm")
+        resolved_enabled_providers = resolve_enabled_llm_providers(llm_settings)
+    if provider not in resolved_enabled_providers:
+        raise ValueError(f"Provider disabled: {provider}.")
+    model_config = _parse_model_config(model.config_json)
+    model_metadata = {
+        "model_id": int(model.id),
+        "model_name": str(model.name or ""),
+        "provider": provider,
+    }
+    return provider, model_config, mcp_configs, model_metadata
+
+
+def _validate_memory_node_mcp_server_keys(mcp_server_keys: list[str]) -> None:
+    normalized_mcp_server_keys = {
+        str(item or "").strip() for item in (mcp_server_keys or []) if str(item or "").strip()
+    }
+    if normalized_mcp_server_keys and INTEGRATED_MCP_LLMCTL_KEY not in normalized_mcp_server_keys:
+        raise ValueError("Memory node requires system-managed LLMCTL MCP server.")
+
+
+def _resolve_memory_node_retry_count(node_config: dict[str, Any]) -> int:
+    retry_count = _parse_optional_int(
+        node_config.get("retry_count"),
+        default=MEMORY_NODE_RETRY_COUNT_DEFAULT,
+        minimum=0,
+    )
+    return min(retry_count, MEMORY_NODE_RETRY_COUNT_MAX)
+
+
+def _resolve_memory_node_fallback_enabled(node_config: dict[str, Any]) -> bool:
+    if "fallback_enabled" not in node_config:
+        return MEMORY_NODE_FALLBACK_ENABLED_DEFAULT
+    return _coerce_bool(node_config.get("fallback_enabled"))
+
+
+def _validate_memory_node_execution_result(
+    *,
+    action: str,
+    output_state: dict[str, Any],
+) -> None:
+    if not isinstance(output_state, dict):
+        raise _MemoryNodeInvalidResultError("Memory node output_state must be a JSON object.")
+    if action == MEMORY_NODE_ACTION_ADD:
+        stored_memory = output_state.get("stored_memory")
+        if not isinstance(stored_memory, dict):
+            raise _MemoryNodeEmptyResultError(
+                "Memory add action produced no stored_memory payload."
+            )
+        stored_memory_id = _parse_optional_int(
+            stored_memory.get("id"),
+            default=0,
+            minimum=1,
+        )
+        if stored_memory_id <= 0:
+            raise _MemoryNodeInvalidResultError(
+                "Memory add action stored_memory.id must be a positive integer."
+            )
+        return
+    if action == MEMORY_NODE_ACTION_RETRIEVE:
+        retrieved = output_state.get("retrieved_memories")
+        if not isinstance(retrieved, list):
+            raise _MemoryNodeInvalidResultError(
+                "Memory retrieve action output_state.retrieved_memories must be a list."
+            )
+        if not retrieved:
+            raise _MemoryNodeEmptyResultError(
+                "Memory retrieve action returned an empty result set."
+            )
+        for entry in retrieved:
+            if not isinstance(entry, dict):
+                raise _MemoryNodeInvalidResultError(
+                    "Memory retrieve action returned non-object entry in retrieved_memories."
+                )
+        return
+    raise _MemoryNodeInvalidResultError(f"Unsupported memory action '{action}'.")
+
+
+def _classify_memory_primary_failure_reason(
+    *,
+    mode: str,
+    error: Exception,
+) -> str:
+    if isinstance(error, _MemoryNodeEmptyResultError):
+        return "primary_empty_result"
+    if isinstance(error, _MemoryNodeInvalidResultError):
+        return "primary_invalid_result"
+    if mode == MEMORY_NODE_MODE_LLM_GUIDED and isinstance(error, _MemoryLlmGuidedValidationError):
+        return "llm_validation_error"
+    if mode == MEMORY_NODE_MODE_LLM_GUIDED and isinstance(error, RuntimeError):
+        return "llm_inference_error"
+    return "primary_runtime_error"
+
+
+def _execute_memory_node_for_mode(
+    *,
+    mode: str,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    mcp_server_keys: list[str],
+    execution_id: int | None,
+    enabled_providers: set[str] | None,
+    default_model_id: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if mode == MEMORY_NODE_MODE_DETERMINISTIC:
+        return _execute_flowchart_memory_node_deterministic(
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            mcp_server_keys=mcp_server_keys,
+        )
+    return _execute_flowchart_memory_node_llm_guided(
+        node_id=node_id,
+        node_ref_id=node_ref_id,
+        node_config=node_config,
+        input_context=input_context,
+        mcp_server_keys=mcp_server_keys,
+        execution_id=execution_id,
+        enabled_providers=enabled_providers,
+        default_model_id=default_model_id,
+    )
 
 
 def _normalize_node_artifact_retention_mode(value: Any) -> str:
@@ -9334,7 +9673,7 @@ def _execute_flowchart_milestone_node(
     return output_state, routing_state
 
 
-def _execute_flowchart_memory_node(
+def _execute_flowchart_memory_node_deterministic(
     *,
     node_id: int,
     node_ref_id: int | None,
@@ -9342,17 +9681,17 @@ def _execute_flowchart_memory_node(
     input_context: dict[str, Any],
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    normalized_mcp_server_keys = {
-        str(item or "").strip() for item in (mcp_server_keys or []) if str(item or "").strip()
-    }
-    if normalized_mcp_server_keys and INTEGRATED_MCP_LLMCTL_KEY not in normalized_mcp_server_keys:
-        raise ValueError("Memory node requires system-managed LLMCTL MCP server.")
+    _validate_memory_node_mcp_server_keys(mcp_server_keys)
 
     action_value = node_config.get("action")
     action = _normalize_memory_node_action(action_value)
     if not action:
         raise ValueError("Memory node action is required: add or retrieve.")
-    limit = _parse_optional_int(node_config.get("limit"), default=10, minimum=1)
+    limit = _parse_optional_int(
+        node_config.get("limit"),
+        default=MEMORY_NODE_RETRIEVE_LIMIT_DEFAULT,
+        minimum=1,
+    )
     retrieved: list[dict[str, Any]] = []
     stored_memory: dict[str, Any] | None = None
     action_results: list[str] = []
@@ -9426,8 +9765,8 @@ def _execute_flowchart_memory_node(
                 memory = session.get(Memory, node_ref_id)
                 if memory is None:
                     raise ValueError(f"Memory {node_ref_id} was not found.")
-                store_mode = str(node_config.get("store_mode") or "append").strip().lower()
-                if store_mode == "replace":
+                store_mode = _normalize_memory_store_mode(node_config.get("store_mode"))
+                if store_mode == MEMORY_NODE_STORE_MODE_REPLACE:
                     memory.description = text
                 else:
                     prefix = memory.description.rstrip()
@@ -9484,6 +9823,375 @@ def _execute_flowchart_memory_node(
         output_state,
         routing_state,
     )
+    return output_state, routing_state
+
+
+def _execute_flowchart_memory_node_llm_guided_add(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    mcp_server_keys: list[str],
+    execution_id: int | None = None,
+    enabled_providers: set[str] | None = None,
+    default_model_id: int | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    _validate_memory_node_mcp_server_keys(mcp_server_keys)
+    additive_prompt = str(node_config.get("additive_prompt") or "").strip()
+    inferred_prompt = ""
+    if not additive_prompt:
+        inferred_prompt = _infer_memory_node_prompt(
+            action=MEMORY_NODE_ACTION_ADD,
+            input_context=input_context,
+        )
+    effective_prompt = additive_prompt or inferred_prompt
+    action_prompt_template, _internal_action_prompt = _build_memory_internal_action_prompt(
+        action=MEMORY_NODE_ACTION_ADD,
+        effective_prompt=effective_prompt,
+    )
+    inference_prompt = _build_memory_llm_guided_add_inference_prompt(
+        action_prompt_template=action_prompt_template,
+        additive_prompt=additive_prompt,
+        inferred_prompt=inferred_prompt,
+        effective_prompt=effective_prompt,
+        input_context=input_context,
+    )
+    provider, model_config, mcp_configs, model_metadata = _resolve_memory_llm_guided_runtime(
+        node_id=node_id,
+        default_model_id=default_model_id,
+        enabled_providers=enabled_providers,
+    )
+    payload = _build_task_payload("flowchart", inference_prompt)
+    payload = _inject_runtime_metadata(payload, _build_runtime_payload(provider, model_config))
+    request_id, _ = _resolve_flowchart_request_ids(
+        node_config=node_config,
+        input_context=input_context,
+    )
+    dispatch_request_id = (
+        request_id
+        or f"flowchart-memory-node-{int(node_id)}-run-{int(execution_id or node_id)}-llm-add"
+    )
+    with _llm_dispatch_scope(
+        request_id=dispatch_request_id,
+        node_id=max(1, int(node_id)),
+        execution_id=max(1, int(execution_id or node_id)),
+        mcp_server_keys=sorted(mcp_configs),
+    ):
+        llm_result = _run_llm(
+            provider,
+            payload,
+            mcp_configs=mcp_configs,
+            model_config=model_config,
+        )
+    if llm_result.returncode != 0:
+        message = llm_result.stderr.strip() or f"LLM exited with code {llm_result.returncode}."
+        raise RuntimeError(message)
+    try:
+        parsed_output = _parse_strict_json_object_output(llm_result.stdout)
+        normalized_add_payload = _normalize_memory_llm_guided_add_payload(parsed_output)
+    except ValueError as exc:
+        raise _MemoryLlmGuidedValidationError(str(exc)) from exc
+    resolved_node_config = dict(node_config)
+    resolved_node_config["action"] = MEMORY_NODE_ACTION_ADD
+    resolved_node_config["text"] = normalized_add_payload["text"]
+    resolved_node_config["store_mode"] = normalized_add_payload["store_mode"]
+    output_state, routing_state = _execute_flowchart_memory_node_deterministic(
+        node_id=node_id,
+        node_ref_id=node_ref_id,
+        node_config=resolved_node_config,
+        input_context=input_context,
+        mcp_server_keys=mcp_server_keys,
+    )
+    action_results = (
+        output_state.get("action_results")
+        if isinstance(output_state.get("action_results"), list)
+        else []
+    )
+    action_results.append(
+        "LLM-guided add inferred memory payload and persisted via deterministic memory writer."
+    )
+    output_state["action_results"] = action_results
+    output_state["llm_guided_add"] = {
+        "provider": model_metadata.get("provider"),
+        "model_id": model_metadata.get("model_id"),
+        "model_name": model_metadata.get("model_name"),
+        "inference_payload": normalized_add_payload,
+        "raw_output": _schema_repair_output_excerpt(llm_result.stdout, limit=2000),
+    }
+    return output_state, routing_state
+
+
+def _execute_flowchart_memory_node_llm_guided_retrieve(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    mcp_server_keys: list[str],
+    execution_id: int | None = None,
+    enabled_providers: set[str] | None = None,
+    default_model_id: int | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    _validate_memory_node_mcp_server_keys(mcp_server_keys)
+    additive_prompt = str(node_config.get("additive_prompt") or "").strip()
+    inferred_prompt = ""
+    if not additive_prompt:
+        inferred_prompt = _infer_memory_node_prompt(
+            action=MEMORY_NODE_ACTION_RETRIEVE,
+            input_context=input_context,
+        )
+    effective_prompt = additive_prompt or inferred_prompt
+    default_limit = _normalize_memory_retrieve_limit(
+        node_config.get("limit"),
+        default=MEMORY_NODE_RETRIEVE_LIMIT_DEFAULT,
+    )
+    action_prompt_template, _internal_action_prompt = _build_memory_internal_action_prompt(
+        action=MEMORY_NODE_ACTION_RETRIEVE,
+        effective_prompt=effective_prompt,
+    )
+    inference_prompt = _build_memory_llm_guided_retrieve_inference_prompt(
+        action_prompt_template=action_prompt_template,
+        additive_prompt=additive_prompt,
+        inferred_prompt=inferred_prompt,
+        effective_prompt=effective_prompt,
+        default_limit=default_limit,
+        input_context=input_context,
+    )
+    provider, model_config, mcp_configs, model_metadata = _resolve_memory_llm_guided_runtime(
+        node_id=node_id,
+        default_model_id=default_model_id,
+        enabled_providers=enabled_providers,
+    )
+    payload = _build_task_payload("flowchart", inference_prompt)
+    payload = _inject_runtime_metadata(payload, _build_runtime_payload(provider, model_config))
+    request_id, _ = _resolve_flowchart_request_ids(
+        node_config=node_config,
+        input_context=input_context,
+    )
+    dispatch_request_id = (
+        request_id
+        or f"flowchart-memory-node-{int(node_id)}-run-{int(execution_id or node_id)}-llm-retrieve"
+    )
+    with _llm_dispatch_scope(
+        request_id=dispatch_request_id,
+        node_id=max(1, int(node_id)),
+        execution_id=max(1, int(execution_id or node_id)),
+        mcp_server_keys=sorted(mcp_configs),
+    ):
+        llm_result = _run_llm(
+            provider,
+            payload,
+            mcp_configs=mcp_configs,
+            model_config=model_config,
+        )
+    if llm_result.returncode != 0:
+        message = llm_result.stderr.strip() or f"LLM exited with code {llm_result.returncode}."
+        raise RuntimeError(message)
+    try:
+        parsed_output = _parse_strict_json_object_output(llm_result.stdout)
+        normalized_retrieve_payload = _normalize_memory_llm_guided_retrieve_payload(
+            parsed_output,
+            default_limit=default_limit,
+        )
+    except ValueError as exc:
+        raise _MemoryLlmGuidedValidationError(str(exc)) from exc
+
+    resolved_node_ref_id = node_ref_id
+    retrieval_resolution = "query"
+    if resolved_node_ref_id is not None:
+        retrieval_resolution = "node_ref_id"
+    else:
+        inferred_memory_id = _parse_optional_int(
+            normalized_retrieve_payload.get("memory_id"),
+            default=0,
+        )
+        if inferred_memory_id > 0:
+            resolved_node_ref_id = inferred_memory_id
+            retrieval_resolution = "inferred_memory_id"
+
+    resolved_node_config = dict(node_config)
+    resolved_node_config["action"] = MEMORY_NODE_ACTION_RETRIEVE
+    resolved_node_config["limit"] = normalized_retrieve_payload.get("limit", default_limit)
+    if "query_text" in normalized_retrieve_payload:
+        resolved_node_config["query"] = normalized_retrieve_payload.get("query_text", "")
+
+    resolved_input_context = input_context
+    if (
+        retrieval_resolution == "query"
+        and "query_text" in normalized_retrieve_payload
+        and not str(normalized_retrieve_payload.get("query_text") or "").strip()
+    ):
+        node_context = (
+            input_context.get("node")
+            if isinstance(input_context.get("node"), dict)
+            else {}
+        )
+        resolved_node_config["additive_prompt"] = ""
+        resolved_input_context = {
+            "node": dict(node_context),
+        }
+
+    output_state, routing_state = _execute_flowchart_memory_node_deterministic(
+        node_id=node_id,
+        node_ref_id=resolved_node_ref_id,
+        node_config=resolved_node_config,
+        input_context=resolved_input_context,
+        mcp_server_keys=mcp_server_keys,
+    )
+    action_results = (
+        output_state.get("action_results")
+        if isinstance(output_state.get("action_results"), list)
+        else []
+    )
+    action_results.append(
+        "LLM-guided retrieve inferred retrieval parameters and executed deterministic retrieval."
+    )
+    output_state["action_results"] = action_results
+    output_state["llm_guided_retrieve"] = {
+        "provider": model_metadata.get("provider"),
+        "model_id": model_metadata.get("model_id"),
+        "model_name": model_metadata.get("model_name"),
+        "inference_payload": normalized_retrieve_payload,
+        "retrieval_resolution": retrieval_resolution,
+        "resolved_memory_id": resolved_node_ref_id,
+        "raw_output": _schema_repair_output_excerpt(llm_result.stdout, limit=2000),
+    }
+    return output_state, routing_state
+
+
+def _execute_flowchart_memory_node_llm_guided(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    mcp_server_keys: list[str],
+    execution_id: int | None = None,
+    enabled_providers: set[str] | None = None,
+    default_model_id: int | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    action = _normalize_memory_node_action(node_config.get("action"))
+    if action == MEMORY_NODE_ACTION_ADD:
+        return _execute_flowchart_memory_node_llm_guided_add(
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            mcp_server_keys=mcp_server_keys,
+            execution_id=execution_id,
+            enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+        )
+    if action == MEMORY_NODE_ACTION_RETRIEVE:
+        return _execute_flowchart_memory_node_llm_guided_retrieve(
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            mcp_server_keys=mcp_server_keys,
+            execution_id=execution_id,
+            enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+        )
+    raise ValueError("Memory node action is required: add or retrieve.")
+
+
+def _execute_flowchart_memory_node(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    mcp_server_keys: list[str],
+    execution_id: int | None = None,
+    enabled_providers: set[str] | None = None,
+    default_model_id: int | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    action = _normalize_memory_node_action(node_config.get("action"))
+    if not action:
+        raise ValueError("Memory node action is required: add or retrieve.")
+    mode = _normalize_memory_node_mode(node_config.get("mode"))
+    retry_count = _resolve_memory_node_retry_count(node_config)
+    fallback_enabled = _resolve_memory_node_fallback_enabled(node_config)
+    primary_attempts = 1 + retry_count
+    primary_error: Exception | None = None
+    fallback_reason = "primary_runtime_error"
+
+    for _attempt in range(primary_attempts):
+        try:
+            output_state, routing_state = _execute_memory_node_for_mode(
+                mode=mode,
+                node_id=node_id,
+                node_ref_id=node_ref_id,
+                node_config=node_config,
+                input_context=input_context,
+                mcp_server_keys=mcp_server_keys,
+                execution_id=execution_id,
+                enabled_providers=enabled_providers,
+                default_model_id=default_model_id,
+            )
+            _validate_memory_node_execution_result(
+                action=action,
+                output_state=output_state,
+            )
+            return output_state, routing_state
+        except Exception as exc:
+            primary_error = exc
+            fallback_reason = _classify_memory_primary_failure_reason(
+                mode=mode,
+                error=exc,
+            )
+
+    if primary_error is None:
+        raise RuntimeError("Memory node failed without a captured primary error.")
+    if not fallback_enabled:
+        raise primary_error
+
+    fallback_mode = (
+        MEMORY_NODE_MODE_LLM_GUIDED
+        if mode == MEMORY_NODE_MODE_DETERMINISTIC
+        else MEMORY_NODE_MODE_DETERMINISTIC
+    )
+    try:
+        output_state, routing_state = _execute_memory_node_for_mode(
+            mode=fallback_mode,
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            mcp_server_keys=mcp_server_keys,
+            execution_id=execution_id,
+            enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+        )
+        _validate_memory_node_execution_result(
+            action=action,
+            output_state=output_state,
+        )
+    except Exception as fallback_error:
+        raise RuntimeError(
+            "Memory node fallback failed after primary mode "
+            f"'{mode}' exhausted ({fallback_reason}); "
+            "fallback_runtime_error."
+        ) from fallback_error
+
+    output_state["execution_status"] = DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING
+    output_state["fallback_used"] = True
+    output_state["failed_mode"] = mode
+    output_state["fallback_reason"] = fallback_reason
+    output_state["fallback_mode"] = fallback_mode
+    action_results = (
+        output_state.get("action_results")
+        if isinstance(output_state.get("action_results"), list)
+        else []
+    )
+    action_results.append(
+        "Primary memory mode failed; succeeded via single-attempt fallback mode."
+    )
+    output_state["action_results"] = action_results
+    routing_state["fallback_used"] = True
+    routing_state["fallback_reason"] = fallback_reason
     return output_state, routing_state
 
 
@@ -10058,6 +10766,9 @@ def _execute_flowchart_node(
         resolved_memory_node_config = dict(node_config)
         if not str(resolved_memory_node_config.get("action") or "").strip():
             resolved_memory_node_config["action"] = MEMORY_NODE_ACTION_RETRIEVE
+        resolved_memory_node_config["mode"] = _normalize_memory_node_mode(
+            resolved_memory_node_config.get("mode")
+        )
         return _execute_deterministic_special_node_with_framework(
             node_type=node_type,
             node_config=resolved_memory_node_config,
@@ -10069,6 +10780,9 @@ def _execute_flowchart_node(
                 node_config=resolved_memory_node_config,
                 input_context=input_context,
                 mcp_server_keys=mcp_server_keys,
+                execution_id=execution_id,
+                enabled_providers=enabled_providers,
+                default_model_id=default_model_id,
             ),
         )
     raise ValueError(f"Unsupported flowchart node type '{node_type}'.")
@@ -10813,15 +11527,6 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                     "routing_state": routing_state,
                 }
 
-                runtime_payload = (
-                    execution_result.run_metadata
-                    if execution_result is not None
-                    else (
-                        routed_execution_request.run_metadata_payload()
-                        if routed_execution_request is not None
-                        else None
-                        )
-                )
                 artifact_summary_for_event: dict[str, Any] | None = None
                 try:
                     with session_scope() as session:
