@@ -215,6 +215,45 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
+  test('shows connector save and delete actions in header and omits bend point count', async () => {
+    const onGraphChange = vi.fn()
+    const onSaveGraph = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, config: { task_prompt: 'run' } },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1' }]}
+        onGraphChange={onGraphChange}
+        onSaveGraph={onSaveGraph}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-edge-hit')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-edge-hit'))
+
+    expect(screen.getByLabelText('Save graph')).toBeTruthy()
+    expect(screen.getByLabelText('Delete connector')).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Trigger + Context' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Context Only' })).toBeTruthy()
+    expect(screen.queryByText('condition key')).toBeNull()
+    expect(screen.queryByText('connector id')).toBeNull()
+    expect(screen.queryByText('bend points')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('Save graph'))
+    expect(onSaveGraph).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByLabelText('Delete connector'))
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      expect(payload?.edges).toHaveLength(0)
+    })
+  })
+
   test('zooms the graph on plain mouse wheel over viewport', async () => {
     const { container } = render(<FlowchartWorkspaceEditor />)
     const viewport = container.querySelector('.flow-ws-viewport')

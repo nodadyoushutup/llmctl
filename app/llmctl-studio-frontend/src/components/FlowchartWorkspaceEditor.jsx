@@ -7,7 +7,11 @@ const NODE_TYPE_WITH_REF = new Set(['flowchart', 'plan', 'milestone', 'memory'])
 const NODE_TYPE_WITH_EDITABLE_REF = new Set(['flowchart'])
 const NODE_TYPE_REQUIRES_REF = new Set(['flowchart'])
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left']
-const EDGE_MODE_OPTIONS = ['solid', 'dotted']
+const EDGE_MODE_OPTIONS = [
+  { value: 'solid', label: 'Trigger + Context' },
+  { value: 'dotted', label: 'Context Only' },
+]
+const EDGE_MODE_VALUES = EDGE_MODE_OPTIONS.map((option) => option.value)
 const EDGE_CONTROL_STYLE_HARD = 'hard'
 const EDGE_CONTROL_STYLE_CURVED = 'curved'
 const EDGE_CONTROL_STYLE_OPTIONS = [
@@ -1290,7 +1294,7 @@ function refLabel(item) {
 
 function normalizeEdgeMode(value) {
   const mode = String(value || '').trim().toLowerCase()
-  return EDGE_MODE_OPTIONS.includes(mode) ? mode : 'solid'
+  return EDGE_MODE_VALUES.includes(mode) ? mode : 'solid'
 }
 
 function buildNodePayload(node, llmctlMcpServerId = null) {
@@ -1936,13 +1940,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     }
     return lookup
   }, [nodes])
-  const selectedEdgeSourceNode = selectedEdge ? nodesByToken.get(selectedEdge.sourceToken) || null : null
-  const selectedEdgeIsDecisionManaged = Boolean(
-    selectedEdge
-    && selectedEdgeSourceNode
-    && normalizeNodeType(selectedEdgeSourceNode.node_type) === 'decision'
-    && normalizeEdgeMode(selectedEdge.edge_mode) === 'solid',
-  )
   const selectedDecisionConditions = useMemo(() => {
     if (!selectedNode || selectedNodeType !== 'decision') {
       return []
@@ -2139,9 +2136,10 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     && selectedNodeType === 'task'
     && !hasTaskPrompt(selectedNode.config),
   )
+  const inspectorHasSelection = Boolean(selectedNode || selectedEdge)
   const inspectorTitle = selectedNode
     ? 'Node Inspector'
-    : (selectedEdge ? 'Edge Inspector' : 'Inspector')
+    : (selectedEdge ? 'Connector Inspector' : 'Inspector')
 
   const emitNotice = useCallback((message) => {
     if (typeof onNotice === 'function') {
@@ -3325,7 +3323,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
         <PanelHeader
           className="flow-ws-panel-header flow-ws-inspector-header"
           title={inspectorTitle}
-          actions={selectedNode ? (
+          actions={inspectorHasSelection ? (
             <>
               <button
                 type="button"
@@ -3347,9 +3345,17 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
               <button
                 type="button"
                 className="icon-button icon-button-danger"
-                aria-label="Delete node"
-                title="Delete node"
-                onClick={() => confirmAndRemoveNode(selectedNode)}
+                aria-label={selectedNode ? 'Delete node' : 'Delete connector'}
+                title={selectedNode ? 'Delete node' : 'Delete connector'}
+                onClick={() => {
+                  if (selectedNode) {
+                    confirmAndRemoveNode(selectedNode)
+                    return
+                  }
+                  if (selectedEdge) {
+                    removeEdge(selectedEdge.localId)
+                  }
+                }}
               >
                 <i className="fa-solid fa-trash" />
               </button>
@@ -4058,28 +4064,13 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 value={normalizeEdgeMode(selectedEdge.edge_mode)}
                 onChange={(event) => updateEdge(selectedEdge.localId, { edge_mode: normalizeEdgeMode(event.target.value) })}
               >
-                {EDGE_MODE_OPTIONS.map((mode) => (
-                  <option key={mode} value={mode}>
-                    {mode}
+                {EDGE_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
             </label>
-            {selectedEdgeIsDecisionManaged ? (
-              <label className="field">
-                <span>connector id</span>
-                <input type="text" value={selectedEdge.condition_key || ''} readOnly />
-              </label>
-            ) : (
-              <label className="field">
-                <span>condition key</span>
-                <input
-                  type="text"
-                  value={selectedEdge.condition_key || ''}
-                  onChange={(event) => updateEdge(selectedEdge.localId, { condition_key: event.target.value })}
-                />
-              </label>
-            )}
             <label className="field">
               <span>label</span>
               <input
@@ -4087,10 +4078,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 value={selectedEdge.label || ''}
                 onChange={(event) => updateEdge(selectedEdge.localId, { label: event.target.value })}
               />
-            </label>
-            <label className="field">
-              <span>bend points</span>
-              <input type="text" value={String(selectedEdgeControlPointCount)} readOnly />
             </label>
             <label className="field">
               <span>bend style</span>
@@ -4119,16 +4106,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                 </button>
               </div>
             ) : null}
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn btn-danger"
-                onClick={() => removeEdge(selectedEdge.localId)}
-              >
-                <i className="fa-solid fa-trash" />
-                delete edge
-              </button>
-            </div>
           </div>
         ) : null}
 
