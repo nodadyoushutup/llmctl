@@ -1,6 +1,6 @@
 from .shared import *  # noqa: F401,F403
 
-__all__ = ['index', 'dashboard', 'list_agents', 'new_agent', 'create_agent', 'view_agent', 'edit_agent', 'update_agent', 'attach_agent_skill', 'detach_agent_skill', 'move_agent_skill', 'create_agent_priority', 'update_agent_priority', 'move_agent_priority', 'delete_agent_priority', 'start_agent', 'stop_agent', 'delete_agent', 'start_run', 'cancel_run', 'end_run', 'delete_run', 'new_run', 'view_run', 'edit_run', 'update_run', 'create_run', 'runs', 'quick_task', 'update_quick_task_defaults', 'create_quick_task']
+__all__ = ['index', 'dashboard', 'list_agents', 'new_agent', 'create_agent', 'view_agent', 'edit_agent', 'update_agent', 'attach_agent_skill', 'detach_agent_skill', 'move_agent_skill', 'create_agent_priority', 'update_agent_priority', 'move_agent_priority', 'delete_agent_priority', 'start_agent', 'stop_agent', 'delete_agent', 'start_run', 'cancel_run', 'end_run', 'delete_run', 'new_run', 'view_run', 'edit_run', 'update_run', 'create_run', 'runs', 'quick_node', 'update_quick_node_defaults', 'create_quick_node']
 
 @bp.get("/")
 def index():
@@ -1095,7 +1095,7 @@ def runs():
     )
 
 @bp.get("/quick")
-def quick_task():
+def quick_node():
     sync_integrated_mcp_servers()
     agents = _load_agents()
     models = _load_llm_models()
@@ -1153,7 +1153,7 @@ def quick_task():
             "quick_default_settings": quick_default_settings,
         }
     return render_template(
-        "quick_task.html",
+        "quick_node.html",
         agents=agents,
         models=models,
         mcp_servers=mcp_servers,
@@ -1171,7 +1171,7 @@ def quick_task():
     )
 
 @bp.post("/quick/settings")
-def update_quick_task_defaults():
+def update_quick_node_defaults():
     request_payload = _settings_request_payload()
     is_api_request = _stage3_api_request()
 
@@ -1179,7 +1179,7 @@ def update_quick_task_defaults():
         if is_api_request:
             return {"error": message}, status_code
         flash(message, "error")
-        return redirect(url_for("agents.quick_task"))
+        return redirect(url_for("agents.quick_node"))
 
     agents = _load_agents()
     models = _load_llm_models()
@@ -1208,11 +1208,6 @@ def update_quick_task_defaults():
     agent_ids = {agent.id for agent in agents}
     model_ids = {model.id for model in models}
     mcp_ids = {server.id for server in mcp_servers}
-    integration_option_keys = {
-        str(option.get("key") or "").strip()
-        for option in integration_options
-        if str(option.get("key") or "").strip()
-    }
 
     selected_agent_id = _coerce_optional_int(
         _settings_form_value(request_payload, "default_agent_id"),
@@ -1243,20 +1238,6 @@ def update_quick_task_defaults():
     if any(collection_id not in rag_ids for collection_id in selected_rag_collections):
         return _quick_settings_error("Default collection selection is invalid.")
 
-    integration_raw_values: list[str] = []
-    for raw_value in _settings_form_list(request_payload, "default_integration_keys"):
-        for item in str(raw_value or "").split(","):
-            cleaned = item.strip()
-            if cleaned:
-                integration_raw_values.append(cleaned)
-    selected_integration_keys, invalid_integration_keys = validate_task_integration_keys(
-        integration_raw_values
-    )
-    if invalid_integration_keys:
-        return _quick_settings_error("Default integration selection is invalid.")
-    if any(key not in integration_option_keys for key in selected_integration_keys):
-        return _quick_settings_error("Default integration selection is invalid.")
-
     _save_integration_settings(
         QUICK_DEFAULT_SETTINGS_PROVIDER,
         {
@@ -1266,7 +1247,8 @@ def update_quick_task_defaults():
                 str(server_id) for server_id in selected_mcp_server_ids
             ),
             "default_rag_collections": ",".join(selected_rag_collections),
-            "default_integration_keys": ",".join(selected_integration_keys),
+            # MCP server selection is authoritative for integrations.
+            "default_integration_keys": "",
         },
     )
     quick_default_settings = _resolved_quick_default_settings(
@@ -1282,10 +1264,10 @@ def update_quick_task_defaults():
             "quick_default_settings": quick_default_settings,
         }
     flash("Quick node defaults updated.", "success")
-    return redirect(url_for("agents.quick_task"))
+    return redirect(url_for("agents.quick_node"))
 
 @bp.post("/quick")
-def create_quick_task():
+def create_quick_node():
     is_api_request = _stage3_api_request()
     payload = request.get_json(silent=True) if request.is_json else {}
     if payload is None or not isinstance(payload, dict):
@@ -1295,7 +1277,7 @@ def create_quick_task():
         if is_api_request:
             return {"error": message}, status_code
         flash(message, "error")
-        return redirect(url_for("agents.quick_task"))
+        return redirect(url_for("agents.quick_node"))
 
     if request.is_json:
         agent_id_raw = str(payload.get("agent_id") or "").strip()
@@ -1306,15 +1288,6 @@ def create_quick_task():
             mcp_server_ids_raw = [str(value).strip() for value in mcp_raw]
         elif mcp_raw not in (None, ""):
             return _quick_error("mcp_server_ids must be an array.")
-        integration_raw = payload.get("integration_keys")
-        if integration_raw is None:
-            integration_raw = []
-        if not isinstance(integration_raw, list):
-            return _quick_error("integration_keys must be an array.")
-        selected_integration_keys, invalid_keys = validate_task_integration_keys(
-            [str(value).strip() for value in integration_raw]
-        )
-        integration_error = "Integration selection is invalid." if invalid_keys else None
         rag_raw = payload.get("rag_collections")
         if rag_raw is None:
             rag_raw = []
@@ -1331,7 +1304,6 @@ def create_quick_task():
         mcp_server_ids_raw = [
             value.strip() for value in request.form.getlist("mcp_server_ids")
         ]
-        selected_integration_keys, integration_error = _parse_node_integration_selection()
         selected_rag_collections = _coerce_chat_collection_list(
             [value.strip() for value in request.form.getlist("rag_collections")]
         )
@@ -1339,8 +1311,6 @@ def create_quick_task():
         uploads = request.files.getlist("attachments")
     if not prompt:
         return _quick_error("Prompt is required.")
-    if integration_error:
-        return _quick_error(integration_error)
     rag_collections_contract = rag_list_collection_contract()
     rag_collection_rows = rag_collections_contract.get("collections")
     if not isinstance(rag_collection_rows, list):
@@ -1415,6 +1385,11 @@ def create_quick_task():
                 selected_mcp_servers = [
                     mcp_by_id[mcp_id] for mcp_id in selected_mcp_ids
                 ]
+            integration_resolution = resolve_effective_integrations_from_mcp(
+                [server.server_key for server in selected_mcp_servers]
+            )
+            selected_integration_keys = integration_resolution.configured_integration_keys
+            integration_warnings = integration_resolution.warnings
             system_contract = build_quick_node_system_contract()
             agent_profile = build_quick_node_agent_profile()
             if agent is not None:
@@ -1422,15 +1397,15 @@ def create_quick_task():
                 if agent.role_id and agent.role is not None:
                     system_contract["role"] = _build_role_payload(agent.role)
                 agent_profile = _build_agent_payload(agent)
-            quick_task_context: dict[str, object] = {"kind": QUICK_TASK_KIND}
+            quick_node_context: dict[str, object] = {"kind": QUICK_NODE_KIND}
             if selected_rag_collections:
-                quick_task_context["rag_collections"] = selected_rag_collections
+                quick_node_context["rag_collections"] = selected_rag_collections
             prompt_payload = serialize_prompt_envelope(
                 build_prompt_envelope(
                     user_request=prompt,
                     system_contract=system_contract,
                     agent_profile=agent_profile,
-                    task_context=quick_task_context,
+                    task_context=quick_node_context,
                     output_contract=build_one_off_output_contract(),
                 )
             )
@@ -1440,7 +1415,7 @@ def create_quick_task():
                 model_id=selected_model_id,
                 status="queued",
                 prompt=prompt_payload,
-                kind=QUICK_TASK_KIND,
+                kind=QUICK_NODE_KIND,
                 integration_keys_json=serialize_task_integration_keys(
                     selected_integration_keys
                 ),
@@ -1463,6 +1438,14 @@ def create_quick_task():
             task.celery_task_id = celery_task.id
 
     if is_api_request:
-        return {"ok": True, "task_id": task_id, "celery_task_id": celery_task.id}, 201
+        return {
+            "ok": True,
+            "task_id": task_id,
+            "celery_task_id": celery_task.id,
+            "selected_integration_keys": selected_integration_keys,
+            "integration_warnings": integration_warnings,
+        }, 201
+    for warning in integration_warnings:
+        flash(warning, "warning")
     flash(f"Quick node {task_id} queued.", "success")
     return redirect(url_for("agents.view_node", task_id=task_id))

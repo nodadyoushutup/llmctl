@@ -3,6 +3,35 @@ from .shared import *  # noqa: F401,F403
 __all__ = ['chat_page', 'chat_activity', 'create_chat_thread_route', 'update_chat_thread_route', 'archive_chat_thread_route', 'restore_chat_thread_route', 'clear_chat_thread_route', 'delete_chat_thread_route', 'api_health', 'api_chat_runtime', 'api_create_chat_thread', 'api_chat_thread', 'api_archive_chat_thread', 'api_clear_chat_thread', 'api_chat_thread_config', 'api_chat_activity', 'api_chat_turn', 'list_nodes', 'view_node', 'remove_node_attachment', 'node_status', 'cancel_node', 'retry_node', 'delete_node', 'new_node', 'create_node']
 
 
+def _chat_selected_mcp_server_keys(thread_payload: object) -> list[str]:
+    if not isinstance(thread_payload, dict):
+        return []
+    servers = thread_payload.get("mcp_servers")
+    if not isinstance(servers, list):
+        return []
+    keys: list[str] = []
+    seen: set[str] = set()
+    for server in servers:
+        if not isinstance(server, dict):
+            continue
+        key = str(server.get("server_key") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    return keys
+
+
+def _chat_selected_integration_payload(thread_payload: object) -> dict[str, object]:
+    selected_mcp_server_keys = _chat_selected_mcp_server_keys(thread_payload)
+    resolution = resolve_effective_integrations_from_mcp(selected_mcp_server_keys)
+    return {
+        "selected_mcp_server_keys": resolution.selected_mcp_server_keys,
+        "selected_integration_keys": resolution.configured_integration_keys,
+        "integration_warnings": resolution.warnings,
+    }
+
+
 def _task_prompt_input_context(prompt_json: object) -> dict[str, object]:
     if not isinstance(prompt_json, dict):
         return {}
@@ -420,6 +449,7 @@ def api_chat_runtime():
         mcp_servers=mcp_servers,
         rag_collections=rag_collections,
     )
+    selected_integration_payload = _chat_selected_integration_payload(selected_thread)
     return {
         "threads": threads,
         "selected_thread_id": (
@@ -439,6 +469,7 @@ def api_chat_runtime():
         "rag_health": rag_health,
         "rag_collections": rag_collections,
         "chat_default_settings": chat_default_settings,
+        **selected_integration_payload,
     }
 
 @bp.post("/api/chat/threads")
@@ -506,7 +537,14 @@ def api_create_chat_thread():
     except ValueError as exc:
         return {"error": str(exc)}, 400
     thread_payload = get_chat_thread(int(thread["id"]))
-    return {"ok": True, "thread": thread_payload or thread}
+    selected_integration_payload = _chat_selected_integration_payload(
+        thread_payload if thread_payload is not None else thread
+    )
+    return {
+        "ok": True,
+        "thread": thread_payload or thread,
+        **selected_integration_payload,
+    }
 
 @bp.get("/api/chat/threads/<int:thread_id>")
 def api_chat_thread(thread_id: int):
@@ -589,7 +627,8 @@ def api_chat_thread_config(thread_id: int):
     thread_payload = get_chat_thread(thread_id)
     if thread_payload is None:
         return {"error": "Thread not found."}, 404
-    return {"ok": True, "thread": thread_payload}
+    selected_integration_payload = _chat_selected_integration_payload(thread_payload)
+    return {"ok": True, "thread": thread_payload, **selected_integration_payload}
 
 @bp.get("/api/chat/activity")
 def api_chat_activity():
@@ -835,7 +874,7 @@ def list_nodes():
             )
         elif is_quick_rag_task_kind(task.kind):
             task_node_names[task.id] = _quick_rag_task_display_name(task)
-        elif is_quick_task_kind(task.kind):
+        elif is_quick_node_kind(task.kind):
             task_node_names[task.id] = "Quick node"
         else:
             task_node_names[task.id] = "-"
@@ -1021,14 +1060,14 @@ def view_node(task_id: int):
             ],
             "mcp_servers": mcp_servers_payload,
             "quick_context": quick_context,
-            "is_quick_task": is_quick_task_kind(task.kind),
+            "is_quick_node": is_quick_node_kind(task.kind),
             "is_quick_rag_task": is_quick_rag_task_kind(task.kind),
         }
     return render_template(
         "task_detail.html",
         task=task,
         task_output=task_output,
-        is_quick_task=is_quick_task_kind(task.kind),
+        is_quick_node=is_quick_node_kind(task.kind),
         is_quick_rag_task=is_quick_rag_task_kind(task.kind),
         quick_rag_task_context=_quick_rag_task_context(task),
         agent=agent,
@@ -1210,14 +1249,9 @@ def new_node():
     agents = _load_agents()
     _, summary = _agent_rollup(agents)
     scripts = _load_scripts()
+    mcp_servers = _load_mcp_servers()
     scripts_by_type = _group_scripts_by_type(scripts)
     selected_scripts_by_type = {script_type: [] for script_type in SCRIPT_TYPE_FIELDS}
-    integration_options = _build_node_integration_options()
-    default_selected_integration_keys = [
-        str(option["key"])
-        for option in integration_options
-        if bool(option.get("connected"))
-    ]
     if _nodes_wants_json():
         script_options = [
             {
@@ -1235,18 +1269,25 @@ def new_node():
                 {"value": value, "label": label}
                 for value, label in SCRIPT_TYPE_WRITE_CHOICES
             ],
-            "integration_options": integration_options,
-            "selected_integration_keys": default_selected_integration_keys,
+            "mcp_servers": [
+                {
+                    "id": server.id,
+                    "name": server.name,
+                    "server_key": server.server_key,
+                }
+                for server in mcp_servers
+            ],
+            "selected_mcp_server_ids": [],
         }
     return render_template(
         "new_task.html",
         agents=agents,
+        mcp_servers=mcp_servers,
         scripts_by_type=scripts_by_type,
         selected_scripts_by_type=selected_scripts_by_type,
         script_type_fields=SCRIPT_TYPE_FIELDS,
         script_type_choices=SCRIPT_TYPE_WRITE_CHOICES,
-        integration_options=integration_options,
-        selected_integration_keys=default_selected_integration_keys,
+        selected_mcp_server_ids=[],
         summary=summary,
         page_title="New Node",
         active_page="nodes",
@@ -1268,6 +1309,12 @@ def create_node():
     if request.is_json:
         agent_id_raw = str(payload.get("agent_id") or "").strip()
         prompt = str(payload.get("prompt") or "").strip()
+        mcp_raw = payload.get("mcp_server_ids")
+        mcp_server_ids_raw: list[str] = []
+        if isinstance(mcp_raw, list):
+            mcp_server_ids_raw = [str(value).strip() for value in mcp_raw]
+        elif mcp_raw not in (None, ""):
+            return _node_error("mcp_server_ids must be an array.")
         uploads = []
         script_ids_by_type = {script_type: [] for script_type in SCRIPT_TYPE_FIELDS}
         raw_script_map = payload.get("script_ids_by_type")
@@ -1301,19 +1348,14 @@ def create_node():
                 continue
             legacy_ids.append(parsed)
         script_error = None
-        raw_integrations = payload.get("integration_keys") or []
-        if not isinstance(raw_integrations, list):
-            return _node_error("integration_keys must be an array.")
-        selected_integration_keys, invalid_keys = validate_task_integration_keys(
-            [str(value).strip() for value in raw_integrations]
-        )
-        integration_error = "Integration selection is invalid." if invalid_keys else None
     else:
         agent_id_raw = request.form.get("agent_id", "").strip()
         prompt = request.form.get("prompt", "").strip()
+        mcp_server_ids_raw = [
+            value.strip() for value in request.form.getlist("mcp_server_ids")
+        ]
         uploads = request.files.getlist("attachments")
         script_ids_by_type, legacy_ids, script_error = _parse_script_selection()
-        selected_integration_keys, integration_error = _parse_node_integration_selection()
 
     if not agent_id_raw:
         return _node_error("Select an agent.")
@@ -1325,14 +1367,45 @@ def create_node():
         return _node_error("Prompt is required.")
     if script_error:
         return _node_error(script_error)
-    if integration_error:
-        return _node_error(integration_error)
 
     try:
         with session_scope() as session:
             agent = session.get(Agent, agent_id)
             if agent is None:
                 return _node_error("Agent not found.", 404)
+            selected_mcp_ids: list[int] = []
+            for raw_id in mcp_server_ids_raw:
+                if not raw_id:
+                    continue
+                parsed_id = _coerce_optional_int(
+                    raw_id,
+                    field_name="mcp_server_id",
+                    minimum=1,
+                )
+                if parsed_id is None:
+                    return _node_error("Invalid MCP server selection.")
+                if parsed_id not in selected_mcp_ids:
+                    selected_mcp_ids.append(parsed_id)
+            selected_mcp_servers: list[MCPServer] = []
+            if selected_mcp_ids:
+                selected_mcp_servers = (
+                    session.execute(
+                        select(MCPServer).where(MCPServer.id.in_(selected_mcp_ids))
+                    )
+                    .scalars()
+                    .all()
+                )
+                if len(selected_mcp_servers) != len(selected_mcp_ids):
+                    return _node_error("One or more MCP servers were not found.", 404)
+                mcp_by_id = {server.id: server for server in selected_mcp_servers}
+                selected_mcp_servers = [
+                    mcp_by_id[mcp_id] for mcp_id in selected_mcp_ids
+                ]
+            integration_resolution = resolve_effective_integrations_from_mcp(
+                [server.server_key for server in selected_mcp_servers]
+            )
+            selected_integration_keys = integration_resolution.configured_integration_keys
+            integration_warnings = integration_resolution.warnings
             script_ids_by_type, script_error = _resolve_script_selection(
                 session,
                 script_ids_by_type,
@@ -1349,6 +1422,7 @@ def create_node():
                     selected_integration_keys
                 ),
             )
+            task.mcp_servers = selected_mcp_servers
             _set_task_scripts(session, task.id, script_ids_by_type)
             attachments = _save_uploaded_attachments(session, uploads)
             _attach_attachments(task, attachments)
@@ -1365,6 +1439,14 @@ def create_node():
             task.celery_task_id = celery_task.id
 
     if is_api_request:
-        return {"ok": True, "task_id": task_id, "celery_task_id": celery_task.id}, 201
+        return {
+            "ok": True,
+            "task_id": task_id,
+            "celery_task_id": celery_task.id,
+            "selected_integration_keys": selected_integration_keys,
+            "integration_warnings": integration_warnings,
+        }, 201
+    for warning in integration_warnings:
+        flash(warning, "warning")
     flash(f"Node {task_id} queued.", "success")
     return redirect(url_for("agents.list_nodes"))

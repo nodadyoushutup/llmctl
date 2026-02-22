@@ -97,6 +97,18 @@ function messageFromError(error, fallback) {
   return message
 }
 
+function warningMessageFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return ''
+  }
+  const warnings = Array.isArray(payload.integration_warnings)
+    ? payload.integration_warnings
+      .map((item) => String(item || '').trim())
+      .filter((item) => item)
+    : []
+  return warnings.join('\n')
+}
+
 function toggleNumericValue(values, value) {
   if (values.includes(value)) {
     return values.filter((item) => item !== value)
@@ -121,6 +133,7 @@ export default function ChatPage() {
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [refreshVersion, setRefreshVersion] = useState(0)
   const [, setChatError] = useFlashState('error')
+  const [, setChatWarning] = useFlashState('warning')
   const [draftMessage, setDraftMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [pendingUserMessages, setPendingUserMessages] = useState([])
@@ -175,6 +188,7 @@ export default function ChatPage() {
         }
         setState({ loading: false, payload, error: '' })
         setChatError('')
+        setChatWarning(warningMessageFromPayload(payload))
 
         const selectedThread = payload && typeof payload === 'object' ? payload.selected_thread : null
         const defaultSettings = payload && typeof payload === 'object' ? payload.chat_default_settings : null
@@ -204,7 +218,7 @@ export default function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [refreshVersion, selectedThreadIdFromQuery, setChatError, setSearchParams])
+  }, [refreshVersion, selectedThreadIdFromQuery, setChatError, setChatWarning, setSearchParams])
 
   useEffect(() => {
     try {
@@ -329,6 +343,7 @@ export default function ChatPage() {
     setChatError('')
     try {
       const response = await createChatThread()
+      setChatWarning(warningMessageFromPayload(response))
       const thread = response && typeof response === 'object' ? response.thread : null
       const nextThreadId = parseThreadId(thread?.id)
       if (thread && typeof thread === 'object') {
@@ -458,6 +473,7 @@ export default function ChatPage() {
         setChatError('Failed to apply session controls.')
         return false
       }
+      setChatWarning(warningMessageFromPayload(response))
       if (response.thread && typeof response.thread === 'object') {
         updateSelectedThread(response.thread)
         setSessionConfig(buildSessionConfig(response.thread, payload?.chat_default_settings || null))
@@ -470,7 +486,14 @@ export default function ChatPage() {
     } finally {
       setSavingSession(false)
     }
-  }, [payload?.chat_default_settings, selectedThreadId, sessionConfig, sessionDirty, setChatError])
+  }, [
+    payload?.chat_default_settings,
+    selectedThreadId,
+    sessionConfig,
+    sessionDirty,
+    setChatError,
+    setChatWarning,
+  ])
 
   async function handleSubmit(event) {
     event.preventDefault()

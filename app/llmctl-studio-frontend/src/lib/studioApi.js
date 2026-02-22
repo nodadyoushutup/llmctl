@@ -425,7 +425,7 @@ function appendFormValues(formData, key, values) {
 export function createNode({
   agentId,
   prompt,
-  integrationKeys = [],
+  mcpServerIds = [],
   scriptIdsByType = null,
   scriptIds = [],
   attachments = [],
@@ -435,7 +435,7 @@ export function createNode({
     const formData = new FormData()
     appendFormValue(formData, 'agent_id', agentId)
     appendFormValue(formData, 'prompt', prompt)
-    appendFormValues(formData, 'integration_keys', integrationKeys)
+    appendFormValues(formData, 'mcp_server_ids', mcpServerIds)
     if (scriptIdsByType && typeof scriptIdsByType === 'object') {
       for (const [scriptType, values] of Object.entries(scriptIdsByType)) {
         const fieldName = SCRIPT_TYPE_FORM_FIELDS[String(scriptType)]
@@ -459,7 +459,7 @@ export function createNode({
     body: {
       agent_id: agentId,
       prompt,
-      integration_keys: integrationKeys,
+      mcp_server_ids: mcpServerIds,
       script_ids_by_type: scriptIdsByType,
       script_ids: scriptIds,
     },
@@ -493,17 +493,16 @@ export function removeNodeAttachment(nodeId, attachmentId) {
   return requestJson(`/nodes/${parsedNodeId}/attachments/${parsedAttachmentId}/remove`, { method: 'POST' })
 }
 
-export function getQuickTaskMeta() {
+export function getQuickNodeMeta() {
   return requestJson('/quick')
 }
 
-export function createQuickTask({
+export function createQuickNode({
   prompt,
   agentId = null,
   modelId = null,
   mcpServerIds = [],
   ragCollections = [],
-  integrationKeys = [],
   attachments = [],
 } = {}) {
   const files = Array.isArray(attachments) ? attachments.filter((file) => file != null) : []
@@ -514,7 +513,6 @@ export function createQuickTask({
     appendFormValue(formData, 'model_id', modelId)
     appendFormValues(formData, 'mcp_server_ids', mcpServerIds)
     appendFormValues(formData, 'rag_collections', ragCollections)
-    appendFormValues(formData, 'integration_keys', integrationKeys)
     for (const file of files) {
       formData.append('attachments', file)
     }
@@ -531,17 +529,15 @@ export function createQuickTask({
       model_id: modelId,
       mcp_server_ids: mcpServerIds,
       rag_collections: ragCollections,
-      integration_keys: integrationKeys,
     },
   })
 }
 
-export function updateQuickTaskDefaults({
+export function updateQuickNodeDefaults({
   defaultAgentId = null,
   defaultModelId = null,
   defaultMcpServerIds = [],
   defaultRagCollections = [],
-  defaultIntegrationKeys = [],
 } = {}) {
   return requestJson('/quick/settings', {
     method: 'POST',
@@ -559,11 +555,6 @@ export function updateQuickTaskDefaults({
         : [],
       default_rag_collections: Array.isArray(defaultRagCollections)
         ? defaultRagCollections
-          .map((value) => String(value || '').trim())
-          .filter((value) => value)
-        : [],
-      default_integration_keys: Array.isArray(defaultIntegrationKeys)
-        ? defaultIntegrationKeys
           .map((value) => String(value || '').trim())
           .filter((value) => value)
         : [],

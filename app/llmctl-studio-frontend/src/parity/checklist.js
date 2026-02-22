@@ -54,11 +54,11 @@ export const parityChecklist = [
   },
   {
     wave: 'Wave 2',
-    area: 'Quick Tasks + Nodes',
+    area: 'Quick Node + Nodes',
     legacyPath: '/quick and /nodes',
     reactPath: '/quick + /nodes + /nodes/new + /nodes/:nodeId',
     status: 'migrated',
-    notes: 'Native React quick task submit, nodes list filters/actions, and node detail lifecycle polling.',
+    notes: 'Native React quick node submit, nodes list filters/actions, and node detail lifecycle polling.',
   },
   {
     wave: 'Wave 3',

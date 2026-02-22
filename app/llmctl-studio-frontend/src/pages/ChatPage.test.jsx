@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import ChatPage from './ChatPage'
+import { FlashContext } from '../lib/flashMessages'
 import {
   archiveChatThread,
   clearChatThread,
@@ -77,13 +78,38 @@ function buildThreadPayload(id, title = `Thread ${id}`) {
 }
 
 function renderPage(initialEntry = '/chat?thread_id=1') {
-  return render(
+  return renderWithFlash(initialEntry)
+}
+
+function renderWithFlash(initialEntry = '/chat?thread_id=1', flash = null) {
+  const page = (
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/chat" element={<ChatPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+  if (!flash) {
+    return render(page)
+  }
+  return render(
+    <FlashContext.Provider value={flash}>
+      {page}
+    </FlashContext.Provider>,
+  )
+}
+
+function buildFlashMock() {
+  return {
+    items: [],
+    push: vi.fn(),
+    clear: vi.fn(),
+    dismiss: vi.fn(),
+    info: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn(),
+  }
 }
 
 describe('ChatPage', () => {
@@ -201,6 +227,24 @@ describe('ChatPage', () => {
 
     await waitFor(() => {
       expect(sendChatTurn).toHaveBeenCalledWith(2, 'hello new thread')
+    })
+  })
+
+  test('emits warning flash when runtime includes integration warnings', async () => {
+    const runtime = buildRuntimePayload()
+    runtime.integration_warnings = [
+      "Skipping integration 'github' for github: GitHub repo is not configured.",
+    ]
+    getChatRuntime.mockResolvedValueOnce(runtime)
+    const flash = buildFlashMock()
+
+    renderWithFlash('/chat?thread_id=1', flash)
+
+    await screen.findByRole('button', { name: /send/i })
+    await waitFor(() => {
+      expect(flash.warning).toHaveBeenCalledWith(
+        expect.stringContaining("Skipping integration 'github'"),
+      )
     })
   })
 })

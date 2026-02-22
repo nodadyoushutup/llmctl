@@ -47,7 +47,7 @@ def _build_code_review_prompt(
     return "\n".join(lines)
 
 
-def _build_quick_task_prompt(agent: Agent, prompt: str) -> str:
+def _build_quick_node_prompt(agent: Agent, prompt: str) -> str:
     payload: dict[str, object] = {
         "prompt": prompt,
         "output_instructions": OUTPUT_INSTRUCTIONS_ONE_OFF,

@@ -27,6 +27,14 @@ Thread actions:
 Clear deletes thread messages/turns and resets compaction summary state while
 keeping the thread record.
 
+MCP Integration Resolution
+--------------------------
+
+Chat uses MCP-driven integration resolution (`services.mcp_integrations`) for
+selected thread MCP servers. Integration defaults are auto-applied from MCP
+selection, and missing/incomplete mapped integrations are surfaced as warnings
+without blocking execution.
+
 RAG Contract Boundary
 ---------------------
 
@@ -117,6 +125,12 @@ JSON routes:
 - `/api/chat/threads/<thread_id>/clear`
 - `/api/chat/threads/<thread_id>/turn`
 - `/api/chat/activity`
+
+Runtime/config payloads include resolved integration metadata:
+
+- `selected_mcp_server_keys`
+- `selected_integration_keys`
+- `integration_warnings`
 
 Per-turn selector overrides (`model_id`, `response_complexity`,
 `mcp_server_ids`, `rag_collections`)

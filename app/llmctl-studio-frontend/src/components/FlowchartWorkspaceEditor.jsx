@@ -323,6 +323,10 @@ function nodeSupportsRuntimeBindings(nodeType) {
   return normalized !== 'start' && normalized !== 'end'
 }
 
+function nodeSupportsCollectionBindings(nodeType) {
+  return nodeSupportsRuntimeBindings(nodeType)
+}
+
 function nodeSupportsMcpServerBindings(nodeType) {
   const normalized = normalizeNodeType(nodeType)
   return nodeSupportsRuntimeBindings(normalized) && normalized !== 'rag'
@@ -1160,6 +1164,16 @@ function normalizeNodeConfig(config, nodeType = '') {
     nextConfig.mode = normalizeRagMode(nextConfig.mode)
     nextConfig.collections = normalizeRagCollections(nextConfig.collections)
     nextConfig.question_prompt = String(nextConfig.question_prompt || '')
+  }
+  if (nodeSupportsCollectionBindings(normalizedType)) {
+    const normalizedCollections = normalizeRagCollections(nextConfig.collections)
+    if (normalizedCollections.length > 0 || Array.isArray(nextConfig.collections)) {
+      nextConfig.collections = normalizedCollections
+    } else {
+      delete nextConfig.collections
+    }
+  } else {
+    delete nextConfig.collections
   }
   if (!nodeSupportsRuntimeBindings(normalizedType)) {
     delete nextConfig.agent_id
@@ -2189,20 +2203,25 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const selectedSpecializedControls = selectedNode
     ? SPECIALIZED_NODE_CONTROL_REGISTRY[selectedNodeType] || null
     : null
-  const selectedSpecializedConfig = (
-    selectedNode && selectedSpecializedControls
+  const selectedNodeConfig = (
+    selectedNode
       ? normalizeNodeConfig(selectedNode.config, selectedNodeType)
+      : null
+  )
+  const selectedSpecializedConfig = (
+    selectedNodeConfig && selectedSpecializedControls
+      ? selectedNodeConfig
       : null
   )
   const selectedRagConfig = (
     selectedNode && selectedNodeType === 'rag'
-      ? normalizeNodeConfig(selectedNode.config, selectedNodeType)
+      ? selectedNodeConfig
       : null
   )
   const selectedRagMode = normalizeRagMode(selectedRagConfig?.mode)
   const ragModeRequiresEmbeddingModel = selectedNodeType === 'rag'
     && (selectedRagMode === RAG_MODE_FRESH_INDEX || selectedRagMode === RAG_MODE_DELTA_INDEX)
-  const selectedRagCollectionSet = new Set(normalizeRagCollections(selectedRagConfig?.collections))
+  const selectedNodeCollectionSet = new Set(normalizeRagCollections(selectedNodeConfig?.collections))
   const selectedPlanConfig = (
     selectedNode && selectedNodeType === 'plan'
       ? selectedSpecializedConfig
@@ -2782,8 +2801,10 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       }
       if (normalizedType !== 'rag') {
         delete nextConfig.mode
-        delete nextConfig.collections
         delete nextConfig.question_prompt
+      }
+      if (!nodeSupportsCollectionBindings(normalizedType)) {
+        delete nextConfig.collections
       }
       if (!SPECIALIZED_NODE_TYPES.has(normalizedType)) {
         delete nextConfig.action
@@ -3962,51 +3983,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     ))}
                   </select>
                 </label>
-                <PersistedDetails
-                  className="chat-picker chat-picker-group flow-ws-mcp-picker"
-                  storageKey="flow-ws:inspector:rag-collections"
-                  defaultOpen
-                >
-                  <summary>
-                    <span className="chat-picker-summary">
-                      <i className="fa-solid fa-database" />
-                      <span>collections</span>
-                    </span>
-                  </summary>
-                  {ragCollectionOptions.length > 0 ? (
-                    <div className="chat-checklist flow-ws-mcp-checklist">
-                      {ragCollectionOptions.map((option) => (
-                        <label key={option.id} className="flow-ws-mcp-option">
-                          <input
-                            type="checkbox"
-                            checked={selectedRagCollectionSet.has(option.id)}
-                            onChange={(event) => {
-                              const nextChecked = Boolean(event.target.checked)
-                              updateNode(selectedNode.token, (current) => {
-                                const nextConfig = current.config && typeof current.config === 'object'
-                                  ? { ...current.config }
-                                  : {}
-                                const currentCollections = normalizeRagCollections(nextConfig.collections)
-                                nextConfig.collections = nextChecked
-                                  ? normalizeRagCollections([...currentCollections, option.id])
-                                  : currentCollections.filter((collectionId) => collectionId !== option.id)
-                                return {
-                                  ...current,
-                                  config: nextConfig,
-                                }
-                              })
-                            }}
-                          />
-                          <span className="flow-ws-mcp-option-content">
-                            <span className="flow-ws-mcp-option-title">{option.label}</span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="toolbar-meta">No RAG collections available.</p>
-                  )}
-                </PersistedDetails>
                 {selectedRagMode === RAG_MODE_QUERY ? (
                   <label className="field">
                     <span>query prompt</span>
@@ -4022,7 +3998,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     />
                   </label>
                 ) : null}
-                {selectedRagCollectionSet.size === 0 ? (
+                {selectedNodeCollectionSet.size === 0 ? (
                   <p className="error-text">RAG nodes require at least one selected collection.</p>
                 ) : null}
                 {selectedRagMode === RAG_MODE_QUERY && !String(selectedRagConfig.question_prompt || '').trim() ? (
@@ -4035,6 +4011,53 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   <p className="error-text">Index modes require an embedding model selection.</p>
                 ) : null}
               </div>
+            ) : null}
+            {selectedNode && nodeSupportsCollectionBindings(selectedNodeType) ? (
+              <PersistedDetails
+                className="chat-picker chat-picker-group flow-ws-mcp-picker"
+                storageKey="flow-ws:inspector:collections"
+                defaultOpen
+              >
+                <summary>
+                  <span className="chat-picker-summary">
+                    <i className="fa-solid fa-database" />
+                    <span>collections</span>
+                  </span>
+                </summary>
+                {ragCollectionOptions.length > 0 ? (
+                  <div className="chat-checklist flow-ws-mcp-checklist">
+                    {ragCollectionOptions.map((option) => (
+                      <label key={option.id} className="flow-ws-mcp-option">
+                        <input
+                          type="checkbox"
+                          checked={selectedNodeCollectionSet.has(option.id)}
+                          onChange={(event) => {
+                            const nextChecked = Boolean(event.target.checked)
+                            updateNode(selectedNode.token, (current) => {
+                              const nextConfig = current.config && typeof current.config === 'object'
+                                ? { ...current.config }
+                                : {}
+                              const currentCollections = normalizeRagCollections(nextConfig.collections)
+                              nextConfig.collections = nextChecked
+                                ? normalizeRagCollections([...currentCollections, option.id])
+                                : currentCollections.filter((collectionId) => collectionId !== option.id)
+                              return {
+                                ...current,
+                                config: nextConfig,
+                              }
+                            })
+                          }}
+                        />
+                        <span className="flow-ws-mcp-option-content">
+                          <span className="flow-ws-mcp-option-title">{option.label}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="toolbar-meta">No collections available.</p>
+                )}
+              </PersistedDetails>
             ) : null}
             {selectedPlanNodeNeedsCompletionTarget ? (
               <p className="error-text">Complete plan item requires plan item id, stage+task keys, or completion source path.</p>

@@ -5,7 +5,7 @@ import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
 import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
-import { createQuickTask, getQuickTaskMeta, updateQuickTaskDefaults } from '../lib/studioApi'
+import { createQuickNode, getQuickNodeMeta, updateQuickNodeDefaults } from '../lib/studioApi'
 
 function errorMessage(error, fallback) {
   if (error instanceof HttpError) {
@@ -46,7 +46,7 @@ function mergeAttachments(current, incoming) {
   return merged
 }
 
-export default function QuickTaskPage() {
+export default function QuickNodePage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, payload: null, error: '' })
   const [validationError, setValidationError] = useState('')
@@ -64,12 +64,11 @@ export default function QuickTaskPage() {
     modelId: '',
     mcpServerIds: [],
     ragCollections: [],
-    integrationKeys: [],
   })
 
   useEffect(() => {
     let cancelled = false
-    getQuickTaskMeta()
+    getQuickNodeMeta()
       .then((payload) => {
         if (!cancelled) {
           setState({ loading: false, payload, error: '' })
@@ -77,7 +76,7 @@ export default function QuickTaskPage() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load quick task metadata.') })
+          setState({ loading: false, payload: null, error: errorMessage(error, 'Failed to load quick node metadata.') })
         }
       })
     return () => {
@@ -90,7 +89,6 @@ export default function QuickTaskPage() {
   const models = payload && Array.isArray(payload.models) ? payload.models : []
   const mcpServers = payload && Array.isArray(payload.mcp_servers) ? payload.mcp_servers : []
   const ragCollections = payload && Array.isArray(payload.rag_collections) ? payload.rag_collections : []
-  const integrationOptions = payload && Array.isArray(payload.integration_options) ? payload.integration_options : []
   const defaultModelId = payload && Number.isInteger(payload.default_model_id)
     ? payload.default_model_id
     : null
@@ -113,16 +111,12 @@ export default function QuickTaskPage() {
     if (initialized || !payload) {
       return
     }
-    const selectedIntegrationKeys = Array.isArray(payload.selected_integration_keys)
-      ? payload.selected_integration_keys.map((value) => String(value))
-      : []
     setForm((current) => ({
       ...current,
       agentId: defaultAgentId ? String(defaultAgentId) : '',
       modelId: defaultModelId ? String(defaultModelId) : '',
       mcpServerIds: selectedMcpServerIds,
       ragCollections: selectedRagCollections,
-      integrationKeys: selectedIntegrationKeys,
     }))
     setQuickDefaultsDirty(false)
     setInitialized(true)
@@ -146,12 +140,11 @@ export default function QuickTaskPage() {
     setActionInfo('')
     setSaveDefaultsBusy(true)
     try {
-      const response = await updateQuickTaskDefaults({
+      const response = await updateQuickNodeDefaults({
         defaultAgentId: parseOptionalId(form.agentId),
         defaultModelId: parseOptionalId(form.modelId),
         defaultMcpServerIds: form.mcpServerIds.map((value) => Number(value)),
         defaultRagCollections: form.ragCollections,
-        defaultIntegrationKeys: form.integrationKeys,
       })
       const defaults = response && typeof response === 'object' && response.quick_default_settings && typeof response.quick_default_settings === 'object'
         ? response.quick_default_settings
@@ -164,7 +157,6 @@ export default function QuickTaskPage() {
             default_model_id: defaults.default_model_id ?? null,
             selected_mcp_server_ids: Array.isArray(defaults.default_mcp_server_ids) ? defaults.default_mcp_server_ids : [],
             selected_rag_collections: Array.isArray(defaults.default_rag_collections) ? defaults.default_rag_collections : [],
-            selected_integration_keys: Array.isArray(defaults.default_integration_keys) ? defaults.default_integration_keys : [],
           }
           : null
         if (nextPayload) {
@@ -196,13 +188,12 @@ export default function QuickTaskPage() {
     }
     setSaving(true)
     try {
-      const payload = await createQuickTask({
+      const payload = await createQuickNode({
         prompt,
         agentId: parseOptionalId(form.agentId),
         modelId,
         mcpServerIds: form.mcpServerIds.map((value) => Number(value)),
         ragCollections: form.ragCollections,
-        integrationKeys: form.integrationKeys,
         attachments,
       })
       const taskId = payload && Number.isInteger(payload.task_id) ? payload.task_id : null
@@ -212,7 +203,7 @@ export default function QuickTaskPage() {
       }
       navigate('/nodes')
     } catch (error) {
-      setActionError(errorMessage(error, 'Failed to send quick task.'))
+      setActionError(errorMessage(error, 'Failed to send quick node.'))
     } finally {
       setSaving(false)
     }
@@ -244,11 +235,11 @@ export default function QuickTaskPage() {
   }
 
   return (
-    <section className="quick-node-shell" aria-label="Quick task">
-      {state.loading ? <p className="muted">Loading quick task metadata...</p> : null}
+    <section className="quick-node-shell" aria-label="Quick Node">
+      {state.loading ? <p className="muted">Loading quick node metadata...</p> : null}
       {state.error ? <p className="error-text">{state.error}</p> : null}
       {validationError ? <p className="error-text">{validationError}</p> : null}
-      <form className="quick-node-form" id="quick-task-form" onSubmit={handleSubmit}>
+      <form className="quick-node-form" id="quick-node-form" onSubmit={handleSubmit}>
         <article className="quick-node-panel quick-node-controls">
           <PanelHeader
             title="Quick Node"
@@ -425,43 +416,9 @@ export default function QuickTaskPage() {
                         )}
                       </PersistedDetails>
 
-                      <PersistedDetails
-                        className="chat-picker chat-picker-group"
-                        storageKey="quick:integrations"
-                      >
-                        <summary>
-                          <span className="chat-picker-summary">
-                            <i className="fa-solid fa-link" />
-                            <span>Integrations</span>
-                          </span>
-                        </summary>
-                        {integrationOptions.length > 0 ? (
-                          <div className="chat-checklist">
-                            {integrationOptions.map((option) => {
-                              const key = String(option.key)
-                              const checked = form.integrationKeys.includes(key)
-                              return (
-                                <label key={key}>
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleDefaultList('integrationKeys', key)}
-                                  />
-                                  <span>
-                                    {option.label}{' '}
-                                    <span className="muted">({option.connected ? 'configured' : 'not configured'})</span>
-                                  </span>
-                                </label>
-                              )
-                            })}
-                          </div>
-                        ) : (
-                          <p className="muted chat-picker-empty">No integrations available.</p>
-                        )}
-                      </PersistedDetails>
                     </div>
                     <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                      Selected integrations are injected into prompt context.
+                      Integrations are auto-applied from selected MCP servers.
                     </span>
                     <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
                       Collections and MCP servers are saved with Quick defaults.

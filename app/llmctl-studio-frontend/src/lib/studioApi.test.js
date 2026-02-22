@@ -20,7 +20,7 @@ import {
   createNode,
   createPlanStage,
   createPlanTask,
-  createQuickTask,
+  createQuickNode,
   clearChatThread,
   deleteAgent,
   deleteAgentPriority,
@@ -117,7 +117,7 @@ import {
   getPlanEdit,
   getPlanMeta,
   getPlans,
-  getQuickTaskMeta,
+  getQuickNodeMeta,
   getRole,
   getRoleEdit,
   getRoleMeta,
@@ -184,7 +184,7 @@ import {
   updatePlan,
   updatePlanStage,
   updatePlanTask,
-  updateQuickTaskDefaults,
+  updateQuickNodeDefaults,
   updateAgent,
   updateAgentPriority,
   updateRole,
@@ -412,7 +412,7 @@ describe('studioApi', () => {
     createNode({
       agentId: 3,
       prompt: 'run this',
-      integrationKeys: ['github'],
+      mcpServerIds: [4],
       scriptIdsByType: { pre_init: [1] },
       scriptIds: [2],
     })
@@ -430,7 +430,7 @@ describe('studioApi', () => {
       body: {
         agent_id: 3,
         prompt: 'run this',
-        integration_keys: ['github'],
+        mcp_server_ids: [4],
         script_ids_by_type: { pre_init: [1] },
         script_ids: [2],
       },
@@ -446,7 +446,7 @@ describe('studioApi', () => {
     createNode({
       agentId: 3,
       prompt: 'run this',
-      integrationKeys: ['github', 'jira'],
+      mcpServerIds: [4, 5],
       scriptIdsByType: { pre_init: [1, 2] },
       scriptIds: [9],
       attachments: [attachment],
@@ -463,26 +463,24 @@ describe('studioApi', () => {
     const formData = options.body
     expect(formData.get('agent_id')).toBe('3')
     expect(formData.get('prompt')).toBe('run this')
-    expect(formData.getAll('integration_keys')).toEqual(['github', 'jira'])
+    expect(formData.getAll('mcp_server_ids')).toEqual(['4', '5'])
     expect(formData.getAll('pre_init_script_ids')).toEqual(['1', '2'])
     expect(formData.getAll('script_ids')).toEqual(['9'])
     expect(formData.getAll('attachments')).toEqual([attachment])
   })
 
   test('stage 3 quick endpoint maps to expected api paths', () => {
-    getQuickTaskMeta()
-    createQuickTask({
+    getQuickNodeMeta()
+    createQuickNode({
       prompt: 'hello',
       agentId: 2,
       modelId: 3,
       mcpServerIds: [4],
-      integrationKeys: ['github'],
     })
-    updateQuickTaskDefaults({
+    updateQuickNodeDefaults({
       defaultAgentId: 2,
       defaultModelId: 3,
       defaultMcpServerIds: [4],
-      defaultIntegrationKeys: ['github'],
     })
 
     expect(requestJson).toHaveBeenNthCalledWith(1, '/quick')
@@ -493,7 +491,7 @@ describe('studioApi', () => {
         agent_id: 2,
         model_id: 3,
         mcp_server_ids: [4],
-        integration_keys: ['github'],
+        rag_collections: [],
       },
     })
     expect(requestJson).toHaveBeenNthCalledWith(3, '/quick/settings', {
@@ -502,19 +500,18 @@ describe('studioApi', () => {
         default_agent_id: 2,
         default_model_id: 3,
         default_mcp_server_ids: [4],
-        default_integration_keys: ['github'],
+        default_rag_collections: [],
       },
     })
   })
 
   test('stage 3 quick create uses multipart payload when attachments are present', () => {
     const attachment = new File(['quick attachment'], 'quick.txt', { type: 'text/plain' })
-    createQuickTask({
+    createQuickNode({
       prompt: 'hello',
       agentId: 2,
       modelId: 3,
       mcpServerIds: [4],
-      integrationKeys: ['github'],
       attachments: [attachment],
     })
 
@@ -531,7 +528,6 @@ describe('studioApi', () => {
     expect(formData.get('agent_id')).toBe('2')
     expect(formData.get('model_id')).toBe('3')
     expect(formData.getAll('mcp_server_ids')).toEqual(['4'])
-    expect(formData.getAll('integration_keys')).toEqual(['github'])
     expect(formData.getAll('attachments')).toEqual([attachment])
   })
 

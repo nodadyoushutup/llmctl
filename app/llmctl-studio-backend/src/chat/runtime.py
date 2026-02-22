@@ -62,6 +62,7 @@ from core.models import (
     chat_thread_mcp_servers,
 )
 from services.integrations import load_integration_settings, resolve_default_model_id
+from services.mcp_integrations import resolve_effective_integrations_from_mcp
 from services.tasks import (
     execute_llm_call_via_execution_router,
     llm_completed_process_from_execution_result,
@@ -773,22 +774,20 @@ class TurnResult:
 
 
 def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
-    selected_keys = {
-        str(key or "").strip().lower()
-        for key in selected_mcp_server_keys
-        if str(key or "").strip()
-    }
+    resolution = resolve_effective_integrations_from_mcp(selected_mcp_server_keys)
+    selected_keys = set(resolution.selected_mcp_server_keys)
+    configured_keys = set(resolution.configured_integration_keys)
     if not selected_keys:
         return []
 
     lines: list[str] = []
-    if "github" in selected_keys:
+    if "github" in configured_keys:
         github = load_integration_settings("github")
         repo = (github.get("repo") or "").strip()
         if repo:
             lines.append(f"GitHub default repository: {repo}.")
 
-    if {"atlassian", "jira"} & selected_keys:
+    if "jira" in configured_keys:
         jira = load_integration_settings("jira")
         jira_parts: list[str] = []
         jira_site = (jira.get("site") or "").strip()
@@ -805,6 +804,7 @@ def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
         if jira_parts:
             lines.append("Jira defaults: " + "; ".join(jira_parts) + ".")
 
+    if "confluence" in configured_keys:
         confluence = load_integration_settings("confluence")
         confluence_parts: list[str] = []
         confluence_site = (confluence.get("site") or "").strip()
@@ -854,6 +854,9 @@ def _mcp_integration_context(selected_mcp_server_keys: list[str]) -> list[str]:
             chroma_parts.append(f"ssl {ssl}")
         if chroma_parts:
             lines.append("ChromaDB defaults: " + "; ".join(chroma_parts) + ".")
+
+    for warning in resolution.warnings:
+        lines.append(f"Integration warning: {warning}")
 
     return lines
 

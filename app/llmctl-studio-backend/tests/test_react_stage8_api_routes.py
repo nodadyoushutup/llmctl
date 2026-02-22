@@ -172,12 +172,22 @@ class Stage8ApiRouteTests(unittest.TestCase):
                 ),
             )
 
-    def _create_mcp_server(self, *, name: str = "MCP Test") -> MCPServer:
+    def _create_mcp_server(
+        self,
+        *,
+        name: str = "MCP Test",
+        server_key: str | None = None,
+    ) -> MCPServer:
+        resolved_server_key = (
+            str(server_key).strip()
+            if str(server_key or "").strip()
+            else f"{name.lower().replace(' ', '-')}-{uuid.uuid4().hex[:8]}"
+        )
         with session_scope() as session:
             return MCPServer.create(
                 session,
                 name=name,
-                server_key=f"{name.lower().replace(' ', '-')}-{uuid.uuid4().hex[:8]}",
+                server_key=resolved_server_key,
                 description="test",
                 config_json=json.dumps({"command": "python3", "args": ["-V"]}),
                 server_type="custom",
@@ -395,6 +405,8 @@ class Stage8ApiRouteTests(unittest.TestCase):
         self.assertTrue(any(int(item.get("id") or 0) == model.id for item in runtime_payload.get("models", [])))
         self.assertTrue(any(int(item.get("id") or 0) == mcp_server.id for item in runtime_payload.get("mcp_servers", [])))
         self.assertTrue(any(int(item.get("id") or 0) == thread_id for item in runtime_payload.get("threads", [])))
+        self.assertEqual([], runtime_payload.get("selected_integration_keys"))
+        self.assertEqual([], runtime_payload.get("integration_warnings"))
 
         clear = self.client.post(f"/api/chat/threads/{thread_id}/clear")
         self.assertEqual(200, clear.status_code)
@@ -415,6 +427,42 @@ class Stage8ApiRouteTests(unittest.TestCase):
             any(int(item.get("id") or 0) == thread_id for item in runtime_after_archive_payload.get("threads", []))
         )
 
+    def test_chat_runtime_reports_integration_warnings_for_selected_integrated_mcp(self) -> None:
+        model = self._create_model(name="Chat Integration Warning Model")
+        github_server = self._create_mcp_server(
+            name="GitHub MCP",
+            server_key="github",
+        )
+
+        create = self.client.post(
+            "/api/chat/threads",
+            json={
+                "title": "Runtime Warning",
+                "model_id": model.id,
+                "mcp_server_ids": [github_server.id],
+                "rag_collections": [],
+            },
+        )
+        self.assertEqual(200, create.status_code)
+        create_payload = create.get_json() or {}
+        self.assertTrue(bool(create_payload.get("ok")))
+        self.assertEqual([], create_payload.get("selected_integration_keys"))
+        create_warnings = create_payload.get("integration_warnings") or []
+        self.assertTrue(create_warnings)
+        self.assertIn("Skipping integration 'github'", str(create_warnings[0]))
+        thread_payload = create_payload.get("thread") or {}
+        thread_id = int(thread_payload.get("id") or 0)
+        self.assertGreater(thread_id, 0)
+
+        runtime = self.client.get(f"/api/chat/runtime?thread_id={thread_id}")
+        self.assertEqual(200, runtime.status_code)
+        runtime_payload = runtime.get_json() or {}
+        self.assertEqual([github_server.server_key], runtime_payload.get("selected_mcp_server_keys"))
+        self.assertEqual([], runtime_payload.get("selected_integration_keys"))
+        runtime_warnings = runtime_payload.get("integration_warnings") or []
+        self.assertTrue(runtime_warnings)
+        self.assertIn("Skipping integration 'github'", str(runtime_warnings[0]))
+
     def test_quick_settings_defaults_roundtrip_json(self) -> None:
         model = self._create_model(name="Quick Defaults Model")
         mcp_server = self._create_mcp_server(name="Quick Defaults MCP")
@@ -425,7 +473,6 @@ class Stage8ApiRouteTests(unittest.TestCase):
                 "default_agent_id": None,
                 "default_model_id": model.id,
                 "default_mcp_server_ids": [mcp_server.id],
-                "default_integration_keys": ["github"],
             },
         )
         self.assertEqual(200, save.status_code)
@@ -434,14 +481,14 @@ class Stage8ApiRouteTests(unittest.TestCase):
         quick_default_settings = save_payload.get("quick_default_settings") or {}
         self.assertEqual(model.id, quick_default_settings.get("default_model_id"))
         self.assertEqual([mcp_server.id], quick_default_settings.get("default_mcp_server_ids"))
-        self.assertEqual(["github"], quick_default_settings.get("default_integration_keys"))
+        self.assertEqual([], quick_default_settings.get("default_integration_keys"))
 
         meta = self.client.get("/api/quick")
         self.assertEqual(200, meta.status_code)
         meta_payload = meta.get_json() or {}
         self.assertEqual(model.id, meta_payload.get("default_model_id"))
         self.assertEqual([mcp_server.id], meta_payload.get("selected_mcp_server_ids"))
-        self.assertEqual(["github"], meta_payload.get("selected_integration_keys"))
+        self.assertEqual([], meta_payload.get("selected_integration_keys"))
 
     def test_flowchart_catalog_handles_memories_without_title_field(self) -> None:
         self._create_memory(description="Remember to validate deployment readiness before promotion.")

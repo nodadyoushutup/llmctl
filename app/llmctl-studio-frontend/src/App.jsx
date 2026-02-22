@@ -21,7 +21,7 @@ import RunNewPage from './pages/RunNewPage'
 import NodesPage from './pages/NodesPage'
 import NodeDetailPage from './pages/NodeDetailPage'
 import NodeNewPage from './pages/NodeNewPage'
-import QuickTaskPage from './pages/QuickTaskPage'
+import QuickNodePage from './pages/QuickNodePage'
 import PlansPage from './pages/PlansPage'
 import PlanDetailPage from './pages/PlanDetailPage'
 import PlanEditPage from './pages/PlanEditPage'
@@ -106,7 +106,7 @@ export default function App() {
         <Route path="/runs/new" element={<AppLayout><RunNewPage /></AppLayout>} />
         <Route path="/runs/:runId" element={<AppLayout><RunDetailPage /></AppLayout>} />
         <Route path="/runs/:runId/edit" element={<AppLayout><RunEditPage /></AppLayout>} />
-        <Route path="/quick" element={<AppLayout><QuickTaskPage /></AppLayout>} />
+        <Route path="/quick" element={<AppLayout><QuickNodePage /></AppLayout>} />
         <Route path="/nodes" element={<AppLayout><NodesPage /></AppLayout>} />
         <Route path="/nodes/new" element={<AppLayout><NodeNewPage /></AppLayout>} />
         <Route path="/nodes/:nodeId" element={<AppLayout><NodeDetailPage /></AppLayout>} />

@@ -43,6 +43,7 @@ from services.integrations import (
     resolve_enabled_llm_providers,
     resolve_llm_provider,
 )
+from services.mcp_integrations import resolve_effective_integrations_from_mcp
 from services.execution.contracts import (
     EXECUTION_CONTRACT_VERSION,
     EXECUTION_STATUS_SUCCESS,
@@ -179,7 +180,7 @@ from core.task_stages import TASK_STAGE_LABELS, TASK_STAGE_ORDER
 from core.task_kinds import (
     RAG_QUICK_DELTA_TASK_KIND,
     RAG_QUICK_INDEX_TASK_KIND,
-    is_quick_task_kind,
+    is_quick_node_kind,
 )
 from core.quick_node import (
     build_quick_node_agent_info,
@@ -410,6 +411,31 @@ def _task_execution_mode(
                 if quick_mode:
                     return quick_mode
     return None
+
+
+def _task_output_payload(task: AgentTask) -> dict[str, Any]:
+    raw_output = str(task.output or "").strip()
+    if not raw_output.startswith("{"):
+        return {}
+    try:
+        output_payload = json.loads(raw_output)
+    except json.JSONDecodeError:
+        return {}
+    return output_payload if isinstance(output_payload, dict) else {}
+
+
+def _normalize_string_list(raw_values: Any) -> list[str]:
+    if not isinstance(raw_values, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_values:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
 
 
 def _kubernetes_job_name_from_dispatch_id(provider_dispatch_id: Any) -> str:
@@ -1179,6 +1205,21 @@ def _task_runtime_metadata(
 
 
 def _task_event_payload(task: AgentTask) -> dict[str, Any]:
+    output_payload = _task_output_payload(task)
+    output_integration_keys = _normalize_string_list(
+        output_payload.get("integration_keys")
+    )
+    output_integration_warnings = _normalize_string_list(
+        output_payload.get("integration_warnings")
+    )
+    output_mcp_server_keys = _normalize_string_list(
+        output_payload.get("mcp_server_keys")
+    )
+    configured_integration_keys = (
+        sorted(parse_task_integration_keys(task.integration_keys_json) or set())
+        if task.integration_keys_json is not None
+        else []
+    )
     return {
         "task_id": int(task.id),
         "status": str(task.status),
@@ -1192,6 +1233,13 @@ def _task_event_payload(task: AgentTask) -> dict[str, Any]:
         "started_at": _resolve_updated_at_version(task.started_at),
         "finished_at": _resolve_updated_at_version(task.finished_at),
         "updated_at": _resolve_updated_at_version(task.updated_at),
+        "selected_mcp_server_keys": output_mcp_server_keys,
+        "selected_integration_keys": (
+            output_integration_keys
+            if output_integration_keys
+            else configured_integration_keys
+        ),
+        "integration_warnings": output_integration_warnings,
     }
 
 
@@ -3713,7 +3761,7 @@ def _inject_instruction_fallback(
 
 
 def _should_use_prompt_payload(task_kind: str | None) -> bool:
-    return is_quick_task_kind(task_kind)
+    return is_quick_node_kind(task_kind)
 
 
 def _load_prompt_dict(prompt: str) -> dict[str, object] | None:
@@ -4882,10 +4930,10 @@ def run_quick_rag_task(self, task_id: int) -> None:
 
 @celery_app.task(bind=True)
 def run_agent_task(self, task_id: int) -> None:
-    _execute_quick_task_via_execution_router(task_id, celery_task_id=self.request.id)
+    _execute_quick_node_via_execution_router(task_id, celery_task_id=self.request.id)
 
 
-def _execute_quick_task_via_execution_router(
+def _execute_quick_node_via_execution_router(
     task_id: int,
     *,
     celery_task_id: str | None = None,
@@ -5093,7 +5141,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         is_run_task = task.run_id is not None
         agent: Agent | None = None
         if task.agent_id is None:
-            if not is_quick_task_kind(task.kind):
+            if not is_quick_node_kind(task.kind):
                 now = _utcnow()
                 task.status = "failed"
                 task.error = "Agent required."
@@ -5102,7 +5150,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 return
         else:
             agent = session.get(Agent, task.agent_id)
-            if agent is None and not is_quick_task_kind(task.kind):
+            if agent is None and not is_quick_node_kind(task.kind):
                 now = _utcnow()
                 task.status = "failed"
                 task.error = "Agent not found."
@@ -5127,7 +5175,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             selected_model_id = task.model_id
         elif default_model_id is not None:
             selected_model_id = default_model_id
-        elif is_quick_task_kind(task.kind):
+        elif is_quick_node_kind(task.kind):
             selected_model_id = _first_available_model_id(session)
 
         if selected_model_id is not None:
@@ -5255,12 +5303,26 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 "transition": "started",
             },
         )
-        selected_integration_keys = parse_task_integration_keys(
-            task.integration_keys_json
+        selected_mcp_server_keys = [
+            str(server.server_key or "").strip()
+            for server in list(task.mcp_servers or [])
+            if str(server.server_key or "").strip()
+        ]
+        mcp_integration_resolution = resolve_effective_integrations_from_mcp(
+            selected_mcp_server_keys
         )
+        if selected_mcp_server_keys:
+            selected_integration_keys = set(
+                mcp_integration_resolution.configured_integration_keys
+            )
+        else:
+            selected_integration_keys = parse_task_integration_keys(
+                task.integration_keys_json
+            )
+        selected_integration_warnings = list(mcp_integration_resolution.warnings)
         prompt = task.prompt
         task_kind = task.kind
-        if agent is not None and not prompt and not is_quick_task_kind(task.kind):
+        if agent is not None and not prompt and not is_quick_node_kind(task.kind):
             prompt = _render_prompt(agent)
         if prompt is None:
             prompt = ""
@@ -5271,7 +5333,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         payload = _build_task_payload(task.kind, prompt)
         system_contract = _build_system_contract(agent)
         agent_profile = _build_agent_info(agent) if agent is not None else None
-        if agent is None and is_quick_task_kind(task_kind):
+        if agent is None and is_quick_node_kind(task_kind):
             system_contract = build_quick_node_system_contract()
             agent_profile = build_quick_node_agent_info()
         payload = _inject_envelope_core_sections(
@@ -5567,6 +5629,8 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
             )
         else:
             _append_task_log("No MCP servers selected for this task.")
+        for warning in selected_integration_warnings:
+            _append_task_log(f"Integration warning: {warning}")
         if unknown_scripts:
             _append_task_log(
                 f"Skipping {len(unknown_scripts)} script(s) with unknown type."
@@ -9205,6 +9269,7 @@ def _execute_flowchart_task_node(
             if selected_integration_keys is not None
             else None
         ),
+        "integration_warnings": selected_integration_warnings,
         "script_ids": [script.id for script in runnable_scripts],
         "resolved_skill_ids": resolved_skill_ids,
         "resolved_skill_versions": resolved_skill_versions,

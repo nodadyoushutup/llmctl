@@ -842,6 +842,85 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
+  test('renders collections controls for task nodes and emits collection updates', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, config: { task_prompt: 'Use docs' } },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2 }]}
+        catalog={{
+          rag_collections: [
+            { id: 'docs', name: 'Docs', status: 'ready' },
+            { id: 'runbooks', name: 'Runbooks', status: 'ready' },
+          ],
+        }}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    expect(screen.getByText('collections')).toBeTruthy()
+
+    const docsCollectionCheckbox = screen.getByLabelText(/Docs \(ready\)/)
+    expect(docsCollectionCheckbox).toBeTruthy()
+    fireEvent.click(docsCollectionCheckbox)
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const taskNode = payload?.nodes?.find((node) => node.node_type === 'task')
+      expect(taskNode?.config?.collections).toEqual(['docs'])
+    })
+  })
+
+  test('preserves selected collections when changing node type from rag to task', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          {
+            id: 2,
+            node_type: 'rag',
+            x: 520,
+            y: 220,
+            config: { mode: 'query', collections: ['docs'], question_prompt: 'query docs' },
+          },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2 }]}
+        catalog={{
+          rag_collections: [
+            { id: 'docs', name: 'Docs', status: 'ready' },
+          ],
+        }}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    const typeField = screen.getByText('type').closest('label')
+    const typeSelect = typeField?.querySelector('select')
+    expect(typeSelect).toBeTruthy()
+    fireEvent.change(typeSelect, { target: { value: 'task' } })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const convertedNode = payload?.nodes?.find((node) => node.id === 2)
+      expect(convertedNode?.node_type).toBe('task')
+      expect(convertedNode?.config?.collections).toEqual(['docs'])
+    })
+  })
+
   test('filters rag index-mode model options to embedding models only', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(

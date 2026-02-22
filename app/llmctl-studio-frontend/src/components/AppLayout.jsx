@@ -17,7 +17,7 @@ const navSections = [
     items: [
       { id: 'chat', to: '/chat', label: 'Chat', icon: 'fa-solid fa-comments', matchPrefixes: ['/chat', '/chat/activity', '/chat/threads/'] },
       { id: 'flowcharts', to: '/flowcharts', label: 'Flowcharts', icon: 'fa-solid fa-diagram-project' },
-      { id: 'quick', to: '/quick', label: 'Quick Nodes', icon: 'fa-solid fa-comment-dots' },
+      { id: 'quick', to: '/quick', label: 'Quick Node', icon: 'fa-solid fa-comment-dots' },
     ],
   },
   {

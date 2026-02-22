@@ -28,7 +28,7 @@ from core.config import Config
 from core.db import session_scope
 from core.models import AgentTask, MCPServer
 from core.prompt_envelope import build_prompt_envelope, serialize_prompt_envelope
-from core.task_kinds import QUICK_TASK_KIND, RAG_QUICK_INDEX_TASK_KIND
+from core.task_kinds import QUICK_NODE_KIND, RAG_QUICK_INDEX_TASK_KIND
 from services import tasks as studio_tasks
 
 
@@ -351,18 +351,18 @@ class NodeExecutorStage4QuickRagTests(StudioDbTestCase):
         )
 
 
-class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
+class NodeExecutorStage4QuickNodeTests(StudioDbTestCase):
     @staticmethod
     def _quick_prompt_payload() -> str:
         return serialize_prompt_envelope(
             build_prompt_envelope(
                 user_request="Review local code.",
-                task_context={"kind": QUICK_TASK_KIND},
+                task_context={"kind": QUICK_NODE_KIND},
                 output_contract={"format": "markdown"},
             )
         )
 
-    def _create_quick_task(
+    def _create_quick_node(
         self,
         *,
         mcp_server_keys: list[str] | None = None,
@@ -371,7 +371,7 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
             task = AgentTask.create(
                 session,
                 status="queued",
-                kind=QUICK_TASK_KIND,
+                kind=QUICK_NODE_KIND,
                 prompt=self._quick_prompt_payload(),
             )
             for server_key in mcp_server_keys or []:
@@ -408,8 +408,8 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
                 task.mcp_servers.append(server)
             return int(task.id)
 
-    def test_quick_task_dispatches_via_executor_router(self) -> None:
-        task_id = self._create_quick_task(mcp_server_keys=["github"])
+    def test_quick_node_dispatches_via_executor_router(self) -> None:
+        task_id = self._create_quick_node(mcp_server_keys=["github"])
 
         class _StubRoutedRequest:
             def run_metadata_payload(self) -> dict[str, object]:
@@ -501,7 +501,7 @@ class NodeExecutorStage4QuickTaskTests(StudioDbTestCase):
                 stored.provider_dispatch_id,
             )
 
-    def test_non_quick_task_dispatches_via_executor_router(self) -> None:
+    def test_non_quick_node_dispatches_via_executor_router(self) -> None:
         task_id = self._create_standard_task(mcp_server_keys=["github"])
 
         class _StubRoutedRequest:

@@ -129,7 +129,7 @@ class AgentRoleMarkdownStage6Tests(StudioDbTestCase):
             )
             return int(task.id)
 
-    def _create_quick_task_fixture(self, *, provider: str = "codex") -> int:
+    def _create_quick_node_fixture(self, *, provider: str = "codex") -> int:
         with session_scope() as session:
             model = LLMModel.create(
                 session,
@@ -396,8 +396,8 @@ class AgentRoleMarkdownStage6Tests(StudioDbTestCase):
             paths = json.loads(task.instruction_materialized_paths_json or "[]")
             self.assertFalse(any(str(path).endswith("/AGENTS.md") for path in paths))
 
-    def test_quick_task_without_agent_keeps_instruction_snapshot_fields_empty(self) -> None:
-        task_id = self._create_quick_task_fixture(provider="codex")
+    def test_quick_node_without_agent_keeps_instruction_snapshot_fields_empty(self) -> None:
+        task_id = self._create_quick_node_fixture(provider="codex")
 
         def _fake_run_llm(
             provider: str,

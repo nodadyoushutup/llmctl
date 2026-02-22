@@ -66,7 +66,7 @@ from core.models import (
     agent_task_scripts,
     is_legacy_skill_script_type,
 )
-from core.task_kinds import QUICK_TASK_KIND, is_quick_task_kind
+from core.task_kinds import QUICK_NODE_KIND, is_quick_node_kind
 from services.celery_app import celery_app
 from services.code_review import (
     CODE_REVIEW_TASK_KIND,
@@ -98,7 +98,7 @@ from db_utils import (
     _resolve_model,
     _serialize_model,
 )
-from prompts import _build_code_review_prompt, _build_quick_task_prompt
+from prompts import _build_code_review_prompt, _build_quick_node_prompt
 from scripts import _parse_script_ids_by_type, _resolve_script_ids_by_type, _set_script_links
 
 
@@ -4111,7 +4111,7 @@ def register(mcp: FastMCP) -> None:
         """Queue a task for an agent, optionally with scripts and attachments.
 
         Use this to start a standard task run.
-        Prefer enqueue_quick_task for lightweight one-off prompts.
+        Prefer enqueue_quick_node for lightweight one-off prompts.
         Keywords: queue task, run task, start task, agent task.
 
         IDs: agent_id is a numeric LLMCTL Studio agent ID.
@@ -4166,8 +4166,8 @@ def register(mcp: FastMCP) -> None:
                     return {"ok": False, "error": "One or more attachments were not found."}
                 attachment_records.extend(rows)
             task_prompt = prompt
-            if is_quick_task_kind(task_kind):
-                task_prompt = _build_quick_task_prompt(agent, prompt)
+            if is_quick_node_kind(task_kind):
+                task_prompt = _build_quick_node_prompt(agent, prompt)
             task = AgentTask(
                 agent_id=agent_id,
                 status="queued",
@@ -4198,23 +4198,23 @@ def register(mcp: FastMCP) -> None:
         return {"ok": True, "task_id": task_id, "celery_task_id": celery_task.id}
 
     @mcp.tool()
-    def enqueue_quick_task(
+    def enqueue_quick_node(
         agent_id: int,
         prompt: str,
         attachment_ids: list[int] | None = None,
         attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Queue a quick task for an agent.
+        """Queue a quick node for an agent.
 
         Use this for lightweight, single-shot tasks.
-        Keywords: quick task, short task, one-off task.
+        Keywords: quick node, short task, one-off task.
 
         IDs: agent_id is a numeric LLMCTL Studio agent ID.
         """
         return enqueue_task(
             agent_id=agent_id,
             prompt=prompt,
-            kind=QUICK_TASK_KIND,
+            kind=QUICK_NODE_KIND,
             attachment_ids=attachment_ids,
             attachments=attachments,
         )

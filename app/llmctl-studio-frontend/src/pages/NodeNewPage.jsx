@@ -54,7 +54,7 @@ export default function NodeNewPage() {
   const [form, setForm] = useState({
     agentId: '',
     prompt: '',
-    integrationKeys: [],
+    mcpServerIds: [],
     scriptIdsByType: {},
   })
 
@@ -91,8 +91,8 @@ export default function NodeNewPage() {
       : {}),
     [payload],
   )
-  const integrationOptions = useMemo(
-    () => (payload && Array.isArray(payload.integration_options) ? payload.integration_options : []),
+  const mcpServers = useMemo(
+    () => (payload && Array.isArray(payload.mcp_servers) ? payload.mcp_servers : []),
     [payload],
   )
   const scriptTypeChoices = useMemo(
@@ -132,25 +132,27 @@ export default function NodeNewPage() {
     for (const scriptType of scriptTypeValues) {
       defaults[scriptType] = []
     }
-    const selectedIntegrationKeys = Array.isArray(payload.selected_integration_keys)
-      ? payload.selected_integration_keys.map((value) => String(value))
+    const selectedMcpServerIds = Array.isArray(payload.selected_mcp_server_ids)
+      ? payload.selected_mcp_server_ids
+        .map((value) => String(value || '').trim())
+        .filter((value) => value)
       : []
     setForm((current) => ({
       ...current,
-      integrationKeys: selectedIntegrationKeys,
+      mcpServerIds: selectedMcpServerIds,
       scriptIdsByType: defaults,
     }))
     setInitialized(true)
   }, [initialized, payload, scriptTypeValues])
 
-  function toggleIntegration(key) {
+  function toggleMcpServer(serverId) {
     setForm((current) => {
-      const exists = current.integrationKeys.includes(key)
+      const exists = current.mcpServerIds.includes(serverId)
       return {
         ...current,
-        integrationKeys: exists
-          ? current.integrationKeys.filter((value) => value !== key)
-          : [...current.integrationKeys, key],
+        mcpServerIds: exists
+          ? current.mcpServerIds.filter((value) => value !== serverId)
+          : [...current.mcpServerIds, serverId],
       }
     })
   }
@@ -193,7 +195,7 @@ export default function NodeNewPage() {
       const payload = await createNode({
         agentId: parsedAgentId,
         prompt,
-        integrationKeys: form.integrationKeys,
+        mcpServerIds: form.mcpServerIds.map((value) => Number(value)),
         scriptIdsByType: form.scriptIdsByType,
         attachments,
       })
@@ -279,30 +281,33 @@ export default function NodeNewPage() {
               ) : null}
             </label>
             <fieldset className="field field-span">
-              <span>Integrations (optional)</span>
-              {integrationOptions.length > 0 ? (
+              <span>MCP Servers (optional)</span>
+              {mcpServers.length > 0 ? (
                 <div className="checkbox-grid">
-                  {integrationOptions.map((option) => {
-                    const key = String(option.key)
-                    const checked = form.integrationKeys.includes(key)
+                  {mcpServers.map((server) => {
+                    const serverId = String(server.id)
+                    const checked = form.mcpServerIds.includes(serverId)
                     return (
-                      <label key={key} className="checkbox-item">
+                      <label key={serverId} className="checkbox-item">
                         <input
                           type="checkbox"
                           checked={checked}
-                          onChange={() => toggleIntegration(key)}
+                          onChange={() => toggleMcpServer(serverId)}
                         />
                         <span>
-                          {option.label}{' '}
-                          <span className="toolbar-meta">({option.connected ? 'configured' : 'not configured'})</span>
+                          {server.name}{' '}
+                          <span className="toolbar-meta">({String(server.server_key || '').trim() || 'custom'})</span>
                         </span>
                       </label>
                     )
                   })}
                 </div>
               ) : (
-                <p className="toolbar-meta">No integrations available.</p>
+                <p className="toolbar-meta">No MCP servers available.</p>
               )}
+              <span className="toolbar-meta">
+                Integrations are auto-applied from selected MCP servers.
+              </span>
             </fieldset>
             <fieldset className="field field-span">
               <span>Scripts (optional)</span>

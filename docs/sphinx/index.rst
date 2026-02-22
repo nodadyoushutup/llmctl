@@ -8,6 +8,7 @@ Technical reference for llmctl runtime surfaces.
    :caption: Runtime Guides
 
    chat_runtime
+   mcp_integration_auto_apply
    provider_runtime
    node_executor_runtime
    agent_runtime_migration_runbook

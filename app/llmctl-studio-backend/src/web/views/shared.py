@@ -92,6 +92,7 @@ from services.instruction_adapters import (
     is_frontier_instruction_provider,
     validate_agent_markdown_filename,
 )
+from services.mcp_integrations import resolve_effective_integrations_from_mcp
 from core.models import (
     Agent,
     AgentPriority,
@@ -219,11 +220,11 @@ from storage.script_storage import read_script_file, remove_script_file, write_s
 from storage.attachment_storage import remove_attachment_file, write_attachment_file
 from core.task_stages import TASK_STAGE_ORDER
 from core.task_kinds import (
-    QUICK_TASK_KIND,
+    QUICK_NODE_KIND,
     RAG_QUICK_DELTA_TASK_KIND,
     RAG_QUICK_INDEX_TASK_KIND,
     is_quick_rag_task_kind,
-    is_quick_task_kind,
+    is_quick_node_kind,
     task_kind_label,
 )
 from services.skills import (
@@ -2158,16 +2159,7 @@ def _resolved_quick_default_settings(
         for item in rag_collections
         if str(item.get("id") or "").strip()
     }
-    integration_option_keys = {
-        str(option.get("key") or "").strip()
-        for option in integration_options
-        if str(option.get("key") or "").strip()
-    }
-    connected_integration_keys = [
-        str(option.get("key") or "").strip()
-        for option in integration_options
-        if str(option.get("key") or "").strip() and bool(option.get("connected"))
-    ]
+    mcp_server_by_id = {server.id: server for server in mcp_servers}
 
     resolved_agent_id: int | None = None
     try:
@@ -2209,24 +2201,25 @@ def _resolved_quick_default_settings(
             continue
         resolved_rag_collections.append(cleaned)
 
-    resolved_integration_keys: list[str] = []
-    if "default_integration_keys" in settings:
-        parsed_integration_keys = _split_csv_values(settings.get("default_integration_keys"))
-        valid_keys, _ = validate_task_integration_keys(parsed_integration_keys)
-        for key in valid_keys:
-            if key in integration_option_keys and key not in resolved_integration_keys:
-                resolved_integration_keys.append(key)
-    else:
-        for key in connected_integration_keys:
-            if key in integration_option_keys and key not in resolved_integration_keys:
-                resolved_integration_keys.append(key)
+    selected_mcp_server_keys: list[str] = []
+    for mcp_id in resolved_mcp_server_ids:
+        server = mcp_server_by_id.get(mcp_id)
+        if server is None:
+            continue
+        key = str(server.server_key or "").strip()
+        if key:
+            selected_mcp_server_keys.append(key)
+    integration_resolution = resolve_effective_integrations_from_mcp(
+        selected_mcp_server_keys
+    )
 
     return {
         "default_agent_id": resolved_agent_id,
         "default_model_id": resolved_model_id,
         "default_mcp_server_ids": resolved_mcp_server_ids,
         "default_rag_collections": resolved_rag_collections,
-        "default_integration_keys": resolved_integration_keys,
+        "default_integration_keys": integration_resolution.configured_integration_keys,
+        "default_integration_warnings": integration_resolution.warnings,
     }
 
 
