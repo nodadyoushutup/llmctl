@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { resolveApiUrl } from '../config/runtime'
 import { HttpError } from '../lib/httpClient'
 import { getAttachment } from '../lib/studioApi'
@@ -75,13 +76,11 @@ export default function AttachmentDetailPage() {
   return (
     <section className="stack" aria-label="Attachment detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{attachment ? attachment.file_name : 'Attachment'}</h2>
-            <p>Attachment metadata and relationship usage.</p>
-          </div>
-          <Link to="/attachments" className="btn-link btn-secondary">All Attachments</Link>
-        </div>
+        <PanelHeader
+          title={attachment ? attachment.file_name : 'Attachment'}
+          actions={<Link to="/attachments" className="btn-link btn-secondary">All Attachments</Link>}
+        />
+        <p className="muted">Attachment metadata and relationship usage.</p>
         {loading ? <p>Loading attachment...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {attachment ? (

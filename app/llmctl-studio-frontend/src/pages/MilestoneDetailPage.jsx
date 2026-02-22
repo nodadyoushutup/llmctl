@@ -145,40 +145,37 @@ export default function MilestoneDetailPage() {
   return (
     <section className="stack" aria-label="Milestone detail">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            <Link to="/milestones" className="btn btn-secondary">
-              <i className="fa-solid fa-arrow-left" />
-              back
-            </Link>
-            {milestone ? (
-              <Link to={`/milestones/${milestone.id}/edit`} className="btn btn-secondary">
-                <i className="fa-solid fa-pen-to-square" />
-                edit
-              </Link>
-            ) : null}
-            {milestone ? (
-              <button
-                type="button"
-                className="icon-button icon-button-danger"
-                aria-label="Delete milestone"
-                title="Delete milestone"
-                disabled={busy}
-                onClick={handleDelete}
-              >
-                <ActionIcon name="trash" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-
         {(!invalidId && state.loading) ? <p>Loading milestone...</p> : null}
         {(invalidId || state.error) ? (
           <p className="error-text">{invalidId ? 'Invalid milestone id.' : state.error}</p>
         ) : null}
         {milestone ? (
           <>
-            <PanelHeader title={milestone.name} />
+            <PanelHeader
+              title={milestone.name}
+              actions={(
+                <div className="table-actions">
+                  <Link to="/milestones" className="btn btn-secondary">
+                    <i className="fa-solid fa-arrow-left" />
+                    back
+                  </Link>
+                  <Link to={`/milestones/${milestone.id}/edit`} className="btn btn-secondary">
+                    <i className="fa-solid fa-pen-to-square" />
+                    edit
+                  </Link>
+                  <button
+                    type="button"
+                    className="icon-button icon-button-danger"
+                    aria-label="Delete milestone"
+                    title="Delete milestone"
+                    disabled={busy}
+                    onClick={handleDelete}
+                  >
+                    <ActionIcon name="trash" />
+                  </button>
+                </div>
+              )}
+            />
             <div className="row" style={{ gap: '8px', marginTop: '12px' }}>
               <span className={statusClass}>{milestone.status_label || milestone.status || '-'}</span>
               <span className={healthClass}>health: {milestone.health_label || milestone.health || '-'}</span>

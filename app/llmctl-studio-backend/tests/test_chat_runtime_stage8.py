@@ -414,6 +414,45 @@ class ChatRuntimeStage8Tests(StudioDbTestCase):
         )
         mocked_llm.assert_not_called()
 
+    def test_rag_selected_without_retrieval_context_allows_turn_with_mcp(self) -> None:
+        model = self._create_model(name="RAG Empty Context With MCP Model")
+        server = self._create_mcp_server(name="MCP With Empty RAG", server_key="github")
+        thread = create_thread(
+            title="RAG Empty Context With MCP",
+            model_id=model.id,
+            rag_collections=["docs"],
+            mcp_server_ids=[server.id],
+        )
+        thread_id = int(thread["id"])
+
+        rag_client = StubRAGContractClient()
+        rag_client.health_result.state = RAG_HEALTH_CONFIGURED_HEALTHY
+        rag_client.retrieval_response.retrieval_context = []
+
+        with patch(
+            "chat.runtime._run_llm",
+            return_value=subprocess.CompletedProcess(["stub"], 0, "assistant reply", ""),
+        ) as mocked_llm:
+            result = execute_turn(
+                thread_id=thread_id,
+                message="summarize repo and github status",
+                rag_client=rag_client,
+            )
+
+        self.assertTrue(result.ok)
+        mocked_llm.assert_called_once()
+        with session_scope() as session:
+            turn = session.execute(
+                select(ChatTurn).where(ChatTurn.id == result.turn_id)
+            ).scalars().first()
+            self.assertIsNotNone(turn)
+            runtime_metadata = json.loads(turn.runtime_metadata_json or "{}") if turn else {}
+            retrieval_stats = runtime_metadata.get("retrieval_stats") or {}
+            self.assertTrue(
+                retrieval_stats.get("rag_context_missing_for_selected_collections")
+            )
+            self.assertEqual(["github"], runtime_metadata.get("selected_mcp_servers"))
+
     def test_rag_retrieval_request_disables_answer_synthesis(self) -> None:
         model = self._create_model(name="RAG Retrieval Request Model")
         thread = create_thread(

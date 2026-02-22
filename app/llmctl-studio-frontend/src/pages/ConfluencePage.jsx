@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getConfluenceWorkspace } from '../lib/studioApi'
 
@@ -60,16 +61,16 @@ export default function ConfluencePage() {
   return (
     <section className="stack" aria-label="Confluence workspace">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Confluence Workspace</h2>
-            <p>Select pages in a space and preview their rendered content.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/integrations/confluence" className="btn-link btn-secondary">Confluence Settings</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-          </div>
-        </div>
+        <PanelHeader
+          title="Confluence Workspace"
+          actions={(
+            <div className="table-actions">
+              <Link to="/settings/integrations/confluence" className="btn-link btn-secondary">Confluence Settings</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+            </div>
+          )}
+        />
+        <p className="muted">Select pages in a space and preview their rendered content.</p>
         {state.loading ? <p>Loading Confluence pages...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {payload?.error ? <p className="error-text">{String(payload.error)}</p> : null}

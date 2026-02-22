@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getPlanMeta } from '../lib/studioApi'
 
@@ -43,10 +44,11 @@ export default function PlanNewPage() {
   return (
     <section className="stack" aria-label="Plan create policy">
       <article className="card">
-        <div className="title-row">
-          <h2>Plans Are Flowchart-Managed</h2>
-          <Link to="/plans" className="btn-link btn-secondary">All Plans</Link>
-        </div>
+        <PanelHeader
+          title="Plans Are Flowchart-Managed"
+          titleTag="h2"
+          actions={<Link to="/plans" className="btn-link btn-secondary">All Plans</Link>}
+        />
         {state.loading ? <p>Loading policy details...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (

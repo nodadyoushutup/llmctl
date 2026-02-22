@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { createAgent, getAgentMeta } from '../lib/studioApi'
 
@@ -85,10 +86,10 @@ export default function AgentNewPage() {
   return (
     <section className="stack" aria-label="Create Agent">
       <article className="card">
-        <div className="title-row">
-          <h2>Create Agent</h2>
-          <Link to="/agents" className="btn-link">All Agents</Link>
-        </div>
+        <PanelHeader
+          title="Create Agent"
+          actions={<Link to="/agents" className="btn-link">All Agents</Link>}
+        />
         {metaError ? <p className="error-text">{metaError}</p> : null}
         {validationError ? <p className="error-text">{validationError}</p> : null}
         <form className="form-grid" onSubmit={handleSubmit}>

@@ -81,17 +81,19 @@ export default function FlowchartHistoryPage() {
   return (
     <section className="stack" aria-label="Flowchart history">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn btn-secondary">
-                <i className="fa-solid fa-arrow-left" />
-                back to flowchart
-              </Link>
-            ) : null}
-          </div>
-        </div>
-        <PanelHeader title="Flowchart History" />
+        <PanelHeader
+          title="Flowchart History"
+          actions={(
+            <div className="table-actions">
+              {parsedFlowchartId ? (
+                <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  back to flowchart
+                </Link>
+              ) : null}
+            </div>
+          )}
+        />
         <p className="muted" style={{ marginTop: '12px' }}>
           {flowchart
             ? `${flowchart.name}. Each run begins at Start. If execution routes back to Start, the current run completes and a new run is queued.`

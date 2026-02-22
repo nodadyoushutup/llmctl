@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getMemoryMeta } from '../lib/studioApi'
 
@@ -43,10 +44,11 @@ export default function MemoryNewPage() {
   return (
     <section className="stack" aria-label="Memory create policy">
       <article className="card">
-        <div className="title-row">
-          <h2>Memories Are Flowchart-Managed</h2>
-          <Link to="/memories" className="btn-link btn-secondary">All Memories</Link>
-        </div>
+        <PanelHeader
+          title="Memories Are Flowchart-Managed"
+          titleTag="h2"
+          actions={<Link to="/memories" className="btn-link btn-secondary">All Memories</Link>}
+        />
         {state.loading ? <p>Loading policy details...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (

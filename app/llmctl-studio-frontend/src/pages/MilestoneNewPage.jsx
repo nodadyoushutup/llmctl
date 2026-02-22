@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getMilestoneMeta } from '../lib/studioApi'
 
@@ -43,10 +44,11 @@ export default function MilestoneNewPage() {
   return (
     <section className="stack" aria-label="Milestone create policy">
       <article className="card">
-        <div className="title-row">
-          <h2>Milestones Are Flowchart-Managed</h2>
-          <Link to="/milestones" className="btn-link btn-secondary">All Milestones</Link>
-        </div>
+        <PanelHeader
+          title="Milestones Are Flowchart-Managed"
+          titleTag="h2"
+          actions={<Link to="/milestones" className="btn-link btn-secondary">All Milestones</Link>}
+        />
         {state.loading ? <p>Loading policy details...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (

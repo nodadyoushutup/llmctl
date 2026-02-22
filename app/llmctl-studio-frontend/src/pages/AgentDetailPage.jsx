@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getAgent, startAgent, stopAgent } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -110,22 +111,22 @@ export default function AgentDetailPage() {
   return (
     <section className="stack" aria-label="Agent detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{agent ? agent.name : 'Agent'}</h2>
-            {agent && agent.description ? <p>{agent.description}</p> : null}
-          </div>
-          <div className="table-actions">
-            {agent ? (
-              <Link to={`/agents/${agent.id}/edit`} className="btn-link">
-                Edit
+        <PanelHeader
+          title={agent ? agent.name : 'Agent'}
+          actions={(
+            <div className="table-actions">
+              {agent ? (
+                <Link to={`/agents/${agent.id}/edit`} className="btn-link">
+                  Edit
+                </Link>
+              ) : null}
+              <Link to="/agents" className="btn-link btn-secondary">
+                All Agents
               </Link>
-            ) : null}
-            <Link to="/agents" className="btn-link btn-secondary">
-              All Agents
-            </Link>
-          </div>
-        </div>
+            </div>
+          )}
+        />
+        {agent && agent.description ? <p className="muted">{agent.description}</p> : null}
         {state.loading ? <p>Loading agent...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

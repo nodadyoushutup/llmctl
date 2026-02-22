@@ -130,22 +130,23 @@ export default function MilestoneEditPage() {
   return (
     <section className="stack" aria-label="Edit milestone">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            {milestone ? (
-              <Link to={`/milestones/${milestone.id}`} className="btn btn-secondary">
-                <i className="fa-solid fa-arrow-left" />
-                back
+        <PanelHeader
+          title="Edit Milestone"
+          actions={(
+            <div className="table-actions">
+              {milestone ? (
+                <Link to={`/milestones/${milestone.id}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  back
+                </Link>
+              ) : null}
+              <Link to="/milestones" className="btn btn-secondary">
+                <i className="fa-solid fa-list" />
+                all milestones
               </Link>
-            ) : null}
-            <Link to="/milestones" className="btn btn-secondary">
-              <i className="fa-solid fa-list" />
-              all milestones
-            </Link>
-          </div>
-        </div>
-
-        <PanelHeader title="Edit Milestone" />
+            </div>
+          )}
+        />
 
         <p className="muted" style={{ marginTop: '12px' }}>
           Update milestone planning, ownership, and delivery details.

@@ -99,22 +99,23 @@ export default function PlanEditPage() {
   return (
     <section className="stack" aria-label="Edit plan">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            {plan ? (
-              <Link to={`/plans/${plan.id}`} className="btn btn-secondary">
-                <i className="fa-solid fa-arrow-left" />
-                back to plan
+        <PanelHeader
+          title="Edit Plan"
+          actions={(
+            <div className="table-actions">
+              {plan ? (
+                <Link to={`/plans/${plan.id}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  back to plan
+                </Link>
+              ) : null}
+              <Link to="/plans" className="btn btn-secondary">
+                <i className="fa-solid fa-list" />
+                all plans
               </Link>
-            ) : null}
-            <Link to="/plans" className="btn btn-secondary">
-              <i className="fa-solid fa-list" />
-              all plans
-            </Link>
-          </div>
-        </div>
-
-        <PanelHeader title="Edit Plan" />
+            </div>
+          )}
+        />
 
         {state.loading ? <p style={{ marginTop: '20px' }}>Loading plan...</p> : null}
         {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}

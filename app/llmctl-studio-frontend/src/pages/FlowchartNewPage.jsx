@@ -93,13 +93,15 @@ export default function FlowchartNewPage() {
   return (
     <section className="stack" aria-label="Create flowchart">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <Link to="/flowcharts" className="btn btn-secondary">
-            <i className="fa-solid fa-arrow-left" />
-            back to flowcharts
-          </Link>
-        </div>
-        <PanelHeader title="Create Flowchart" />
+        <PanelHeader
+          title="Create Flowchart"
+          actions={(
+            <Link to="/flowcharts" className="btn btn-secondary">
+              <i className="fa-solid fa-arrow-left" />
+              back to flowcharts
+            </Link>
+          )}
+        />
         <p className="muted" style={{ marginTop: '12px' }}>
           Start with workflow metadata now. Add nodes and edges in the visual editor after creation.
         </p>

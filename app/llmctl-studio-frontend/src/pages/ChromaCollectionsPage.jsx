@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteChromaCollection, getChromaCollections } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -98,16 +99,16 @@ export default function ChromaCollectionsPage() {
   return (
     <section className="stack" aria-label="Chroma collections">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Chroma Collections</h2>
-            <p>Browse collections, inspect metadata, and remove stale datasets.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/integrations/chroma" className="btn-link btn-secondary">Chroma Settings</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-          </div>
-        </div>
+        <PanelHeader
+          title="Chroma Collections"
+          actions={(
+            <div className="table-actions">
+              <Link to="/settings/integrations/chroma" className="btn-link btn-secondary">Chroma Settings</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+            </div>
+          )}
+        />
+        <p className="muted">Browse collections, inspect metadata, and remove stale datasets.</p>
         <div className="toolbar">
           <div className="toolbar-group">
             <label>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useLocation, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getGithubPullRequest, runGithubPullRequestCodeReview } from '../lib/studioApi'
 
@@ -109,7 +110,7 @@ export default function GithubPullRequestPage() {
     return (
       <section className="stack" aria-label="GitHub pull request detail">
         <article className="card">
-          <h2>GitHub Pull Request</h2>
+          <PanelHeader title="GitHub Pull Request" />
           <p className="error-text">Pull request id must be a positive integer.</p>
         </article>
       </section>
@@ -119,17 +120,17 @@ export default function GithubPullRequestPage() {
   return (
     <section className="stack" aria-label="GitHub pull request detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>GitHub Pull Request</h2>
-            <p>Conversation, commits, checks, and changed-file context.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/github" className="btn-link btn-secondary">Back to GitHub</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-            <button type="button" className="btn-link" onClick={runCodeReview}>Run Code Review</button>
-          </div>
-        </div>
+        <PanelHeader
+          title="GitHub Pull Request"
+          actions={(
+            <div className="table-actions">
+              <Link to="/github" className="btn-link btn-secondary">Back to GitHub</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+              <button type="button" className="btn-link" onClick={runCodeReview}>Run Code Review</button>
+            </div>
+          )}
+        />
+        <p className="muted">Conversation, commits, checks, and changed-file context.</p>
         <div className="toolbar">
           <div className="toolbar-group">
             <Link to={`/github/pulls/${parsedPrNumber}`} className={tab === 'conversation' ? 'btn-link' : 'btn-link btn-secondary'}>Conversation</Link>

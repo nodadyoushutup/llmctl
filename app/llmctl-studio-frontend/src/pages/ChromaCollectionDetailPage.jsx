@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteChromaCollection, getChromaCollection } from '../lib/studioApi'
 
@@ -93,20 +94,20 @@ export default function ChromaCollectionDetailPage() {
   return (
     <section className="stack" aria-label="Chroma collection detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Chroma Collection Detail</h2>
-            <p>Collection metadata and delete controls.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/chroma/collections" className="btn-link btn-secondary">Back to Collections</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-            <button type="button" className="btn-link" onClick={handleDelete}>
-              <i className="fa-solid fa-trash" aria-hidden="true" />
-              Delete
-            </button>
-          </div>
-        </div>
+        <PanelHeader
+          title="Chroma Collection Detail"
+          actions={(
+            <div className="table-actions">
+              <Link to="/chroma/collections" className="btn-link btn-secondary">Back to Collections</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+              <button type="button" className="btn-link" onClick={handleDelete}>
+                <i className="fa-solid fa-trash" aria-hidden="true" />
+                Delete
+              </button>
+            </div>
+          )}
+        />
+        <p className="muted">Collection metadata and delete controls.</p>
         {state.loading ? <p>Loading collection...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

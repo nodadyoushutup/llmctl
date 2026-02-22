@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getNodeStatus, getRun } from '../lib/studioApi'
 import PersistedDetails from '../components/PersistedDetails'
@@ -165,16 +166,16 @@ export default function ExecutionMonitorPage() {
   return (
     <section className="stack" aria-label="Execution monitor">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Execution Monitor</h2>
-            <p>Inspect run and node execution status by id using live API responses.</p>
-          </div>
-          <div className="table-actions">
-            <Link className="btn btn-secondary" to="/runs">Autoruns</Link>
-            <Link className="btn btn-secondary" to="/nodes">Nodes</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Execution Monitor"
+          actions={(
+            <div className="table-actions">
+              <Link className="btn btn-secondary" to="/runs">Autoruns</Link>
+              <Link className="btn btn-secondary" to="/nodes">Nodes</Link>
+            </div>
+          )}
+        />
+        <p className="muted">Inspect run and node execution status by id using live API responses.</p>
       </article>
 
       <section className="card-grid" aria-label="Execution reads">

@@ -149,23 +149,25 @@ export default function FlowchartRunDetailPage() {
   return (
     <section className="stack" aria-label="Flowchart run detail">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            {resolvedFlowchartId ? (
-              <Link to={`/flowcharts/${resolvedFlowchartId}/history`} className="btn btn-secondary">
-                <i className="fa-solid fa-arrow-left" />
-                back to history
-              </Link>
-            ) : null}
-            {resolvedFlowchartId ? (
-              <Link to={`/flowcharts/${resolvedFlowchartId}`} className="btn btn-secondary">
-                <i className="fa-solid fa-diagram-project" />
-                open flowchart
-              </Link>
-            ) : null}
-          </div>
-        </div>
-        <PanelHeader title={flowchartRun ? `Run ${flowchartRun.id}` : 'Flowchart Run'} />
+        <PanelHeader
+          title={flowchartRun ? `Run ${flowchartRun.id}` : 'Flowchart Run'}
+          actions={(
+            <div className="table-actions">
+              {resolvedFlowchartId ? (
+                <Link to={`/flowcharts/${resolvedFlowchartId}/history`} className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  back to history
+                </Link>
+              ) : null}
+              {resolvedFlowchartId ? (
+                <Link to={`/flowcharts/${resolvedFlowchartId}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-diagram-project" />
+                  open flowchart
+                </Link>
+              ) : null}
+            </div>
+          )}
+        />
         {state.loading ? <p>Loading flowchart run...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

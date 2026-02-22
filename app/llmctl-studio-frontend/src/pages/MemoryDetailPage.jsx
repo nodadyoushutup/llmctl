@@ -141,36 +141,6 @@ export default function MemoryDetailPage() {
   return (
     <section className="stack" aria-label="Memory detail">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            <Link to="/memories" className="icon-button" aria-label="Back to memories" title="Back to memories">
-              <i className="fa-solid fa-arrow-left" />
-            </Link>
-            {memory ? (
-              <Link
-                to={`/memories/${memory.id}/edit`}
-                className="icon-button"
-                aria-label="Edit memory"
-                title="Edit memory"
-              >
-                <ActionIcon name="edit" />
-              </Link>
-            ) : null}
-            {memory ? (
-              <button
-                type="button"
-                className="icon-button icon-button-danger"
-                disabled={busy}
-                aria-label="Delete memory"
-                title="Delete memory"
-                onClick={handleDelete}
-              >
-                <ActionIcon name="trash" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-
         {(!invalidId && state.loading) ? <p>Loading memory...</p> : null}
         {(invalidId || state.error) ? (
           <p className="error-text">{invalidId ? 'Invalid memory id.' : state.error}</p>
@@ -178,7 +148,34 @@ export default function MemoryDetailPage() {
 
         {memory ? (
           <>
-            <PanelHeader title="Memory" />
+            <PanelHeader
+              title="Memory"
+              actions={(
+                <div className="table-actions">
+                  <Link to="/memories" className="icon-button" aria-label="Back to memories" title="Back to memories">
+                    <i className="fa-solid fa-arrow-left" />
+                  </Link>
+                  <Link
+                    to={`/memories/${memory.id}/edit`}
+                    className="icon-button"
+                    aria-label="Edit memory"
+                    title="Edit memory"
+                  >
+                    <ActionIcon name="edit" />
+                  </Link>
+                  <button
+                    type="button"
+                    className="icon-button icon-button-danger"
+                    disabled={busy}
+                    aria-label="Delete memory"
+                    title="Delete memory"
+                    onClick={handleDelete}
+                  >
+                    <ActionIcon name="trash" />
+                  </button>
+                </div>
+              )}
+            />
 
             <div className="grid grid-2" style={{ marginTop: '20px' }}>
               <div className="subcard">

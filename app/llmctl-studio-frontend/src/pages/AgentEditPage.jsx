@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import {
   attachAgentSkill,
@@ -263,19 +264,21 @@ export default function AgentEditPage() {
   return (
     <section className="stack" aria-label="Edit agent">
       <article className="card">
-        <div className="title-row">
-          <h2>{agent ? `Edit ${agent.name}` : 'Edit Agent'}</h2>
-          <div className="table-actions">
-            {agent ? (
-              <Link to={`/agents/${agent.id}`} className="btn-link btn-secondary">
-                Back to Agent
+        <PanelHeader
+          title={agent ? `Edit ${agent.name}` : 'Edit Agent'}
+          actions={(
+            <div className="table-actions">
+              {agent ? (
+                <Link to={`/agents/${agent.id}`} className="btn-link btn-secondary">
+                  Back to Agent
+                </Link>
+              ) : null}
+              <Link to="/agents" className="btn-link btn-secondary">
+                All Agents
               </Link>
-            ) : null}
-            <Link to="/agents" className="btn-link btn-secondary">
-              All Agents
-            </Link>
-          </div>
-        </div>
+            </div>
+          )}
+        />
         {state.loading ? <p>Loading agent...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {validationError ? <p className="error-text">{validationError}</p> : null}

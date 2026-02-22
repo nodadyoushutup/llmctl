@@ -1064,6 +1064,12 @@ def _build_prompt(
             " If the user asks about a specific file/probe identifier, only use "
             "matching retrieved sources and state when there is no match."
         )
+        if not retrieval_context:
+            sections.append(
+                "No retrieval context was returned for selected RAG collections in "
+                "this turn. Do not claim collection-derived repository/file facts "
+                "unless MCP tools return verifiable evidence."
+            )
     if retrieval_context:
         blocks = [f"[{idx}] {text}" for idx, text in enumerate(retrieval_context, start=1)]
         sections.append("Retrieved context:\n" + "\n".join(blocks))
@@ -1374,6 +1380,8 @@ def execute_turn(
                 retrieval_scope_metadata.get("source_hint_tokens") or []
             )
             retrieval_stats["scoped_retrieved_count"] = len(retrieval_context)
+            rag_context_missing = not retrieval_context
+            retrieval_stats["rag_context_missing_for_selected_collections"] = rag_context_missing
             _record_activity(
                 session,
                 thread_id=thread.id,
@@ -1388,7 +1396,7 @@ def execute_turn(
                     "citation_count": len(citation_records),
                 },
             )
-            if not retrieval_context:
+            if rag_context_missing and not selected_mcp_keys:
                 turn.reason_code = RAG_REASON_UNAVAILABLE
                 turn.error_message = "No retrieval context was found for selected collections."
                 turn.runtime_metadata_json = _safe_json_dump(

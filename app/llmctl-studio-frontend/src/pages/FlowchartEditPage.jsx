@@ -109,21 +109,23 @@ export default function FlowchartEditPage() {
   return (
     <section className="stack" aria-label="Edit flowchart">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            {parsedFlowchartId ? (
-              <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn btn-secondary">
-                <i className="fa-solid fa-arrow-left" />
-                back to flowchart
+        <PanelHeader
+          title="Edit Flowchart"
+          actions={(
+            <div className="table-actions">
+              {parsedFlowchartId ? (
+                <Link to={`/flowcharts/${parsedFlowchartId}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  back to flowchart
+                </Link>
+              ) : null}
+              <Link to="/flowcharts" className="btn btn-secondary">
+                <i className="fa-solid fa-list" />
+                all flowcharts
               </Link>
-            ) : null}
-            <Link to="/flowcharts" className="btn btn-secondary">
-              <i className="fa-solid fa-list" />
-              all flowcharts
-            </Link>
-          </div>
-        </div>
-        <PanelHeader title="Edit Flowchart" />
+            </div>
+          )}
+        />
         <p className="muted" style={{ marginTop: '12px' }}>
           Update flowchart metadata and guardrails without leaving the flowchart workspace.
         </p>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getGithubWorkspace } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -80,16 +81,16 @@ export default function GithubPage() {
   return (
     <section className="stack" aria-label="GitHub workspace">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>GitHub Workspace</h2>
-            <p>Browse pull requests, workflow runs, and repository files.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/integrations/github" className="btn-link btn-secondary">GitHub Settings</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-          </div>
-        </div>
+        <PanelHeader
+          title="GitHub Workspace"
+          actions={(
+            <div className="table-actions">
+              <Link to="/settings/integrations/github" className="btn-link btn-secondary">GitHub Settings</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+            </div>
+          )}
+        />
+        <p className="muted">Browse pull requests, workflow runs, and repository files.</p>
         <div className="toolbar">
           <div className="toolbar-group">
             <button type="button" className={tab === 'pulls' ? 'btn-link' : 'btn-link btn-secondary'} onClick={() => setTab('pulls')}>Pulls</button>

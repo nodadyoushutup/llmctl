@@ -83,22 +83,23 @@ export default function MemoryEditPage() {
   return (
     <section className="stack" aria-label="Edit memory">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <div className="table-actions">
-            {memory ? (
-              <Link to={`/memories/${memory.id}`} className="btn btn-secondary">
-                <i className="fa-solid fa-arrow-left" />
-                back to memory
+        <PanelHeader
+          title="Edit Memory"
+          actions={(
+            <div className="table-actions">
+              {memory ? (
+                <Link to={`/memories/${memory.id}`} className="btn btn-secondary">
+                  <i className="fa-solid fa-arrow-left" />
+                  back to memory
+                </Link>
+              ) : null}
+              <Link to="/memories" className="btn btn-secondary">
+                <i className="fa-solid fa-list" />
+                all memories
               </Link>
-            ) : null}
-            <Link to="/memories" className="btn btn-secondary">
-              <i className="fa-solid fa-list" />
-              all memories
-            </Link>
-          </div>
-        </div>
-
-        <PanelHeader title="Edit Memory" />
+            </div>
+          )}
+        />
 
         <p className="muted" style={{ marginTop: '12px' }}>
           Update the stored memory description.

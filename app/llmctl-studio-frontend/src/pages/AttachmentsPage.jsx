@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteAttachment, getAttachments } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -100,12 +101,8 @@ export default function AttachmentsPage() {
   return (
     <section className="stack" aria-label="Attachments">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Attachments</h2>
-            <p>Files attached to tasks, templates, and flowchart nodes.</p>
-          </div>
-        </div>
+        <PanelHeader title="Attachments" />
+        <p className="muted">Files attached to tasks, templates, and flowchart nodes.</p>
         {state.loading ? <p>Loading attachments...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

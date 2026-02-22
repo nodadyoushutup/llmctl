@@ -343,41 +343,42 @@ export default function PlanDetailPage() {
   return (
     <section className="stack" aria-label="Plan detail">
       <article className="card">
-        <div className="title-row" style={{ marginBottom: '16px' }}>
-          <Link to="/plans" className="btn btn-secondary">
-            <i className="fa-solid fa-arrow-left" />
-            back to plans
-          </Link>
-          {plan ? (
-            <div className="table-actions">
-              <Link
-                to={`/plans/${plan.id}/edit`}
-                className="icon-button"
-                aria-label="Edit plan"
-                title="Edit plan"
-              >
-                <ActionIcon name="edit" />
-              </Link>
-              <button
-                type="button"
-                className="icon-button icon-button-danger"
-                aria-label="Delete plan"
-                title="Delete plan"
-                disabled={busy}
-                onClick={handleDeletePlan}
-              >
-                <ActionIcon name="trash" />
-              </button>
-            </div>
-          ) : null}
-        </div>
-
         {state.loading ? <p>Loading plan...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
 
         {plan ? (
           <>
-            <PanelHeader title={plan.name} />
+            <PanelHeader
+              title={plan.name}
+              actions={(
+                <>
+                  <Link to="/plans" className="btn btn-secondary">
+                    <i className="fa-solid fa-arrow-left" />
+                    back to plans
+                  </Link>
+                  <div className="table-actions">
+                    <Link
+                      to={`/plans/${plan.id}/edit`}
+                      className="icon-button"
+                      aria-label="Edit plan"
+                      title="Edit plan"
+                    >
+                      <ActionIcon name="edit" />
+                    </Link>
+                    <button
+                      type="button"
+                      className="icon-button icon-button-danger"
+                      aria-label="Delete plan"
+                      title="Delete plan"
+                      disabled={busy}
+                      onClick={handleDeletePlan}
+                    >
+                      <ActionIcon name="trash" />
+                    </button>
+                  </div>
+                </>
+              )}
+            />
             <dl className="meta-list meta-list-compact" style={{ marginTop: '20px' }}>
               <div className="meta-span">
                 <dt>Artifact runs</dt>
