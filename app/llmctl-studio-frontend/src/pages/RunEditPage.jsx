@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getRunEdit } from '../lib/studioApi'
 
@@ -59,13 +60,15 @@ export default function RunEditPage() {
   return (
     <section className="stack" aria-label="Autorun edit">
       <article className="card">
-        <div className="title-row">
-          <h2>Autoruns are read-only</h2>
-          <div className="table-actions">
-            {run ? <Link to={`/runs/${run.id}`} className="btn-link btn-secondary">Back to Autorun</Link> : null}
-            <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Autoruns are read-only"
+          actions={(
+            <div className="table-actions">
+              {run ? <Link to={`/runs/${run.id}`} className="btn-link btn-secondary">Back to Autorun</Link> : null}
+              <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
+            </div>
+          )}
+        />
         {loading ? <p>Loading autorun metadata...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {!loading && !error ? (

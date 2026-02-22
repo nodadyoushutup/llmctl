@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import {
   deleteRagSource,
@@ -119,7 +120,7 @@ export default function RagSourceDetailPage() {
     return (
       <section className="stack" aria-label="RAG source detail">
         <article className="card">
-          <h2>RAG Source Detail</h2>
+          <PanelHeader title="RAG Source Detail" />
           <p className="error-text">Source id must be a positive integer.</p>
         </article>
       </section>
@@ -129,23 +130,23 @@ export default function RagSourceDetailPage() {
   return (
     <section className="stack" aria-label="RAG source detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>RAG Source Detail</h2>
-            <p>Source detail and indexing status.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/rag/sources" className="btn-link btn-secondary">Back to Sources</Link>
-            <Link to={`/rag/sources/${parsedSourceId}/edit`} className="btn-link btn-secondary">Edit</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-            <button type="button" className="btn-link" disabled={busy} onClick={() => queueQuick('fresh')}>Quick Index</button>
-            <button type="button" className="btn-link" disabled={busy} onClick={() => queueQuick('delta')}>Quick Delta</button>
-            <button type="button" className="btn-link" disabled={busy} onClick={handleDelete}>
-              <i className="fa-solid fa-trash" aria-hidden="true" />
-              Delete
-            </button>
-          </div>
-        </div>
+        <PanelHeader
+          title="RAG Source Detail"
+          actions={(
+            <div className="table-actions">
+              <Link to="/rag/sources" className="btn-link btn-secondary">Back to Sources</Link>
+              <Link to={`/rag/sources/${parsedSourceId}/edit`} className="btn-link btn-secondary">Edit</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+              <button type="button" className="btn-link" disabled={busy} onClick={() => queueQuick('fresh')}>Quick Index</button>
+              <button type="button" className="btn-link" disabled={busy} onClick={() => queueQuick('delta')}>Quick Delta</button>
+              <button type="button" className="btn-link" disabled={busy} onClick={handleDelete}>
+                <i className="fa-solid fa-trash" aria-hidden="true" />
+                Delete
+              </button>
+            </div>
+          )}
+        />
+        <p className="muted">Source detail and indexing status.</p>
         {state.loading ? <p>Loading source detail...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

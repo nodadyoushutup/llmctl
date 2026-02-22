@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { createNode, getNodeMeta } from '../lib/studioApi'
 
@@ -229,15 +230,15 @@ export default function NodeNewPage() {
   return (
     <section className="stack" aria-label="Create node">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Create Node</h2>
-            <p>Queue a single run and trigger the celery worker.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Create Node"
+          actions={(
+            <div className="table-actions">
+              <Link to="/nodes" className="btn-link btn-secondary">All Nodes</Link>
+            </div>
+          )}
+        />
+        <p className="muted">Queue a single run and trigger the celery worker.</p>
         {state.loading ? <p>Loading node metadata...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {validationError ? <p className="error-text">{validationError}</p> : null}

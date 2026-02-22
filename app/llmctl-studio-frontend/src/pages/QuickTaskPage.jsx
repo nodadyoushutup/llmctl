@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
+import PersistedDetails from '../components/PersistedDetails'
 import { HttpError } from '../lib/httpClient'
 import { createQuickTask, getQuickTaskMeta, updateQuickTaskDefaults } from '../lib/studioApi'
 
@@ -53,6 +54,8 @@ export default function QuickTaskPage() {
   const [, setActionInfo] = useFlashState('success')
   const [saving, setSaving] = useState(false)
   const [saveDefaultsBusy, setSaveDefaultsBusy] = useState(false)
+  const [quickDefaultsDirty, setQuickDefaultsDirty] = useState(false)
+  const [isControlsOpen, setIsControlsOpen] = useState(true)
   const [initialized, setInitialized] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [form, setForm] = useState({
@@ -60,6 +63,7 @@ export default function QuickTaskPage() {
     agentId: '',
     modelId: '',
     mcpServerIds: [],
+    ragCollections: [],
     integrationKeys: [],
   })
 
@@ -85,6 +89,7 @@ export default function QuickTaskPage() {
   const agents = payload && Array.isArray(payload.agents) ? payload.agents : []
   const models = payload && Array.isArray(payload.models) ? payload.models : []
   const mcpServers = payload && Array.isArray(payload.mcp_servers) ? payload.mcp_servers : []
+  const ragCollections = payload && Array.isArray(payload.rag_collections) ? payload.rag_collections : []
   const integrationOptions = payload && Array.isArray(payload.integration_options) ? payload.integration_options : []
   const defaultModelId = payload && Number.isInteger(payload.default_model_id)
     ? payload.default_model_id
@@ -97,6 +102,11 @@ export default function QuickTaskPage() {
       .map((value) => Number.parseInt(String(value), 10))
       .filter((value) => Number.isInteger(value) && value > 0)
       .map((value) => String(value))
+    : []
+  const selectedRagCollections = payload && Array.isArray(payload.selected_rag_collections)
+    ? payload.selected_rag_collections
+      .map((value) => String(value || '').trim())
+      .filter((value) => value)
     : []
 
   useEffect(() => {
@@ -111,10 +121,25 @@ export default function QuickTaskPage() {
       agentId: defaultAgentId ? String(defaultAgentId) : '',
       modelId: defaultModelId ? String(defaultModelId) : '',
       mcpServerIds: selectedMcpServerIds,
+      ragCollections: selectedRagCollections,
       integrationKeys: selectedIntegrationKeys,
     }))
+    setQuickDefaultsDirty(false)
     setInitialized(true)
-  }, [defaultAgentId, defaultModelId, initialized, payload, selectedMcpServerIds])
+  }, [defaultAgentId, defaultModelId, initialized, payload, selectedMcpServerIds, selectedRagCollections])
+
+  function setDefaultField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }))
+    setQuickDefaultsDirty(true)
+  }
+
+  function toggleDefaultList(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: toggleListValue(current[field], value),
+    }))
+    setQuickDefaultsDirty(true)
+  }
 
   async function handleSaveDefaults() {
     setActionError('')
@@ -125,6 +150,7 @@ export default function QuickTaskPage() {
         defaultAgentId: parseOptionalId(form.agentId),
         defaultModelId: parseOptionalId(form.modelId),
         defaultMcpServerIds: form.mcpServerIds.map((value) => Number(value)),
+        defaultRagCollections: form.ragCollections,
         defaultIntegrationKeys: form.integrationKeys,
       })
       const defaults = response && typeof response === 'object' && response.quick_default_settings && typeof response.quick_default_settings === 'object'
@@ -137,6 +163,7 @@ export default function QuickTaskPage() {
             default_agent_id: defaults.default_agent_id ?? null,
             default_model_id: defaults.default_model_id ?? null,
             selected_mcp_server_ids: Array.isArray(defaults.default_mcp_server_ids) ? defaults.default_mcp_server_ids : [],
+            selected_rag_collections: Array.isArray(defaults.default_rag_collections) ? defaults.default_rag_collections : [],
             selected_integration_keys: Array.isArray(defaults.default_integration_keys) ? defaults.default_integration_keys : [],
           }
           : null
@@ -145,6 +172,7 @@ export default function QuickTaskPage() {
         }
       }
       setActionInfo('Quick defaults saved.')
+      setQuickDefaultsDirty(false)
     } catch (error) {
       setActionError(errorMessage(error, 'Failed to save quick defaults.'))
     } finally {
@@ -173,6 +201,7 @@ export default function QuickTaskPage() {
         agentId: parseOptionalId(form.agentId),
         modelId,
         mcpServerIds: form.mcpServerIds.map((value) => Number(value)),
+        ragCollections: form.ragCollections,
         integrationKeys: form.integrationKeys,
         attachments,
       })
@@ -224,150 +253,229 @@ export default function QuickTaskPage() {
           <PanelHeader
             title="Quick Node"
             actions={(
-              <>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label={saveDefaultsBusy ? 'Saving quick defaults' : 'Save quick defaults'}
-                  title={saveDefaultsBusy ? 'Saving quick defaults' : 'Save quick defaults'}
-                  disabled={saveDefaultsBusy}
-                  onClick={handleSaveDefaults}
-                >
-                  <ActionIcon name="save" />
-                </button>
-                <Link to="/nodes" className="icon-button" aria-label="Back to nodes" title="Back to nodes">
-                  <i className="fa-solid fa-list" />
-                </Link>
-              </>
+              <Link to="/nodes" className="icon-button" aria-label="Back to nodes" title="Back to nodes">
+                <i className="fa-solid fa-list" />
+              </Link>
             )}
           />
           <div className="quick-node-panel-body quick-node-controls-body">
             <p className="muted quick-node-panel-intro">
               Run one-off prompts with the default Quick Node profile, or pick an agent override.
             </p>
+            <PersistedDetails
+              className="chat-session-drawer quick-node-controls-drawer"
+              storageKey="quick:controls"
+              defaultOpen
+              onToggle={(event) => {
+                setIsControlsOpen(Boolean(event.currentTarget?.open))
+              }}
+            >
+              <summary>
+                <span className="chat-session-title">controls</span>
+                <span className="chat-session-summary">
+                  <button
+                    type="button"
+                    className="icon-button chat-session-summary-action"
+                    aria-label="Save quick defaults"
+                    title="Save quick defaults"
+                    disabled={saveDefaultsBusy}
+                    onClick={async (event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      const summary = event.currentTarget.closest('summary')
+                      const drawer = summary?.parentElement
+                      if (!summary || !drawer) {
+                        return
+                      }
+                      if (!drawer.open) {
+                        summary.click()
+                        return
+                      }
+                      await handleSaveDefaults()
+                    }}
+                  >
+                    <i className={`fa-solid ${isControlsOpen ? 'fa-floppy-disk' : 'fa-angle-down'}`} />
+                  </button>
+                </span>
+              </summary>
+              <div className="chat-session-content">
+                <div className="chat-session-controls">
+                  <label className="chat-control">
+                    Agent override (optional)
+                    <select
+                      className="input"
+                      value={form.agentId}
+                      disabled={agents.length === 0}
+                      onChange={(event) => setDefaultField('agentId', event.target.value)}
+                    >
+                      <option value="">Default Quick Node</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                    {agents.length > 0 ? (
+                      <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                        Leave blank to use the hard-coded Quick Node profile.
+                      </span>
+                    ) : (
+                      <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                        No override agents created yet. Quick Node default is still available.
+                      </span>
+                    )}
+                  </label>
 
-            <label className="label">
-              Agent override (optional)
-              <select
-                className="input"
-                value={form.agentId}
-                disabled={agents.length === 0}
-                onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value }))}
-              >
-                <option value="">Default Quick Node</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-              {agents.length > 0 ? (
-                <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                  Leave blank to use the hard-coded Quick Node profile.
-                </span>
-              ) : (
-                <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                  No override agents created yet. Quick Node default is still available.
-                </span>
-              )}
-            </label>
+                  <label className="chat-control">
+                    Model
+                    <select
+                      required
+                      className="input"
+                      value={form.modelId}
+                      disabled={models.length === 0}
+                      onChange={(event) => setDefaultField('modelId', event.target.value)}
+                    >
+                      <option value="">Select model</option>
+                      {models.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name} ({model.provider})
+                        </option>
+                      ))}
+                    </select>
+                    {models.length > 0 ? (
+                      <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                        Defaults to Settings default model, otherwise the first model on this list.
+                      </span>
+                    ) : (
+                      <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                        No models available. Create a model before sending a quick node.
+                      </span>
+                    )}
+                  </label>
 
-            <label className="label">
-              Model
-              <select
-                required
-                className="input"
-                value={form.modelId}
-                disabled={models.length === 0}
-                onChange={(event) => setForm((current) => ({ ...current, modelId: event.target.value }))}
-              >
-                <option value="">Select model</option>
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name} ({model.provider})
-                  </option>
-                ))}
-              </select>
-              {models.length > 0 ? (
-                <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                  Defaults to Settings default model, otherwise the first model on this list.
-                </span>
-              ) : (
-                <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                  No models available. Create a model before sending a quick node.
-                </span>
-              )}
-            </label>
+                  <label className="chat-control">
+                    Context (optional)
+                    <div className="chat-session-groups quick-node-context-groups">
+                      <PersistedDetails
+                        className="chat-picker chat-picker-group"
+                        storageKey="quick:collections"
+                      >
+                        <summary>
+                          <span className="chat-picker-summary">
+                            <i className="fa-solid fa-database" />
+                            <span>Collections</span>
+                          </span>
+                        </summary>
+                        {ragCollections.length > 0 ? (
+                          <div className="chat-checklist">
+                            {ragCollections.map((collection) => {
+                              const collectionId = String(collection?.id || '').trim()
+                              if (!collectionId) {
+                                return null
+                              }
+                              const checked = form.ragCollections.includes(collectionId)
+                              return (
+                                <label key={`quick-rag-${collectionId}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleDefaultList('ragCollections', collectionId)}
+                                  />
+                                  <span>{collection.name}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <p className="muted chat-picker-empty">No collections available.</p>
+                        )}
+                      </PersistedDetails>
 
-            <label className="label">
-              MCP servers (optional)
-              {mcpServers.length > 0 ? (
-                <div className="quick-node-options-list">
-                  {mcpServers.map((server) => {
-                    const serverId = String(server.id)
-                    const checked = form.mcpServerIds.includes(serverId)
-                    return (
-                      <label key={server.id} className="quick-node-option">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setForm((current) => ({
-                              ...current,
-                              mcpServerIds: toggleListValue(current.mcpServerIds, serverId),
-                            }))
-                          }
-                        />
-                        <span>
-                          {server.name} <span className="muted">({server.server_key})</span>
-                        </span>
-                      </label>
-                    )
-                  })}
+                      <PersistedDetails
+                        className="chat-picker chat-picker-group"
+                        storageKey="quick:mcp-servers"
+                      >
+                        <summary>
+                          <span className="chat-picker-summary">
+                            <i className="fa-solid fa-plug" />
+                            <span>MCP Servers</span>
+                          </span>
+                        </summary>
+                        {mcpServers.length > 0 ? (
+                          <div className="chat-checklist">
+                            {mcpServers.map((server) => {
+                              const serverId = String(server.id)
+                              const checked = form.mcpServerIds.includes(serverId)
+                              return (
+                                <label key={server.id}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleDefaultList('mcpServerIds', serverId)}
+                                  />
+                                  <span>
+                                    {server.name} <span className="muted">({server.server_key})</span>
+                                  </span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <p className="muted chat-picker-empty">No MCP servers available.</p>
+                        )}
+                      </PersistedDetails>
+
+                      <PersistedDetails
+                        className="chat-picker chat-picker-group"
+                        storageKey="quick:integrations"
+                      >
+                        <summary>
+                          <span className="chat-picker-summary">
+                            <i className="fa-solid fa-link" />
+                            <span>Integrations</span>
+                          </span>
+                        </summary>
+                        {integrationOptions.length > 0 ? (
+                          <div className="chat-checklist">
+                            {integrationOptions.map((option) => {
+                              const key = String(option.key)
+                              const checked = form.integrationKeys.includes(key)
+                              return (
+                                <label key={key}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleDefaultList('integrationKeys', key)}
+                                  />
+                                  <span>
+                                    {option.label}{' '}
+                                    <span className="muted">({option.connected ? 'configured' : 'not configured'})</span>
+                                  </span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <p className="muted chat-picker-empty">No integrations available.</p>
+                        )}
+                      </PersistedDetails>
+                    </div>
+                    <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                      Selected integrations are injected into prompt context.
+                    </span>
+                    <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+                      Collections and MCP servers are saved with Quick defaults.
+                    </span>
+                  </label>
+
+                  <div className="chat-session-actions">
+                    <p className="chat-session-dirty" aria-live="polite">
+                      {quickDefaultsDirty ? 'Unsaved changes' : 'Defaults are saved'}
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                  No MCP servers available.
-                </span>
-              )}
-            </label>
-
-            <label className="label">
-              Integrations (optional)
-              {integrationOptions.length > 0 ? (
-                <div className="quick-node-options-list">
-                  {integrationOptions.map((option) => {
-                    const key = String(option.key)
-                    const checked = form.integrationKeys.includes(key)
-                    return (
-                      <label key={key} className="quick-node-option">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setForm((current) => ({
-                              ...current,
-                              integrationKeys: toggleListValue(current.integrationKeys, key),
-                            }))
-                          }
-                        />
-                        <span>
-                          {option.label}{' '}
-                          <span className="muted">({option.connected ? 'configured' : 'not configured'})</span>
-                        </span>
-                      </label>
-                    )
-                  })}
-                </div>
-              ) : (
-                <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                  No integrations available.
-                </span>
-              )}
-              <span className="muted" style={{ fontSize: '12px', marginTop: '6px' }}>
-                Selected integrations are injected into prompt context.
-              </span>
-            </label>
+              </div>
+            </PersistedDetails>
           </div>
         </article>
 
@@ -377,7 +485,7 @@ export default function QuickTaskPage() {
             actions={(
               <button
                 type="submit"
-                className="icon-button"
+                className="icon-button icon-button-primary"
                 aria-label={saving ? 'Sending to CLI' : 'Send to CLI'}
                 title={saving ? 'Sending to CLI' : 'Send to CLI'}
                 disabled={saving || models.length === 0}

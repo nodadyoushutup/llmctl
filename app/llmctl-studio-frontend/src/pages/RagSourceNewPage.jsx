@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import {
   createRagSource,
@@ -119,15 +120,15 @@ export default function RagSourceNewPage() {
   return (
     <section className="stack" aria-label="New RAG source">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>New RAG Source</h2>
-            <p>Configure a source and optional indexing schedule.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/rag/sources" className="btn-link btn-secondary">Back to Sources</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="New RAG Source"
+          actions={(
+            <div className="table-actions">
+              <Link to="/rag/sources" className="btn-link btn-secondary">Back to Sources</Link>
+            </div>
+          )}
+        />
+        <p className="muted">Configure a source and optional indexing schedule.</p>
         {metaState.loading ? <p>Loading source form metadata...</p> : null}
         {metaState.error ? <p className="error-text">{metaState.error}</p> : null}
         {!metaState.loading && !metaState.error ? (

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link } from 'react-router-dom'
 import IntegerInput from '../components/IntegerInput'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import {
   getSettingsChat,
@@ -150,18 +151,18 @@ export default function SettingsChatPage() {
   return (
     <section className="stack" aria-label="Settings chat">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Chat Defaults</h2>
-            <p>Defaults here are applied when creating a new chat thread.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>
-            <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
-            <Link to="/settings/runtime/chat" className="btn-link btn-secondary">Runtime Chat</Link>
-            <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Chat Defaults"
+          actions={(
+            <div className="table-actions">
+              <Link to="/settings/core" className="btn-link btn-secondary">Core</Link>
+              <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
+              <Link to="/settings/runtime/chat" className="btn-link btn-secondary">Runtime Chat</Link>
+              <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
+            </div>
+          )}
+        />
+        <p className="muted">Defaults here are applied when creating a new chat thread.</p>
         {state.loading ? <p>Loading chat settings...</p> : null}
         {!state.loading && !state.error ? (
           <p className="toolbar-meta">

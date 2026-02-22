@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getJiraWorkspace } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -67,16 +68,16 @@ export default function JiraPage() {
   return (
     <section className="stack" aria-label="Jira workspace">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Jira Workspace</h2>
-            <p>Browse board columns and drill into issue details.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/integrations/jira" className="btn-link btn-secondary">Jira Settings</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-          </div>
-        </div>
+        <PanelHeader
+          title="Jira Workspace"
+          actions={(
+            <div className="table-actions">
+              <Link to="/settings/integrations/jira" className="btn-link btn-secondary">Jira Settings</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+            </div>
+          )}
+        />
+        <p className="muted">Browse board columns and drill into issue details.</p>
         {state.loading ? <p>Loading Jira board...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {payload?.board_error ? <p className="error-text">{String(payload.board_error)}</p> : null}

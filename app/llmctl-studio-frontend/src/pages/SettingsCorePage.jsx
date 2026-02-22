@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { useFlash } from '../lib/flashMessages'
 import { HttpError } from '../lib/httpClient'
 import { getSettingsCore } from '../lib/studioApi'
@@ -48,18 +49,18 @@ export default function SettingsCorePage() {
   return (
     <section className="stack" aria-label="Settings core">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Core Settings</h2>
-            <p>Paths, polling, and provider defaults.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
-            <Link to="/settings/runtime" className="btn-link btn-secondary">Runtime</Link>
-            <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
-            <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Core Settings"
+          actions={(
+            <div className="table-actions">
+              <Link to="/settings/provider" className="btn-link btn-secondary">Provider</Link>
+              <Link to="/settings/runtime" className="btn-link btn-secondary">Runtime</Link>
+              <Link to="/settings/chat" className="btn-link btn-secondary">Chat</Link>
+              <Link to="/settings/integrations" className="btn-link btn-secondary">Integrations</Link>
+            </div>
+          )}
+        />
+        <p className="muted">Paths, polling, and provider defaults.</p>
         {state.loading ? <p>Loading core settings...</p> : null}
         {!state.loading && !state.error ? (
           <div className="stack">

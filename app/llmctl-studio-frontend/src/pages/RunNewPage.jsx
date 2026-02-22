@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getRunMeta } from '../lib/studioApi'
 
@@ -52,12 +53,14 @@ export default function RunNewPage() {
   return (
     <section className="stack" aria-label="Autorun policy">
       <article className="card">
-        <div className="title-row">
-          <h2>Autoruns are automatic</h2>
-          <div className="table-actions">
-            <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Autoruns are automatic"
+          actions={(
+            <div className="table-actions">
+              <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
+            </div>
+          )}
+        />
         {state.loading ? <p>Loading policy details...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (

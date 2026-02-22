@@ -502,6 +502,7 @@ export function createQuickTask({
   agentId = null,
   modelId = null,
   mcpServerIds = [],
+  ragCollections = [],
   integrationKeys = [],
   attachments = [],
 } = {}) {
@@ -512,6 +513,7 @@ export function createQuickTask({
     appendFormValue(formData, 'agent_id', agentId)
     appendFormValue(formData, 'model_id', modelId)
     appendFormValues(formData, 'mcp_server_ids', mcpServerIds)
+    appendFormValues(formData, 'rag_collections', ragCollections)
     appendFormValues(formData, 'integration_keys', integrationKeys)
     for (const file of files) {
       formData.append('attachments', file)
@@ -528,6 +530,7 @@ export function createQuickTask({
       agent_id: agentId,
       model_id: modelId,
       mcp_server_ids: mcpServerIds,
+      rag_collections: ragCollections,
       integration_keys: integrationKeys,
     },
   })
@@ -537,6 +540,7 @@ export function updateQuickTaskDefaults({
   defaultAgentId = null,
   defaultModelId = null,
   defaultMcpServerIds = [],
+  defaultRagCollections = [],
   defaultIntegrationKeys = [],
 } = {}) {
   return requestJson('/quick/settings', {
@@ -552,6 +556,11 @@ export function updateQuickTaskDefaults({
         ? defaultMcpServerIds
           .map((value) => Number.parseInt(String(value), 10))
           .filter((value) => Number.isInteger(value) && value > 0)
+        : [],
+      default_rag_collections: Array.isArray(defaultRagCollections)
+        ? defaultRagCollections
+          .map((value) => String(value || '').trim())
+          .filter((value) => value)
         : [],
       default_integration_keys: Array.isArray(defaultIntegrationKeys)
         ? defaultIntegrationKeys

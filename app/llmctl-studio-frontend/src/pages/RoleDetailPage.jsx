@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getRole } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -67,16 +68,16 @@ export default function RoleDetailPage() {
   return (
     <section className="stack" aria-label="Role detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{role ? role.name : 'Role'}</h2>
-            {role?.description ? <p>{role.description}</p> : null}
-          </div>
-          <div className="table-actions">
-            {role ? <Link to={`/roles/${role.id}/edit`} className="btn-link">Edit</Link> : null}
-            <Link to="/roles" className="btn-link btn-secondary">All Roles</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title={role ? role.name : 'Role'}
+          actions={(
+            <div className="table-actions">
+              {role ? <Link to={`/roles/${role.id}/edit`} className="btn-link">Edit</Link> : null}
+              <Link to="/roles" className="btn-link btn-secondary">All Roles</Link>
+            </div>
+          )}
+        />
+        {role?.description ? <p className="muted">{role.description}</p> : null}
         {parsedRoleId && state.loading ? <p>Loading role...</p> : null}
         {resolvedError ? <p className="error-text">{resolvedError}</p> : null}
         {role ? (

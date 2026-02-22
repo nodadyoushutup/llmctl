@@ -71,8 +71,8 @@ Stage 2 explicit out-of-scope:
 - [x] Preserve route-specific action sets while removing duplicate bespoke header scaffolding.
 
 ## Stage 7 - Family D Migration (Direct H2 Detail/New/Edit Headers)
-- [ ] Migrate remaining direct `<h2>` page-entry headers to shared compact header wrappers.
-- [ ] Eliminate remaining legacy page-level header variants.
+- [x] Migrate remaining direct `<h2>` page-entry headers to shared compact header wrappers.
+- [x] Eliminate remaining legacy page-level header variants.
 
 ## Stage 8 - Header Cleanup And Strictness Enforcement
 - [x] Remove obsolete header CSS blocks and dead markup paths superseded by shared primitives.
@@ -83,8 +83,8 @@ Stage 2 explicit out-of-scope:
 - [x] Run additional lint/build checks needed for confidence.
 
 ## Stage 10 - Docs Updates
-- [ ] Update relevant Sphinx/Read the Docs pages for UI/header conventions.
-- [ ] Archive this plan in `docs/planning/archive/` after completion.
+- [x] Update relevant Sphinx/Read the Docs pages for UI/header conventions.
+- [x] Archive this plan in `docs/planning/archive/` after completion.
 
 ## Execution Notes (2026-02-21)
 - Completed migration pass from legacy `title-row` to `PanelHeader` for model/mcp/skill/script list+detail+new+edit pages, including related tests (`ModelNewPage.test.jsx`, `ModelEditPage.test.jsx`).
@@ -94,3 +94,21 @@ Stage 2 explicit out-of-scope:
 - Visual verification captured and reviewed:
   - `docs/screenshots/2026-02-21-18-50-03--models--panel-header-migration-after-restart--1920x1080--7cb3953--d9cf47.png`
 - Remaining Stage 7 scope: direct `title-row` page-entry headers still present on 38 pages (for example flowchart detail/edit families, run/plan/memory/milestone detail/edit/new families, integrations/workspace pages, and several agent/role/attachment pages).
+- Completed Stage 7 full sweep:
+  - Migrated all remaining `title-row` page-entry headers to `PanelHeader` across agent/role/run/rag/jira/github/chroma/settings/confluence/attachments/node/execution pages.
+  - Migrated invalid-state page-entry `<h2>` branches to `PanelHeader` where applicable.
+  - Removed obsolete `.title-row`, `.title-row h2`, and unused `.section-title` CSS blocks from `styles.css`.
+  - Verified zero residual legacy page-level header wrappers with `rg -n "title-row" app/llmctl-studio-frontend/src -S` (no matches).
+- Final validation for this pass:
+  - `npm run check:header-consistency` (pass)
+  - `npm run test -- src/pages/ChatPage.test.jsx` (pass)
+  - `npm run build` (pass)
+  - Frontend rollout restart + health check:
+    - `kubectl -n llmctl rollout restart deploy/llmctl-studio-frontend`
+    - `kubectl -n llmctl rollout status deploy/llmctl-studio-frontend`
+- Visual verification artifacts:
+  - `docs/screenshots/2026-02-21-19-23-26--chat-thread-21--header-plan-final--1920x1080--6cc7fdc--c6297c.png`
+  - `docs/screenshots/2026-02-21-19-23-26--flowcharts-1--header-plan-reference--1920x1080--6cc7fdc--7eaa44.png`
+- Stage 10 docs updates:
+  - Added `docs/sphinx/studio_ui_header_conventions.rst`.
+  - Added `studio_ui_header_conventions` to `docs/sphinx/index.rst` Runtime Guides toctree.

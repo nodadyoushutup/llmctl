@@ -2147,11 +2147,17 @@ def _resolved_quick_default_settings(
     models: list[LLMModel],
     mcp_servers: list[MCPServer],
     integration_options: list[dict[str, object]],
+    rag_collections: list[dict[str, str]],
 ) -> dict[str, object]:
     settings = _load_integration_settings(QUICK_DEFAULT_SETTINGS_PROVIDER)
     agent_ids = {agent.id for agent in agents}
     model_ids = {model.id for model in models}
     mcp_ids = {server.id for server in mcp_servers}
+    rag_ids = {
+        str(item.get("id") or "").strip()
+        for item in rag_collections
+        if str(item.get("id") or "").strip()
+    }
     integration_option_keys = {
         str(option.get("key") or "").strip()
         for option in integration_options
@@ -2196,6 +2202,13 @@ def _resolved_quick_default_settings(
         if mcp_id in mcp_ids and mcp_id not in resolved_mcp_server_ids:
             resolved_mcp_server_ids.append(mcp_id)
 
+    resolved_rag_collections: list[str] = []
+    for raw_collection in _split_csv_values(settings.get("default_rag_collections")):
+        cleaned = str(raw_collection or "").strip()
+        if not cleaned or cleaned not in rag_ids or cleaned in resolved_rag_collections:
+            continue
+        resolved_rag_collections.append(cleaned)
+
     resolved_integration_keys: list[str] = []
     if "default_integration_keys" in settings:
         parsed_integration_keys = _split_csv_values(settings.get("default_integration_keys"))
@@ -2212,6 +2225,7 @@ def _resolved_quick_default_settings(
         "default_agent_id": resolved_agent_id,
         "default_model_id": resolved_model_id,
         "default_mcp_server_ids": resolved_mcp_server_ids,
+        "default_rag_collections": resolved_rag_collections,
         "default_integration_keys": resolved_integration_keys,
     }
 

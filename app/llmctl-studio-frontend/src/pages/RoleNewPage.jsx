@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { createRole, getRoleMeta } from '../lib/studioApi'
 
@@ -79,10 +80,10 @@ export default function RoleNewPage() {
   return (
     <section className="stack" aria-label="Create role">
       <article className="card">
-        <div className="title-row">
-          <h2>Create Role</h2>
-          <Link to="/roles" className="btn-link btn-secondary">All Roles</Link>
-        </div>
+        <PanelHeader
+          title="Create Role"
+          actions={<Link to="/roles" className="btn-link btn-secondary">All Roles</Link>}
+        />
         {state.loading ? <p>Loading role metadata...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {validationError ? <p className="error-text">{validationError}</p> : null}

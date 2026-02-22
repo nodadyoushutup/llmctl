@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteRun, getRun, stopAgent } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -141,18 +142,18 @@ export default function RunDetailPage() {
   return (
     <section className="stack" aria-label="Autorun detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{run ? run.name || `Autorun ${run.id}` : 'Autorun'}</h2>
-            <p>Autoruns are created automatically when you enable autorun on the agent.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
-            {run && run.agent_id ? (
-              <Link to={`/agents/${run.agent_id}`} className="btn-link btn-secondary">View Agent</Link>
-            ) : null}
-          </div>
-        </div>
+        <PanelHeader
+          title={run ? run.name || `Autorun ${run.id}` : 'Autorun'}
+          actions={(
+            <div className="table-actions">
+              <Link to="/runs" className="btn-link btn-secondary">All Autoruns</Link>
+              {run && run.agent_id ? (
+                <Link to={`/agents/${run.agent_id}`} className="btn-link btn-secondary">View Agent</Link>
+              ) : null}
+            </div>
+          )}
+        />
+        <p className="muted">Autoruns are created automatically when you enable autorun on the agent.</p>
         {state.loading ? <p>Loading autorun...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

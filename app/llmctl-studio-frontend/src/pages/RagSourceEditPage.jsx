@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getRagSourceEdit, updateRagSource } from '../lib/studioApi'
 
@@ -88,7 +89,7 @@ export default function RagSourceEditPage() {
     return (
       <section className="stack" aria-label="Edit RAG source">
         <article className="card">
-          <h2>Edit RAG Source</h2>
+          <PanelHeader title="Edit RAG Source" />
           <p className="error-text">Source id must be a positive integer.</p>
         </article>
       </section>
@@ -98,15 +99,15 @@ export default function RagSourceEditPage() {
   return (
     <section className="stack" aria-label="Edit RAG source">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Edit RAG Source</h2>
-            <p>Update source configuration and schedule settings.</p>
-          </div>
-          <div className="table-actions">
-            <Link to={`/rag/sources/${parsedSourceId}`} className="btn-link btn-secondary">Back to Source</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Edit RAG Source"
+          actions={(
+            <div className="table-actions">
+              <Link to={`/rag/sources/${parsedSourceId}`} className="btn-link btn-secondary">Back to Source</Link>
+            </div>
+          )}
+        />
+        <p className="muted">Update source configuration and schedule settings.</p>
         {state.loading ? <p>Loading source edit metadata...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (

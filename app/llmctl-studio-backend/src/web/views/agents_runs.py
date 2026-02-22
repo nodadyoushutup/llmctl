@@ -1101,11 +1101,27 @@ def quick_task():
     models = _load_llm_models()
     mcp_servers = _load_mcp_servers()
     integration_options = _build_node_integration_options()
+    rag_collections_contract = rag_list_collection_contract()
+    rag_collection_rows = rag_collections_contract.get("collections")
+    if not isinstance(rag_collection_rows, list):
+        rag_collection_rows = []
+    rag_collections = [
+        {
+            "id": str(item.get("id") or "").strip(),
+            "name": str(item.get("name") or "").strip(),
+            "status": str(item.get("status") or "").strip() or "",
+        }
+        for item in rag_collection_rows
+        if isinstance(item, dict)
+        and str(item.get("id") or "").strip()
+        and str(item.get("name") or "").strip()
+    ]
     quick_default_settings = _resolved_quick_default_settings(
         agents=agents,
         models=models,
         mcp_servers=mcp_servers,
         integration_options=integration_options,
+        rag_collections=rag_collections,
     )
     _, summary = _agent_rollup(agents)
     if _nodes_wants_json():
@@ -1128,9 +1144,11 @@ def quick_task():
                 for server in mcp_servers
             ],
             "integration_options": integration_options,
+            "rag_collections": rag_collections,
             "default_agent_id": quick_default_settings["default_agent_id"],
             "default_model_id": quick_default_settings["default_model_id"],
             "selected_mcp_server_ids": quick_default_settings["default_mcp_server_ids"],
+            "selected_rag_collections": quick_default_settings["default_rag_collections"],
             "selected_integration_keys": quick_default_settings["default_integration_keys"],
             "quick_default_settings": quick_default_settings,
         }
@@ -1140,9 +1158,11 @@ def quick_task():
         models=models,
         mcp_servers=mcp_servers,
         integration_options=integration_options,
+        rag_collections=rag_collections,
         default_agent_id=quick_default_settings["default_agent_id"],
         default_model_id=quick_default_settings["default_model_id"],
         selected_mcp_server_ids=quick_default_settings["default_mcp_server_ids"],
+        selected_rag_collections=quick_default_settings["default_rag_collections"],
         selected_integration_keys=quick_default_settings["default_integration_keys"],
         summary=summary,
         page_title="Quick Node",
@@ -1165,6 +1185,26 @@ def update_quick_task_defaults():
     models = _load_llm_models()
     mcp_servers = _load_mcp_servers()
     integration_options = _build_node_integration_options()
+    rag_collections_contract = rag_list_collection_contract()
+    rag_collection_rows = rag_collections_contract.get("collections")
+    if not isinstance(rag_collection_rows, list):
+        rag_collection_rows = []
+    rag_collections = [
+        {
+            "id": str(item.get("id") or "").strip(),
+            "name": str(item.get("name") or "").strip(),
+            "status": str(item.get("status") or "").strip() or "",
+        }
+        for item in rag_collection_rows
+        if isinstance(item, dict)
+        and str(item.get("id") or "").strip()
+        and str(item.get("name") or "").strip()
+    ]
+    rag_ids = {
+        str(item.get("id") or "").strip()
+        for item in rag_collections
+        if str(item.get("id") or "").strip()
+    }
     agent_ids = {agent.id for agent in agents}
     model_ids = {model.id for model in models}
     mcp_ids = {server.id for server in mcp_servers}
@@ -1197,6 +1237,12 @@ def update_quick_task_defaults():
     if any(server_id not in mcp_ids for server_id in selected_mcp_server_ids):
         return _quick_settings_error("Default MCP server selection is invalid.")
 
+    selected_rag_collections = _coerce_chat_collection_list(
+        _settings_form_list(request_payload, "default_rag_collections")
+    )
+    if any(collection_id not in rag_ids for collection_id in selected_rag_collections):
+        return _quick_settings_error("Default collection selection is invalid.")
+
     integration_raw_values: list[str] = []
     for raw_value in _settings_form_list(request_payload, "default_integration_keys"):
         for item in str(raw_value or "").split(","):
@@ -1219,6 +1265,7 @@ def update_quick_task_defaults():
             "default_mcp_server_ids": ",".join(
                 str(server_id) for server_id in selected_mcp_server_ids
             ),
+            "default_rag_collections": ",".join(selected_rag_collections),
             "default_integration_keys": ",".join(selected_integration_keys),
         },
     )
@@ -1227,6 +1274,7 @@ def update_quick_task_defaults():
         models=models,
         mcp_servers=mcp_servers,
         integration_options=integration_options,
+        rag_collections=rag_collections,
     )
     if is_api_request:
         return {
@@ -1267,6 +1315,14 @@ def create_quick_task():
             [str(value).strip() for value in integration_raw]
         )
         integration_error = "Integration selection is invalid." if invalid_keys else None
+        rag_raw = payload.get("rag_collections")
+        if rag_raw is None:
+            rag_raw = []
+        if not isinstance(rag_raw, list):
+            return _quick_error("rag_collections must be an array.")
+        selected_rag_collections = _coerce_chat_collection_list(
+            [str(value).strip() for value in rag_raw]
+        )
         prompt = str(payload.get("prompt") or "").strip()
         uploads = []
     else:
@@ -1276,12 +1332,26 @@ def create_quick_task():
             value.strip() for value in request.form.getlist("mcp_server_ids")
         ]
         selected_integration_keys, integration_error = _parse_node_integration_selection()
+        selected_rag_collections = _coerce_chat_collection_list(
+            [value.strip() for value in request.form.getlist("rag_collections")]
+        )
         prompt = request.form.get("prompt", "").strip()
         uploads = request.files.getlist("attachments")
     if not prompt:
         return _quick_error("Prompt is required.")
     if integration_error:
         return _quick_error(integration_error)
+    rag_collections_contract = rag_list_collection_contract()
+    rag_collection_rows = rag_collections_contract.get("collections")
+    if not isinstance(rag_collection_rows, list):
+        rag_collection_rows = []
+    rag_ids = {
+        str(item.get("id") or "").strip()
+        for item in rag_collection_rows
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    if any(collection_id not in rag_ids for collection_id in selected_rag_collections):
+        return _quick_error("Collection selection is invalid.")
 
     try:
         with session_scope() as session:
@@ -1352,12 +1422,15 @@ def create_quick_task():
                 if agent.role_id and agent.role is not None:
                     system_contract["role"] = _build_role_payload(agent.role)
                 agent_profile = _build_agent_payload(agent)
+            quick_task_context: dict[str, object] = {"kind": QUICK_TASK_KIND}
+            if selected_rag_collections:
+                quick_task_context["rag_collections"] = selected_rag_collections
             prompt_payload = serialize_prompt_envelope(
                 build_prompt_envelope(
                     user_request=prompt,
                     system_contract=system_contract,
                     agent_profile=agent_profile,
-                    task_context={"kind": QUICK_TASK_KIND},
+                    task_context=quick_task_context,
                     output_contract=build_one_off_output_contract(),
                 )
             )

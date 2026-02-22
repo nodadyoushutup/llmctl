@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteRole, getRoleEdit, updateRole } from '../lib/studioApi'
 
@@ -133,13 +134,15 @@ export default function RoleEditPage() {
   return (
     <section className="stack" aria-label="Edit role">
       <article className="card">
-        <div className="title-row">
-          <h2>{role ? `Edit ${role.name}` : 'Edit Role'}</h2>
-          <div className="table-actions">
-            {role ? <Link to={`/roles/${role.id}`} className="btn-link btn-secondary">Back to Role</Link> : null}
-            <Link to="/roles" className="btn-link btn-secondary">All Roles</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title={role ? `Edit ${role.name}` : 'Edit Role'}
+          actions={(
+            <div className="table-actions">
+              {role ? <Link to={`/roles/${role.id}`} className="btn-link btn-secondary">Back to Role</Link> : null}
+              <Link to="/roles" className="btn-link btn-secondary">All Roles</Link>
+            </div>
+          )}
+        />
         {parsedRoleId && state.loading ? <p>Loading role...</p> : null}
         {resolvedError ? <p className="error-text">{resolvedError}</p> : null}
         {validationError ? <p className="error-text">{validationError}</p> : null}

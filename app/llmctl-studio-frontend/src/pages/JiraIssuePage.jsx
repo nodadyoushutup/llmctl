@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getJiraIssue } from '../lib/studioApi'
 
@@ -65,7 +66,7 @@ export default function JiraIssuePage() {
     return (
       <section className="stack" aria-label="Jira issue detail">
         <article className="card">
-          <h2>Jira Issue</h2>
+          <PanelHeader title="Jira Issue" />
           <p className="error-text">Issue key is required.</p>
         </article>
       </section>
@@ -75,16 +76,16 @@ export default function JiraIssuePage() {
   return (
     <section className="stack" aria-label="Jira issue detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Jira Issue</h2>
-            <p>Issue details, status metadata, and comment activity.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/jira" className="btn-link btn-secondary">Back to Jira</Link>
-            <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
-          </div>
-        </div>
+        <PanelHeader
+          title="Jira Issue"
+          actions={(
+            <div className="table-actions">
+              <Link to="/jira" className="btn-link btn-secondary">Back to Jira</Link>
+              <button type="button" className="btn-link btn-secondary" onClick={refresh}>Refresh</button>
+            </div>
+          )}
+        />
+        <p className="muted">Issue details, status metadata, and comment activity.</p>
         {state.loading ? <p>Loading issue...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {payload?.issue_error ? <p className="error-text">{String(payload.issue_error)}</p> : null}
