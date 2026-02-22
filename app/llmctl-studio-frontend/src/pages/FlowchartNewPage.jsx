@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { createFlowchart, getFlowchartMeta } from '../lib/studioApi'
+import PanelHeader from '../components/PanelHeader'
 
 function errorMessage(error, fallback) {
   if (error instanceof HttpError) {
@@ -98,9 +99,7 @@ export default function FlowchartNewPage() {
             back to flowcharts
           </Link>
         </div>
-        <div className="card-header">
-          <h2 className="section-title">Create Flowchart</h2>
-        </div>
+        <PanelHeader title="Create Flowchart" />
         <p className="muted" style={{ marginTop: '12px' }}>
           Start with workflow metadata now. Add nodes and edges in the visual editor after creation.
         </p>

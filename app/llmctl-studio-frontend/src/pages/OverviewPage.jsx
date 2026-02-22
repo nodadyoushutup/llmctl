@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getAgents } from '../lib/studioApi'
+import PanelHeader from '../components/PanelHeader'
 
 function errorMessage(error) {
   if (error instanceof HttpError) {
@@ -82,9 +83,7 @@ export default function OverviewPage() {
 
       <section className="grid grid-3">
         <article className="card">
-          <div className="card-header">
-            <h2 className="section-title">Overview</h2>
-          </div>
+          <PanelHeader title="Overview" />
           <p className="muted" style={{ marginTop: '12px' }}>
             Track agent density, active load, and the last known autorun signal.
           </p>
@@ -105,9 +104,7 @@ export default function OverviewPage() {
         </article>
 
         <article className="card">
-          <div className="card-header">
-            <h2 className="section-title">Newest Agents</h2>
-          </div>
+          <PanelHeader title="Newest Agents" />
           <div className="stack" style={{ marginTop: '20px' }}>
             {recentAgents.length > 0 ? recentAgents.map((agent) => (
               <div key={agent.id} className="row-between">
@@ -125,9 +122,7 @@ export default function OverviewPage() {
         </article>
 
         <article className="card">
-          <div className="card-header">
-            <h2 className="section-title">Autorun Feed</h2>
-          </div>
+          <PanelHeader title="Autorun Feed" />
           <div className="stack" style={{ marginTop: '20px' }}>
             {recentRuns.length > 0 ? recentRuns.map((agent) => (
               <div key={agent.id} className="subcard">
@@ -147,9 +142,7 @@ export default function OverviewPage() {
 
       <section className="grid">
         <article className="card">
-          <div className="card-header">
-            <h2 className="section-title">Active Agents</h2>
-          </div>
+          <PanelHeader title="Active Agents" />
           <div className="stack" style={{ marginTop: '20px' }}>
             {activeAgents.length > 0 ? activeAgents.map((agent) => (
               <div key={agent.id} className="subcard">

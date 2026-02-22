@@ -111,8 +111,8 @@ describe('ModelEditPage', () => {
       expect(getModelEdit).toHaveBeenCalledWith(12)
     })
 
-    expect(screen.getByRole('button', { name: 'Save Model' }).closest('.title-row')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Cancel' }).closest('.title-row')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save Model' }).closest('.panel-header')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel' }).closest('.panel-header')).toBeTruthy()
     expect(container.querySelector('.form-actions')).toBeNull()
   })
 

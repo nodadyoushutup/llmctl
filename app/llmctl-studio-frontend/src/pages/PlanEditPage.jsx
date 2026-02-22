@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getPlanEdit, updatePlan } from '../lib/studioApi'
+import PanelHeader from '../components/PanelHeader'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -113,12 +114,7 @@ export default function PlanEditPage() {
           </div>
         </div>
 
-        <div className="card-header">
-          <div>
-            {plan ? <p className="eyebrow">plan {plan.id}</p> : null}
-            <h2 className="section-title">Edit Plan</h2>
-          </div>
-        </div>
+        <PanelHeader title="Edit Plan" />
 
         {state.loading ? <p style={{ marginTop: '20px' }}>Loading plan...</p> : null}
         {state.error ? <p className="error-text" style={{ marginTop: '12px' }}>{state.error}</p> : null}

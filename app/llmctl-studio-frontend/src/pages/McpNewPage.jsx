@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { createMcp, getMcpMeta } from '../lib/studioApi'
 
@@ -79,13 +80,12 @@ export default function McpNewPage() {
   return (
     <section className="stack" aria-label="New MCP server">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>New MCP Server</h2>
-            <p>Define a custom server config and attach it later.</p>
-          </div>
-          <Link to="/mcps" className="btn-link btn-secondary">All MCP Servers</Link>
-        </div>
+        <PanelHeader
+          title="New MCP Server"
+          titleTag="h2"
+          actions={<Link to="/mcps" className="btn-link btn-secondary">All MCP Servers</Link>}
+        />
+        <p className="panel-header-copy">Define a custom server config and attach it later.</p>
         {state.loading ? <p>Loading MCP options...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

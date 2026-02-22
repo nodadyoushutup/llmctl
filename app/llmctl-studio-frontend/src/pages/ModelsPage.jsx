@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { useFlash } from '../lib/flashMessages'
 import { HttpError } from '../lib/httpClient'
 import { rememberModelsListScroll, resolveModelsListHref, restoreModelsListScroll } from '../lib/modelsListState'
@@ -470,22 +471,23 @@ export default function ModelsPage() {
   return (
     <section className="stack" aria-label="Models">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Models</h2>
-            <p>Create model profiles that bind provider selection and runtime policies.</p>
-          </div>
-          <Link
-            to="/models/new"
-            state={{ from: listHref }}
-            className="button"
-            aria-label="New model"
-            title="New model"
-            onClick={rememberListState}
-          >
-            New Model
-          </Link>
-        </div>
+        <PanelHeader
+          title="Models"
+          titleTag="h2"
+          actions={(
+            <Link
+              to="/models/new"
+              state={{ from: listHref }}
+              className="button"
+              aria-label="New model"
+              title="New model"
+              onClick={rememberListState}
+            >
+              New Model
+            </Link>
+          )}
+        />
+        <p className="panel-header-copy">Create model profiles that bind provider selection and runtime policies.</p>
         <div className="models-list-controls" data-testid="models-list-controls">
           <div className="models-list-controls-left">
             <div className="toolbar-group">

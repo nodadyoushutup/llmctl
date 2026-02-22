@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getScriptEdit, updateScript } from '../lib/studioApi'
 
@@ -86,16 +87,17 @@ export default function ScriptEditPage() {
   return (
     <section className="stack" aria-label="Edit script">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Edit Script</h2>
-            <p>Update file metadata and content.</p>
-          </div>
-          <div className="table-actions">
-            {parsedScriptId ? <Link to={`/scripts/${parsedScriptId}`} className="btn-link btn-secondary">Back to Script</Link> : null}
-            <Link to="/scripts" className="btn-link btn-secondary">All Scripts</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Edit Script"
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {parsedScriptId ? <Link to={`/scripts/${parsedScriptId}`} className="btn-link btn-secondary">Back to Script</Link> : null}
+              <Link to="/scripts" className="btn-link btn-secondary">All Scripts</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">Update file metadata and content.</p>
         {loading ? <p>Loading script...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

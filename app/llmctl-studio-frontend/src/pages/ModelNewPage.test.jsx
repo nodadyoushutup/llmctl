@@ -92,8 +92,8 @@ describe('ModelNewPage', () => {
       expect(getModelMeta).toHaveBeenCalledTimes(1)
     })
 
-    expect(screen.getByRole('button', { name: 'Create Model' }).closest('.title-row')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Cancel' }).closest('.title-row')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create Model' }).closest('.panel-header')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel' }).closest('.panel-header')).toBeTruthy()
     expect(container.querySelector('.form-actions')).toBeNull()
   })
 

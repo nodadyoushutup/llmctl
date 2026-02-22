@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getSkillEdit, updateSkill } from '../lib/studioApi'
 
@@ -124,16 +125,17 @@ export default function SkillEditPage() {
   return (
     <section className="stack" aria-label="Edit skill">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Edit Skill</h2>
-            <p>Update metadata and publish new immutable versions.</p>
-          </div>
-          <div className="table-actions">
-            {parsedSkillId ? <Link to={`/skills/${parsedSkillId}`} className="btn-link btn-secondary">Back to Skill</Link> : null}
-            <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Edit Skill"
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {parsedSkillId ? <Link to={`/skills/${parsedSkillId}`} className="btn-link btn-secondary">Back to Skill</Link> : null}
+              <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">Update metadata and publish new immutable versions.</p>
         {loading ? <p>Loading skill...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

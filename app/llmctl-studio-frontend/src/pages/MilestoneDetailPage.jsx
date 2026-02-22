@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
 import { deleteMilestone, deleteMilestoneArtifact, getMilestone, getMilestoneArtifacts } from '../lib/studioApi'
@@ -177,15 +178,10 @@ export default function MilestoneDetailPage() {
         ) : null}
         {milestone ? (
           <>
-            <div className="card-header">
-              <div>
-                <p className="eyebrow">milestone</p>
-                <h2 className="section-title">{milestone.name}</h2>
-              </div>
-              <div className="row" style={{ gap: '8px' }}>
-                <span className={statusClass}>{milestone.status_label || milestone.status || '-'}</span>
-                <span className={healthClass}>health: {milestone.health_label || milestone.health || '-'}</span>
-              </div>
+            <PanelHeader title={milestone.name} />
+            <div className="row" style={{ gap: '8px', marginTop: '12px' }}>
+              <span className={statusClass}>{milestone.status_label || milestone.status || '-'}</span>
+              <span className={healthClass}>health: {milestone.health_label || milestone.health || '-'}</span>
             </div>
 
             <div className="grid grid-2" style={{ marginTop: '20px' }}>

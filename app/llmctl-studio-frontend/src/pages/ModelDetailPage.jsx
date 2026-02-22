@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { resolveModelsListHref } from '../lib/modelsListState'
 import { getModel } from '../lib/studioApi'
@@ -126,16 +127,17 @@ export default function ModelDetailPage() {
   return (
     <section className="stack" aria-label="Model detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{model ? model.name : 'Model'}</h2>
-            <p>{model?.description || 'Model settings and binding usage.'}</p>
-          </div>
-          <div className="table-actions">
-            {model ? <Link to={`/models/${model.id}/edit`} state={{ from: listHref }} className="btn-link">Edit</Link> : null}
-            <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title={model ? model.name : 'Model'}
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {model ? <Link to={`/models/${model.id}/edit`} state={{ from: listHref }} className="btn-link">Edit</Link> : null}
+              <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">{model?.description || 'Model settings and binding usage.'}</p>
         {loading ? <p>Loading model...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {model ? (
@@ -185,7 +187,7 @@ export default function ModelDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Flowchart node bindings</h2>
+        <PanelHeader title="Flowchart node bindings" titleTag="h2" />
         {nodes.length === 0 ? <p>No flowchart node bindings.</p> : (
           <ul>
             {nodes.map((node) => (
@@ -200,7 +202,7 @@ export default function ModelDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Task bindings</h2>
+        <PanelHeader title="Task bindings" titleTag="h2" />
         {tasks.length === 0 ? <p>No task bindings.</p> : (
           <ul>
             {tasks.map((task) => (

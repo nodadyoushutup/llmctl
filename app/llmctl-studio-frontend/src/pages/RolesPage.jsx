@@ -81,8 +81,8 @@ export default function RolesPage() {
   }
 
   return (
-    <section className="stack" aria-label="Roles">
-      <article className="card panel-card">
+    <section className="stack workflow-fixed-page" aria-label="Roles">
+      <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="Roles"
           actions={(
@@ -91,7 +91,7 @@ export default function RolesPage() {
             </Link>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           <p className="panel-header-copy">
             Reusable role instructions that can be bound to agents.
           </p>
@@ -100,7 +100,7 @@ export default function RolesPage() {
           {actionError ? <p className="error-text">{actionError}</p> : null}
           {!state.loading && !state.error && roles.length === 0 ? <p>No roles created yet.</p> : null}
           {!state.loading && !state.error && roles.length > 0 ? (
-            <div className="table-wrap">
+            <div className="table-wrap workflow-list-table-shell">
               <table className="data-table">
                 <thead>
                   <tr>

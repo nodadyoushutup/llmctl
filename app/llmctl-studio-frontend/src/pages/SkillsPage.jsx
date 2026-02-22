@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteSkill, getSkills } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -86,16 +87,17 @@ export default function SkillsPage() {
   return (
     <section className="stack" aria-label="Skills">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Skills</h2>
-            <p>First-class skill packages assigned to Agents.</p>
-          </div>
-          <div className="table-actions">
-            <Link to="/skills/import" className="btn-link btn-secondary">Import Skill</Link>
-            <Link to="/skills/new" className="btn-link">New Skill</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Skills"
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              <Link to="/skills/import" className="btn-link btn-secondary">Import Skill</Link>
+              <Link to="/skills/new" className="btn-link">New Skill</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">First-class skill packages assigned to Agents.</p>
         {state.loading ? <p>Loading skills...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

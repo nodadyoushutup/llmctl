@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getSkillImportMeta, importSkillBundle, previewSkillImport } from '../lib/studioApi'
 
@@ -84,13 +85,12 @@ export default function SkillImportPage() {
   return (
     <section className="stack" aria-label="Import skill">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Import Skill</h2>
-            <p>Import from bundle upload or local package directory.</p>
-          </div>
-          <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
-        </div>
+        <PanelHeader
+          title="Import Skill"
+          titleTag="h2"
+          actions={<Link to="/skills" className="btn-link btn-secondary">All Skills</Link>}
+        />
+        <p className="panel-header-copy">Import from bundle upload or local package directory.</p>
         {state.loading ? <p>Loading import metadata...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
@@ -156,7 +156,7 @@ export default function SkillImportPage() {
 
       {preview ? (
         <article className="card">
-          <h2>Preview</h2>
+          <PanelHeader title="Preview" titleTag="h2" />
           <pre>{JSON.stringify(preview, null, 2)}</pre>
         </article>
       ) : null}

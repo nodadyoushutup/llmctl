@@ -25,13 +25,12 @@ const navSections = [
     label: 'Artifact',
     items: [
       {
-        id: 'artifact-all',
-        to: '/artifacts/all',
-        label: 'All Artifacts',
-        icon: 'fa-solid fa-boxes-stacked',
-        matchPrefixes: ['/artifacts/all', '/artifacts/item/'],
+        id: 'artifact-task',
+        to: '/artifacts/type/task',
+        label: 'Task',
+        icon: 'fa-solid fa-list-check',
+        matchPrefixes: ['/artifacts/type/task', '/artifacts/item/'],
       },
-      { id: 'artifact-task', to: '/artifacts/type/task', label: 'Task', icon: 'fa-solid fa-list-check' },
       { id: 'artifact-plan', to: '/artifacts/type/plan', label: 'Plan', icon: 'fa-solid fa-map' },
       { id: 'artifact-milestone', to: '/artifacts/type/milestone', label: 'Milestone', icon: 'fa-solid fa-flag-checkered' },
       { id: 'artifact-memory', to: '/artifacts/type/memory', label: 'Memory', icon: 'fa-solid fa-brain' },
@@ -127,14 +126,13 @@ export default function AppLayout({ children }) {
   const active = useMemo(() => findActive(location.pathname), [location.pathname])
   const isFlowchartDetailRoute = useMemo(() => /^\/flowcharts\/\d+\/?$/.test(location.pathname), [location.pathname])
   const isNodeDetailRoute = useMemo(() => /^\/nodes\/\d+\/?$/.test(location.pathname), [location.pathname])
+  const isChatRoute = useMemo(() => /^\/chat(?:\/|$)/.test(location.pathname), [location.pathname])
   const isFixedListRoute = useMemo(
-    () => /^(\/nodes|\/runs|\/plans|\/milestones|\/memories|\/artifacts\/all|\/artifacts\/type\/[^/]+)\/?$/.test(location.pathname),
+    () => /^(\/nodes|\/runs|\/plans|\/milestones|\/memories|\/artifacts\/type\/[^/]+)\/?$/.test(location.pathname),
     [location.pathname],
   )
-  const isFixedContentRoute = isFlowchartDetailRoute || isNodeDetailRoute || isFixedListRoute
+  const isFixedContentRoute = isFlowchartDetailRoute || isNodeDetailRoute || isFixedListRoute || isChatRoute
   const [expandedBySection, setExpandedBySection] = useState(() => initialExpanded(location.pathname))
-
-  const title = active?.item?.label || 'LLMCTL'
 
   return (
     <div className="app-shell page">
@@ -192,13 +190,6 @@ export default function AppLayout({ children }) {
         </aside>
 
         <div className={`main${isFixedContentRoute ? ' main-is-fixed' : ''}`}>
-          <header className="topbar content-header" id="content-header">
-            <div className="topbar-row">
-              <div>
-                <h1 className="title">{title}</h1>
-              </div>
-            </div>
-          </header>
           <main className={`content${isFixedContentRoute ? ' content-is-fixed' : ''}`}>{children}</main>
         </div>
       </div>

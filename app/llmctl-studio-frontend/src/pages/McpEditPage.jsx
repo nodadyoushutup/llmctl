@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getMcpEdit, updateMcp } from '../lib/studioApi'
 
@@ -98,16 +99,17 @@ export default function McpEditPage() {
   return (
     <section className="stack" aria-label="Edit MCP server">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Edit MCP Server</h2>
-            <p>Update server details and config JSON.</p>
-          </div>
-          <div className="table-actions">
-            {parsedMcpId ? <Link to={`/mcps/${parsedMcpId}`} className="btn-link btn-secondary">Back to MCP</Link> : null}
-            <Link to="/mcps" className="btn-link btn-secondary">All MCP Servers</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title="Edit MCP Server"
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {parsedMcpId ? <Link to={`/mcps/${parsedMcpId}`} className="btn-link btn-secondary">Back to MCP</Link> : null}
+              <Link to="/mcps" className="btn-link btn-secondary">All MCP Servers</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">Update server details and config JSON.</p>
         {loading ? <p>Loading MCP server...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

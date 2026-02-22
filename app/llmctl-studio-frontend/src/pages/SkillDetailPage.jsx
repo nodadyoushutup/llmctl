@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { resolveApiUrl } from '../config/runtime'
 import { HttpError } from '../lib/httpClient'
 import { getSkill } from '../lib/studioApi'
@@ -67,17 +68,18 @@ export default function SkillDetailPage() {
   return (
     <section className="stack" aria-label="Skill detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{skill ? skill.display_name || skill.name : 'Skill'}</h2>
-            <p>{skill?.description || 'Skill metadata, versions, and bindings.'}</p>
-          </div>
-          <div className="table-actions">
-            {skill ? <Link to={`/skills/${skill.id}/edit`} className="btn-link">Edit</Link> : null}
-            {skill ? <a href={exportHref} className="btn-link btn-secondary">Export</a> : null}
-            <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title={skill ? skill.display_name || skill.name : 'Skill'}
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {skill ? <Link to={`/skills/${skill.id}/edit`} className="btn-link">Edit</Link> : null}
+              {skill ? <a href={exportHref} className="btn-link btn-secondary">Export</a> : null}
+              <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">{skill?.description || 'Skill metadata, versions, and bindings.'}</p>
         {loading ? <p>Loading skill...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {skill ? (
@@ -123,7 +125,7 @@ export default function SkillDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Attached agents</h2>
+        <PanelHeader title="Attached agents" titleTag="h2" />
         {attachedAgents.length === 0 ? <p>No agent bindings.</p> : (
           <ul>
             {attachedAgents.map((agent) => (

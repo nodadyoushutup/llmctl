@@ -9,6 +9,7 @@ import {
 } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
 import { routeCountMeta } from '../lib/flowchartRouting'
+import PanelHeader from '../components/PanelHeader'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -164,9 +165,7 @@ export default function FlowchartRunDetailPage() {
             ) : null}
           </div>
         </div>
-        <div className="card-header">
-          <h2 className="section-title">{flowchartRun ? `Run ${flowchartRun.id}` : 'Flowchart Run'}</h2>
-        </div>
+        <PanelHeader title={flowchartRun ? `Run ${flowchartRun.id}` : 'Flowchart Run'} />
         {state.loading ? <p>Loading flowchart run...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
@@ -202,9 +201,7 @@ export default function FlowchartRunDetailPage() {
 
       {active ? (
         <article className="card">
-          <div className="card-header">
-            <h2 className="section-title">Run Controls</h2>
-          </div>
+          <PanelHeader title="Run Controls" />
           <div className="row" style={{ marginTop: '16px', gap: '10px' }}>
             <button
               type="button"
@@ -234,9 +231,7 @@ export default function FlowchartRunDetailPage() {
       ) : null}
 
       <article className="card">
-        <div className="card-header">
-          <h2 className="section-title">Node Runs</h2>
-        </div>
+        <PanelHeader title="Node Runs" />
         {nodeRuns.length === 0 ? (
           <p className="muted" style={{ marginTop: '12px' }}>No node runs recorded for this flowchart run yet.</p>
         ) : null}

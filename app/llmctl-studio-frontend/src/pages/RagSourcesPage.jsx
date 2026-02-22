@@ -142,8 +142,8 @@ export default function RagSourcesPage() {
   }
 
   return (
-    <section className="stack" aria-label="RAG sources">
-      <article className="card panel-card">
+    <section className="stack workflow-fixed-page" aria-label="RAG sources">
+      <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="RAG Sources"
           actions={(
@@ -152,7 +152,7 @@ export default function RagSourcesPage() {
             </Link>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           <p className="panel-header-copy">
             Configure retrieval sources and run quick index operations.
           </p>
@@ -160,7 +160,7 @@ export default function RagSourcesPage() {
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {!state.loading && !state.error && sources.length === 0 ? <p>No sources found.</p> : null}
           {!state.loading && !state.error && sources.length > 0 ? (
-            <div className="table-wrap">
+            <div className="table-wrap workflow-list-table-shell">
               <table className="data-table">
                 <thead>
                   <tr>

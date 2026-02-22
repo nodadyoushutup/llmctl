@@ -14,7 +14,7 @@ function normalizePanelId(value) {
   if (DETAIL_PANELS.some((panel) => panel.id === normalized)) {
     return normalized
   }
-  return 'metadata'
+  return 'data'
 }
 
 function errorMessage(error, fallback) {
@@ -33,7 +33,7 @@ function errorMessage(error, fallback) {
 const ENTITY_CONFIG = {
   artifact: {
     label: 'artifact',
-    listPath: '/artifacts/all',
+    listPath: '/artifacts/type/task',
   },
   plan: {
     label: 'plan',
@@ -53,8 +53,8 @@ const ENTITY_CONFIG = {
 }
 
 const DETAIL_PANELS = [
-  { id: 'metadata', label: 'Metadata', icon: 'fa-solid fa-circle-info' },
   { id: 'data', label: 'Data', icon: 'fa-solid fa-table-columns' },
+  { id: 'metadata', label: 'Metadata', icon: 'fa-solid fa-circle-info' },
   { id: 'payload', label: 'Payload', icon: 'fa-solid fa-code' },
 ]
 
@@ -177,6 +177,27 @@ function toPrettyJson(value) {
   }
 }
 
+function formatArtifactContentText(value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return ''
+  }
+  const looksLikeJsonObject = text.startsWith('{') && text.endsWith('}')
+  const looksLikeJsonArray = text.startsWith('[') && text.endsWith(']')
+  if (!looksLikeJsonObject && !looksLikeJsonArray) {
+    return text
+  }
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed === 'object') {
+      return JSON.stringify(parsed, null, 2)
+    }
+  } catch {
+    // Keep original text when content only looks like JSON.
+  }
+  return text
+}
+
 function buildPlanOutlineText(plan) {
   const lines = []
   const planName = String(plan?.name || '').trim()
@@ -293,7 +314,7 @@ function buildArtifactDataPresentation(artifact, dataSections) {
       title: 'Stored Memory',
       metadataEntries: recordEntries(storedMemory, ['id', 'created_at', 'updated_at']),
       contentTitle: 'description',
-      contentText: String(storedMemory.description || '').trim() || '-',
+      contentText: formatArtifactContentText(storedMemory.description) || '-',
       secondarySections: dataSections.filter((section) => section.id !== 'memory-stored'),
     }
   }
@@ -596,7 +617,7 @@ export default function ArtifactDetailPage() {
   const artifactType = String(artifact?.artifact_type || '').trim().toLowerCase()
   const artifactTypeLabel = String(artifact?.artifact_type || '').trim() || 'artifact'
   const backPath = context.kind === 'artifact'
-    ? (artifactType ? `/artifacts/type/${artifactType}` : '/artifacts/all')
+    ? (artifactType ? `/artifacts/type/${artifactType}` : '/artifacts/type/task')
     : (config ? `${config.listPath}/${context.entityId}` : '/')
   const flowchartRunId = parseId(artifact?.flowchart_run_id)
   const flowchartRunHref = flowchartRunId ? `/flowcharts/runs/${flowchartRunId}` : ''
@@ -610,7 +631,7 @@ export default function ArtifactDetailPage() {
   function selectPanel(panelId) {
     const normalized = normalizePanelId(panelId)
     const updated = new URLSearchParams(searchParams)
-    if (normalized === 'metadata') {
+    if (normalized === 'data') {
       updated.delete('panel')
     } else {
       updated.set('panel', normalized)

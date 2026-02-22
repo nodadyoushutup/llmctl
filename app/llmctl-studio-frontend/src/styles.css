@@ -19,7 +19,6 @@
   --success: #22c55e;
   --warning: #f59e0b;
   --danger: #ef4444;
-  --header-row-height: 36px;
   --scrollbar-thumb: rgba(20, 24, 28, 0.62);
   --scrollbar-thumb-hover: rgba(24, 28, 32, 0.66);
   --scrollbar-track: rgba(6, 9, 12, 0.55);
@@ -142,30 +141,6 @@ select[size]:not([size='1']) {
   min-height: 100%;
   height: 100%;
   overflow: hidden;
-}
-
-.app-shell::before,
-.page::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle at top left, rgba(255, 122, 24, 0.22), transparent 48%),
-    radial-gradient(circle at 45% 15%, rgba(79, 209, 197, 0.18), transparent 55%),
-    radial-gradient(circle at 85% 35%, rgba(110, 231, 183, 0.16), transparent 50%);
-  pointer-events: none;
-}
-
-.app-shell::after,
-.page::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: linear-gradient(rgba(38, 49, 64, 0.35) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(38, 49, 64, 0.35) 1px, transparent 1px);
-  background-size: 120px 120px;
-  opacity: 0.35;
-  mask-image: radial-gradient(circle at top, #000 0%, transparent 70%);
-  pointer-events: none;
 }
 
 .layout {
@@ -444,45 +419,38 @@ select[size]:not([size='1']) {
   overflow: hidden;
 }
 
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.topbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: var(--header-row-height);
-}
-
-.title {
-  margin: 0;
-  font-size: 22px;
-  color: #fff;
-}
-
 .content {
   flex: 1;
-  padding: 28px 32px 48px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
   min-height: 0;
 }
 
 .content.content-is-fixed {
   overflow: hidden;
-  padding-bottom: 24px;
+  padding: 0;
+}
+
+.content > .stack,
+.content > .workflow-fixed-page,
+.content > .artifact-detail-fixed-page,
+.content > .flowchart-fixed-page,
+.content > .node-detail-fixed-page,
+.content > .provider-fixed-page {
+  flex: 1;
+  min-height: 0;
+}
+
+.content > .stack > .panel-card:only-child {
+  flex: 1;
+  min-height: 0;
+}
+
+.content > .stack > .panel-card:only-child > .panel-card-body {
+  flex: 1;
+  min-height: 0;
 }
 
 .grid {
@@ -622,13 +590,6 @@ select[size]:not([size='1']) {
   padding-left: 18px;
 }
 
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .panel-header {
   display: flex;
   align-items: center;
@@ -685,6 +646,10 @@ select[size]:not([size='1']) {
   gap: 0;
   padding: 0;
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .panel-card-body {
@@ -1572,6 +1537,18 @@ select[size]:not([size='1']) {
   color: #fff;
 }
 
+.icon-button-primary {
+  border-color: rgba(255, 122, 24, 0.44);
+  background: var(--accent);
+  color: #0b0f14;
+}
+
+.icon-button-primary:hover {
+  border-color: rgba(255, 122, 24, 0.58);
+  background: var(--accent-dark);
+  color: #0b0f14;
+}
+
 .icon-button svg {
   width: 1rem;
   height: 1rem;
@@ -1611,7 +1588,7 @@ select[size]:not([size='1']) {
   display: grid;
   grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  gap: 16px;
+  gap: 0;
   min-height: 0;
   height: 100%;
   max-height: 100%;
@@ -1633,33 +1610,20 @@ select[size]:not([size='1']) {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  padding: 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(
-    180deg,
-    rgba(19, 28, 38, 0.95) 0%,
-    rgba(16, 23, 31, 0.96) 100%
-  );
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.52);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.chat-panel-header {
-  min-height: 42px;
-  padding: 4px 0 8px;
+.chat-panel > :not(.panel-header) {
+  margin-left: 12px;
+  margin-right: 12px;
 }
 
-.chat-panel-header .panel-header-title {
-  font-size: 10px;
-  letter-spacing: 0.16em;
-}
-
-.chat-panel-header-actions {
-  gap: 6px;
-}
-
-.chat-threads-header {
-  margin-bottom: 10px;
+.chat-side-panel {
+  border-right: 1px solid var(--line);
 }
 
 .chat-checklist {
@@ -1713,39 +1677,6 @@ select[size]:not([size='1']) {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-}
-
-.chat-main-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(38, 49, 64, 0.72);
-}
-
-.chat-main-title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-transform: none;
-  letter-spacing: normal;
-  color: inherit;
-}
-
-.chat-main-title .section-title {
-  font-size: 17px;
-  line-height: 1.2;
-}
-
-.chat-main-usage {
-  font-size: 11px;
-}
-
-.chat-main-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .chat-session-controls {
@@ -2275,30 +2206,18 @@ fieldset.field {
 
 .provider-settings-card {
   position: relative;
-  border-color: var(--line);
-  background: rgba(17, 24, 33, 0.9);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .provider-settings-card::before {
   content: none;
 }
 
-.provider-settings-header {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.9rem;
-}
-
-.provider-settings-header h2 {
-  margin: 0;
-  font-size: 1.15rem;
-  letter-spacing: 0.02em;
-}
-
-.provider-settings-header p {
-  margin: 0.4rem 0 0;
+.provider-settings-description {
+  margin: 10px 12px 0;
   max-width: 52ch;
   color: #bad1e5;
   font-size: 0.88rem;
@@ -2538,9 +2457,6 @@ fieldset.field {
     overflow: visible;
   }
 
-  .provider-settings-header {
-    flex-direction: column;
-  }
 }
 
 @media (max-width: 960px) {
@@ -2853,6 +2769,10 @@ fieldset.field {
   gap: 0;
   padding: 0;
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .node-detail-scroll {
@@ -3208,8 +3128,12 @@ fieldset.field {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px;
+  padding: 8px 10px;
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .flowchart-fixed-header {
@@ -4022,7 +3946,7 @@ pre {
   }
 
   .content {
-    padding: 16px 14px 20px;
+    padding: 0;
   }
 
   .node-detail-fixed-layout {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getChatThread } from '../lib/studioApi'
+import PanelHeader from '../components/PanelHeader'
 
 export default function ChatThreadPage() {
   const params = useParams()
@@ -54,15 +55,14 @@ export default function ChatThreadPage() {
   return (
     <section className="stack" aria-label="Chat thread detail">
       <article className="card">
-        <div className="card-header">
-          <div>
-            <h2 className="section-title">{payload?.title || 'Chat Thread'}</h2>
-          </div>
-          <Link className="btn-link btn-secondary" to="/chat/activity">
-            <i className="fa-solid fa-arrow-left" />
-            back to activity
-          </Link>
-        </div>
+        <PanelHeader
+          title={payload?.title || 'Chat Thread'}
+          actions={(
+            <Link className="icon-button" to="/chat/activity" aria-label="Back to activity" title="Back to activity">
+              <i className="fa-solid fa-arrow-left" />
+            </Link>
+          )}
+        />
         {state.loading ? <p>Loading thread...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {payload ? (
@@ -120,9 +120,7 @@ export default function ChatThreadPage() {
       </article>
 
       <article className="card">
-        <div className="card-header">
-          <h2 className="section-title">Messages</h2>
-        </div>
+        <PanelHeader title="Messages" />
         {!state.loading && !state.error && messages.length === 0 ? <p className="muted">No messages in this thread yet.</p> : null}
         {!state.loading && !state.error && messages.length > 0 ? (
           <div className="stack" style={{ marginTop: '14px' }}>

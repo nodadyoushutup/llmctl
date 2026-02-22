@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { createScript, getScriptMeta } from '../lib/studioApi'
 
@@ -69,13 +70,12 @@ export default function ScriptNewPage() {
   return (
     <section className="stack" aria-label="New script">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>New Script</h2>
-            <p>Upload a script file or paste content to attach to agents.</p>
-          </div>
-          <Link to="/scripts" className="btn-link btn-secondary">All Scripts</Link>
-        </div>
+        <PanelHeader
+          title="New Script"
+          titleTag="h2"
+          actions={<Link to="/scripts" className="btn-link btn-secondary">All Scripts</Link>}
+        />
+        <p className="panel-header-copy">Upload a script file or paste content to attach to agents.</p>
         {state.loading ? <p>Loading script options...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

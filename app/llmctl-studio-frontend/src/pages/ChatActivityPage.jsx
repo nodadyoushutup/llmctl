@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getChatActivity } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
+import PanelHeader from '../components/PanelHeader'
 
 function parseThreadId(value) {
   const parsed = Number.parseInt(String(value || '').trim(), 10)
@@ -114,13 +115,14 @@ export default function ChatActivityPage() {
   return (
     <section className="stack" aria-label="Chat activity">
       <article className="card">
-        <div className="card-header">
-          <h2 className="section-title">Chat Activity</h2>
-          <Link className="btn-link btn-secondary" to="/chat">
-            <i className="fa-solid fa-comments" />
-            back to chat
-          </Link>
-        </div>
+        <PanelHeader
+          title="Chat Activity"
+          actions={(
+            <Link className="icon-button" to="/chat" aria-label="Back to chat" title="Back to chat">
+              <i className="fa-solid fa-comments" />
+            </Link>
+          )}
+        />
         <p className="muted" style={{ marginTop: '12px' }}>
           Thread lifecycle, turn, retrieval/tool, compaction, and failure audit events.
         </p>

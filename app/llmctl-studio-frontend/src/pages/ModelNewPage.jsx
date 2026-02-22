@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFlash } from '../lib/flashMessages'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
+import PanelHeader from '../components/PanelHeader'
 import {
   modelFieldLabel,
   normalizeProviderModelOptions,
@@ -160,31 +161,32 @@ export default function ModelNewPage() {
   return (
     <section className="stack" aria-label="New model">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>New Model</h2>
-            <p>Bind a provider with model and reasoning policies.</p>
-          </div>
-          <div className="table-actions">
-            <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              onClick={handleCancel}
-              disabled={busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              form="model-new-form"
-              className="btn-link"
-              disabled={!canSubmit}
-            >
-              Create Model
-            </button>
-          </div>
-        </div>
+        <PanelHeader
+          title="New Model"
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
+              <button
+                type="button"
+                className="btn-link btn-secondary"
+                onClick={handleCancel}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="model-new-form"
+                className="btn-link"
+                disabled={!canSubmit}
+              >
+                Create Model
+              </button>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">Bind a provider with model and reasoning policies.</p>
         {state.loading ? <p>Loading model options...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {!state.loading && !state.error ? (

@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getMilestoneEdit, updateMilestone } from '../lib/studioApi'
+import PanelHeader from '../components/PanelHeader'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -144,12 +145,7 @@ export default function MilestoneEditPage() {
           </div>
         </div>
 
-        <div className="card-header">
-          <div>
-            {milestone ? <p className="eyebrow">milestone {milestone.id}</p> : null}
-            <h2 className="section-title">Edit Milestone</h2>
-          </div>
-        </div>
+        <PanelHeader title="Edit Milestone" />
 
         <p className="muted" style={{ marginTop: '12px' }}>
           Update milestone planning, ownership, and delivery details.

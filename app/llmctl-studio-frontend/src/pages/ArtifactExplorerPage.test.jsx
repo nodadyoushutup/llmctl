@@ -8,11 +8,10 @@ vi.mock('../lib/studioApi', () => ({
   getNodeArtifacts: vi.fn(),
 }))
 
-function renderPage(initialEntry = '/artifacts/all') {
+function renderPage(initialEntry = '/artifacts/type/task') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
-        <Route path="/artifacts/all" element={<ArtifactExplorerPage />} />
         <Route path="/artifacts/type/:artifactType" element={<ArtifactExplorerPage />} />
         <Route path="/artifacts/item/:artifactId" element={<p>Artifact detail</p>} />
       </Routes>
@@ -38,21 +37,6 @@ describe('ArtifactExplorerPage', () => {
         },
       ],
     })
-  })
-
-  test('loads all artifacts on all route', async () => {
-    renderPage('/artifacts/all')
-    await waitFor(() => {
-      expect(getNodeArtifacts).toHaveBeenCalledWith({
-        limit: 50,
-        offset: 0,
-        artifactType: '',
-        nodeType: '',
-        flowchartRunId: null,
-        order: 'desc',
-      })
-    })
-    expect(await screen.findByRole('heading', { name: 'Artifacts' })).toBeInTheDocument()
   })
 
   test('loads type-scoped artifacts and renders row-link to detail', async () => {

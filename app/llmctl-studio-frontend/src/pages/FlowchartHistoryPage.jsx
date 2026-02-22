@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getFlowchartHistory } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
+import PanelHeader from '../components/PanelHeader'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -90,9 +91,7 @@ export default function FlowchartHistoryPage() {
             ) : null}
           </div>
         </div>
-        <div className="card-header">
-          <h2 className="section-title">Flowchart History</h2>
-        </div>
+        <PanelHeader title="Flowchart History" />
         <p className="muted" style={{ marginTop: '12px' }}>
           {flowchart
             ? `${flowchart.name}. Each run begins at Start. If execution routes back to Start, the current run completes and a new run is queued.`

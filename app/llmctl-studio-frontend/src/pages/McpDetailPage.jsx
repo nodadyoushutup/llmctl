@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getMcp } from '../lib/studioApi'
 
@@ -58,16 +59,17 @@ export default function McpDetailPage() {
   return (
     <section className="stack" aria-label="MCP detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{mcp ? mcp.name : 'MCP Server'}</h2>
-            <p>{mcp?.description || 'Server metadata, config, and binding usage.'}</p>
-          </div>
-          <div className="table-actions">
-            {mcp && !mcp.is_integrated ? <Link to={`/mcps/${mcp.id}/edit`} className="btn-link">Edit</Link> : null}
-            <Link to="/mcps" className="btn-link btn-secondary">All MCP Servers</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title={mcp ? mcp.name : 'MCP Server'}
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {mcp && !mcp.is_integrated ? <Link to={`/mcps/${mcp.id}/edit`} className="btn-link">Edit</Link> : null}
+              <Link to="/mcps" className="btn-link btn-secondary">All MCP Servers</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">{mcp?.description || 'Server metadata, config, and binding usage.'}</p>
         {loading ? <p>Loading MCP server...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {mcp ? (
@@ -92,7 +94,7 @@ export default function McpDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Flowchart node bindings</h2>
+        <PanelHeader title="Flowchart node bindings" titleTag="h2" />
         {nodes.length === 0 ? <p>No flowchart node bindings.</p> : (
           <ul>
             {nodes.map((node) => (
@@ -107,7 +109,7 @@ export default function McpDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Task bindings</h2>
+        <PanelHeader title="Task bindings" titleTag="h2" />
         {tasks.length === 0 ? <p>No task bindings.</p> : (
           <ul>
             {tasks.map((task) => (

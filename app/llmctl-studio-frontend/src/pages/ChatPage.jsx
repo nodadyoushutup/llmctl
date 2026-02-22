@@ -260,19 +260,6 @@ export default function ChatPage() {
     setShowPendingAssistantBubble(false)
   }, [selectedThreadId])
 
-  const usagePercentLabel = useMemo(() => {
-    if (!selectedThread || typeof selectedThread !== 'object') {
-      return 'select a thread to start'
-    }
-    const latestTurn = selectedThread.latest_turn
-    const limit = Number(latestTurn?.context_limit_tokens)
-    if (!Number.isFinite(limit) || limit <= 0) {
-      return '0%'
-    }
-    const usageAfter = Number(latestTurn?.context_usage_after) || 0
-    return `${((usageAfter * 100) / limit).toFixed(1)}%`
-  }, [selectedThread])
-
   const autosizeMessageInput = useCallback(() => {
     const input = messageInputRef.current
     if (!input) {
@@ -570,9 +557,7 @@ export default function ChatPage() {
     <section className={`chat-live-layout${isSideCollapsed ? ' chat-side-collapsed' : ''}`} id="chat-live-layout">
       <aside className="chat-panel chat-side-panel">
         <PanelHeader
-          className="chat-panel-header chat-threads-header"
           title="Threads"
-          actionsClassName="chat-panel-header-actions"
           actions={(
             <>
               <button
@@ -808,16 +793,7 @@ export default function ChatPage() {
 
       <article className="chat-panel">
         <PanelHeader
-          className="chat-panel-header chat-main-topbar"
-          titleTag="div"
-          titleClassName="chat-main-title"
-          title={(
-            <>
-              <h2 className="section-title">{selectedThread?.title || 'Live Chat'}</h2>
-              <p className="muted chat-main-usage">{usagePercentLabel}</p>
-            </>
-          )}
-          actionsClassName="chat-main-actions"
+          title={selectedThread?.title || 'Live Chat'}
           actions={(
             <>
               <button
@@ -835,6 +811,7 @@ export default function ChatPage() {
                     type="button"
                     className="icon-button"
                     aria-label="Clear thread"
+                    title="Clear thread"
                     onClick={handleClearThread}
                     disabled={clearingThread || state.loading}
                   >
@@ -844,11 +821,12 @@ export default function ChatPage() {
                     id="chat-send-btn"
                     type="submit"
                     form="chat-turn-form"
-                    className="btn-link"
+                    className="icon-button icon-button-primary"
+                    aria-label="Send message"
+                    title="Send message"
                     disabled={sending || savingSession || state.loading}
                   >
                     <i className="fa-solid fa-paper-plane" />
-                    send
                   </button>
                 </>
               ) : null}

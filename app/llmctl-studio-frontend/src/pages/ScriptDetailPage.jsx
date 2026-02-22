@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { getScript } from '../lib/studioApi'
 
@@ -58,16 +59,17 @@ export default function ScriptDetailPage() {
   return (
     <section className="stack" aria-label="Script detail">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>{script ? script.file_name : 'Script'}</h2>
-            <p>{script?.description || 'Script metadata, content, and bindings.'}</p>
-          </div>
-          <div className="table-actions">
-            {script ? <Link to={`/scripts/${script.id}/edit`} className="btn-link">Edit</Link> : null}
-            <Link to="/scripts" className="btn-link btn-secondary">All Scripts</Link>
-          </div>
-        </div>
+        <PanelHeader
+          title={script ? script.file_name : 'Script'}
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {script ? <Link to={`/scripts/${script.id}/edit`} className="btn-link">Edit</Link> : null}
+              <Link to="/scripts" className="btn-link btn-secondary">All Scripts</Link>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">{script?.description || 'Script metadata, content, and bindings.'}</p>
         {loading ? <p>Loading script...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {script ? (
@@ -92,7 +94,7 @@ export default function ScriptDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Task bindings</h2>
+        <PanelHeader title="Task bindings" titleTag="h2" />
         {attachedTasks.length === 0 ? <p>No task bindings.</p> : (
           <ul>
             {attachedTasks.map((task) => (
@@ -103,7 +105,7 @@ export default function ScriptDetailPage() {
       </article>
 
       <article className="card">
-        <h2>Flowchart node bindings</h2>
+        <PanelHeader title="Flowchart node bindings" titleTag="h2" />
         {attachedNodes.length === 0 ? <p>No flowchart node bindings.</p> : (
           <ul>
             {attachedNodes.map((node) => (

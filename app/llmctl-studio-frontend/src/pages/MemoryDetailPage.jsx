@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import ActionIcon from '../components/ActionIcon'
 import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
+import PanelHeader from '../components/PanelHeader'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
@@ -177,12 +178,7 @@ export default function MemoryDetailPage() {
 
         {memory ? (
           <>
-            <div className="card-header">
-              <div>
-                <p className="eyebrow">memory {memory.id}</p>
-                <h2 className="section-title">Memory</h2>
-              </div>
-            </div>
+            <PanelHeader title="Memory" />
 
             <div className="grid grid-2" style={{ marginTop: '20px' }}>
               <div className="subcard">

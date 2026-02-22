@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteMcp, getMcps } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -23,14 +24,14 @@ function McpTable({ title, rows, onDelete, busyById, navigate, allowDelete }) {
   if (rows.length === 0) {
     return (
       <article className="card">
-        <h2>{title}</h2>
+        <PanelHeader title={title} titleTag="h2" />
         <p>No entries.</p>
       </article>
     )
   }
   return (
     <article className="card">
-      <h2>{title}</h2>
+      <PanelHeader title={title} titleTag="h2" />
       <div className="table-wrap">
         <table className="data-table">
           <thead>
@@ -153,13 +154,12 @@ export default function McpsPage() {
   return (
     <section className="stack" aria-label="MCP servers">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>MCP Servers</h2>
-            <p>User-managed and system-managed servers for flowchart nodes.</p>
-          </div>
-          <Link to="/mcps/new" className="btn-link">New MCP Server</Link>
-        </div>
+        <PanelHeader
+          title="MCP Servers"
+          titleTag="h2"
+          actions={<Link to="/mcps/new" className="btn-link">New MCP Server</Link>}
+        />
+        <p className="panel-header-copy">User-managed and system-managed servers for flowchart nodes.</p>
         {state.loading ? <p>Loading MCP servers...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlash, useFlashState } from '../lib/flashMessages'
 import { useParams } from 'react-router-dom'
 import SettingsInnerSidebar from '../components/SettingsInnerSidebar'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import {
   getSettingsProvider,
@@ -103,17 +104,15 @@ function ProviderSectionCard({
 }) {
   return (
     <article className={`card provider-settings-card${className ? ` ${className}` : ''}`}>
-      <header className="provider-settings-header">
-        <div>
-          <h2>{title}</h2>
-          <p>{description}</p>
-        </div>
-        {icon ? (
+      <PanelHeader
+        title={title}
+        actions={icon ? (
           <span className="provider-settings-icon" aria-hidden="true">
             <i className={icon} />
           </span>
         ) : null}
-      </header>
+      />
+      <p className="provider-settings-description">{description}</p>
       <div className="stack-sm provider-settings-body">
         {children}
       </div>

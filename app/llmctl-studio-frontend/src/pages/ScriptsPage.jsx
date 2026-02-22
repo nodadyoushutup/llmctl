@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { deleteScript, getScripts } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -86,13 +87,12 @@ export default function ScriptsPage() {
   return (
     <section className="stack" aria-label="Scripts">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Scripts</h2>
-            <p>Upload helper scripts and bind them to flowchart nodes.</p>
-          </div>
-          <Link to="/scripts/new" className="btn-link">New Script</Link>
-        </div>
+        <PanelHeader
+          title="Scripts"
+          titleTag="h2"
+          actions={<Link to="/scripts/new" className="btn-link">New Script</Link>}
+        />
+        <p className="panel-header-copy">Upload helper scripts and bind them to flowchart nodes.</p>
         {state.loading ? <p>Loading scripts...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}

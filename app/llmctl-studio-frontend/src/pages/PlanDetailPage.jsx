@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import ArtifactHistoryTable from '../components/ArtifactHistoryTable'
 import PersistedDetails from '../components/PersistedDetails'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import {
   createPlanStage,
@@ -376,12 +377,7 @@ export default function PlanDetailPage() {
 
         {plan ? (
           <>
-            <div className="card-header">
-              <div>
-                <p className="eyebrow">plan {plan.id}</p>
-                <h2 className="section-title">{plan.name}</h2>
-              </div>
-            </div>
+            <PanelHeader title={plan.name} />
             <dl className="meta-list meta-list-compact" style={{ marginTop: '20px' }}>
               <div className="meta-span">
                 <dt>Artifact runs</dt>
@@ -432,17 +428,19 @@ export default function PlanDetailPage() {
       </article>
 
       <article className="card">
-        <div className="card-header">
-          <h2 className="section-title">Plan Outline</h2>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => togglePanel('add-stage-panel')}
-          >
-            <i className="fa-solid fa-plus" />
-            add stage
-          </button>
-        </div>
+        <PanelHeader
+          title="Plan Outline"
+          actions={(
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => togglePanel('add-stage-panel')}
+            >
+              <i className="fa-solid fa-plus" />
+              add stage
+            </button>
+          )}
+        />
 
         <p className="muted" style={{ marginTop: '12px' }}>
           Expand each stage to browse subtasks, notes, and update progress.

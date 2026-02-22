@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getFlowchartEdit, updateFlowchart } from '../lib/studioApi'
+import PanelHeader from '../components/PanelHeader'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -122,12 +123,7 @@ export default function FlowchartEditPage() {
             </Link>
           </div>
         </div>
-        <div className="card-header">
-          <div>
-            {flowchart ? <p className="eyebrow">flowchart {flowchart.id}</p> : null}
-            <h2 className="section-title">Edit Flowchart</h2>
-          </div>
-        </div>
+        <PanelHeader title="Edit Flowchart" />
         <p className="muted" style={{ marginTop: '12px' }}>
           Update flowchart metadata and guardrails without leaving the flowchart workspace.
         </p>

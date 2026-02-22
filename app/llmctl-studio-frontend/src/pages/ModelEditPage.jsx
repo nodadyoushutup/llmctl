@@ -3,6 +3,7 @@ import { useFlash } from '../lib/flashMessages'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import ActionIcon from '../components/ActionIcon'
+import PanelHeader from '../components/PanelHeader'
 import {
   modelFieldLabel,
   normalizeProviderModelOptions,
@@ -200,42 +201,43 @@ export default function ModelEditPage() {
   return (
     <section className="stack" aria-label="Edit model">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>Edit Model</h2>
-            <p>Update provider selection and model policies.</p>
-          </div>
-          <div className="table-actions">
-            {parsedModelId ? <Link to={`/models/${parsedModelId}`} state={{ from: listHref }} className="btn-link btn-secondary">Back to Model</Link> : null}
-            <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
-            <button
-              type="button"
-              className="icon-button icon-button-danger"
-              aria-label="Delete model"
-              title="Delete model"
-              onClick={() => { void handleDelete() }}
-              disabled={busy || deleteBusy || loading || Boolean(error)}
-            >
-              <ActionIcon name="trash" />
-            </button>
-            <button
-              type="button"
-              className="btn-link btn-secondary"
-              onClick={handleCancel}
-              disabled={busy || deleteBusy}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              form="model-edit-form"
-              className="btn-link"
-              disabled={!canSubmit || deleteBusy}
-            >
-              Save Model
-            </button>
-          </div>
-        </div>
+        <PanelHeader
+          title="Edit Model"
+          titleTag="h2"
+          actions={(
+            <div className="table-actions">
+              {parsedModelId ? <Link to={`/models/${parsedModelId}`} state={{ from: listHref }} className="btn-link btn-secondary">Back to Model</Link> : null}
+              <Link to={listHref} className="btn-link btn-secondary">All Models</Link>
+              <button
+                type="button"
+                className="icon-button icon-button-danger"
+                aria-label="Delete model"
+                title="Delete model"
+                onClick={() => { void handleDelete() }}
+                disabled={busy || deleteBusy || loading || Boolean(error)}
+              >
+                <ActionIcon name="trash" />
+              </button>
+              <button
+                type="button"
+                className="btn-link btn-secondary"
+                onClick={handleCancel}
+                disabled={busy || deleteBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="model-edit-form"
+                className="btn-link"
+                disabled={!canSubmit || deleteBusy}
+              >
+                Save Model
+              </button>
+            </div>
+          )}
+        />
+        <p className="panel-header-copy">Update provider selection and model policies.</p>
         {loading ? <p>Loading model...</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
         {!loading && !error ? (

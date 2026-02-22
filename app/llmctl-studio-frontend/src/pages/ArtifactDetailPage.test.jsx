@@ -110,23 +110,53 @@ describe('ArtifactDetailPage', () => {
       expect(getMemoryArtifact).toHaveBeenCalledWith(7, 55)
     })
     expect(await screen.findByText('Artifact 55')).toBeInTheDocument()
-    expect(screen.getByText('retrieve')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Stored Memory' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open run detail' })).toHaveAttribute('href', '/flowcharts/runs/42')
     expect(getMilestoneArtifact).not.toHaveBeenCalled()
     expect(getPlanArtifact).not.toHaveBeenCalled()
     expect(getNodeArtifact).not.toHaveBeenCalled()
   })
 
-  test('renders layman structured fields on data tab', async () => {
+  test('renders layman structured fields on data panel by default', async () => {
     renderPage('/memories/7/artifacts/55')
 
     expect(await screen.findByText('Artifact 55')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Data' }))
 
     expect(screen.getByRole('heading', { name: 'Stored Memory' })).toBeInTheDocument()
     expect(screen.getByText('Primary memory row')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Retrieved Memory 1' })).toBeInTheDocument()
     expect(screen.getByText('Retrieved memory row')).toBeInTheDocument()
+  })
+
+  test('pretty prints json stored memory descriptions on data panel', async () => {
+    getMemoryArtifact.mockResolvedValueOnce({
+      item: {
+        id: 170,
+        artifact_type: 'memory',
+        flowchart_id: 3,
+        flowchart_node_id: 9,
+        flowchart_run_id: 42,
+        flowchart_run_node_id: 88,
+        variant_key: 'run-42-node-run-88',
+        payload: {
+          action: 'retrieve',
+          stored_memory: {
+            id: 170,
+            description: '{"issue_key":"EXMP-69","summary":"Support safe post-login redirect using next parameter","status":"In Progress","priority":"Medium","route_key":"selected_issue"}',
+            created_at: '2026-02-18 11:00',
+            updated_at: '2026-02-18 11:01',
+          },
+        },
+        created_at: '2026-02-18 11:00',
+        updated_at: '2026-02-18 11:01',
+      },
+    })
+
+    const { container } = renderPage('/memories/7/artifacts/170')
+    expect(await screen.findByText('Artifact 170')).toBeInTheDocument()
+    const descriptionCode = container.querySelector('.artifact-memory-description-code')
+    expect(descriptionCode?.textContent).toContain('{\n  "issue_key": "EXMP-69"')
+    expect(descriptionCode?.textContent).toContain('"route_key": "selected_issue"\n}')
   })
 
   test('loads plan artifact details for plan route', async () => {

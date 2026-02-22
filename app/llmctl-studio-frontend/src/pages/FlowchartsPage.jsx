@@ -85,7 +85,7 @@ export default function FlowchartsPage() {
   }
 
   return (
-    <section className="stack" aria-label="Flowcharts">
+    <section className="stack workflow-fixed-page" aria-label="Flowcharts">
       <article className="card panel-card workflow-list-card">
         <PanelHeader
           title="Flowcharts"
@@ -95,7 +95,7 @@ export default function FlowchartsPage() {
             </Link>
           )}
         />
-        <div className="panel-card-body">
+        <div className="panel-card-body workflow-fixed-panel-body">
           {state.loading ? <p>Loading flowcharts...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {!state.loading && !state.error && flowcharts.length === 0 ? (

@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { HttpError } from '../lib/httpClient'
 import { getMemoryEdit, updateMemory } from '../lib/studioApi'
+import PanelHeader from '../components/PanelHeader'
 
 function parseId(value) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -97,12 +98,7 @@ export default function MemoryEditPage() {
           </div>
         </div>
 
-        <div className="card-header">
-          <div>
-            {memory ? <p className="eyebrow">memory {memory.id}</p> : null}
-            <h2 className="section-title">Edit Memory</h2>
-          </div>
-        </div>
+        <PanelHeader title="Edit Memory" />
 
         <p className="muted" style={{ marginTop: '12px' }}>
           Update the stored memory description.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
+import PanelHeader from '../components/PanelHeader'
 import { HttpError } from '../lib/httpClient'
 import { createSkill, getSkillMeta } from '../lib/studioApi'
 
@@ -90,13 +91,12 @@ export default function SkillNewPage() {
   return (
     <section className="stack" aria-label="New skill">
       <article className="card">
-        <div className="title-row">
-          <div>
-            <h2>New Skill</h2>
-            <p>Create a new skill package and initial immutable version.</p>
-          </div>
-          <Link to="/skills" className="btn-link btn-secondary">All Skills</Link>
-        </div>
+        <PanelHeader
+          title="New Skill"
+          titleTag="h2"
+          actions={<Link to="/skills" className="btn-link btn-secondary">All Skills</Link>}
+        />
+        <p className="panel-header-copy">Create a new skill package and initial immutable version.</p>
         {state.loading ? <p>Loading skill options...</p> : null}
         {state.error ? <p className="error-text">{state.error}</p> : null}
         {actionError ? <p className="error-text">{actionError}</p> : null}
