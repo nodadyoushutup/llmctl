@@ -1,6 +1,15 @@
 Changelog
 =========
 
+2026-02-22
+----------
+
+- Hard-cut Plan flowchart-node runtime contract from legacy ``action`` fields to required ``store_mode`` values (``append``/``replace``/``update``), including inspector, graph-save validation, runtime output, and artifact payload alignment.
+- Added startup migration for legacy Plan-node configs (``action`` to ``store_mode`` mapping, completion-path conversion to update patches, fail-fast malformed config handling) and updated Stage 9 backend tests for new plan-mode semantics.
+- Added Plan-node execution-mode contract (``mode=llm_guided|deterministic``) with Memory-style failure controls (``retry_count``/``fallback_enabled``), single-hop mode fallback semantics, and degraded mode-fallback evidence in runtime/artifact payloads.
+- Added flowchart connector taxonomy update for ``Trigger + Context + Attachments`` (solid), ``Context Only`` (dashed visual), and ``Attachments Only`` (dotted visual), including runtime attachment propagation channels.
+- Added two-column Attachments list IA with node-type scoping (Chat/Quick/Flowchart), header pagination controls, and scoped attachment count payloads in ``GET /attachments``.
+
 2026-02-21
 ----------
 

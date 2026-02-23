@@ -111,6 +111,14 @@ MEMORY_NODE_MODE_DETERMINISTIC = "deterministic"
 MEMORY_NODE_RETRY_COUNT_DEFAULT = 1
 MEMORY_NODE_RETRY_COUNT_MAX = 5
 MEMORY_NODE_FALLBACK_ENABLED_DEFAULT = True
+PLAN_NODE_STORE_MODE_APPEND = "append"
+PLAN_NODE_STORE_MODE_REPLACE = "replace"
+PLAN_NODE_STORE_MODE_UPDATE = "update"
+PLAN_NODE_MODE_LLM_GUIDED = "llm_guided"
+PLAN_NODE_MODE_DETERMINISTIC = "deterministic"
+PLAN_NODE_RETRY_COUNT_DEFAULT = 1
+PLAN_NODE_RETRY_COUNT_MAX = 5
+PLAN_NODE_FALLBACK_ENABLED_DEFAULT = True
 
 
 def utcnow() -> datetime:
@@ -249,6 +257,7 @@ def _ensure_schema() -> None:
         }
         _ensure_columns(connection, "flowchart_nodes", flowchart_node_columns)
         _migrate_memory_node_mode_defaults(connection)
+        _migrate_plan_node_store_mode_defaults(connection)
 
         flowchart_edge_columns = {
             "source_handle_id": "VARCHAR(32)",
@@ -475,14 +484,20 @@ def _migrate_mcp_server_configs_to_jsonb(connection) -> None:
     )
 
 
-def _parse_memory_node_config_for_migration(raw_config: object, *, node_id: int) -> dict[str, object]:
+def _parse_flowchart_node_config_for_migration(
+    raw_config: object,
+    *,
+    node_id: int,
+    node_type: str,
+) -> dict[str, object]:
+    normalized_type = str(node_type or "").strip().lower() or "unknown"
     if raw_config is None:
         return {}
     if isinstance(raw_config, dict):
         return dict(raw_config)
     if not isinstance(raw_config, str):
         raise RuntimeError(
-            "Failed to migrate memory node config for "
+            f"Failed to migrate {normalized_type} node config for "
             f"flowchart_nodes.id={node_id}: config_json must be JSON object text."
         )
     stripped = raw_config.strip()
@@ -492,15 +507,23 @@ def _parse_memory_node_config_for_migration(raw_config: object, *, node_id: int)
         parsed_payload = json.loads(stripped)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            "Failed to migrate memory node config for "
+            f"Failed to migrate {normalized_type} node config for "
             f"flowchart_nodes.id={node_id}: config_json is not valid JSON."
         ) from exc
     if not isinstance(parsed_payload, dict):
         raise RuntimeError(
-            "Failed to migrate memory node config for "
+            f"Failed to migrate {normalized_type} node config for "
             f"flowchart_nodes.id={node_id}: config_json must decode to a JSON object."
         )
     return dict(parsed_payload)
+
+
+def _parse_memory_node_config_for_migration(raw_config: object, *, node_id: int) -> dict[str, object]:
+    return _parse_flowchart_node_config_for_migration(
+        raw_config,
+        node_id=node_id,
+        node_type="memory",
+    )
 
 
 def _normalize_memory_node_mode_for_migration(value: object) -> str:
@@ -580,6 +603,198 @@ def _migrate_memory_node_mode_defaults(connection) -> None:
                 config_payload.get("fallback_enabled")
             )
         )
+        if migrated_payload == config_payload:
+            continue
+        connection.execute(
+            text(
+                "UPDATE flowchart_nodes "
+                "SET config_json = :config_json "
+                "WHERE id = :id"
+            ),
+            {"id": node_id, "config_json": json.dumps(migrated_payload, sort_keys=True)},
+        )
+
+
+def _normalize_plan_node_store_mode_for_migration(config_payload: dict[str, object]) -> str:
+    store_mode_raw = config_payload.get("store_mode")
+    cleaned_store_mode = str(store_mode_raw or "").strip().lower()
+    if cleaned_store_mode in {"replace", "overwrite", "set"}:
+        return PLAN_NODE_STORE_MODE_REPLACE
+    if cleaned_store_mode in {"update", "patch", "mutate"}:
+        return PLAN_NODE_STORE_MODE_UPDATE
+    if cleaned_store_mode in {"append", "add", "additive", "create", "create_or_update"}:
+        return PLAN_NODE_STORE_MODE_APPEND
+
+    action_raw = config_payload.get("action")
+    cleaned_action = str(action_raw or "").strip().lower()
+    if cleaned_action in {
+        "complete_plan_item",
+        "complete plan item",
+        "mark_plan_item_complete",
+        "mark_task_complete",
+    }:
+        return PLAN_NODE_STORE_MODE_UPDATE
+    if cleaned_action in {
+        "create",
+        "update",
+        "read",
+        "create_or_update",
+        "create_or_update_plan",
+        "create/update",
+        "create or update plan",
+        "update_completion",
+        "complete",
+    }:
+        return PLAN_NODE_STORE_MODE_APPEND
+    return PLAN_NODE_STORE_MODE_APPEND
+
+
+def _normalize_plan_node_mode_for_migration(value: object) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned == PLAN_NODE_MODE_LLM_GUIDED:
+        return PLAN_NODE_MODE_LLM_GUIDED
+    return PLAN_NODE_MODE_DETERMINISTIC
+
+
+def _normalize_plan_node_retry_count_for_migration(value: object) -> int:
+    if value is None:
+        return PLAN_NODE_RETRY_COUNT_DEFAULT
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return PLAN_NODE_RETRY_COUNT_DEFAULT
+        value = stripped
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return PLAN_NODE_RETRY_COUNT_DEFAULT
+    if parsed < 0:
+        return 0
+    if parsed > PLAN_NODE_RETRY_COUNT_MAX:
+        return PLAN_NODE_RETRY_COUNT_MAX
+    return parsed
+
+
+def _normalize_plan_node_fallback_enabled_for_migration(value: object) -> bool:
+    if value is None:
+        return PLAN_NODE_FALLBACK_ENABLED_DEFAULT
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return PLAN_NODE_FALLBACK_ENABLED_DEFAULT
+    cleaned = str(value).strip().lower()
+    if not cleaned:
+        return PLAN_NODE_FALLBACK_ENABLED_DEFAULT
+    if cleaned in {"1", "true", "yes", "on"}:
+        return True
+    if cleaned in {"0", "false", "no", "off"}:
+        return False
+    return PLAN_NODE_FALLBACK_ENABLED_DEFAULT
+
+
+def _plan_migration_patch_from_legacy_completion_fields(
+    config_payload: dict[str, object],
+) -> dict[str, object] | None:
+    patch_payload = config_payload.get("patch")
+    normalized_patch = dict(patch_payload) if isinstance(patch_payload, dict) else {}
+    task_updates = list(normalized_patch.get("tasks") or [])
+    if not isinstance(task_updates, list):
+        task_updates = []
+
+    has_completion_target = False
+    plan_item_id_raw = config_payload.get("plan_item_id")
+    if plan_item_id_raw is not None:
+        try:
+            plan_item_id = int(plan_item_id_raw)
+        except (TypeError, ValueError):
+            plan_item_id = 0
+        if plan_item_id > 0:
+            has_completion_target = True
+            task_updates.append({"task_id": plan_item_id, "completed": True})
+
+    stage_key = str(config_payload.get("stage_key") or "").strip()
+    task_key = str(config_payload.get("task_key") or "").strip()
+    if stage_key and task_key:
+        has_completion_target = True
+        task_updates.append(
+            {
+                "stage_key": stage_key,
+                "task_key": task_key,
+                "completed": True,
+            }
+        )
+
+    if not has_completion_target:
+        return normalized_patch if normalized_patch else None
+    normalized_patch["tasks"] = task_updates
+    return normalized_patch
+
+
+def _migrate_plan_node_store_mode_defaults(connection) -> None:
+    tables = _table_names(connection)
+    if "flowchart_nodes" not in tables:
+        return
+    columns = _table_columns(connection, "flowchart_nodes")
+    if "node_type" not in columns or "config_json" not in columns:
+        return
+    rows = connection.execute(
+        text(
+            "SELECT id, config_json "
+            "FROM flowchart_nodes "
+            "WHERE lower(trim(node_type)) = 'plan' "
+            "ORDER BY id ASC"
+        )
+    ).all()
+    for row in rows:
+        node_id = int(row[0])
+        config_payload = _parse_flowchart_node_config_for_migration(
+            row[1],
+            node_id=node_id,
+            node_type="plan",
+        )
+        migrated_payload = dict(config_payload)
+        migrated_payload["mode"] = _normalize_plan_node_mode_for_migration(
+            config_payload.get("mode")
+        )
+        migrated_payload["store_mode"] = _normalize_plan_node_store_mode_for_migration(
+            config_payload
+        )
+        migrated_payload["retry_count"] = _normalize_plan_node_retry_count_for_migration(
+            config_payload.get("retry_count")
+        )
+        migrated_payload["fallback_enabled"] = (
+            _normalize_plan_node_fallback_enabled_for_migration(
+                config_payload.get("fallback_enabled")
+            )
+        )
+        legacy_completion_source_path = str(
+            config_payload.get("completion_source_path") or ""
+        ).strip()
+        if legacy_completion_source_path and not str(
+            migrated_payload.get("patch_source_path") or ""
+        ).strip():
+            migrated_payload["patch_source_path"] = legacy_completion_source_path
+
+        if migrated_payload["store_mode"] == PLAN_NODE_STORE_MODE_UPDATE:
+            normalized_patch = _plan_migration_patch_from_legacy_completion_fields(
+                config_payload
+            )
+            if isinstance(normalized_patch, dict) and normalized_patch:
+                migrated_payload["patch"] = normalized_patch
+
+        for legacy_key in (
+            "action",
+            "plan_item_id",
+            "stage_key",
+            "task_key",
+            "completion_source_path",
+        ):
+            migrated_payload.pop(legacy_key, None)
+
         if migrated_payload == config_payload:
             continue
         connection.execute(
@@ -1869,7 +2084,7 @@ def _migrate_flowchart_edge_modes(connection) -> None:
             "SET edge_mode = 'solid' "
             "WHERE edge_mode IS NULL "
             "OR trim(edge_mode) = '' "
-            "OR lower(trim(edge_mode)) NOT IN ('solid', 'dotted')"
+            "OR lower(trim(edge_mode)) NOT IN ('solid', 'dotted', 'dashed')"
         )
     )
 

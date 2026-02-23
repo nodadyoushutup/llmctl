@@ -16,10 +16,11 @@ for specialized behavior fields):
   (``llm_guided`` or ``deterministic``), includes ``Failure`` controls
   (``retry_count`` and ``fallback_enabled``), includes retention controls, and
   requires system-managed ``llmctl-mcp`` binding.
-- ``plan`` requires ``action`` (``create_or_update_plan`` or
-  ``complete_plan_item``), supports optional ``additive_prompt``, supports
-  completion targeting via ``plan_item_id`` or ``stage_key`` + ``task_key`` or
-  ``completion_source_path``, and includes retention controls.
+- ``plan`` requires ``mode`` (``llm_guided`` or ``deterministic``), requires
+  ``store_mode`` (``append`` | ``replace`` | ``update``), supports optional
+  ``additive_prompt``, optional ``patch`` or ``patch_source_path``, includes
+  ``Failure`` controls (``retry_count`` and ``fallback_enabled``), and includes
+  retention controls.
 - ``milestone`` requires ``action`` (``create_or_update`` or ``mark_complete``),
   supports optional ``additive_prompt``, and includes retention controls.
 - ``decision`` synchronizes conditions from solid outgoing connectors (``N``
@@ -47,6 +48,87 @@ For specialized nodes:
 - invalid non-empty memory ``config.mode`` values are rejected at save time,
 - memory nodes are system-bound to ``llmctl-mcp`` during graph persistence,
 - runtime memory-node execution rejects explicit non-system MCP key sets.
+- plan-node graph writes require ``config.mode`` with canonical values
+  ``llm_guided`` | ``deterministic``,
+- plan-node graph writes require ``config.store_mode`` with canonical values
+  ``append`` | ``replace`` | ``update``.
+- plan-node failure controls default to ``retry_count=1`` and
+  ``fallback_enabled=true`` when omitted.
+
+Connector Modes and Attachment Propagation
+------------------------------------------
+
+Flowchart graph connectors now use three execution modes:
+
+- ``solid``: Trigger + Context + Attachments
+- ``dotted``: Context Only
+- ``dashed``: Attachments Only
+
+Runtime propagation semantics:
+
+- Solid connectors trigger downstream execution and pass upstream context plus
+  attachment references.
+- Context-only connectors do not trigger execution and only contribute context
+  payloads into ``input_context.context_only_upstream_nodes``.
+- Attachments-only connectors do not trigger execution and only contribute
+  attachment references into
+  ``input_context.attachment_only_upstream_nodes`` /
+  ``input_context.propagated_attachments``.
+
+Plan Node Mode and Store-Mode Semantics
+---------------------------------------
+
+Plan-node execution mode is configured per node via ``config.mode``:
+
+- ``deterministic``: primary path applies ``patch``/``patch_source_path``
+  payloads (and optional LLM transform patch when configured) through the
+  deterministic plan applier.
+- ``llm_guided``: primary path requires a strict JSON object patch inferred by
+  the LLM and then applies it through the deterministic plan applier.
+
+Plan-node store mode is configured per node via ``config.store_mode``.
+
+Allowed values:
+
+- ``append``: add-only behavior for stages/tasks; existing matched items are not
+  mutated and produce warning entries.
+- ``replace``: full plan structure overwrite from provided ``patch.stages``
+  payload.
+- ``update``: targeted mutation-only behavior for existing stages/tasks.
+
+Update matching behavior:
+
+- id-first targeting (``stage_id``/``task_id``)
+- key fallback targeting (``stage_key``/``task_key``) when ids are absent
+- ambiguous key matches are hard failures
+- missing targets are skipped with warning details and
+  ``operation_counts.skipped_missing`` increments
+
+Hard-cut migration behavior:
+
+- missing/invalid plan ``mode`` is migrated to ``deterministic``
+- legacy ``action=create_or_update_plan`` is migrated to ``store_mode=append``
+- legacy ``action=complete_plan_item`` is migrated to ``store_mode=update``
+- missing/unknown legacy values default to ``append``
+- malformed non-object plan configs fail fast during startup migration
+- missing failure controls are migrated to defaults
+  (``retry_count=1``, ``fallback_enabled=true``)
+
+Plan failure and degraded semantics:
+
+- Primary plan mode attempts execute ``1 + retry_count`` times.
+- Retries apply only to the primary mode.
+- If ``fallback_enabled=true`` and primary attempts are exhausted, runtime
+  attempts exactly one fallback in the opposite plan mode.
+- On fallback success, output includes degraded markers:
+
+  - ``mode_fallback_used=true``,
+  - ``failed_mode``,
+  - ``fallback_mode``,
+  - ``fallback_reason``.
+
+- On fallback failure, runtime raises a hard failure; no second fallback hop is
+  attempted.
 
 Memory Node Mode Semantics
 --------------------------
@@ -173,8 +255,13 @@ Artifact Payload Schemas
 
 ``plan`` artifact payload:
 
-- ``action``, ``action_results``, ``additive_prompt``
-- ``completion_target``, ``touched``, ``plan``, ``routing_state``
+- ``mode``, ``store_mode``, ``action_results``, ``additive_prompt``
+- ``operation_counts`` (``created``, ``updated``, ``replaced``, ``skipped_missing``)
+- ``touched``, ``warnings``, ``errors``
+- degraded/mode-fallback evidence:
+  ``mode_fallback_used``, ``failed_mode``, ``fallback_mode``, ``fallback_reason``
+- ``plan``, ``routing_state``
+- optional ``llm_transform_summary``
 
 ``milestone`` artifact payload:
 

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import FlashProvider from '../components/FlashProvider'
 import FlowchartDetailPage from './FlowchartDetailPage'
 import {
+  createQuickNode,
   getFlowchartEdit,
   getFlowchartGraph,
   getFlowchartHistory,
@@ -16,7 +17,7 @@ const mountSpy = vi.fn()
 const unmountSpy = vi.fn()
 
 vi.mock('../components/FlowchartWorkspaceEditor', () => {
-  const MockFlowchartWorkspaceEditor = forwardRef(function MockFlowchartWorkspaceEditor(_props, ref) {
+  const MockFlowchartWorkspaceEditor = forwardRef(function MockFlowchartWorkspaceEditor(props, ref) {
     useImperativeHandle(ref, () => ({
       applyServerGraph: () => false,
       validateBeforeSave: () => true,
@@ -29,7 +30,35 @@ vi.mock('../components/FlowchartWorkspaceEditor', () => {
       }
     }, [])
 
-    return <div data-testid="flowchart-workspace-editor">mock workspace</div>
+    return (
+      <div>
+        <div data-testid="flowchart-workspace-editor-actions">{props.panelActions}</div>
+        <button
+          type="button"
+          onClick={() => props.onRunFromNode?.({
+            persistedId: 11,
+            node_type: 'task',
+            title: 'Deploy Node',
+          })}
+        >
+          Mock Run From Node
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onQuickNodeFromNode?.({
+            persistedId: 11,
+            node_type: 'task',
+            title: 'Deploy Node',
+            model_id: 5,
+            mcp_server_ids: [7],
+            config: { task_prompt: 'Deploy release build', collections: ['ops'] },
+          })}
+        >
+          Mock Quick Node
+        </button>
+        <div data-testid="flowchart-workspace-editor">mock workspace</div>
+      </div>
+    )
   })
   MockFlowchartWorkspaceEditor.displayName = 'MockFlowchartWorkspaceEditor'
   return { default: MockFlowchartWorkspaceEditor }
@@ -37,6 +66,7 @@ vi.mock('../components/FlowchartWorkspaceEditor', () => {
 
 vi.mock('../lib/studioApi', () => ({
   cancelFlowchartRun: vi.fn(),
+  createQuickNode: vi.fn(),
   deleteFlowchart: vi.fn(),
   getFlowchartEdit: vi.fn(),
   getFlowchartGraph: vi.fn(),
@@ -54,6 +84,8 @@ function renderPage(initialEntry = '/flowcharts/9') {
         <Routes>
           <Route path="/flowcharts/:flowchartId" element={<FlowchartDetailPage />} />
           <Route path="/flowcharts" element={<p>Flowcharts list route</p>} />
+          <Route path="/nodes" element={<p>Nodes list route</p>} />
+          <Route path="/nodes/:nodeId" element={<p>Node detail route</p>} />
         </Routes>
       </FlashProvider>
     </MemoryRouter>,
@@ -75,6 +107,7 @@ describe('FlowchartDetailPage', () => {
     getFlowchartEdit.mockResolvedValue({ catalog: null, node_types: ['start', 'task', 'end'] })
     getFlowchartRuntime.mockResolvedValue({ active_run_id: null, active_run_status: null, running_node_ids: [] })
     runFlowchart.mockResolvedValue({ flowchart_run: { id: 42 } })
+    createQuickNode.mockResolvedValue({ task_id: 88 })
   })
 
   test('running a flowchart does not remount the workspace editor', async () => {
@@ -99,5 +132,41 @@ describe('FlowchartDetailPage', () => {
     })
     expect(mountSpy.mock.calls.length).toBe(mountsBeforeRun)
     expect(unmountSpy.mock.calls.length).toBe(unmountsBeforeRun)
+  })
+
+  test('run from node uses start_node_id override', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(getFlowchartGraph).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mock Run From Node' }))
+
+    await waitFor(() => {
+      expect(runFlowchart).toHaveBeenCalledWith(9, { startNodeId: 11 })
+    })
+  })
+
+  test('quick node from selected node creates and routes to node detail', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(getFlowchartGraph).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mock Quick Node' }))
+
+    await waitFor(() => {
+      expect(createQuickNode).toHaveBeenCalledWith({
+        prompt: 'Deploy release build',
+        modelId: 5,
+        mcpServerIds: [7],
+        ragCollections: ['ops'],
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText('Node detail route')).toBeInTheDocument()
+    })
   })
 })

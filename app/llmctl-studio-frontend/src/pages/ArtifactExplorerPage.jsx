@@ -1,34 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import PanelHeader from '../components/PanelHeader'
+import HeaderPagination from '../components/HeaderPagination'
+import TableListEmptyState from '../components/TableListEmptyState'
+import TwoColumnListShell from '../components/TwoColumnListShell'
 import { HttpError } from '../lib/httpClient'
 import { getNodeArtifacts } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
 
 const ARTIFACT_TYPE_OPTIONS = [
-  { value: 'task', label: 'Task' },
-  { value: 'plan', label: 'Plan' },
-  { value: 'milestone', label: 'Milestone' },
-  { value: 'memory', label: 'Memory' },
-  { value: 'decision', label: 'Decision' },
-  { value: 'rag', label: 'RAG' },
-]
-
-const NODE_TYPE_OPTIONS = [
-  { value: '', label: 'all node types' },
-  { value: 'start', label: 'Start' },
-  { value: 'task', label: 'Task' },
-  { value: 'plan', label: 'Plan' },
-  { value: 'milestone', label: 'Milestone' },
-  { value: 'memory', label: 'Memory' },
-  { value: 'decision', label: 'Decision' },
-  { value: 'rag', label: 'RAG' },
-  { value: 'flowchart', label: 'Flowchart' },
-  { value: 'end', label: 'End' },
+  { value: 'task', label: 'Task', icon: 'fa-solid fa-list-check' },
+  { value: 'plan', label: 'Plan', icon: 'fa-solid fa-map' },
+  { value: 'milestone', label: 'Milestone', icon: 'fa-solid fa-flag-checkered' },
+  { value: 'memory', label: 'Memory', icon: 'fa-solid fa-brain' },
+  { value: 'decision', label: 'Decision', icon: 'fa-solid fa-code-branch' },
+  { value: 'rag', label: 'RAG', icon: 'fa-solid fa-database' },
 ]
 
 const SUPPORTED_ARTIFACT_TYPES = new Set(ARTIFACT_TYPE_OPTIONS.map((option) => option.value))
-const SUPPORTED_NODE_TYPES = new Set(NODE_TYPE_OPTIONS.filter((option) => option.value).map((option) => option.value))
 
 function parsePositiveInt(value, fallback = null) {
   const parsed = Number.parseInt(String(value || '').trim(), 10)
@@ -47,17 +35,6 @@ function normalizeArtifactType(value) {
     return normalized
   }
   return null
-}
-
-function normalizeNodeType(value) {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (!normalized) {
-    return ''
-  }
-  if (SUPPORTED_NODE_TYPES.has(normalized)) {
-    return normalized
-  }
-  return ''
 }
 
 function typeLabel(type) {
@@ -85,8 +62,8 @@ export default function ArtifactExplorerPage() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const routeArtifactType = normalizeArtifactType(params.artifactType)
-  const nodeTypeFilter = normalizeNodeType(searchParams.get('node_type'))
-  const runIdFilter = parsePositiveInt(searchParams.get('flowchart_run_id'))
+  const flowchartIdFilter = parsePositiveInt(searchParams.get('flowchart_id'))
+  const flowchartNodeIdFilter = parsePositiveInt(searchParams.get('flowchart_node_id'))
   const limit = parsePositiveInt(searchParams.get('limit'), 50) || 50
   const offset = parsePositiveInt(searchParams.get('offset'), 0) || 0
 
@@ -98,13 +75,20 @@ export default function ArtifactExplorerPage() {
       return
     }
     let cancelled = false
-    getNodeArtifacts({
+    const request = {
       limit,
       offset,
       artifactType: routeArtifactType,
-      nodeType: nodeTypeFilter,
-      flowchartRunId: runIdFilter,
       order: 'desc',
+    }
+    if (flowchartIdFilter) {
+      request.flowchartId = flowchartIdFilter
+    }
+    if (flowchartNodeIdFilter) {
+      request.flowchartNodeId = flowchartNodeIdFilter
+    }
+    getNodeArtifacts({
+      ...request,
     })
       .then((payload) => {
         if (!cancelled) {
@@ -123,7 +107,7 @@ export default function ArtifactExplorerPage() {
     return () => {
       cancelled = true
     }
-  }, [limit, nodeTypeFilter, offset, routeArtifactType, runIdFilter])
+  }, [flowchartIdFilter, flowchartNodeIdFilter, limit, offset, routeArtifactType])
 
   const title = useMemo(() => {
     if (!routeArtifactType) {
@@ -131,6 +115,23 @@ export default function ArtifactExplorerPage() {
     }
     return `${typeLabel(routeArtifactType)} Artifacts`
   }, [routeArtifactType])
+  const artifactTypeSidebarItems = useMemo(() => {
+    const scopedParams = new URLSearchParams()
+    if (flowchartIdFilter) {
+      scopedParams.set('flowchart_id', String(flowchartIdFilter))
+    }
+    if (flowchartNodeIdFilter) {
+      scopedParams.set('flowchart_node_id', String(flowchartNodeIdFilter))
+    }
+    const queryString = scopedParams.toString()
+    const querySuffix = queryString ? `?${queryString}` : ''
+    return ARTIFACT_TYPE_OPTIONS.map((option) => ({
+      id: option.value,
+      label: option.label,
+      icon: option.icon,
+      to: `/artifacts/type/${option.value}${querySuffix}`,
+    }))
+  }, [flowchartIdFilter, flowchartNodeIdFilter])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const items = payload && Array.isArray(payload.items) ? payload.items : []
@@ -138,6 +139,8 @@ export default function ArtifactExplorerPage() {
   const hasItems = !state.loading && !state.error && items.length > 0
   const canGoPrev = offset > 0
   const canGoNext = offset + items.length < totalCount
+  const currentPage = Math.floor(offset / limit) + 1
+  const totalPages = Math.max(1, Math.ceil(totalCount / limit))
 
   function updateParams(nextParams) {
     const updated = new URLSearchParams(searchParams)
@@ -151,23 +154,6 @@ export default function ArtifactExplorerPage() {
     setSearchParams(updated)
   }
 
-  function applyFilters(event) {
-    event.preventDefault()
-    const formData = new FormData(event.currentTarget)
-    const nextNodeType = normalizeNodeType(formData.get('node_type'))
-    const nextRunId = parsePositiveInt(formData.get('flowchart_run_id'))
-    updateParams({
-      node_type: nextNodeType,
-      flowchart_run_id: nextRunId,
-      offset: 0,
-      limit,
-    })
-  }
-
-  function resetFilters() {
-    setSearchParams(new URLSearchParams())
-  }
-
   function handleRowClick(event, href) {
     if (!href || shouldIgnoreRowClick(event.target)) {
       return
@@ -176,139 +162,87 @@ export default function ArtifactExplorerPage() {
   }
 
   return (
-    <section className="stack workflow-fixed-page" aria-label={title}>
-      <article className="card panel-card workflow-list-card">
-        <PanelHeader
-          title={title}
-          actionsClassName="workflow-list-panel-header-actions"
-          actions={(
-            <div className="artifact-explorer-header-actions">
-              <span className="panel-header-meta artifact-explorer-header-count">{`${items.length} shown / ${totalCount} total`}</span>
-              <button type="submit" form="artifact-explorer-filter-form" className="btn-link btn-secondary">
-                <i className="fa-solid fa-filter" />
-                filter
-              </button>
-              <button type="button" className="btn-link" onClick={resetFilters}>
-                <i className="fa-solid fa-rotate-right" />
-                reset
-              </button>
-              <nav className="pagination" aria-label="Artifact pages">
-                {canGoPrev ? (
-                  <button
-                    type="button"
-                    className="pagination-btn"
-                    onClick={() => updateParams({ offset: Math.max(0, offset - limit), limit })}
-                  >
-                    Prev
-                  </button>
-                ) : (
-                  <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-                )}
-                {canGoNext ? (
-                  <button
-                    type="button"
-                    className="pagination-btn"
-                    onClick={() => updateParams({ offset: offset + limit, limit })}
-                  >
-                    Next
-                  </button>
-                ) : (
-                  <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-                )}
-              </nav>
-            </div>
-          )}
-        />
-
-        <div className="panel-card-body workflow-fixed-panel-body">
-          <form id="artifact-explorer-filter-form" className="form-grid artifact-explorer-filter-form" onSubmit={applyFilters}>
-            <div className="toolbar toolbar-wrap artifact-explorer-filter-controls">
-              <div className="toolbar-group">
-                <label htmlFor="artifact-node-type-filter">Node type</label>
-                <select
-                  id="artifact-node-type-filter"
-                  name="node_type"
-                  defaultValue={nodeTypeFilter}
-                >
-                  {NODE_TYPE_OPTIONS.map((option) => (
-                    <option key={`node-type-${option.value || 'all'}`} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="toolbar-group">
-                <label htmlFor="artifact-run-id-filter">Run id</label>
-                <input
-                  id="artifact-run-id-filter"
-                  name="flowchart_run_id"
-                  defaultValue={runIdFilter || ''}
-                  placeholder="all runs"
-                  inputMode="numeric"
-                />
-              </div>
-            </div>
-          </form>
-
-          {state.loading ? <p>Loading artifacts...</p> : null}
-          {state.error ? <p className="error-text">{state.error}</p> : null}
-
-          {!state.loading && !state.error ? (
-            <div className="workflow-list-table-shell artifact-explorer-results-shell">
-              {hasItems ? (
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Artifact</th>
-                        <th>Type</th>
-                        <th>Node type</th>
-                        <th>Ref</th>
-                        <th>Flowchart</th>
-                        <th>Run</th>
-                        <th>Created</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((artifact) => {
-                        const artifactId = parsePositiveInt(artifact?.id)
-                        if (!artifactId) {
-                          return null
-                        }
-                        const href = `/artifacts/item/${artifactId}`
-                        const action = String((artifact?.payload || {}).action || '').trim()
-                        return (
-                          <tr
-                            key={`artifact-${artifactId}`}
-                            className="table-row-link"
-                            data-href={href}
-                            onClick={(event) => handleRowClick(event, href)}
-                          >
-                            <td>
-                              <Link to={href}>{`Artifact ${artifactId}`}</Link>
-                              {action ? <p className="table-note">{action}</p> : null}
-                            </td>
-                            <td>{artifact.artifact_type || '-'}</td>
-                            <td>{artifact.node_type || '-'}</td>
-                            <td>{artifact.ref_id || '-'}</td>
-                            <td>{artifact.flowchart_id || '-'}</td>
-                            <td>{artifact.flowchart_run_id || '-'}</td>
-                            <td>{artifact.created_at || '-'}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="artifact-explorer-empty-state" role="status" aria-live="polite">
-                  <p className="muted">No artifacts found for this filter set.</p>
-                </div>
-              )}
-            </div>
-          ) : null}
+    <TwoColumnListShell
+      ariaLabel={title}
+      className="provider-fixed-page"
+      sidebarAriaLabel="Artifact types"
+      sidebarTitle="Artifacts"
+      sidebarItems={artifactTypeSidebarItems}
+      activeSidebarId={routeArtifactType || ''}
+      mainTitle={title}
+      mainActions={(
+        <div className="artifact-explorer-header-actions">
+          <span className="panel-header-meta artifact-explorer-header-count">{`${items.length} shown / ${totalCount} total`}</span>
+          <HeaderPagination
+            ariaLabel="Artifact pages"
+            canGoPrev={canGoPrev}
+            canGoNext={canGoNext}
+            onPrev={() => updateParams({ offset: Math.max(0, offset - limit), limit })}
+            onNext={() => updateParams({ offset: offset + limit, limit })}
+            currentPage={currentPage}
+            totalPages={totalPages}
+          />
         </div>
-      </article>
-    </section>
+      )}
+    >
+      {state.loading ? <p>Loading artifacts...</p> : null}
+      {state.error ? <p className="error-text">{state.error}</p> : null}
+
+      {!state.loading && !state.error ? (
+        <div className="workflow-list-table-shell artifact-explorer-results-shell">
+          {hasItems ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Artifact</th>
+                    <th>Type</th>
+                    <th>Node type</th>
+                    <th>Ref</th>
+                    <th>Flowchart</th>
+                    <th>Run</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((artifact) => {
+                    const artifactId = parsePositiveInt(artifact?.id)
+                    if (!artifactId) {
+                      return null
+                    }
+                    const href = `/artifacts/item/${artifactId}`
+                    const action = String((artifact?.payload || {}).action || '').trim()
+                    return (
+                      <tr
+                        key={`artifact-${artifactId}`}
+                        className="table-row-link"
+                        data-href={href}
+                        onClick={(event) => handleRowClick(event, href)}
+                      >
+                        <td>
+                          <Link to={href}>{`Artifact ${artifactId}`}</Link>
+                          {action ? <p className="table-note">{action}</p> : null}
+                        </td>
+                        <td>{artifact.artifact_type || '-'}</td>
+                        <td>{artifact.node_type || '-'}</td>
+                        <td>{artifact.ref_id || '-'}</td>
+                        <td>{artifact.flowchart_id || '-'}</td>
+                        <td>{artifact.flowchart_run_id || '-'}</td>
+                        <td>{artifact.created_at || '-'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <TableListEmptyState
+              className="artifact-explorer-empty-state"
+              message="No artifacts found for this filter set."
+            />
+          )}
+        </div>
+      ) : null}
+    </TwoColumnListShell>
   )
 }

@@ -5,6 +5,7 @@ import FlowchartWorkspaceEditor from '../components/FlowchartWorkspaceEditor'
 import { HttpError } from '../lib/httpClient'
 import {
   cancelFlowchartRun,
+  createQuickNode,
   deleteFlowchart,
   getFlowchartGraph,
   getFlowchartEdit,
@@ -57,6 +58,39 @@ function hasTaskPrompt(config) {
   return typeof prompt === 'string' && Boolean(prompt.trim())
 }
 
+function flowchartWorkspaceNodeId(node) {
+  return parseId(node?.persistedId) || parseId(node?.id)
+}
+
+function flowchartWorkspaceNodeLabel(node) {
+  const title = String(node?.title || '').trim()
+  if (title) {
+    return title
+  }
+  const nodeType = String(node?.node_type || '').trim().toLowerCase()
+  return nodeType ? `${nodeType} node` : 'node'
+}
+
+function quickNodePromptFromFlowchartNode(node) {
+  if (!node || typeof node !== 'object') {
+    return ''
+  }
+  const config = node.config && typeof node.config === 'object' ? node.config : {}
+  const candidates = [
+    config.task_prompt,
+    config.question_prompt,
+    config.additive_prompt,
+    node.title,
+  ]
+  for (const value of candidates) {
+    const text = String(value || '').trim()
+    if (text) {
+      return text
+    }
+  }
+  return ''
+}
+
 function validateDraftNodes(nodes) {
   if (!Array.isArray(nodes)) {
     return []
@@ -89,7 +123,6 @@ export default function FlowchartDetailPage() {
   const [validationState, setValidationState] = useState(null)
   const [runtimeWarning, setRuntimeWarning] = useState('')
   const [catalogWarning, setCatalogWarning] = useState('')
-  const [areToolbarToolsExpanded, setAreToolbarToolsExpanded] = useState(true)
   const [isMetaExpanded, setIsMetaExpanded] = useState(false)
   const workspaceEditorRef = useRef(null)
 
@@ -263,6 +296,61 @@ export default function FlowchartDetailPage() {
     })
   }
 
+  async function handleRunFromNode(node) {
+    if (!parsedFlowchartId) {
+      return
+    }
+    const startNodeId = flowchartWorkspaceNodeId(node)
+    if (!startNodeId) {
+      setActionError('Save graph before running from this node.')
+      return
+    }
+    const nodeLabel = flowchartWorkspaceNodeLabel(node)
+    await withAction('run-from-node', async () => {
+      const payload = await runFlowchart(parsedFlowchartId, { startNodeId })
+      const runId = parseId(payload?.flowchart_run?.id)
+      setActionInfo(runId ? `Flowchart run queued from ${nodeLabel} (run ${runId}).` : `Flowchart run queued from ${nodeLabel}.`)
+      await refresh({ silent: true })
+    })
+  }
+
+  async function handleQuickNodeFromNode(node) {
+    const prompt = quickNodePromptFromFlowchartNode(node)
+    if (!prompt) {
+      setActionError('Add a task prompt, question prompt, additive prompt, or node title before using Quick Node.')
+      return
+    }
+    const config = node?.config && typeof node.config === 'object' ? node.config : {}
+    const mcpServerIds = Array.isArray(node?.mcp_server_ids)
+      ? node.mcp_server_ids
+        .map((value) => parseId(value))
+        .filter((value) => value != null)
+      : []
+    const ragCollections = Array.isArray(config.collections)
+      ? config.collections
+        .map((value) => String(value || '').trim())
+        .filter((value) => value)
+      : []
+    const modelId = parseId(node?.model_id)
+    const nodeLabel = flowchartWorkspaceNodeLabel(node)
+    await withAction('quick-node-from-node', async () => {
+      const payload = await createQuickNode({
+        prompt,
+        modelId,
+        mcpServerIds,
+        ragCollections,
+      })
+      const taskId = parseId(payload?.task_id)
+      if (taskId) {
+        setActionInfo(`Quick Node queued from ${nodeLabel} (node ${taskId}).`)
+        navigate(`/nodes/${taskId}`)
+        return
+      }
+      setActionInfo(`Quick Node queued from ${nodeLabel}.`)
+      navigate('/nodes')
+    })
+  }
+
   async function handleStop(force) {
     if (!activeRunId) {
       return
@@ -358,6 +446,139 @@ export default function FlowchartDetailPage() {
   const validationLabel = activeValidation?.valid
     ? 'valid'
     : `${validationIssueCount} issue${validationIssueCount === 1 ? '' : 's'}`
+  const hasTopNotices = Boolean(state.loading || state.error || runtimeWarning || catalogWarning)
+  const workspacePanelActions = (
+    <div className="flowchart-fixed-workspace-actions">
+      <div className="table-actions flowchart-fixed-primary-actions">
+        {parsedFlowchartId ? (
+          <Link
+            to="/flowcharts"
+            className="icon-button"
+            aria-label="Back to flowcharts"
+            title="Back to flowcharts"
+          >
+            <i className="fa-solid fa-arrow-left" />
+          </Link>
+        ) : null}
+        <button
+          type="button"
+          className="icon-button flowchart-icon-button-primary"
+          aria-label="Save graph"
+          title="Save graph"
+          disabled={isBusy('save-graph')}
+          onClick={handleSaveGraph}
+        >
+          <i className="fa-solid fa-floppy-disk" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Validate"
+          title="Validate"
+          disabled={isBusy('validate')}
+          onClick={handleValidate}
+        >
+          <i className="fa-solid fa-check" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Run flowchart"
+          title="Run flowchart"
+          disabled={isBusy('run') || activeRun}
+          onClick={handleRun}
+        >
+          <i className="fa-solid fa-play" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Reset graph workspace"
+          title="Reset graph workspace"
+          onClick={handleResetGraph}
+        >
+          <i className="fa-solid fa-rotate-left" />
+        </button>
+      </div>
+      <div className="table-actions flowchart-fixed-secondary-actions">
+        {parsedFlowchartId ? (
+          <Link
+            to={`/flowcharts/${parsedFlowchartId}/edit`}
+            className="icon-button"
+            aria-label="Edit metadata"
+            title="Edit metadata"
+          >
+            <i className="fa-solid fa-pen-to-square" />
+          </Link>
+        ) : null}
+        {parsedFlowchartId ? (
+          <Link
+            to={`/flowcharts/${parsedFlowchartId}/history`}
+            className="icon-button"
+            aria-label="History"
+            title="History"
+          >
+            <i className="fa-solid fa-clock-rotate-left" />
+          </Link>
+        ) : null}
+        {activeRunId ? (
+          <Link
+            to={`/flowcharts/runs/${activeRunId}`}
+            className="icon-button"
+            aria-label={`Open run ${activeRunId}`}
+            title={`Open run ${activeRunId}`}
+          >
+            <i className="fa-solid fa-diagram-project" />
+          </Link>
+        ) : null}
+        {activeRunId ? (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Stop run"
+            title="Stop run"
+            disabled={isBusy('stop')}
+            onClick={() => handleStop(false)}
+          >
+            <i className="fa-solid fa-stop" />
+          </button>
+        ) : null}
+        {activeRunId ? (
+          <button
+            type="button"
+            className="icon-button icon-button-danger"
+            aria-label="Force stop run"
+            title="Force stop run"
+            disabled={isBusy('force-stop')}
+            onClick={() => handleStop(true)}
+          >
+            <i className="fa-solid fa-ban" />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={`icon-button${isMetaExpanded ? ' icon-button-active' : ''}`}
+          aria-label={isMetaExpanded ? 'Hide metadata' : 'Show metadata'}
+          title={isMetaExpanded ? 'Hide metadata' : 'Show metadata'}
+          aria-expanded={isMetaExpanded}
+          aria-controls="flowchart-inline-meta"
+          onClick={() => setIsMetaExpanded((current) => !current)}
+        >
+          <i className={`fa-solid ${isMetaExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`} />
+        </button>
+        <button
+          type="button"
+          className="icon-button icon-button-danger"
+          aria-label="Delete flowchart"
+          title="Delete flowchart"
+          disabled={isBusy('delete')}
+          onClick={handleDelete}
+        >
+          <i className="fa-solid fa-trash" />
+        </button>
+      </div>
+    </div>
+  )
   const handleWorkspaceNotice = useCallback((message) => {
     const text = String(message || '').trim()
     if (!text) {
@@ -380,210 +601,61 @@ export default function FlowchartDetailPage() {
   return (
     <section className="flowchart-fixed-page" aria-label="Flowchart detail">
       <article className="card flowchart-fixed-card">
-        <header className="flowchart-fixed-header">
-          <div className="flowchart-fixed-toolbar">
-            <div className="flowchart-fixed-toolbar-anchor">
-              {parsedFlowchartId ? (
-                <Link
-                  to="/flowcharts"
-                  className="icon-button"
-                  aria-label="Back to flowcharts"
-                  title="Back to flowcharts"
-                >
-                  <i className="fa-solid fa-arrow-left" />
-                </Link>
-              ) : null}
-            </div>
-            {areToolbarToolsExpanded ? (
-              <div className="flowchart-fixed-toolbar-tools" id="flowchart-toolbar-tools">
-                <div className="table-actions flowchart-fixed-primary-actions">
-                  <button
-                    type="button"
-                    className="icon-button flowchart-icon-button-primary"
-                    aria-label="Save graph"
-                    title="Save graph"
-                    disabled={isBusy('save-graph')}
-                    onClick={handleSaveGraph}
-                  >
-                    <i className="fa-solid fa-floppy-disk" />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label="Validate"
-                    title="Validate"
-                    disabled={isBusy('validate')}
-                    onClick={handleValidate}
-                  >
-                    <i className="fa-solid fa-check" />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label="Run flowchart"
-                    title="Run flowchart"
-                    disabled={isBusy('run') || activeRun}
-                    onClick={handleRun}
-                  >
-                    <i className="fa-solid fa-play" />
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label="Reset graph workspace"
-                    title="Reset graph workspace"
-                    onClick={handleResetGraph}
-                  >
-                    <i className="fa-solid fa-rotate-left" />
-                  </button>
-                </div>
-                <div className="table-actions flowchart-fixed-secondary-actions">
-                  {parsedFlowchartId ? (
-                    <Link
-                      to={`/flowcharts/${parsedFlowchartId}/edit`}
-                      className="icon-button"
-                      aria-label="Edit metadata"
-                      title="Edit metadata"
-                    >
-                      <i className="fa-solid fa-pen-to-square" />
-                    </Link>
-                  ) : null}
-                  {parsedFlowchartId ? (
-                    <Link
-                      to={`/flowcharts/${parsedFlowchartId}/history`}
-                      className="icon-button"
-                      aria-label="History"
-                      title="History"
-                    >
-                      <i className="fa-solid fa-clock-rotate-left" />
-                    </Link>
-                  ) : null}
-                  {activeRunId ? (
-                    <Link
-                      to={`/flowcharts/runs/${activeRunId}`}
-                      className="icon-button"
-                      aria-label={`Open run ${activeRunId}`}
-                      title={`Open run ${activeRunId}`}
-                    >
-                      <i className="fa-solid fa-diagram-project" />
-                    </Link>
-                  ) : null}
-                  {activeRunId ? (
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label="Stop run"
-                      title="Stop run"
-                      disabled={isBusy('stop')}
-                      onClick={() => handleStop(false)}
-                    >
-                      <i className="fa-solid fa-stop" />
-                    </button>
-                  ) : null}
-                  {activeRunId ? (
-                    <button
-                      type="button"
-                      className="icon-button icon-button-danger"
-                      aria-label="Force stop run"
-                      title="Force stop run"
-                      disabled={isBusy('force-stop')}
-                      onClick={() => handleStop(true)}
-                    >
-                      <i className="fa-solid fa-ban" />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="icon-button icon-button-danger"
-                    aria-label="Delete flowchart"
-                    title="Delete flowchart"
-                    disabled={isBusy('delete')}
-                    onClick={handleDelete}
-                  >
-                    <i className="fa-solid fa-trash" />
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="table-actions flowchart-fixed-toggle-actions">
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={areToolbarToolsExpanded ? 'Hide tool buttons' : 'Show tool buttons'}
-                title={areToolbarToolsExpanded ? 'Hide tool buttons' : 'Show tool buttons'}
-                aria-expanded={areToolbarToolsExpanded}
-                aria-controls="flowchart-toolbar-tools"
-                onClick={() => setAreToolbarToolsExpanded((current) => !current)}
-              >
-                <i className={`fa-solid ${areToolbarToolsExpanded ? 'fa-angles-left' : 'fa-angles-right'}`} />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={isMetaExpanded ? 'Hide metadata' : 'Show metadata'}
-                title={isMetaExpanded ? 'Hide metadata' : 'Show metadata'}
-                aria-expanded={isMetaExpanded}
-                aria-controls="flowchart-inline-meta"
-                onClick={() => setIsMetaExpanded((current) => !current)}
-              >
-                <i className={`fa-solid ${isMetaExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`} />
-              </button>
-            </div>
+        {hasTopNotices ? (
+          <div className="flowchart-fixed-notices">
+            {state.loading ? <p>Loading flowchart...</p> : null}
+            {state.error ? <p className="error-text">{state.error}</p> : null}
+            {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
+            {catalogWarning ? <p className="toolbar-meta">{catalogWarning}</p> : null}
           </div>
-          {flowchart && isMetaExpanded ? (
-            <section className="flowchart-meta-panel" id="flowchart-inline-meta" aria-label="Flowchart metadata">
-              <div className="flowchart-meta-head">
-                <p className="flowchart-meta-title">
-                  <i className="fa-solid fa-chart-simple" />
-                  workspace metadata
+        ) : null}
+        {flowchart && isMetaExpanded ? (
+          <section className="flowchart-meta-panel" id="flowchart-inline-meta" aria-label="Flowchart metadata">
+            <div className="flowchart-meta-head">
+              <p className="flowchart-meta-title">
+                <i className="fa-solid fa-chart-simple" />
+                workspace metadata
+              </p>
+              <span className={`flowchart-meta-pill ${runtimeMetaTone(runtimeStatus)}`}>
+                <i className="fa-solid fa-wave-square" />
+                runtime {runtimeLabel}
+              </span>
+            </div>
+            <div className="flowchart-meta-grid">
+              <article className="flowchart-meta-item">
+                <p className="flowchart-meta-label">nodes</p>
+                <p className="flowchart-meta-value">{nodes.length}</p>
+              </article>
+              <article className="flowchart-meta-item">
+                <p className="flowchart-meta-label">edges</p>
+                <p className="flowchart-meta-value">{edges.length}</p>
+              </article>
+              <article className="flowchart-meta-item">
+                <p className="flowchart-meta-label">active run</p>
+                <p className="flowchart-meta-value">{activeRunId ? `run ${activeRunId}` : 'none'}</p>
+              </article>
+              <article className="flowchart-meta-item">
+                <p className="flowchart-meta-label">max runtime</p>
+                <p className="flowchart-meta-value">{flowchart.max_runtime_minutes || '-'}m</p>
+              </article>
+              <article className="flowchart-meta-item">
+                <p className="flowchart-meta-label">max parallel</p>
+                <p className="flowchart-meta-value">{flowchart.max_parallel_nodes || 1}</p>
+              </article>
+              <article className="flowchart-meta-item">
+                <p className="flowchart-meta-label">validation</p>
+                <p className={`flowchart-meta-value ${activeValidation?.valid ? 'is-valid' : 'is-invalid'}`}>
+                  {activeValidation?.valid ? (
+                    <i className="fa-solid fa-circle-check" />
+                  ) : (
+                    <i className="fa-solid fa-triangle-exclamation" />
+                  )}
+                  {validationLabel}
                 </p>
-                <span className={`flowchart-meta-pill ${runtimeMetaTone(runtimeStatus)}`}>
-                  <i className="fa-solid fa-wave-square" />
-                  runtime {runtimeLabel}
-                </span>
-              </div>
-              <div className="flowchart-meta-grid">
-                <article className="flowchart-meta-item">
-                  <p className="flowchart-meta-label">nodes</p>
-                  <p className="flowchart-meta-value">{nodes.length}</p>
-                </article>
-                <article className="flowchart-meta-item">
-                  <p className="flowchart-meta-label">edges</p>
-                  <p className="flowchart-meta-value">{edges.length}</p>
-                </article>
-                <article className="flowchart-meta-item">
-                  <p className="flowchart-meta-label">active run</p>
-                  <p className="flowchart-meta-value">{activeRunId ? `run ${activeRunId}` : 'none'}</p>
-                </article>
-                <article className="flowchart-meta-item">
-                  <p className="flowchart-meta-label">max runtime</p>
-                  <p className="flowchart-meta-value">{flowchart.max_runtime_minutes || '-'}m</p>
-                </article>
-                <article className="flowchart-meta-item">
-                  <p className="flowchart-meta-label">max parallel</p>
-                  <p className="flowchart-meta-value">{flowchart.max_parallel_nodes || 1}</p>
-                </article>
-                <article className="flowchart-meta-item">
-                  <p className="flowchart-meta-label">validation</p>
-                  <p className={`flowchart-meta-value ${activeValidation?.valid ? 'is-valid' : 'is-invalid'}`}>
-                    {activeValidation?.valid ? (
-                      <i className="fa-solid fa-circle-check" />
-                    ) : (
-                      <i className="fa-solid fa-triangle-exclamation" />
-                    )}
-                    {validationLabel}
-                  </p>
-                </article>
-              </div>
-            </section>
-          ) : null}
-
-          {state.loading ? <p>Loading flowchart...</p> : null}
-          {state.error ? <p className="error-text">{state.error}</p> : null}
-          {runtimeWarning ? <p className="toolbar-meta">{runtimeWarning}</p> : null}
-          {catalogWarning ? <p className="toolbar-meta">{catalogWarning}</p> : null}
-        </header>
+              </article>
+            </div>
+          </section>
+        ) : null}
 
         <div className="flowchart-fixed-workspace">
           <FlowchartWorkspaceEditor
@@ -594,9 +666,13 @@ export default function FlowchartDetailPage() {
             catalog={catalog}
             nodeTypes={nodeTypeOptions}
             runningNodeIds={runningNodeIds}
+            panelTitle="Workspace"
+            panelActions={workspacePanelActions}
             onGraphChange={handleWorkspaceGraphChange}
             onNotice={handleWorkspaceNotice}
             onSaveGraph={handleSaveGraph}
+            onRunFromNode={handleRunFromNode}
+            onQuickNodeFromNode={handleQuickNodeFromNode}
             saveGraphBusy={isBusy('save-graph')}
           />
         </div>

@@ -8,8 +8,9 @@ const NODE_TYPE_WITH_EDITABLE_REF = new Set(['flowchart'])
 const NODE_TYPE_REQUIRES_REF = new Set(['flowchart'])
 const HANDLE_IDS = ['top', 'right', 'bottom', 'left']
 const EDGE_MODE_OPTIONS = [
-  { value: 'solid', label: 'Trigger + Context' },
+  { value: 'solid', label: 'Trigger + Context + Attachments' },
   { value: 'dotted', label: 'Context Only' },
+  { value: 'dashed', label: 'Attachments Only' },
 ]
 const EDGE_MODE_VALUES = EDGE_MODE_OPTIONS.map((option) => option.value)
 const EDGE_CONTROL_STYLE_HARD = 'hard'
@@ -53,11 +54,19 @@ const MEMORY_STORE_MODE_OPTIONS = [
   { value: MEMORY_STORE_MODE_APPEND, label: 'Additive' },
   { value: MEMORY_STORE_MODE_REPLACE, label: 'Replace' },
 ]
-const PLAN_ACTION_CREATE_OR_UPDATE = 'create_or_update_plan'
-const PLAN_ACTION_COMPLETE_PLAN_ITEM = 'complete_plan_item'
-const PLAN_ACTION_OPTIONS = [
-  { value: PLAN_ACTION_CREATE_OR_UPDATE, label: 'Create or update plan' },
-  { value: PLAN_ACTION_COMPLETE_PLAN_ITEM, label: 'Complete plan item' },
+const PLAN_STORE_MODE_APPEND = 'append'
+const PLAN_STORE_MODE_REPLACE = 'replace'
+const PLAN_STORE_MODE_UPDATE = 'update'
+const PLAN_STORE_MODE_OPTIONS = [
+  { value: PLAN_STORE_MODE_APPEND, label: 'Append' },
+  { value: PLAN_STORE_MODE_REPLACE, label: 'Replace' },
+  { value: PLAN_STORE_MODE_UPDATE, label: 'Update' },
+]
+const PLAN_MODE_LLM_GUIDED = 'llm_guided'
+const PLAN_MODE_DETERMINISTIC = 'deterministic'
+const PLAN_MODE_OPTIONS = [
+  { value: PLAN_MODE_LLM_GUIDED, label: 'LLM-guided' },
+  { value: PLAN_MODE_DETERMINISTIC, label: 'Deterministic' },
 ]
 const MILESTONE_RETENTION_OPTIONS = [
   { value: 'ttl', label: 'TTL' },
@@ -69,6 +78,9 @@ const DEFAULT_MILESTONE_RETENTION_TTL_SECONDS = 3600
 const DEFAULT_MILESTONE_RETENTION_MAX_COUNT = 25
 const DEFAULT_PLAN_RETENTION_TTL_SECONDS = 3600
 const DEFAULT_PLAN_RETENTION_MAX_COUNT = 25
+const DEFAULT_PLAN_RETRY_COUNT = 1
+const MAX_PLAN_RETRY_COUNT = 5
+const DEFAULT_PLAN_FALLBACK_ENABLED = true
 const DEFAULT_MEMORY_RETRY_COUNT = 1
 const MAX_MEMORY_RETRY_COUNT = 5
 const DEFAULT_MEMORY_FALLBACK_ENABLED = true
@@ -79,8 +91,9 @@ const TYPE_TO_REF_CATALOG_KEY = {
   milestone: 'milestones',
   memory: 'memories',
 }
-const NODE_TYPES_WITH_MODEL = new Set(['task', 'rag'])
+const NODE_TYPES_WITH_MODEL = new Set(['flowchart', 'task', 'plan', 'milestone', 'memory', 'decision', 'rag'])
 const SPECIALIZED_NODE_TYPES = new Set(['milestone', 'memory', 'plan'])
+const NODE_TYPES_WITH_ARTIFACT_EXPLORER_ROUTE = new Set(['task', 'plan', 'milestone', 'memory', 'decision', 'rag'])
 const RAG_MODE_QUERY = 'query'
 const RAG_MODE_FRESH_INDEX = 'fresh_index'
 const RAG_MODE_DELTA_INDEX = 'delta_index'
@@ -231,6 +244,17 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+function cloneJsonValue(value) {
+  if (value == null) {
+    return value
+  }
+  try {
+    return JSON.parse(JSON.stringify(value))
+  } catch {
+    return value
+  }
+}
+
 function normalizeZoom(value) {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) {
@@ -242,6 +266,14 @@ function normalizeZoom(value) {
 function normalizeNodeType(value) {
   const type = String(value || '').trim().toLowerCase()
   return DEFAULT_NODE_TYPES.includes(type) ? type : 'task'
+}
+
+function nodeArtifactExplorerType(nodeType) {
+  const normalized = normalizeNodeType(nodeType)
+  if (NODE_TYPES_WITH_ARTIFACT_EXPLORER_ROUTE.has(normalized)) {
+    return normalized
+  }
+  return 'task'
 }
 
 function nodeSupportsRoutingConfig(nodeType) {
@@ -909,15 +941,14 @@ function defaultConfigForType(nodeType) {
   }
   if (normalized === 'plan') {
     return {
-      action: PLAN_ACTION_CREATE_OR_UPDATE,
+      mode: PLAN_MODE_DETERMINISTIC,
+      store_mode: PLAN_STORE_MODE_APPEND,
       additive_prompt: '',
+      retry_count: DEFAULT_PLAN_RETRY_COUNT,
+      fallback_enabled: DEFAULT_PLAN_FALLBACK_ENABLED,
       retention_mode: 'ttl',
       retention_ttl_seconds: DEFAULT_PLAN_RETENTION_TTL_SECONDS,
       retention_max_count: DEFAULT_PLAN_RETENTION_MAX_COUNT,
-      plan_item_id: null,
-      stage_key: '',
-      task_key: '',
-      completion_source_path: '',
     }
   }
   if (normalized === 'milestone') {
@@ -959,17 +990,57 @@ function normalizeMilestoneAction(value) {
     : 'create_or_update'
 }
 
-function normalizePlanAction(value) {
-  const action = String(value || '').trim().toLowerCase()
-  if ([
-    'complete_plan_item',
-    'complete plan item',
-    'mark_plan_item_complete',
-    'mark_task_complete',
-  ].includes(action)) {
-    return PLAN_ACTION_COMPLETE_PLAN_ITEM
+function normalizePlanStoreMode(value) {
+  const cleaned = String(value || '').trim().toLowerCase()
+  if (['replace', 'overwrite', 'set'].includes(cleaned)) {
+    return PLAN_STORE_MODE_REPLACE
   }
-  return PLAN_ACTION_CREATE_OR_UPDATE
+  if (['update', 'patch', 'mutate'].includes(cleaned)) {
+    return PLAN_STORE_MODE_UPDATE
+  }
+  return PLAN_STORE_MODE_APPEND
+}
+
+function normalizePlanMode(value) {
+  const cleaned = String(value || '').trim().toLowerCase()
+  if (cleaned === PLAN_MODE_LLM_GUIDED) {
+    return PLAN_MODE_LLM_GUIDED
+  }
+  return PLAN_MODE_DETERMINISTIC
+}
+
+function normalizePlanRetryCount(value) {
+  const parsed = parseOptionalInt(value)
+  if (parsed == null) {
+    return DEFAULT_PLAN_RETRY_COUNT
+  }
+  return clamp(parsed, 0, MAX_PLAN_RETRY_COUNT)
+}
+
+function normalizePlanFallbackEnabled(value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'number') {
+    if (value === 1) {
+      return true
+    }
+    if (value === 0) {
+      return false
+    }
+    return DEFAULT_PLAN_FALLBACK_ENABLED
+  }
+  const cleaned = String(value || '').trim().toLowerCase()
+  if (!cleaned) {
+    return DEFAULT_PLAN_FALLBACK_ENABLED
+  }
+  if (['1', 'true', 'yes', 'on'].includes(cleaned)) {
+    return true
+  }
+  if (['0', 'false', 'no', 'off'].includes(cleaned)) {
+    return false
+  }
+  return DEFAULT_PLAN_FALLBACK_ENABLED
 }
 
 function normalizeMemoryAction(value) {
@@ -1035,22 +1106,25 @@ function normalizeMemoryFallbackEnabled(value) {
 
 const SPECIALIZED_NODE_CONTROL_REGISTRY = {
   milestone: {
-    actionOptions: MILESTONE_ACTION_OPTIONS,
-    normalizeAction: normalizeMilestoneAction,
+    primaryControlLabel: 'action',
+    primaryControlKey: 'action',
+    primaryControlOptions: MILESTONE_ACTION_OPTIONS,
+    normalizePrimaryControl: normalizeMilestoneAction,
     lockLlmctlMcp: false,
-    showPlanCompletionTargetFields: false,
   },
   memory: {
-    actionOptions: MEMORY_ACTION_OPTIONS,
-    normalizeAction: normalizeMemoryAction,
+    primaryControlLabel: 'action',
+    primaryControlKey: 'action',
+    primaryControlOptions: MEMORY_ACTION_OPTIONS,
+    normalizePrimaryControl: normalizeMemoryAction,
     lockLlmctlMcp: false,
-    showPlanCompletionTargetFields: false,
   },
   plan: {
-    actionOptions: PLAN_ACTION_OPTIONS,
-    normalizeAction: normalizePlanAction,
+    primaryControlLabel: 'store mode',
+    primaryControlKey: 'store_mode',
+    primaryControlOptions: PLAN_STORE_MODE_OPTIONS,
+    normalizePrimaryControl: normalizePlanStoreMode,
     lockLlmctlMcp: false,
-    showPlanCompletionTargetFields: true,
   },
 }
 
@@ -1120,20 +1194,14 @@ function normalizeNodeConfig(config, nodeType = '') {
     delete nextConfig.fallback_condition_key
   }
   if (normalizedType === 'plan') {
-    nextConfig.action = normalizePlanAction(nextConfig.action)
+    nextConfig.mode = normalizePlanMode(nextConfig.mode)
+    nextConfig.store_mode = normalizePlanStoreMode(nextConfig.store_mode)
     nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+    nextConfig.retry_count = normalizePlanRetryCount(nextConfig.retry_count)
+    nextConfig.fallback_enabled = normalizePlanFallbackEnabled(nextConfig.fallback_enabled)
     nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
     nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_PLAN_RETENTION_TTL_SECONDS
     nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_PLAN_RETENTION_MAX_COUNT
-    const planItemId = parsePositiveInt(nextConfig.plan_item_id)
-    if (planItemId == null) {
-      delete nextConfig.plan_item_id
-    } else {
-      nextConfig.plan_item_id = planItemId
-    }
-    nextConfig.stage_key = String(nextConfig.stage_key || '').trim()
-    nextConfig.task_key = String(nextConfig.task_key || '').trim()
-    nextConfig.completion_source_path = String(nextConfig.completion_source_path || '').trim()
   }
   if (normalizedType === 'milestone') {
     nextConfig.action = normalizeMilestoneAction(nextConfig.action)
@@ -1152,12 +1220,12 @@ function normalizeNodeConfig(config, nodeType = '') {
     nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
     nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_MILESTONE_RETENTION_TTL_SECONDS
     nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
-  } else {
+  } else if (normalizedType !== 'plan') {
     delete nextConfig.retry_count
     delete nextConfig.fallback_enabled
     delete nextConfig.store_mode
   }
-  if (normalizedType !== 'rag' && normalizedType !== 'memory') {
+  if (normalizedType !== 'rag' && normalizedType !== 'memory' && normalizedType !== 'plan') {
     delete nextConfig.mode
   }
   if (normalizedType === 'rag') {
@@ -1393,6 +1461,17 @@ function refLabel(item) {
 function normalizeEdgeMode(value) {
   const mode = String(value || '').trim().toLowerCase()
   return EDGE_MODE_VALUES.includes(mode) ? mode : 'solid'
+}
+
+function edgeModePathClass(value) {
+  const mode = normalizeEdgeMode(value)
+  if (mode === 'dotted') {
+    return ' is-dashed'
+  }
+  if (mode === 'dashed') {
+    return ' is-dotted'
+  }
+  return ''
 }
 
 function buildNodePayload(node, llmctlMcpServerId = null) {
@@ -1679,10 +1758,14 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   catalog = null,
   nodeTypes = DEFAULT_NODE_TYPES,
   runningNodeIds = [],
+  panelTitle = 'Workspace',
+  panelActions = null,
   onGraphChange,
   onNodeSelectionChange,
   onNotice,
   onSaveGraph,
+  onRunFromNode,
+  onQuickNodeFromNode,
   saveGraphBusy = false,
 }, ref) {
   const initialWorkspace = useMemo(
@@ -1701,6 +1784,8 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const wheelZoomTargetRef = useRef(null)
   const wheelZoomAnchorRef = useRef(null)
   const wheelZoomCommitRef = useRef(null)
+  const copiedNodeTemplateRef = useRef(null)
+  const pasteIterationRef = useRef(0)
   const routingFieldRefs = useRef({
     [ROUTING_FOCUS_FIELD_FAN_IN_MODE]: null,
     [ROUTING_FOCUS_FIELD_FAN_IN_CUSTOM_COUNT]: null,
@@ -1718,6 +1803,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const [dragging, setDragging] = useState(null)
   const [isViewportPanning, setIsViewportPanning] = useState(false)
   const [zoom, setZoom] = useState(1)
+  const [contextMenu, setContextMenu] = useState(null)
 
   useEffect(() => {
     connectDragRef.current = connectDrag
@@ -2016,6 +2102,10 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
 
   const selectedNode = selectedNodeToken ? nodesByToken.get(selectedNodeToken) || null : null
   const selectedNodeType = selectedNode ? normalizeNodeType(selectedNode.node_type) : ''
+  const selectedNodePersistedId = selectedNode ? parsePositiveInt(selectedNode.persistedId) : null
+  const selectedNodeArtifactsHref = selectedNodePersistedId
+    ? `/artifacts/type/${nodeArtifactExplorerType(selectedNodeType)}?flowchart_node_id=${selectedNodePersistedId}`
+    : ''
   const canSaveGraph = typeof onSaveGraph === 'function'
   const saveButtonDisabled = saveGraphBusy || !canSaveGraph
   const selectedEdge = selectedEdgeId
@@ -2024,6 +2114,35 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const selectedEdgeControlPointCount = selectedEdge
     ? normalizeEdgeControlPoints(selectedEdge.controlPoints).length
     : 0
+  const contextMenuNode = contextMenu && contextMenu.targetType === 'node'
+    ? nodesByToken.get(contextMenu.targetId) || null
+    : null
+  const contextMenuEdge = contextMenu && contextMenu.targetType === 'edge'
+    ? edges.find((edge) => edge.localId === contextMenu.targetId) || null
+    : null
+  const contextMenuNodeType = contextMenuNode ? normalizeNodeType(contextMenuNode.node_type) : ''
+  const contextMenuNodePersistedId = contextMenuNode ? parsePositiveInt(contextMenuNode.persistedId) : null
+  const contextMenuDeleteDisabled = Boolean(
+    contextMenuNode && contextMenuNodeType === 'start',
+  )
+  const contextMenuDuplicateDisabled = Boolean(
+    !contextMenuNode || contextMenuNodeType === 'start',
+  )
+  const contextMenuRunFromHereDisabled = Boolean(
+    !contextMenuNode
+    || contextMenuNodePersistedId == null
+    || typeof onRunFromNode !== 'function',
+  )
+  const contextMenuQuickNodeDisabled = Boolean(
+    !contextMenuNode || typeof onQuickNodeFromNode !== 'function',
+  )
+  const contextMenuNodeHasConnectors = Boolean(
+    contextMenuNode
+    && edges.some((edge) => edge.sourceToken === contextMenuNode.token || edge.targetToken === contextMenuNode.token),
+  )
+  const contextMenuEdgeHasControlPoints = Boolean(
+    contextMenuEdge && normalizeEdgeControlPoints(contextMenuEdge.controlPoints).length > 0,
+  )
   const decisionConditionLookupByNodeToken = useMemo(() => {
     const lookup = new Map()
     for (const node of nodes) {
@@ -2222,18 +2341,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   const ragModeRequiresEmbeddingModel = selectedNodeType === 'rag'
     && (selectedRagMode === RAG_MODE_FRESH_INDEX || selectedRagMode === RAG_MODE_DELTA_INDEX)
   const selectedNodeCollectionSet = new Set(normalizeRagCollections(selectedNodeConfig?.collections))
-  const selectedPlanConfig = (
-    selectedNode && selectedNodeType === 'plan'
-      ? selectedSpecializedConfig
-      : null
-  )
-  const selectedPlanNodeNeedsCompletionTarget = Boolean(
-    selectedPlanConfig
-    && selectedPlanConfig.action === PLAN_ACTION_COMPLETE_PLAN_ITEM
-    && !selectedPlanConfig.plan_item_id
-    && !(selectedPlanConfig.stage_key && selectedPlanConfig.task_key)
-    && !selectedPlanConfig.completion_source_path,
-  )
   const selectedTaskNodeNeedsPrompt = Boolean(
     selectedNode
     && selectedNodeType === 'task'
@@ -2515,6 +2622,129 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     addNodeAt(nodeType, centerX, centerY)
   }
 
+  function nodeCopyTemplate(node) {
+    if (!node || typeof node !== 'object') {
+      return null
+    }
+    const nodeType = normalizeNodeType(node.node_type)
+    const fallbackConfig = defaultConfigForType(nodeType)
+    const configInput = node.config && typeof node.config === 'object'
+      ? cloneJsonValue(node.config)
+      : fallbackConfig
+    return {
+      node_type: nodeType,
+      title: String(node.title || titleForType(nodeType) || '').trim() || titleForType(nodeType),
+      ref_id: NODE_TYPE_WITH_REF.has(nodeType) ? parseOptionalInt(node.ref_id) : null,
+      x: toNumber(node.x, 0),
+      y: toNumber(node.y, 0),
+      config: normalizeNodeConfig(configInput, nodeType),
+      model_id: NODE_TYPES_WITH_MODEL.has(nodeType) ? parseOptionalInt(node.model_id) : null,
+      mcp_server_ids: normalizeNodeMcpServerIds(nodeType, node.mcp_server_ids, llmctlMcpServerId),
+      script_ids: Array.isArray(node.script_ids) ? [...node.script_ids] : [],
+      attachment_ids: Array.isArray(node.attachment_ids) ? [...node.attachment_ids] : [],
+    }
+  }
+
+  const createNodeFromTemplate = useCallback((template, { x = null, y = null } = {}) => {
+    if (!template || typeof template !== 'object') {
+      return null
+    }
+    const nodeType = normalizeNodeType(template.node_type)
+    if (nodeType === 'start' && nodes.some((node) => normalizeNodeType(node.node_type) === 'start')) {
+      emitNotice('Only one start node is allowed.')
+      return null
+    }
+    const rawX = x == null ? toNumber(template.x, 0) : toNumber(x, 0)
+    const rawY = y == null ? toNumber(template.y, 0) : toNumber(y, 0)
+    const nextPosition = clampNodePosition(nodeType, rawX, rawY)
+    const fallbackConfig = defaultConfigForType(nodeType)
+    const templateConfig = template.config && typeof template.config === 'object'
+      ? cloneJsonValue(template.config)
+      : fallbackConfig
+    const clientId = nextClientNodeIdRef.current++
+    const nextNode = {
+      token: makeNodeToken(null, clientId),
+      persistedId: null,
+      clientId,
+      node_type: nodeType,
+      title: String(template.title || titleForType(nodeType) || '').trim() || titleForType(nodeType),
+      ref_id: NODE_TYPE_WITH_REF.has(nodeType) ? parseOptionalInt(template.ref_id) : null,
+      x: nextPosition.x,
+      y: nextPosition.y,
+      config: normalizeNodeConfig(templateConfig, nodeType),
+      model_id: NODE_TYPES_WITH_MODEL.has(nodeType) ? parseOptionalInt(template.model_id) : null,
+      mcp_server_ids: normalizeNodeMcpServerIds(nodeType, template.mcp_server_ids, llmctlMcpServerId),
+      script_ids: Array.isArray(template.script_ids) ? [...template.script_ids] : [],
+      attachment_ids: Array.isArray(template.attachment_ids) ? [...template.attachment_ids] : [],
+    }
+    setNodes((current) => [...current, nextNode])
+    setSelectedNodeToken(nextNode.token)
+    setSelectedEdgeId('')
+    return nextNode
+  }, [emitNotice, llmctlMcpServerId, nodes])
+
+  const copyNodeToClipboard = useCallback((token, { silent = false } = {}) => {
+    const node = nodesByToken.get(token)
+    if (!node) {
+      return false
+    }
+    if (normalizeNodeType(node.node_type) === 'start') {
+      if (!silent) {
+        emitNotice('Start node cannot be copied.')
+      }
+      return false
+    }
+    const template = nodeCopyTemplate(node)
+    if (!template) {
+      return false
+    }
+    copiedNodeTemplateRef.current = template
+    pasteIterationRef.current = 0
+    if (!silent) {
+      emitNotice(`Copied "${template.title}" node.`)
+    }
+    return true
+  }, [emitNotice, nodesByToken])
+
+  const pasteNodeFromClipboard = useCallback(() => {
+    const template = copiedNodeTemplateRef.current
+    if (!template) {
+      return false
+    }
+    const step = pasteIterationRef.current + 1
+    const offset = 36 * step
+    const anchorNode = selectedNodeToken ? nodesByToken.get(selectedNodeToken) || null : null
+    const baseX = anchorNode ? toNumber(anchorNode.x, 0) : toNumber(template.x, 0)
+    const baseY = anchorNode ? toNumber(anchorNode.y, 0) : toNumber(template.y, 0)
+    const created = createNodeFromTemplate(template, { x: baseX + offset, y: baseY + offset })
+    if (!created) {
+      return false
+    }
+    pasteIterationRef.current = step
+    return true
+  }, [createNodeFromTemplate, nodesByToken, selectedNodeToken])
+
+  const duplicateNode = useCallback((node) => {
+    if (!node) {
+      return false
+    }
+    if (normalizeNodeType(node.node_type) === 'start') {
+      emitNotice('Start node cannot be duplicated.')
+      return false
+    }
+    const template = nodeCopyTemplate(node)
+    if (!template) {
+      return false
+    }
+    copiedNodeTemplateRef.current = template
+    pasteIterationRef.current = 1
+    const created = createNodeFromTemplate(template, {
+      x: toNumber(node.x, 0) + 36,
+      y: toNumber(node.y, 0) + 36,
+    })
+    return Boolean(created)
+  }, [createNodeFromTemplate, emitNotice])
+
   const removeNode = useCallback((token) => {
     const node = nodesByToken.get(token)
     if (!node) {
@@ -2547,6 +2777,146 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     setSelectedEdgeId('')
     setEdgePointDrag(null)
   }, [])
+
+  const resetNodeConnectors = useCallback((token, { silent = false } = {}) => {
+    const removableEdgeIds = edges
+      .filter((edge) => edge.sourceToken === token || edge.targetToken === token)
+      .map((edge) => edge.localId)
+    if (removableEdgeIds.length === 0) {
+      if (!silent) {
+        emitNotice('No connectors to reset.')
+      }
+      return false
+    }
+    const removableEdgeSet = new Set(removableEdgeIds)
+    setEdges((current) => current.filter((edge) => !removableEdgeSet.has(edge.localId)))
+    if (selectedEdgeId && removableEdgeSet.has(selectedEdgeId)) {
+      setSelectedEdgeId('')
+    }
+    setEdgePointDrag(null)
+    if (!silent) {
+      emitNotice(`Reset ${removableEdgeIds.length} connector${removableEdgeIds.length === 1 ? '' : 's'}.`)
+    }
+    return true
+  }, [edges, emitNotice, selectedEdgeId])
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null)
+  }, [])
+
+  const openContextMenuForNode = useCallback((event, nodeToken) => {
+    const nextX = clamp(event.clientX, 8, Math.max(8, window.innerWidth - 232))
+    const nextY = clamp(event.clientY, 8, Math.max(8, window.innerHeight - 214))
+    event.preventDefault()
+    event.stopPropagation()
+    setSelectedNodeToken(nodeToken)
+    setSelectedEdgeId('')
+    setContextMenu({
+      targetType: 'node',
+      targetId: nodeToken,
+      x: nextX,
+      y: nextY,
+    })
+  }, [])
+
+  const openContextMenuForEdge = useCallback((event, edgeLocalId) => {
+    const nextX = clamp(event.clientX, 8, Math.max(8, window.innerWidth - 232))
+    const nextY = clamp(event.clientY, 8, Math.max(8, window.innerHeight - 110))
+    event.preventDefault()
+    event.stopPropagation()
+    setSelectedEdgeId(edgeLocalId)
+    setSelectedNodeToken('')
+    setContextMenu({
+      targetType: 'edge',
+      targetId: edgeLocalId,
+      x: nextX,
+      y: nextY,
+    })
+  }, [])
+
+  const handleContextMenuDelete = useCallback(() => {
+    if (!contextMenu) {
+      return
+    }
+    if (contextMenu.targetType === 'node') {
+      const node = nodesByToken.get(contextMenu.targetId)
+      closeContextMenu()
+      if (node) {
+        confirmAndRemoveNode(node)
+      }
+      return
+    }
+    if (contextMenu.targetType === 'edge') {
+      closeContextMenu()
+      removeEdge(contextMenu.targetId)
+    }
+  }, [closeContextMenu, confirmAndRemoveNode, contextMenu, nodesByToken, removeEdge])
+
+  const handleContextMenuDuplicate = useCallback(() => {
+    if (!contextMenu || contextMenu.targetType !== 'node') {
+      return
+    }
+    const node = nodesByToken.get(contextMenu.targetId)
+    closeContextMenu()
+    if (!node) {
+      return
+    }
+    duplicateNode(node)
+  }, [closeContextMenu, contextMenu, duplicateNode, nodesByToken])
+
+  const handleContextMenuResetConnectors = useCallback(() => {
+    if (!contextMenu || contextMenu.targetType !== 'node') {
+      return
+    }
+    const node = nodesByToken.get(contextMenu.targetId)
+    closeContextMenu()
+    if (!node) {
+      return
+    }
+    resetNodeConnectors(node.token)
+  }, [closeContextMenu, contextMenu, nodesByToken, resetNodeConnectors])
+
+  const handleContextMenuRunFromHere = useCallback(() => {
+    if (!contextMenu || contextMenu.targetType !== 'node') {
+      return
+    }
+    const node = nodesByToken.get(contextMenu.targetId)
+    closeContextMenu()
+    if (!node || typeof onRunFromNode !== 'function') {
+      return
+    }
+    onRunFromNode(node)
+  }, [closeContextMenu, contextMenu, nodesByToken, onRunFromNode])
+
+  const handleContextMenuQuickNode = useCallback(() => {
+    if (!contextMenu || contextMenu.targetType !== 'node') {
+      return
+    }
+    const node = nodesByToken.get(contextMenu.targetId)
+    closeContextMenu()
+    if (!node || typeof onQuickNodeFromNode !== 'function') {
+      return
+    }
+    onQuickNodeFromNode(node)
+  }, [closeContextMenu, contextMenu, nodesByToken, onQuickNodeFromNode])
+
+  const handleContextMenuResetBends = useCallback(() => {
+    if (!contextMenu || contextMenu.targetType !== 'edge') {
+      return
+    }
+    const localId = contextMenu.targetId
+    closeContextMenu()
+    setEdges((current) => current.map((edge) => {
+      if (edge.localId !== localId) {
+        return edge
+      }
+      return {
+        ...edge,
+        controlPoints: [],
+      }
+    }))
+    setEdgePointDrag(null)
+  }, [closeContextMenu, contextMenu])
 
   function applyServerGraph(nextNodesRaw, nextEdgesRaw) {
     const nextWorkspace = buildInitialWorkspace(nextNodesRaw, nextEdgesRaw)
@@ -2581,10 +2951,38 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
   useEffect(() => {
     function onKeyDown(event) {
       const tagName = String(event?.target?.tagName || '').toLowerCase()
-      if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || event.metaKey || event.ctrlKey) {
+      if (
+        tagName === 'input'
+        || tagName === 'textarea'
+        || tagName === 'select'
+        || Boolean(event?.target?.isContentEditable)
+      ) {
+        return
+      }
+      const key = String(event.key || '').toLowerCase()
+      const hasPrimaryModifier = (event.metaKey || event.ctrlKey) && !event.altKey
+      if (hasPrimaryModifier && !event.shiftKey && key === 'c') {
+        if (!selectedNodeToken) {
+          return
+        }
+        const copied = copyNodeToClipboard(selectedNodeToken)
+        if (copied) {
+          event.preventDefault()
+        }
+        return
+      }
+      if (hasPrimaryModifier && !event.shiftKey && key === 'v') {
+        const pasted = pasteNodeFromClipboard()
+        if (pasted) {
+          event.preventDefault()
+        }
+        return
+      }
+      if (event.metaKey || event.ctrlKey) {
         return
       }
       if (event.key === 'Escape') {
+        closeContextMenu()
         setConnectStart(null)
         setConnectDrag(null)
         return
@@ -2613,7 +3011,47 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [emitNotice, removeEdge, removeNode, selectedNodeToken, selectedEdgeId, nodesByToken])
+  }, [
+    closeContextMenu,
+    copyNodeToClipboard,
+    emitNotice,
+    nodesByToken,
+    pasteNodeFromClipboard,
+    removeEdge,
+    removeNode,
+    selectedEdgeId,
+    selectedNodeToken,
+  ])
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return undefined
+    }
+    function onPointerDown(event) {
+      const menuElement = event.target?.closest?.('.flow-ws-context-menu')
+      if (menuElement) {
+        return
+      }
+      closeContextMenu()
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [closeContextMenu, contextMenu])
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+    if (contextMenu.targetType === 'node' && !nodesByToken.has(contextMenu.targetId)) {
+      closeContextMenu()
+      return
+    }
+    if (contextMenu.targetType === 'edge' && !edges.some((edge) => edge.localId === contextMenu.targetId)) {
+      closeContextMenu()
+    }
+  }, [closeContextMenu, contextMenu, edges, nodesByToken])
 
   function beginDrag(event, node) {
     if (event.button !== 0) {
@@ -2813,16 +3251,10 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
         delete nextConfig.retention_ttl_seconds
         delete nextConfig.retention_max_count
       }
-      if (normalizedType !== 'memory') {
+      if (normalizedType !== 'memory' && normalizedType !== 'plan') {
         delete nextConfig.retry_count
         delete nextConfig.fallback_enabled
         delete nextConfig.store_mode
-      }
-      if (normalizedType !== 'plan') {
-        delete nextConfig.plan_item_id
-        delete nextConfig.stage_key
-        delete nextConfig.task_key
-        delete nextConfig.completion_source_path
       }
       if (normalizedType === 'task' && typeof nextConfig.task_prompt !== 'string') {
         nextConfig.task_prompt = ''
@@ -2857,15 +3289,14 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
         nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_MILESTONE_RETENTION_MAX_COUNT
       }
       if (normalizedType === 'plan') {
-        nextConfig.action = normalizePlanAction(nextConfig.action)
+        nextConfig.mode = normalizePlanMode(nextConfig.mode)
+        nextConfig.store_mode = normalizePlanStoreMode(nextConfig.store_mode)
         nextConfig.additive_prompt = String(nextConfig.additive_prompt || '')
+        nextConfig.retry_count = normalizePlanRetryCount(nextConfig.retry_count)
+        nextConfig.fallback_enabled = normalizePlanFallbackEnabled(nextConfig.fallback_enabled)
         nextConfig.retention_mode = normalizeMilestoneRetentionMode(nextConfig.retention_mode)
         nextConfig.retention_ttl_seconds = parseOptionalInt(nextConfig.retention_ttl_seconds) ?? DEFAULT_PLAN_RETENTION_TTL_SECONDS
         nextConfig.retention_max_count = parseOptionalInt(nextConfig.retention_max_count) ?? DEFAULT_PLAN_RETENTION_MAX_COUNT
-        nextConfig.plan_item_id = parsePositiveInt(nextConfig.plan_item_id)
-        nextConfig.stage_key = String(nextConfig.stage_key || '').trim()
-        nextConfig.task_key = String(nextConfig.task_key || '').trim()
-        nextConfig.completion_source_path = String(nextConfig.completion_source_path || '').trim()
       }
       return {
         ...current,
@@ -3019,11 +3450,16 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
     }
 
     function clearViewportPan() {
-      if (!viewportPanRef.current) {
+      const panState = viewportPanRef.current
+      if (!panState) {
         return
       }
       viewportPanRef.current = null
       setIsViewportPanning(false)
+      if (!panState.moved) {
+        setSelectedNodeToken('')
+        setSelectedEdgeId('')
+      }
     }
 
     window.addEventListener('pointermove', onPointerMove)
@@ -3181,6 +3617,12 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
       </aside>
 
       <div className="flow-ws-editor">
+        <PanelHeader
+          className="flow-ws-panel-header flow-ws-editor-header"
+          title={panelTitle}
+          actions={panelActions}
+          actionsClassName="flow-ws-editor-header-actions"
+        />
         <div className="flow-ws-toolbar">
           <div className="flow-ws-toolbar-actions">
             <button type="button" className="btn btn-secondary" onClick={() => setZoomKeepingCenter(zoom - ZOOM_STEP)}>
@@ -3280,7 +3722,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     <g key={edge.localId}>
                       <path
                         d={pathMeta.d}
-                        className={`flow-ws-edge-path${edge.edge_mode === 'dotted' ? ' is-dotted' : ''}${selected ? ' is-selected' : ''}`}
+                        className={`flow-ws-edge-path${edgeModePathClass(edge.edge_mode)}${selected ? ' is-selected' : ''}`}
                         markerEnd="url(#flow-ws-arrow)"
                       />
                       {edgeCaption ? (
@@ -3306,6 +3748,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                           setSelectedEdgeId(edge.localId)
                           setSelectedNodeToken('')
                         }}
+                        onContextMenu={(event) => openContextMenuForEdge(event, edge.localId)}
                         onDoubleClick={(event) => {
                           event.preventDefault()
                           event.stopPropagation()
@@ -3398,6 +3841,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       setSelectedNodeToken(node.token)
                       setSelectedEdgeId('')
                     }}
+                    onContextMenu={(event) => openContextMenuForNode(event, node.token)}
                   >
                     <span className="flow-ws-node-shape" />
                     <span className="flow-ws-node-content">
@@ -3431,6 +3875,94 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
             </div>
           </div>
         </div>
+        {contextMenu ? (
+          <div
+            className="flow-ws-context-menu"
+            role="menu"
+            aria-label={contextMenu.targetType === 'node' ? 'Node context menu' : 'Connector context menu'}
+            style={{
+              left: `${contextMenu.x}px`,
+              top: `${contextMenu.y}px`,
+            }}
+          >
+            {contextMenu.targetType === 'node' ? (
+              <>
+                <button
+                  type="button"
+                  className="flow-ws-context-menu-item"
+                  role="menuitem"
+                  disabled={contextMenuDuplicateDisabled}
+                  onClick={handleContextMenuDuplicate}
+                >
+                  <i className="fa-solid fa-copy" />
+                  Duplicate node
+                </button>
+                <button
+                  type="button"
+                  className="flow-ws-context-menu-item"
+                  role="menuitem"
+                  disabled={!contextMenuNodeHasConnectors}
+                  onClick={handleContextMenuResetConnectors}
+                >
+                  <i className="fa-solid fa-link-slash" />
+                  Reset connectors
+                </button>
+                <button
+                  type="button"
+                  className="flow-ws-context-menu-item"
+                  role="menuitem"
+                  disabled={contextMenuRunFromHereDisabled}
+                  onClick={handleContextMenuRunFromHere}
+                >
+                  <i className="fa-solid fa-play" />
+                  Run From Here
+                </button>
+                <button
+                  type="button"
+                  className="flow-ws-context-menu-item"
+                  role="menuitem"
+                  disabled={contextMenuQuickNodeDisabled}
+                  onClick={handleContextMenuQuickNode}
+                >
+                  <i className="fa-solid fa-bolt" />
+                  Quick Node
+                </button>
+                <button
+                  type="button"
+                  className="flow-ws-context-menu-item is-destructive"
+                  role="menuitem"
+                  disabled={contextMenuDeleteDisabled}
+                  onClick={handleContextMenuDelete}
+                >
+                  <i className="fa-solid fa-trash" />
+                  Delete node
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="flow-ws-context-menu-item"
+                  role="menuitem"
+                  disabled={!contextMenuEdgeHasControlPoints}
+                  onClick={handleContextMenuResetBends}
+                >
+                  <i className="fa-solid fa-wave-square" />
+                  Reset bends
+                </button>
+                <button
+                  type="button"
+                  className="flow-ws-context-menu-item is-destructive"
+                  role="menuitem"
+                  onClick={handleContextMenuDelete}
+                >
+                  <i className="fa-solid fa-trash" />
+                  Delete connector
+                </button>
+              </>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <aside className="flow-ws-inspector">
@@ -3456,6 +3988,38 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
               >
                 <i className="fa-solid fa-floppy-disk" />
               </button>
+              {selectedNode ? (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Duplicate node"
+                  title={selectedNodeType === 'start' ? 'Start node cannot be duplicated' : 'Duplicate node'}
+                  disabled={selectedNodeType === 'start'}
+                  onClick={() => duplicateNode(selectedNode)}
+                >
+                  <i className="fa-solid fa-copy" />
+                </button>
+              ) : null}
+              {selectedNodeArtifactsHref ? (
+                <a
+                  className="icon-button"
+                  aria-label="View node artifacts"
+                  title="View node artifacts"
+                  href={selectedNodeArtifactsHref}
+                >
+                  <i className="fa-solid fa-box-archive" />
+                </a>
+              ) : (selectedNode ? (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="View node artifacts"
+                  title="Save graph first to view node artifacts"
+                  disabled
+                >
+                  <i className="fa-solid fa-box-archive" />
+                </button>
+              ) : null)}
               <button
                 type="button"
                 className="icon-button icon-button-danger"
@@ -3695,26 +4259,27 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
             {selectedSpecializedControls && selectedSpecializedConfig ? (
               <div className="stack-sm">
                 <label className="field">
-                  <span>action</span>
+                  <span>{selectedSpecializedControls.primaryControlLabel}</span>
                   <select
                     required
-                    value={selectedSpecializedConfig.action}
+                    value={selectedSpecializedConfig[selectedSpecializedControls.primaryControlKey]}
                     onChange={(event) => updateNode(selectedNode.token, (current) => ({
                       ...current,
                       config: {
                         ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                        action: selectedSpecializedControls.normalizeAction(event.target.value),
+                        [selectedSpecializedControls.primaryControlKey]:
+                          selectedSpecializedControls.normalizePrimaryControl(event.target.value),
                       },
                     }))}
                   >
-                    {selectedSpecializedControls.actionOptions.map((option) => (
+                    {selectedSpecializedControls.primaryControlOptions.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
                   </select>
                 </label>
-                {selectedNodeType === 'memory' ? (
+                {selectedNodeType === 'memory' || selectedNodeType === 'plan' ? (
                   <label className="field">
                     <span>mode</span>
                     <select
@@ -3723,11 +4288,13 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                         ...current,
                         config: {
                           ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                          mode: normalizeMemoryMode(event.target.value),
+                          mode: selectedNodeType === 'plan'
+                            ? normalizePlanMode(event.target.value)
+                            : normalizeMemoryMode(event.target.value),
                         },
                       }))}
                     >
-                      {MEMORY_MODE_OPTIONS.map((option) => (
+                      {(selectedNodeType === 'plan' ? PLAN_MODE_OPTIONS : MEMORY_MODE_OPTIONS).map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -3769,7 +4336,7 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                     }))}
                   />
                 </label>
-                {selectedNodeType === 'memory' ? (
+                {selectedNodeType === 'memory' || selectedNodeType === 'plan' ? (
                   <div className="stack-sm" role="group" aria-label="Failure">
                     <p className="toolbar-meta">Failure</p>
                     <label className="field">
@@ -3777,14 +4344,18 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       <input
                         type="number"
                         min="0"
-                        max={MAX_MEMORY_RETRY_COUNT}
+                        max={selectedNodeType === 'plan' ? MAX_PLAN_RETRY_COUNT : MAX_MEMORY_RETRY_COUNT}
                         step="1"
-                        value={selectedSpecializedConfig.retry_count ?? DEFAULT_MEMORY_RETRY_COUNT}
+                        value={selectedSpecializedConfig.retry_count ?? (
+                          selectedNodeType === 'plan' ? DEFAULT_PLAN_RETRY_COUNT : DEFAULT_MEMORY_RETRY_COUNT
+                        )}
                         onChange={(event) => updateNode(selectedNode.token, (current) => ({
                           ...current,
                           config: {
                             ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                            retry_count: normalizeMemoryRetryCount(event.target.value),
+                            retry_count: selectedNodeType === 'plan'
+                              ? normalizePlanRetryCount(event.target.value)
+                              : normalizeMemoryRetryCount(event.target.value),
                           },
                         }))}
                       />
@@ -3797,7 +4368,9 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                           ...current,
                           config: {
                             ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                            fallback_enabled: normalizeMemoryFallbackEnabled(event.target.value),
+                            fallback_enabled: selectedNodeType === 'plan'
+                              ? normalizePlanFallbackEnabled(event.target.value)
+                              : normalizeMemoryFallbackEnabled(event.target.value),
                           },
                         }))}
                       >
@@ -3861,69 +4434,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                       }))}
                     />
                   </label>
-                ) : null}
-                {selectedSpecializedControls.showPlanCompletionTargetFields
-                && selectedSpecializedConfig.action === PLAN_ACTION_COMPLETE_PLAN_ITEM ? (
-                  <>
-                    <label className="field">
-                      <span>plan item id (preferred)</span>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={selectedSpecializedConfig.plan_item_id ?? ''}
-                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                          ...current,
-                          config: {
-                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                            plan_item_id: parsePositiveInt(event.target.value),
-                          },
-                        }))}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>stage key</span>
-                      <input
-                        type="text"
-                        value={selectedSpecializedConfig.stage_key || ''}
-                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                          ...current,
-                          config: {
-                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                            stage_key: event.target.value,
-                          },
-                        }))}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>task key</span>
-                      <input
-                        type="text"
-                        value={selectedSpecializedConfig.task_key || ''}
-                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                          ...current,
-                          config: {
-                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                            task_key: event.target.value,
-                          },
-                        }))}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>completion source path</span>
-                      <input
-                        type="text"
-                        value={selectedSpecializedConfig.completion_source_path || ''}
-                        onChange={(event) => updateNode(selectedNode.token, (current) => ({
-                          ...current,
-                          config: {
-                            ...(current.config && typeof current.config === 'object' ? current.config : {}),
-                            completion_source_path: event.target.value,
-                          },
-                        }))}
-                      />
-                    </label>
-                  </>
                 ) : null}
                 {selectedSpecializedControls.lockLlmctlMcp ? (
                   <label className="field">
@@ -4058,9 +4568,6 @@ const FlowchartWorkspaceEditor = forwardRef(function FlowchartWorkspaceEditor({
                   <p className="toolbar-meta">No collections available.</p>
                 )}
               </PersistedDetails>
-            ) : null}
-            {selectedPlanNodeNeedsCompletionTarget ? (
-              <p className="error-text">Complete plan item requires plan item id, stage+task keys, or completion source path.</p>
             ) : null}
             {selectedNodeType === 'decision' ? (
               <div className="stack-sm">

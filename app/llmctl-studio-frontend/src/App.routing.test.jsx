@@ -95,7 +95,7 @@ describe('App routing', () => {
 
   test('attachments route is native react', async () => {
     renderAt('/attachments')
-    expect((await screen.findAllByRole('heading', { name: 'Attachments' })).length).toBeGreaterThan(0)
+    expect((await screen.findAllByRole('heading', { name: 'Chat Attachments' })).length).toBeGreaterThan(0)
   })
 
   test('models route is native react', async () => {
@@ -115,7 +115,12 @@ describe('App routing', () => {
 
   test('mcps route is native react', async () => {
     renderAt('/mcps')
-    expect((await screen.findAllByRole('heading', { name: 'MCP Servers' })).length).toBeGreaterThan(0)
+    expect((await screen.findAllByRole('heading', { name: 'Integrated MCP Servers' })).length).toBeGreaterThan(0)
+  })
+
+  test('mcps custom section route is native react', async () => {
+    renderAt('/mcps/custom')
+    expect((await screen.findAllByRole('heading', { name: 'Custom MCP Servers' })).length).toBeGreaterThan(0)
   })
 
   test('github route is native react', async () => {

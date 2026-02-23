@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
+import TableListEmptyState from '../components/TableListEmptyState'
 import { HttpError } from '../lib/httpClient'
 import { deleteAgent, getAgents, startAgent, stopAgent } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -149,91 +150,96 @@ export default function AgentsPage() {
           {state.loading ? <p>Loading agents...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
           {actionError ? <p className="error-text">{actionError}</p> : null}
-          {!state.loading && !state.error && agents.length === 0 ? <p>No agents created yet.</p> : null}
-          {!state.loading && !state.error && agents.length > 0 ? (
-            <div className="table-wrap workflow-list-table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Role</th>
-                    <th>Autorun</th>
-                    <th className="table-actions-cell">Autorun</th>
-                    <th className="table-actions-cell">Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.map((agent) => {
-                    const status = String(agent.status || 'stopped')
-                    const active = ['running', 'starting', 'stopping'].includes(status)
-                    const busy = Boolean(busyById[agent.id])
-                    const href = `/agents/${agent.id}`
-                    return (
-                      <tr
-                        key={agent.id}
-                        className="table-row-link"
-                        data-href={href}
-                        onClick={(event) => handleRowClick(event, href)}
-                      >
-                        <td>
-                          <Link to={href}>{agent.name}</Link>
-                        </td>
-                        <td>
-                          <span className="chip">{agent.is_system ? 'system' : 'user'}</span>
-                        </td>
-                        <td>{agent.role_name || '-'}</td>
-                        <td>
-                          <span className={agentStatusClassName(status)}>
-                            {agentStatusLabel(status)}
-                          </span>
-                        </td>
-                        <td className="table-actions-cell">
-                          <div className="table-actions">
-                            {active ? (
-                              <button
-                                type="button"
-                                className="icon-button"
-                                aria-label="Disable autorun"
-                                title="Disable autorun"
-                                disabled={busy}
-                                onClick={() => handleStop(agent.id)}
-                              >
-                                <ActionIcon name="stop" />
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="icon-button"
-                                aria-label="Enable autorun"
-                                title="Enable autorun"
-                                disabled={busy}
-                                onClick={() => handleStart(agent.id)}
-                              >
-                                <ActionIcon name="play" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="table-actions-cell">
-                          <div className="table-actions">
-                            <button
-                              type="button"
-                              className="icon-button icon-button-danger"
-                              aria-label="Delete agent"
-                              title="Delete agent"
-                              disabled={busy}
-                              onClick={() => handleDelete(agent.id)}
-                            >
-                              <ActionIcon name="trash" />
-                            </button>
-                          </div>
-                        </td>
+          {!state.loading && !state.error ? (
+            <div className="workflow-list-table-shell">
+              {agents.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Role</th>
+                        <th>Autorun</th>
+                        <th className="table-actions-cell">Autorun</th>
+                        <th className="table-actions-cell">Delete</th>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {agents.map((agent) => {
+                        const status = String(agent.status || 'stopped')
+                        const active = ['running', 'starting', 'stopping'].includes(status)
+                        const busy = Boolean(busyById[agent.id])
+                        const href = `/agents/${agent.id}`
+                        return (
+                          <tr
+                            key={agent.id}
+                            className="table-row-link"
+                            data-href={href}
+                            onClick={(event) => handleRowClick(event, href)}
+                          >
+                            <td>
+                              <Link to={href}>{agent.name}</Link>
+                            </td>
+                            <td>
+                              <span className="chip">{agent.is_system ? 'system' : 'user'}</span>
+                            </td>
+                            <td>{agent.role_name || '-'}</td>
+                            <td>
+                              <span className={agentStatusClassName(status)}>
+                                {agentStatusLabel(status)}
+                              </span>
+                            </td>
+                            <td className="table-actions-cell">
+                              <div className="table-actions">
+                                {active ? (
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    aria-label="Disable autorun"
+                                    title="Disable autorun"
+                                    disabled={busy}
+                                    onClick={() => handleStop(agent.id)}
+                                  >
+                                    <ActionIcon name="stop" />
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    aria-label="Enable autorun"
+                                    title="Enable autorun"
+                                    disabled={busy}
+                                    onClick={() => handleStart(agent.id)}
+                                  >
+                                    <ActionIcon name="play" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                            <td className="table-actions-cell">
+                              <div className="table-actions">
+                                <button
+                                  type="button"
+                                  className="icon-button icon-button-danger"
+                                  aria-label="Delete agent"
+                                  title="Delete agent"
+                                  disabled={busy}
+                                  onClick={() => handleDelete(agent.id)}
+                                >
+                                  <ActionIcon name="trash" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <TableListEmptyState message="No agents created yet." />
+              )}
             </div>
           ) : null}
         </div>

@@ -243,17 +243,18 @@ class SpecialNodeToolingStage10Tests(unittest.TestCase):
         self.assertEqual("deterministic.milestone", trace.get("tool_name"))
         self.assertEqual(DETERMINISTIC_TOOL_STATUS_SUCCESS, trace.get("execution_status"))
 
-    def test_plan_wrapper_uses_complete_plan_item_operation(self) -> None:
+    def test_plan_wrapper_uses_update_operation(self) -> None:
         output_state, _routing_state = (
             studio_tasks._execute_deterministic_special_node_with_framework(
                 node_type=FLOWCHART_NODE_TYPE_PLAN,
-                node_config={"action": "complete_plan_item"},
+                node_config={"mode": "deterministic", "store_mode": "update"},
                 input_context={},
                 execution_id=9016,
                 invoke=lambda: (
                     {
                         "node_type": FLOWCHART_NODE_TYPE_PLAN,
-                        "action": "complete_plan_item",
+                        "mode": "deterministic",
+                        "store_mode": "update",
                         "action_results": ["completed plan task"],
                     },
                     {},
@@ -262,7 +263,7 @@ class SpecialNodeToolingStage10Tests(unittest.TestCase):
         )
 
         trace = output_state.get("deterministic_tooling") or {}
-        self.assertEqual("complete_plan_item", trace.get("operation"))
+        self.assertEqual("update", trace.get("operation"))
         self.assertEqual("deterministic.plan", trace.get("tool_name"))
         self.assertEqual(DETERMINISTIC_TOOL_STATUS_SUCCESS, trace.get("execution_status"))
 

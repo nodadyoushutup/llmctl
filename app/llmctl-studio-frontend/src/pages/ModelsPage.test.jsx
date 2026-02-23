@@ -379,13 +379,18 @@ describe('ModelsPage', () => {
     renderPage('/models')
     await screen.findByRole('link', { name: 'Alpha' })
 
+    expect(screen.getByRole('link', { name: /^Codex$/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Gemini$/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Claude$/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^vLLM Local$/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^vLLM Remote$/i })).toBeInTheDocument()
     expect(screen.getByLabelText('Search')).toBeInTheDocument()
     expect(screen.getByText('Filters')).toBeInTheDocument()
     expect(screen.getByLabelText('Models pages')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'New model' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('Filters'))
-    expect(screen.getByLabelText('Provider')).toBeInTheDocument()
+    expect(screen.getByLabelText('Default')).toBeInTheDocument()
     expect(screen.getByLabelText('Sort')).toBeInTheDocument()
   })
 

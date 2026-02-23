@@ -94,7 +94,7 @@ def _task_incoming_connector_context(
         if prompt_input_context:
             input_context = prompt_input_context
             context_source = "task_prompt"
-    trigger_sources, pulled_dotted_sources = _flowchart_run_node_context_trace(
+    trigger_sources, context_only_sources, attachment_only_sources = _flowchart_run_node_context_trace(
         input_context
     )
     upstream_nodes = [
@@ -107,6 +107,11 @@ def _task_incoming_connector_context(
         for item in (input_context.get("dotted_upstream_nodes") or [])
         if isinstance(item, dict)
     ]
+    attachment_only_upstream_nodes = [
+        item
+        for item in (input_context.get("attachment_only_upstream_nodes") or [])
+        if isinstance(item, dict)
+    ]
     return {
         "source": context_source,
         "flowchart_run_node_id": node_run_id,
@@ -114,14 +119,24 @@ def _task_incoming_connector_context(
         "upstream_nodes": upstream_nodes,
         "dotted_upstream_nodes": dotted_upstream_nodes,
         "context_only_upstream_nodes": dotted_upstream_nodes,
+        "attachment_only_upstream_nodes": attachment_only_upstream_nodes,
         "trigger_sources": trigger_sources,
-        "pulled_dotted_sources": pulled_dotted_sources,
-        "context_only_sources": pulled_dotted_sources,
+        "pulled_dotted_sources": context_only_sources,
+        "context_only_sources": context_only_sources,
+        "pulled_attachment_sources": attachment_only_sources,
+        "attachment_only_sources": attachment_only_sources,
         "trigger_source_count": len(trigger_sources),
-        "pulled_dotted_source_count": len(pulled_dotted_sources),
-        "context_only_source_count": len(pulled_dotted_sources),
+        "pulled_dotted_source_count": len(context_only_sources),
+        "context_only_source_count": len(context_only_sources),
+        "pulled_attachment_source_count": len(attachment_only_sources),
+        "attachment_only_source_count": len(attachment_only_sources),
         "has_connector_context": bool(
-            upstream_nodes or dotted_upstream_nodes or trigger_sources or pulled_dotted_sources
+            upstream_nodes
+            or dotted_upstream_nodes
+            or attachment_only_upstream_nodes
+            or trigger_sources
+            or context_only_sources
+            or attachment_only_sources
         ),
     }
 

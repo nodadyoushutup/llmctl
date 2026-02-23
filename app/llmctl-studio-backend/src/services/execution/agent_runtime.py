@@ -19,6 +19,7 @@ class FrontierAgentRequest:
     provider: str
     prompt: str | None
     mcp_configs: dict[str, dict[str, Any]]
+    system_prompt: str | None = None
     model_config: dict[str, Any] | None = None
     env: dict[str, str] | None = None
     request_id: str | None = None
@@ -88,6 +89,7 @@ class FrontierAgent:
         provider = str(request.provider or "").strip().lower()
         provider_label = self._dependencies.provider_label(provider)
         prompt_text = str(request.prompt or "")
+        system_prompt_text = str(request.system_prompt or "").strip()
         config_map = request.model_config if isinstance(request.model_config, dict) else {}
         env_map = dict(request.env or os.environ.copy())
         request_id = str(request.request_id or "").strip() or None
@@ -122,6 +124,7 @@ class FrontierAgent:
                 provider=provider,
                 provider_label=provider_label,
                 prompt=cycle_prompt,
+                system_prompt=system_prompt_text,
                 mcp_configs=request.mcp_configs,
                 config_map=config_map,
                 env_map=env_map,
@@ -198,6 +201,7 @@ class FrontierAgent:
         provider: str,
         provider_label: str,
         prompt: str,
+        system_prompt: str,
         mcp_configs: dict[str, dict[str, Any]],
         config_map: dict[str, Any],
         env_map: dict[str, str],
@@ -207,6 +211,7 @@ class FrontierAgent:
             if provider == "codex":
                 return self._run_codex(
                     prompt=prompt,
+                    system_prompt=system_prompt,
                     mcp_configs=mcp_configs,
                     config_map=config_map,
                     env_map=env_map,
@@ -216,6 +221,7 @@ class FrontierAgent:
             if provider == "gemini":
                 return self._run_gemini(
                     prompt=prompt,
+                    system_prompt=system_prompt,
                     config_map=config_map,
                     env_map=env_map,
                     on_log=on_log,
@@ -224,6 +230,7 @@ class FrontierAgent:
             if provider == "claude":
                 return self._run_claude(
                     prompt=prompt,
+                    system_prompt=system_prompt,
                     config_map=config_map,
                     env_map=env_map,
                     on_log=on_log,
@@ -346,6 +353,7 @@ class FrontierAgent:
         self,
         *,
         prompt: str,
+        system_prompt: str,
         mcp_configs: dict[str, dict[str, Any]],
         config_map: dict[str, Any],
         env_map: dict[str, str],
@@ -396,6 +404,13 @@ class FrontierAgent:
             "model": model_name,
             "input": prompt,
         }
+        configured_instructions = str(config_map.get("instructions") or "").strip()
+        effective_instructions = _merge_system_prompt(
+            primary=system_prompt,
+            secondary=configured_instructions,
+        )
+        if effective_instructions:
+            payload["instructions"] = effective_instructions
         if mcp_tools:
             payload["tools"] = mcp_tools
         max_output_tokens = _optional_positive_int(config_map.get("max_output_tokens"))
@@ -430,6 +445,7 @@ class FrontierAgent:
         self,
         *,
         prompt: str,
+        system_prompt: str,
         config_map: dict[str, Any],
         env_map: dict[str, str],
         on_log: Callable[[str], None] | None,
@@ -508,6 +524,15 @@ class FrontierAgent:
         top_k = _optional_positive_int(config_map.get("top_k"))
         if top_k is not None:
             request_config["top_k"] = top_k
+        configured_system_instruction = str(
+            config_map.get("system_instruction") or config_map.get("system") or ""
+        ).strip()
+        effective_system_instruction = _merge_system_prompt(
+            primary=system_prompt,
+            secondary=configured_system_instruction,
+        )
+        if effective_system_instruction:
+            request_config["system_instruction"] = effective_system_instruction
 
         try:
             response_payload = genai.Client(**client_kwargs).models.generate_content(
@@ -535,6 +560,7 @@ class FrontierAgent:
         self,
         *,
         prompt: str,
+        system_prompt: str,
         config_map: dict[str, Any],
         env_map: dict[str, str],
         on_log: Callable[[str], None] | None,
@@ -586,9 +612,13 @@ class FrontierAgent:
         top_p = _optional_float(config_map.get("top_p"))
         if top_p is not None:
             payload["top_p"] = top_p
-        system_prompt = str(config_map.get("system") or "").strip()
-        if system_prompt:
-            payload["system"] = system_prompt
+        configured_system_prompt = str(config_map.get("system") or "").strip()
+        effective_system_prompt = _merge_system_prompt(
+            primary=system_prompt,
+            secondary=configured_system_prompt,
+        )
+        if effective_system_prompt:
+            payload["system"] = effective_system_prompt
 
         try:
             response_payload = Anthropic(api_key=claude_api_key).messages.create(**payload)
@@ -607,6 +637,14 @@ class FrontierAgent:
         )
         setattr(completed, "_llmctl_raw_response", response_payload)
         return completed
+
+
+def _merge_system_prompt(*, primary: str | None, secondary: str | None) -> str:
+    first = str(primary or "").strip()
+    second = str(secondary or "").strip()
+    if first and second:
+        return f"{first}\n\n{second}"
+    return first or second
 
 
 def _optional_positive_int(value: Any) -> int | None:

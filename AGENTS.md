@@ -96,6 +96,14 @@
 - Prefer reusable CSS classes and shared style patterns over one-off CSS blocks; keep styling DRY and consistent.
 - Aim to implement components and styling correctly the first time, emphasizing maintainability, reuse, and predictable UX.
 
+# Column/List Shell Standards
+
+- For two-column list screens (left section nav + right list/detail panel), use `app/llmctl-studio-frontend/src/components/TwoColumnListShell.jsx`.
+- Do not implement ad-hoc split layouts for these pages using custom wrappers or one-off spacing rules.
+- Both left and right columns must use `PanelHeader`-based header rows so header height, border, and typography stay uniform.
+- Keep right-column headers edge-aligned with the content column; do not add custom left padding/margins that offset the header from the column boundary.
+- Keep the left column as a natural divider column (not a rounded card/panel) unless the user explicitly requests a visual exception.
+
 # Metadata Presentation
 
 - Do not render metadata key/value content as bubbles, pills, chips, or card tiles.

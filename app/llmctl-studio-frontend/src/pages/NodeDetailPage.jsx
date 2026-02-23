@@ -115,6 +115,9 @@ function titleCaseLabel(value) {
   if (normalized === 'context_only') {
     return 'context only'
   }
+  if (normalized === 'attachments_only') {
+    return 'attachments only'
+  }
   return normalized.replaceAll('_', ' ')
 }
 
@@ -166,11 +169,13 @@ function sectionHasContent(section) {
       {
         const triggerCount = Number.parseInt(String(value.trigger_source_count || ''), 10)
         const contextOnlyCount = Number.parseInt(String(value.context_only_source_count || ''), 10)
+        const attachmentOnlyCount = Number.parseInt(String(value.attachment_only_source_count || ''), 10)
         const source = String(value.source || '').trim().toLowerCase()
         return asRecordList(value.connector_blocks).length > 0
           || Object.keys(asRecord(value.resolved_input_context)).length > 0
           || (Number.isInteger(triggerCount) && triggerCount > 0)
           || (Number.isInteger(contextOnlyCount) && contextOnlyCount > 0)
+          || (Number.isInteger(attachmentOnlyCount) && attachmentOnlyCount > 0)
           || (source.length > 0 && source !== 'none')
       }
     case 'results':

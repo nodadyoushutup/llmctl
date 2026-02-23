@@ -17,31 +17,12 @@ import PanelHeader from '../components/PanelHeader'
 import PersistedDetails from '../components/PersistedDetails'
 
 const CHAT_SIDE_COLLAPSED_KEY = 'llmctl-chat-side-collapsed'
-const DETAILS_STORAGE_PREFIX = 'llmctl-ui-details:'
-const CHAT_SESSION_CONTROLS_STORAGE_KEY = 'chat:session-controls'
+const CHAT_SIDE_MODE_KEY = 'llmctl-chat-side-mode'
+const CHAT_CONTROLS_DEFAULT_SECTION_KEY = 'model'
 
 function parseThreadId(value) {
   const parsed = Number.parseInt(String(value || '').trim(), 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
-}
-
-function readPersistedDetailsOpen(storageKey, defaultOpen = false) {
-  const normalized = String(storageKey || '').trim()
-  if (!normalized) {
-    return Boolean(defaultOpen)
-  }
-  try {
-    const raw = window.localStorage.getItem(`${DETAILS_STORAGE_PREFIX}${normalized}`)
-    if (raw === '1') {
-      return true
-    }
-    if (raw === '0') {
-      return false
-    }
-  } catch {
-    return Boolean(defaultOpen)
-  }
-  return Boolean(defaultOpen)
 }
 
 function threadSummaryFromThread(thread) {
@@ -149,9 +130,13 @@ export default function ChatPage() {
     mcpServerIds: [],
     ragCollections: [],
   })
-  const [isSessionControlsOpen, setIsSessionControlsOpen] = useState(() =>
-    readPersistedDetailsOpen(CHAT_SESSION_CONTROLS_STORAGE_KEY, true),
-  )
+  const [sidePanelMode, setSidePanelMode] = useState(() => {
+    try {
+      return window.localStorage.getItem(CHAT_SIDE_MODE_KEY) === 'controls' ? 'controls' : 'threads'
+    } catch {
+      return 'threads'
+    }
+  })
   const [isSideCollapsed, setIsSideCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(CHAT_SIDE_COLLAPSED_KEY) === '1'
@@ -159,6 +144,7 @@ export default function ChatPage() {
       return false
     }
   })
+  const [expandedControlsSectionKey, setExpandedControlsSectionKey] = useState(CHAT_CONTROLS_DEFAULT_SECTION_KEY)
 
   const messageInputRef = useRef(null)
   const messageLogRef = useRef(null)
@@ -227,6 +213,14 @@ export default function ChatPage() {
       return
     }
   }, [isSideCollapsed])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_SIDE_MODE_KEY, sidePanelMode)
+    } catch {
+      return
+    }
+  }, [sidePanelMode])
 
   const payload = state.payload && typeof state.payload === 'object' ? state.payload : null
   const threads = useMemo(
@@ -580,64 +574,98 @@ export default function ChatPage() {
     <section className={`chat-live-layout${isSideCollapsed ? ' chat-side-collapsed' : ''}`} id="chat-live-layout">
       <aside className="chat-panel chat-side-panel">
         <PanelHeader
-          title="Threads"
+          title={sidePanelMode === 'threads' ? 'Threads' : 'Controls'}
+          actionsClassName="chat-side-header-actions"
           actions={(
             <>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Create thread"
-                title="Create thread"
-                onClick={handleCreateThread}
-                disabled={creatingThread || state.loading}
-              >
-                <i className="fa-solid fa-plus" />
-              </button>
-              <Link className="icon-button" to="/chat/activity" aria-label="Chat activity" title="Chat activity">
-                <i className="fa-solid fa-timeline" />
-              </Link>
+              <div className="chat-side-mode-toggle" role="group" aria-label="Chat sidebar view">
+                <button
+                  type="button"
+                  className={`chat-side-mode-button${sidePanelMode === 'threads' ? ' is-active' : ''}`}
+                  aria-pressed={sidePanelMode === 'threads'}
+                  onClick={() => setSidePanelMode('threads')}
+                >
+                  Threads
+                </button>
+                <button
+                  type="button"
+                  className={`chat-side-mode-button${sidePanelMode === 'controls' ? ' is-active' : ''}`}
+                  aria-pressed={sidePanelMode === 'controls'}
+                  onClick={() => setSidePanelMode('controls')}
+                >
+                  Controls
+                </button>
+              </div>
+              {sidePanelMode === 'threads' ? (
+                <>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Create thread"
+                    title="Create thread"
+                    onClick={handleCreateThread}
+                    disabled={creatingThread || state.loading}
+                  >
+                    <i className="fa-solid fa-plus" />
+                  </button>
+                  <Link className="icon-button" to="/chat/activity" aria-label="Chat activity" title="Chat activity">
+                    <i className="fa-solid fa-timeline" />
+                  </Link>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Save controls"
+                  title="Save controls"
+                  onClick={saveSessionControls}
+                  disabled={savingSession || !selectedThread || !sessionDirty}
+                >
+                  <i className="fa-solid fa-floppy-disk" />
+                </button>
+              )}
             </>
           )}
         />
 
-        {selectedThread ? (
-          <PersistedDetails
-            className="chat-session-drawer"
-            storageKey={CHAT_SESSION_CONTROLS_STORAGE_KEY}
-            defaultOpen
-            onToggle={(event) => {
-              setIsSessionControlsOpen(Boolean(event.currentTarget?.open))
-            }}
-          >
-            <summary>
-              <span className="chat-session-title">controls</span>
-              <span className="chat-session-summary">
-                <button
-                  type="button"
-                  className="icon-button chat-session-summary-action"
-                  aria-label={isSessionControlsOpen ? 'Save session controls' : 'Expand session controls'}
-                  title={isSessionControlsOpen ? 'Save session controls' : 'Expand session controls'}
-                  disabled={savingSession || (isSessionControlsOpen && !sessionDirty)}
-                  onClick={async (event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    const summary = event.currentTarget.closest('summary')
-                    const drawer = summary?.parentElement
-                    if (!summary || !drawer) {
-                      return
-                    }
-                    if (!drawer.open) {
-                      summary.click()
-                      return
-                    }
-                    await saveSessionControls()
-                  }}
-                >
-                  <i className={`fa-solid ${isSessionControlsOpen ? 'fa-floppy-disk' : 'fa-angle-down'}`} />
-                </button>
-              </span>
-            </summary>
-            <div className="chat-session-content">
+        {sidePanelMode === 'threads' ? (
+          <>
+            {!state.loading && !state.error && threads.length > 0 ? (
+              <div className="chat-thread-list-shell">
+                <div className="chat-thread-list">
+                  {threads.map((thread) => {
+                    const threadId = parseThreadId(thread?.id)
+                    const isSelected = threadId && selectedThreadId && threadId === Number(selectedThreadId)
+                    return (
+                      <div
+                        key={`chat-thread-row-${thread.id}`}
+                        className={`chat-thread-row table-row-link${isSelected ? ' chat-thread-row-selected' : ''}`}
+                        data-href={threadId ? `/chat?thread_id=${threadId}` : undefined}
+                        onClick={(event) => handleThreadRowClick(event, threadId)}
+                      >
+                        <p className="chat-thread-title">{thread.title || `Thread ${thread.id}`}</p>
+                        <button
+                          type="button"
+                          className="icon-button icon-button-danger"
+                          aria-label="Delete thread"
+                          onClick={() => handleArchiveThread(threadId)}
+                          disabled={archivingThreadId === threadId || state.loading}
+                        >
+                          <i className="fa-solid fa-trash" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
+            {!state.loading && !state.error && threads.length === 0 ? (
+              <p className="muted chat-thread-empty">No chat threads yet.</p>
+            ) : null}
+          </>
+        ) : (
+          <div className="chat-controls-shell">
+            {selectedThread ? (
               <form
                 className="chat-session-controls"
                 id="chat-session-controls-form"
@@ -646,172 +674,185 @@ export default function ChatPage() {
                   await saveSessionControls()
                 }}
               >
-                <div className="chat-session-form-grid">
-                  <label className="chat-control">
-                    model
-                    <select
-                      name="model_id"
-                      value={sessionConfig.modelId}
-                      onChange={(event) => {
-                        setSessionConfig((current) => ({ ...current, modelId: event.target.value }))
-                        setSessionDirty(true)
-                      }}
-                    >
-                      <option value="">Default model</option>
-                      {models.map((model) => (
-                        <option key={`chat-model-${model.id}`} value={model.id}>
-                          {model.name} ({model.provider})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="node-left-shell">
+                  <div className="node-left-list">
+                    <section className={`node-left-card${expandedControlsSectionKey === 'model' ? ' is-expanded' : ''}`}>
+                      <button
+                        type="button"
+                        className="node-left-toggle"
+                        aria-expanded={expandedControlsSectionKey === 'model'}
+                        aria-controls="chat-controls-model"
+                        onClick={() => setExpandedControlsSectionKey('model')}
+                      >
+                        <span className="chat-picker-summary chat-controls-toggle-main">
+                          <i className="fa-solid fa-cube" />
+                          <span>Model</span>
+                        </span>
+                        <span className="node-left-toggle-meta">
+                          <i className={`fa-solid ${expandedControlsSectionKey === 'model' ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true" />
+                        </span>
+                      </button>
+                      {expandedControlsSectionKey === 'model' ? (
+                        <div className="node-left-content" id="chat-controls-model">
+                          <div className="node-left-scroll-panel">
+                            <div className="chat-session-form-grid">
+                              <label className="chat-control">
+                                model
+                                <select
+                                  name="model_id"
+                                  value={sessionConfig.modelId}
+                                  onChange={(event) => {
+                                    setSessionConfig((current) => ({ ...current, modelId: event.target.value }))
+                                    setSessionDirty(true)
+                                  }}
+                                >
+                                  <option value="">Default model</option>
+                                  {models.map((model) => (
+                                    <option key={`chat-model-${model.id}`} value={model.id}>
+                                      {(model.name || `Model ${model.id}`)} ({model.provider})
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
 
-                  <label className="chat-control">
-                    complexity
-                    <select
-                      name="response_complexity"
-                      value={sessionConfig.responseComplexity}
-                      onChange={(event) => {
-                        setSessionConfig((current) => ({
-                          ...current,
-                          responseComplexity: event.target.value,
-                        }))
-                        setSessionDirty(true)
-                      }}
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="extra_high">Extra High</option>
-                    </select>
-                  </label>
-                </div>
+                              <label className="chat-control">
+                                complexity
+                                <select
+                                  name="response_complexity"
+                                  value={sessionConfig.responseComplexity}
+                                  onChange={(event) => {
+                                    setSessionConfig((current) => ({
+                                      ...current,
+                                      responseComplexity: event.target.value,
+                                    }))
+                                    setSessionDirty(true)
+                                  }}
+                                >
+                                  <option value="low">Low</option>
+                                  <option value="medium">Medium</option>
+                                  <option value="high">High</option>
+                                  <option value="extra_high">Extra High</option>
+                                </select>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </section>
 
-                <div className="chat-session-groups">
-                  <PersistedDetails
-                    className="chat-picker chat-picker-group"
-                    storageKey="chat:session-collections"
-                  >
-                    <summary>
-                      <span className="chat-picker-summary">
-                        <i className="fa-solid fa-database" />
-                        <span>Collections</span>
-                      </span>
-                    </summary>
-                    {payload?.rag_health?.state === 'configured_healthy' && ragCollections.length > 0 ? (
-                      <div className="chat-checklist">
-                        {ragCollections.map((collection) => {
-                          const collectionId = String(collection?.id || '').trim()
-                          if (!collectionId) {
-                            return null
-                          }
-                          const checked = sessionConfig.ragCollections.includes(collectionId)
-                          return (
-                            <label key={`chat-rag-${collectionId || collection?.name}`}>
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => {
-                                  setSessionConfig((current) => ({
-                                    ...current,
-                                    ragCollections: toggleStringValue(current.ragCollections, collectionId),
-                                  }))
-                                  setSessionDirty(true)
-                                }}
-                              />
-                              <span>{collection.name}</span>
-                            </label>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <p className="muted chat-picker-empty">
-                        RAG state: {String(payload?.rag_health?.state || 'unconfigured')}
-                        {payload?.rag_health?.error ? ` (${payload.rag_health.error})` : ''}
-                      </p>
-                    )}
-                  </PersistedDetails>
+                    <section className={`node-left-card${expandedControlsSectionKey === 'collections' ? ' is-expanded' : ''}`}>
+                      <button
+                        type="button"
+                        className="node-left-toggle"
+                        aria-expanded={expandedControlsSectionKey === 'collections'}
+                        aria-controls="chat-controls-collections"
+                        onClick={() => setExpandedControlsSectionKey('collections')}
+                      >
+                        <span className="chat-picker-summary chat-controls-toggle-main">
+                          <i className="fa-solid fa-database" />
+                          <span>Collections</span>
+                        </span>
+                        <span className="node-left-toggle-meta">
+                          <i className={`fa-solid ${expandedControlsSectionKey === 'collections' ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true" />
+                        </span>
+                      </button>
+                      {expandedControlsSectionKey === 'collections' ? (
+                        <div className="node-left-content" id="chat-controls-collections">
+                          <div className="node-left-scroll-panel">
+                            {payload?.rag_health?.state === 'configured_healthy' && ragCollections.length > 0 ? (
+                              <div className="chat-checklist">
+                                {ragCollections.map((collection) => {
+                                  const collectionId = String(collection?.id || '').trim()
+                                  if (!collectionId) {
+                                    return null
+                                  }
+                                  const checked = sessionConfig.ragCollections.includes(collectionId)
+                                  return (
+                                    <label key={`chat-rag-${collectionId || collection?.name}`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => {
+                                          setSessionConfig((current) => ({
+                                            ...current,
+                                            ragCollections: toggleStringValue(current.ragCollections, collectionId),
+                                          }))
+                                          setSessionDirty(true)
+                                        }}
+                                      />
+                                      <span>{collection.name}</span>
+                                    </label>
+                                  )
+                                })}
+                              </div>
+                            ) : (
+                              <p className="muted chat-picker-empty">
+                                RAG state: {String(payload?.rag_health?.state || 'unconfigured')}
+                                {payload?.rag_health?.error ? ` (${payload.rag_health.error})` : ''}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </section>
 
-                  <PersistedDetails
-                    className="chat-picker chat-picker-group"
-                    storageKey="chat:session-mcp-servers"
-                  >
-                    <summary>
-                      <span className="chat-picker-summary">
-                        <i className="fa-solid fa-plug" />
-                        <span>MCP Servers</span>
-                      </span>
-                    </summary>
-                    <div className="chat-checklist">
-                      {mcpServers.map((mcp) => {
-                        const mcpId = Number(mcp?.id)
-                        if (!Number.isInteger(mcpId) || mcpId <= 0) {
-                          return null
-                        }
-                        const checked = sessionConfig.mcpServerIds.includes(mcpId)
-                        return (
-                          <label key={`chat-mcp-${mcp.id}`}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setSessionConfig((current) => ({
-                                  ...current,
-                                  mcpServerIds: toggleNumericValue(current.mcpServerIds, mcpId),
-                                }))
-                                setSessionDirty(true)
-                              }}
-                            />
-                            <span>{mcp.name}</span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  </PersistedDetails>
-                </div>
-
-                <div className="chat-session-actions">
-                  <p className="chat-session-dirty" aria-live="polite">
-                    {sessionDirty ? 'Unsaved changes' : 'Session is saved'}
-                  </p>
-                </div>
-              </form>
-            </div>
-          </PersistedDetails>
-        ) : null}
-
-        {!state.loading && !state.error && threads.length > 0 ? (
-          <div className="chat-thread-list-shell">
-            <div className="chat-thread-list">
-              {threads.map((thread) => {
-                const threadId = parseThreadId(thread?.id)
-                const isSelected = threadId && selectedThreadId && threadId === Number(selectedThreadId)
-                return (
-                  <div
-                    key={`chat-thread-row-${thread.id}`}
-                    className={`chat-thread-row table-row-link${isSelected ? ' chat-thread-row-selected' : ''}`}
-                    data-href={threadId ? `/chat?thread_id=${threadId}` : undefined}
-                    onClick={(event) => handleThreadRowClick(event, threadId)}
-                  >
-                    <p className="chat-thread-title">{thread.title || `Thread ${thread.id}`}</p>
-                    <button
-                      type="button"
-                      className="icon-button icon-button-danger"
-                      aria-label="Delete thread"
-                      onClick={() => handleArchiveThread(threadId)}
-                      disabled={archivingThreadId === threadId || state.loading}
-                    >
-                      <i className="fa-solid fa-trash" />
-                    </button>
+                    <section className={`node-left-card${expandedControlsSectionKey === 'mcp' ? ' is-expanded' : ''}`}>
+                      <button
+                        type="button"
+                        className="node-left-toggle"
+                        aria-expanded={expandedControlsSectionKey === 'mcp'}
+                        aria-controls="chat-controls-mcp"
+                        onClick={() => setExpandedControlsSectionKey('mcp')}
+                      >
+                        <span className="chat-picker-summary chat-controls-toggle-main">
+                          <i className="fa-solid fa-plug" />
+                          <span>MCP Servers</span>
+                        </span>
+                        <span className="node-left-toggle-meta">
+                          <i className={`fa-solid ${expandedControlsSectionKey === 'mcp' ? 'fa-chevron-up' : 'fa-chevron-down'}`} aria-hidden="true" />
+                        </span>
+                      </button>
+                      {expandedControlsSectionKey === 'mcp' ? (
+                        <div className="node-left-content" id="chat-controls-mcp">
+                          <div className="node-left-scroll-panel">
+                            <div className="chat-checklist">
+                              {mcpServers.map((mcp) => {
+                                const mcpId = Number(mcp?.id)
+                                if (!Number.isInteger(mcpId) || mcpId <= 0) {
+                                  return null
+                                }
+                                const checked = sessionConfig.mcpServerIds.includes(mcpId)
+                                return (
+                                  <label key={`chat-mcp-${mcp.id}`}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        setSessionConfig((current) => ({
+                                          ...current,
+                                          mcpServerIds: toggleNumericValue(current.mcpServerIds, mcpId),
+                                        }))
+                                        setSessionDirty(true)
+                                      }}
+                                    />
+                                    <span>{mcp.name || mcp.server_key || `Server ${mcpId}`}</span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </section>
                   </div>
-                )
-              })}
-            </div>
+                </div>
+
+              </form>
+            ) : (
+              <p className="muted chat-thread-empty">Select a thread to configure controls.</p>
+            )}
           </div>
-        ) : null}
-        {!state.loading && !state.error && threads.length === 0 ? (
-          <p className="muted chat-thread-empty">No chat threads yet.</p>
-        ) : null}
+        )}
       </aside>
 
       <article className="chat-panel">

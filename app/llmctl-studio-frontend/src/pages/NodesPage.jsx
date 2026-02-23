@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import HeaderPagination from '../components/HeaderPagination'
 import PanelHeader from '../components/PanelHeader'
+import TableListEmptyState from '../components/TableListEmptyState'
 import { HttpError } from '../lib/httpClient'
 import { cancelNode, deleteNode, getNodes } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -207,55 +209,16 @@ export default function NodesPage() {
           title="Nodes"
           actionsClassName="workflow-list-panel-header-actions"
           actions={(
-            <nav className="pagination" aria-label="Nodes pages">
-              {page > 1 ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ page: page - 1 })}
-                >
-                  Prev
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-              )}
-              <div className="pagination-pages">
-                {paginationItems.map((item, index) => {
-                  const itemType = String(item?.type || '')
-                  if (itemType === 'gap') {
-                    return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
-                  }
-                  const itemPage = Number.parseInt(String(item?.page || ''), 10)
-                  if (!Number.isInteger(itemPage) || itemPage <= 0) {
-                    return null
-                  }
-                  if (itemPage === page) {
-                    return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
-                  }
-                  return (
-                    <button
-                      key={itemPage}
-                      type="button"
-                      className="pagination-link"
-                      onClick={() => updateParams({ page: itemPage })}
-                    >
-                      {itemPage}
-                    </button>
-                  )
-                })}
-              </div>
-              {page < totalPages ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ page: page + 1 })}
-                >
-                  Next
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-              )}
-            </nav>
+            <HeaderPagination
+              ariaLabel="Nodes pages"
+              canGoPrev={page > 1}
+              canGoNext={page < totalPages}
+              onPrev={() => updateParams({ page: page - 1 })}
+              onNext={() => updateParams({ page: page + 1 })}
+              currentPage={page}
+              pageItems={paginationItems}
+              onPageSelect={(itemPage) => updateParams({ page: itemPage })}
+            />
           )}
         />
         <div className="panel-card-body workflow-fixed-panel-body">
@@ -340,83 +303,88 @@ export default function NodesPage() {
           {autoRefreshEnabled ? (
             <p className="toolbar-meta">Active tasks detected. Refreshing every 5s.</p>
           ) : null}
-          {!state.loading && !state.error && tasks.length === 0 ? <p>No nodes recorded yet.</p> : null}
-          {!state.loading && !state.error && tasks.length > 0 ? (
-            <div className="table-wrap workflow-list-table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Node</th>
-                    <th>Agent</th>
-                    <th>Type</th>
-                    <th>Status</th>
-                    <th>Autorun task</th>
-                    <th>Started</th>
-                    <th>Finished</th>
-                    <th className="table-actions-cell">Cancel</th>
-                    <th className="table-actions-cell">Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tasks.map((task) => {
-                    const href = `/nodes/${task.id}`
-                    const statusMeta = nodeStatusMeta(task.status)
-                    const busy = Boolean(busyById[task.id])
-                    const allowCancel = canCancel(task.status)
-                    return (
-                      <tr
-                        key={task.id}
-                        className="table-row-link"
-                        data-href={href}
-                        onClick={(event) => handleRowClick(event, href)}
-                      >
-                        <td>
-                          <Link to={href}>{task.node_name || `Node ${task.id}`}</Link>
-                          <div className="table-note">#{task.id}</div>
-                        </td>
-                        <td>{task.agent_name || '-'}</td>
-                        <td className="muted">{task.node_type || '-'}</td>
-                        <td>
-                          <span className={statusMeta.className}>{statusMeta.label}</span>
-                        </td>
-                        <td className="muted" style={{ fontSize: '12px' }}>{task.run_task_id || '-'}</td>
-                        <td className="muted">{task.started_at || '-'}</td>
-                        <td className="muted">{task.finished_at || '-'}</td>
-                        <td className="table-actions-cell">
-                          <div className="table-actions">
-                            {allowCancel ? (
-                              <button
-                                type="button"
-                                className="icon-button"
-                                aria-label="Cancel node"
-                                title="Cancel node"
-                                disabled={busy}
-                                onClick={() => handleCancel(task.id)}
-                              >
-                                <ActionIcon name="stop" />
-                              </button>
-                            ) : <span className="muted">-</span>}
-                          </div>
-                        </td>
-                        <td className="table-actions-cell">
-                          <div className="table-actions">
-                            <button
-                              type="button"
-                              className="icon-button icon-button-danger"
-                              aria-label="Delete node"
-                              title="Delete node"
-                              disabled={busy}
-                              onClick={() => handleDelete(task.id)}
-                            >
-                              <ActionIcon name="trash" />
-                            </button>
-                          </div>
-                        </td>
+          {!state.loading && !state.error ? (
+            <div className="workflow-list-table-shell">
+              {tasks.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Node</th>
+                        <th>Agent</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Autorun task</th>
+                        <th>Started</th>
+                        <th>Finished</th>
+                        <th className="table-actions-cell">Cancel</th>
+                        <th className="table-actions-cell">Delete</th>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {tasks.map((task) => {
+                        const href = `/nodes/${task.id}`
+                        const statusMeta = nodeStatusMeta(task.status)
+                        const busy = Boolean(busyById[task.id])
+                        const allowCancel = canCancel(task.status)
+                        return (
+                          <tr
+                            key={task.id}
+                            className="table-row-link"
+                            data-href={href}
+                            onClick={(event) => handleRowClick(event, href)}
+                          >
+                            <td>
+                              <Link to={href}>{task.node_name || `Node ${task.id}`}</Link>
+                              <div className="table-note">#{task.id}</div>
+                            </td>
+                            <td>{task.agent_name || '-'}</td>
+                            <td className="muted">{task.node_type || '-'}</td>
+                            <td>
+                              <span className={statusMeta.className}>{statusMeta.label}</span>
+                            </td>
+                            <td className="muted" style={{ fontSize: '12px' }}>{task.run_task_id || '-'}</td>
+                            <td className="muted">{task.started_at || '-'}</td>
+                            <td className="muted">{task.finished_at || '-'}</td>
+                            <td className="table-actions-cell">
+                              <div className="table-actions">
+                                {allowCancel ? (
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    aria-label="Cancel node"
+                                    title="Cancel node"
+                                    disabled={busy}
+                                    onClick={() => handleCancel(task.id)}
+                                  >
+                                    <ActionIcon name="stop" />
+                                  </button>
+                                ) : <span className="muted">-</span>}
+                              </div>
+                            </td>
+                            <td className="table-actions-cell">
+                              <div className="table-actions">
+                                <button
+                                  type="button"
+                                  className="icon-button icon-button-danger"
+                                  aria-label="Delete node"
+                                  title="Delete node"
+                                  disabled={busy}
+                                  onClick={() => handleDelete(task.id)}
+                                >
+                                  <ActionIcon name="trash" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <TableListEmptyState message="No nodes recorded yet." />
+              )}
             </div>
           ) : null}
         </div>

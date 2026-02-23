@@ -251,7 +251,8 @@ export default function FlowchartRunDetailPage() {
                   <th>Runtime</th>
                   <th>Dispatch / Fallback</th>
                   <th>Triggered By (Solid)</th>
-                  <th>Pulled Context (Dotted)</th>
+                  <th>Context Only</th>
+                  <th>Attachments Only</th>
                   <th>Node task</th>
                   <th>Started</th>
                   <th>Finished</th>
@@ -321,7 +322,10 @@ export default function FlowchartRunDetailPage() {
                         <p className="table-note">{sourceSummary(nodeRun.trigger_sources)}</p>
                       </td>
                       <td>
-                        <p className="table-note">{sourceSummary(nodeRun.pulled_dotted_sources)}</p>
+                        <p className="table-note">{sourceSummary(nodeRun.context_only_sources || nodeRun.pulled_dotted_sources)}</p>
+                      </td>
+                      <td>
+                        <p className="table-note">{sourceSummary(nodeRun.attachment_only_sources || nodeRun.pulled_attachment_sources)}</p>
                       </td>
                       <td>
                         {href ? <Link to={href}>{nodeRun.agent_task_id}</Link> : <span className="muted">-</span>}

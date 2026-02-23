@@ -61,7 +61,7 @@ SPECIAL_NODE_OUTPUT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "required": ["node_type", "action", "action_results"]
     },
     FLOWCHART_NODE_TYPE_PLAN: {
-        "required": ["node_type", "action", "action_results"]
+        "required": ["node_type", "mode", "store_mode", "action_results"]
     },
 }
 
@@ -82,7 +82,7 @@ NODE_ARTIFACT_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
         "required": ["action", "action_results", "milestone", "routing_state"]
     },
     NODE_ARTIFACT_TYPE_PLAN: {
-        "required": ["action", "action_results", "plan", "routing_state"]
+        "required": ["mode", "store_mode", "action_results", "plan", "routing_state"]
     },
     NODE_ARTIFACT_TYPE_RAG: {
         "required": ["node_type", "input_context", "output_state", "routing_state"]
@@ -241,7 +241,6 @@ def validate_special_node_output_contract(
                 "Decision routing_state.matched_connector_ids must contain non-empty strings."
             )
     elif normalized_type in {
-        FLOWCHART_NODE_TYPE_PLAN,
         FLOWCHART_NODE_TYPE_MILESTONE,
         FLOWCHART_NODE_TYPE_MEMORY,
     }:
@@ -252,6 +251,15 @@ def validate_special_node_output_contract(
             raise ValueError(
                 f"{normalized_type} output_state.action_results must be an array."
             )
+    elif normalized_type == FLOWCHART_NODE_TYPE_PLAN:
+        mode = str(output_state.get("mode") or "").strip()
+        if not mode:
+            raise ValueError("plan output_state.mode is required.")
+        store_mode = str(output_state.get("store_mode") or "").strip()
+        if not store_mode:
+            raise ValueError("plan output_state.store_mode is required.")
+        if not isinstance(output_state.get("action_results"), list):
+            raise ValueError("plan output_state.action_results must be an array.")
 
 
 def validate_node_artifact_payload_contract(

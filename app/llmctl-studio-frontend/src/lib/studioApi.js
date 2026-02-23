@@ -1105,9 +1105,18 @@ export function validateFlowchart(flowchartId) {
   return requestJson(`/flowcharts/${parsedFlowchartId}/validate`)
 }
 
-export function runFlowchart(flowchartId) {
+export function runFlowchart(flowchartId, { startNodeId = null } = {}) {
   const parsedFlowchartId = parsePositiveId(flowchartId, 'flowchartId')
-  return requestJson(`/flowcharts/${parsedFlowchartId}/run`, { method: 'POST' })
+  if (startNodeId == null || String(startNodeId).trim() === '') {
+    return requestJson(`/flowcharts/${parsedFlowchartId}/run`, { method: 'POST' })
+  }
+  const parsedStartNodeId = parsePositiveId(startNodeId, 'startNodeId')
+  return requestJson(`/flowcharts/${parsedFlowchartId}/run`, {
+    method: 'POST',
+    body: {
+      start_node_id: parsedStartNodeId,
+    },
+  })
 }
 
 export function getFlowchartHistory(flowchartId) {
@@ -1850,8 +1859,42 @@ export function deleteScript(scriptId) {
   return requestJson(`/scripts/${parsedScriptId}/delete`, { method: 'POST' })
 }
 
-export function getAttachments() {
-  return requestJson('/attachments')
+export function getAttachments({
+  nodeType = '',
+  limit = null,
+  offset = null,
+  page = null,
+  perPage = null,
+} = {}) {
+  const params = new URLSearchParams()
+  const normalizedNodeType = String(nodeType || '').trim().toLowerCase()
+  if (normalizedNodeType) {
+    if (!['chat', 'quick', 'flowchart'].includes(normalizedNodeType)) {
+      throw new Error('nodeType must be one of chat, quick, or flowchart when provided.')
+    }
+    params.set('node_type', normalizedNodeType)
+  }
+  const parsedLimit = Number.parseInt(String(limit ?? ''), 10)
+  const parsedPerPage = Number.parseInt(String(perPage ?? ''), 10)
+  const resolvedLimit = Number.isInteger(parsedLimit) && parsedLimit > 0
+    ? parsedLimit
+    : Number.isInteger(parsedPerPage) && parsedPerPage > 0
+      ? parsedPerPage
+      : null
+  if (resolvedLimit != null) {
+    params.set('limit', String(resolvedLimit))
+  }
+  const parsedOffset = Number.parseInt(String(offset ?? ''), 10)
+  if (Number.isInteger(parsedOffset) && parsedOffset >= 0) {
+    params.set('offset', String(parsedOffset))
+  }
+  const parsedPage = Number.parseInt(String(page ?? ''), 10)
+  if (Number.isInteger(parsedPage) && parsedPage > 0) {
+    params.set('page', String(parsedPage))
+  }
+  const query = params.toString()
+  const path = query ? `/attachments?${query}` : '/attachments'
+  return requestJson(path)
 }
 
 export function getAttachment(attachmentId) {

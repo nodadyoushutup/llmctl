@@ -159,7 +159,8 @@ export default function App() {
         <Route path="/models/new" element={<AppLayout><ModelNewPage /></AppLayout>} />
         <Route path="/models/:modelId" element={<AppLayout><ModelDetailPage /></AppLayout>} />
         <Route path="/models/:modelId/edit" element={<AppLayout><ModelEditPage /></AppLayout>} />
-        <Route path="/mcps" element={<AppLayout><McpsPage /></AppLayout>} />
+        <Route path="/mcps" element={<AppLayout><McpsPage section="integrated" /></AppLayout>} />
+        <Route path="/mcps/custom" element={<AppLayout><McpsPage section="custom" /></AppLayout>} />
         <Route path="/mcps/new" element={<AppLayout><McpNewPage /></AppLayout>} />
         <Route path="/mcps/:mcpId" element={<AppLayout><McpDetailPage /></AppLayout>} />
         <Route path="/mcps/:mcpId/edit" element={<AppLayout><McpEditPage /></AppLayout>} />

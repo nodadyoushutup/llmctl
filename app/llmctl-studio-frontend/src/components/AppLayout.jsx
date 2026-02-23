@@ -22,20 +22,15 @@ const navSections = [
   },
   {
     id: 'workflow',
-    label: 'Artifact',
+    label: 'Artifacts',
     items: [
       {
-        id: 'artifact-task',
-        to: '/artifacts/type/task',
-        label: 'Task',
-        icon: 'fa-solid fa-list-check',
-        matchPrefixes: ['/artifacts/type/task', '/artifacts/item/'],
+        id: 'artifacts',
+        to: '/artifacts',
+        label: 'Artifacts',
+        icon: 'fa-solid fa-box-archive',
+        matchPrefixes: ['/artifacts', '/artifacts/type/', '/artifacts/item/'],
       },
-      { id: 'artifact-plan', to: '/artifacts/type/plan', label: 'Plan', icon: 'fa-solid fa-map' },
-      { id: 'artifact-milestone', to: '/artifacts/type/milestone', label: 'Milestone', icon: 'fa-solid fa-flag-checkered' },
-      { id: 'artifact-memory', to: '/artifacts/type/memory', label: 'Memory', icon: 'fa-solid fa-brain' },
-      { id: 'artifact-decision', to: '/artifacts/type/decision', label: 'Decision', icon: 'fa-solid fa-code-branch' },
-      { id: 'artifact-rag', to: '/artifacts/type/rag', label: 'RAG', icon: 'fa-solid fa-database' },
     ],
   },
   {
@@ -128,7 +123,7 @@ export default function AppLayout({ children }) {
   const isNodeDetailRoute = useMemo(() => /^\/nodes\/\d+\/?$/.test(location.pathname), [location.pathname])
   const isChatRoute = useMemo(() => /^\/chat(?:\/|$)/.test(location.pathname), [location.pathname])
   const isFixedListRoute = useMemo(
-    () => /^(\/nodes|\/runs|\/plans|\/milestones|\/memories|\/artifacts\/type\/[^/]+)\/?$/.test(location.pathname),
+    () => /^(\/nodes|\/runs|\/plans|\/milestones|\/memories|\/artifacts(?:\/type\/[^/]+|\/all)?|\/mcps(?:\/custom)?|\/models|\/scripts|\/attachments)\/?$/.test(location.pathname),
     [location.pathname],
   )
   const isFixedContentRoute = isFlowchartDetailRoute || isNodeDetailRoute || isFixedListRoute || isChatRoute

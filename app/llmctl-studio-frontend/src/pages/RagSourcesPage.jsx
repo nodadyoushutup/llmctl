@@ -3,6 +3,7 @@ import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
 import PanelHeader from '../components/PanelHeader'
+import TableListEmptyState from '../components/TableListEmptyState'
 import { HttpError } from '../lib/httpClient'
 import {
   deleteRagSource,
@@ -158,67 +159,72 @@ export default function RagSourcesPage() {
           </p>
           {state.loading ? <p>Loading RAG sources...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
-          {!state.loading && !state.error && sources.length === 0 ? <p>No sources found.</p> : null}
-          {!state.loading && !state.error && sources.length > 0 ? (
-            <div className="table-wrap workflow-list-table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Kind</th>
-                    <th>Name</th>
-                    <th>Location</th>
-                    <th>Schedule</th>
-                    <th>Last indexed</th>
-                    <th>Status</th>
-                    <th className="table-actions-cell">Index</th>
-                    <th className="table-actions-cell">Delta</th>
-                    <th className="table-actions-cell">Edit</th>
-                    <th className="table-actions-cell">Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sources.map((source) => {
-                    const sourceId = Number.parseInt(String(source.id ?? ''), 10)
-                    const href = `/rag/sources/${sourceId}`
-                    const busy = Boolean(busyById[sourceId])
-                    const kindMeta = sourceKindMeta(source.kind)
-                    return (
-                      <tr key={sourceId} className="table-row-link" data-href={href} onClick={(event) => handleRowClick(event, href)}>
-                        <td className="source-kind-cell">
-                          <span className="source-kind-icon" role="img" aria-label={kindMeta.label} title={kindMeta.label}>
-                            <i className={kindMeta.iconClass} aria-hidden="true" />
-                          </span>
-                        </td>
-                        <td><Link to={href}>{source.name || `Source ${sourceId}`}</Link></td>
-                        <td className="mono">{source.location || source.local_path || source.git_repo || source.drive_folder_id || '-'}</td>
-                        <td>{source.schedule_text || '-'}</td>
-                        <td>{source.last_indexed_at || '-'}</td>
-                        <td>{source.status || '-'}</td>
-                        <td className="table-actions-cell">
-                          <button type="button" className="icon-button" title="Quick index" aria-label="Quick index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'fresh')}>
-                            <ActionIcon name="play" />
-                          </button>
-                        </td>
-                        <td className="table-actions-cell">
-                          <button type="button" className="icon-button" title="Quick delta index" aria-label="Quick delta index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'delta')}>
-                            <i className="fa-solid fa-code-branch" aria-hidden="true" />
-                          </button>
-                        </td>
-                        <td className="table-actions-cell">
-                          <Link to={`/rag/sources/${sourceId}/edit`} className="icon-button" title="Edit source" aria-label="Edit source">
-                            <ActionIcon name="edit" />
-                          </Link>
-                        </td>
-                        <td className="table-actions-cell">
-                          <button type="button" className="icon-button icon-button-danger" title="Delete source" aria-label="Delete source" disabled={busy} onClick={() => handleDelete(sourceId)}>
-                            <ActionIcon name="trash" />
-                          </button>
-                        </td>
+          {!state.loading && !state.error ? (
+            <div className="workflow-list-table-shell">
+              {sources.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Kind</th>
+                        <th>Name</th>
+                        <th>Location</th>
+                        <th>Schedule</th>
+                        <th>Last indexed</th>
+                        <th>Status</th>
+                        <th className="table-actions-cell">Index</th>
+                        <th className="table-actions-cell">Delta</th>
+                        <th className="table-actions-cell">Edit</th>
+                        <th className="table-actions-cell">Delete</th>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {sources.map((source) => {
+                        const sourceId = Number.parseInt(String(source.id ?? ''), 10)
+                        const href = `/rag/sources/${sourceId}`
+                        const busy = Boolean(busyById[sourceId])
+                        const kindMeta = sourceKindMeta(source.kind)
+                        return (
+                          <tr key={sourceId} className="table-row-link" data-href={href} onClick={(event) => handleRowClick(event, href)}>
+                            <td className="source-kind-cell">
+                              <span className="source-kind-icon" role="img" aria-label={kindMeta.label} title={kindMeta.label}>
+                                <i className={kindMeta.iconClass} aria-hidden="true" />
+                              </span>
+                            </td>
+                            <td><Link to={href}>{source.name || `Source ${sourceId}`}</Link></td>
+                            <td className="mono">{source.location || source.local_path || source.git_repo || source.drive_folder_id || '-'}</td>
+                            <td>{source.schedule_text || '-'}</td>
+                            <td>{source.last_indexed_at || '-'}</td>
+                            <td>{source.status || '-'}</td>
+                            <td className="table-actions-cell">
+                              <button type="button" className="icon-button" title="Quick index" aria-label="Quick index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'fresh')}>
+                                <ActionIcon name="play" />
+                              </button>
+                            </td>
+                            <td className="table-actions-cell">
+                              <button type="button" className="icon-button" title="Quick delta index" aria-label="Quick delta index" disabled={busy} onClick={() => handleQuickRun(sourceId, 'delta')}>
+                                <i className="fa-solid fa-code-branch" aria-hidden="true" />
+                              </button>
+                            </td>
+                            <td className="table-actions-cell">
+                              <Link to={`/rag/sources/${sourceId}/edit`} className="icon-button" title="Edit source" aria-label="Edit source">
+                                <ActionIcon name="edit" />
+                              </Link>
+                            </td>
+                            <td className="table-actions-cell">
+                              <button type="button" className="icon-button icon-button-danger" title="Delete source" aria-label="Delete source" disabled={busy} onClick={() => handleDelete(sourceId)}>
+                                <ActionIcon name="trash" />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <TableListEmptyState message="No sources found." />
+              )}
             </div>
           ) : null}
         </div>

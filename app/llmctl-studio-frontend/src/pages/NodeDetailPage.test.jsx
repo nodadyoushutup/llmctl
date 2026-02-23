@@ -173,6 +173,7 @@ describe('NodeDetailPage connector context helpers', () => {
       { label: 'Context source', value: 'flowchart_run_node' },
       { label: 'Trigger incoming connectors', value: 2 },
       { label: 'Context only incoming connectors', value: 3 },
+      { label: 'Attachments only incoming connectors', value: 0 },
       { label: 'Connector blocks', value: 2 },
     ])
   })

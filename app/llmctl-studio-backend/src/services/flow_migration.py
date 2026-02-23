@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from core.integrated_mcp import INTEGRATED_MCP_LLMCTL_KEY
 from core.models import (
+    FLOWCHART_EDGE_MODE_DASHED,
     FLOWCHART_EDGE_MODE_DOTTED,
     FLOWCHART_EDGE_MODE_SOLID,
     FLOWCHART_NODE_TYPE_CHOICES,
@@ -64,11 +65,11 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
         "attachments": False,
     },
     FLOWCHART_NODE_TYPE_FLOWCHART: {
-        "model": False,
+        "model": True,
         "mcp": False,
         "scripts": False,
         "skills": False,
-        "attachments": False,
+        "attachments": True,
     },
     FLOWCHART_NODE_TYPE_TASK: {
         "model": True,
@@ -99,18 +100,18 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
         "attachments": True,
     },
     FLOWCHART_NODE_TYPE_DECISION: {
-        "model": False,
+        "model": True,
         "mcp": False,
         "scripts": False,
         "skills": False,
-        "attachments": False,
+        "attachments": True,
     },
     FLOWCHART_NODE_TYPE_RAG: {
         "model": True,
         "mcp": False,
         "scripts": False,
         "skills": False,
-        "attachments": False,
+        "attachments": True,
     },
 }
 
@@ -166,6 +167,8 @@ def _parse_json_dict(value: Any) -> dict[str, Any]:
 
 def _normalize_edge_mode(value: Any) -> str:
     cleaned = str(value or "").strip().lower()
+    if cleaned == FLOWCHART_EDGE_MODE_DASHED:
+        return FLOWCHART_EDGE_MODE_DASHED
     if cleaned == FLOWCHART_EDGE_MODE_DOTTED:
         return FLOWCHART_EDGE_MODE_DOTTED
     return FLOWCHART_EDGE_MODE_SOLID
@@ -389,7 +392,11 @@ def _transform_snapshot(
         edge_id = int(edge_payload["id"])
         normalized_mode = _normalize_edge_mode(edge_payload.get("edge_mode"))
         original_mode = str(edge_payload.get("edge_mode") or "").strip().lower()
-        if original_mode not in {FLOWCHART_EDGE_MODE_SOLID, FLOWCHART_EDGE_MODE_DOTTED}:
+        if original_mode not in {
+            FLOWCHART_EDGE_MODE_SOLID,
+            FLOWCHART_EDGE_MODE_DOTTED,
+            FLOWCHART_EDGE_MODE_DASHED,
+        }:
             issues.append(
                 MigrationIssue(
                     code="transform.defaulted_edge_mode",
@@ -837,7 +844,7 @@ def _run_dry_execution_checks(
                 decision_connectors = [
                     str(edge.get("condition_key") or "").strip()
                     for edge in outgoing_edges
-                    if _normalize_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_SOLID
+                if _normalize_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_SOLID
                     and str(edge.get("condition_key") or "").strip()
                 ]
                 if decision_connectors:

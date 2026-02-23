@@ -1322,6 +1322,21 @@ def validate_flowchart(flowchart_id: int):
 
 @bp.post("/flowcharts/<int:flowchart_id>/run")
 def run_flowchart_route(flowchart_id: int):
+    payload = _flowchart_request_payload()
+    start_node_id_raw = (
+        payload.get("start_node_id")
+        if payload
+        else request.form.get("start_node_id")
+    )
+    try:
+        start_node_id = _coerce_optional_int(
+            start_node_id_raw,
+            field_name="start_node_id",
+            minimum=1,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
     validation_errors: list[str] = []
     with session_scope() as session:
         flowchart = (
@@ -1360,6 +1375,12 @@ def run_flowchart_route(flowchart_id: int):
                 "error": "Flowchart graph validation failed.",
                 "validation": {"valid": False, "errors": validation_errors},
             }, 400
+        if start_node_id is not None and all(
+            int(node.id) != int(start_node_id) for node in list(flowchart.nodes)
+        ):
+            return {
+                "error": "start_node_id must reference a node in this flowchart.",
+            }, 400
         flowchart_run = FlowchartRun.create(
             session,
             flowchart_id=flowchart_id,
@@ -1367,7 +1388,14 @@ def run_flowchart_route(flowchart_id: int):
         )
         run_id = flowchart_run.id
 
-    async_result = run_flowchart.delay(flowchart_id, run_id)
+    if start_node_id is not None:
+        async_result = run_flowchart.delay(
+            flowchart_id,
+            run_id,
+            start_node_id=start_node_id,
+        )
+    else:
+        async_result = run_flowchart.delay(flowchart_id, run_id)
     flowchart_run_payload: dict[str, object]
     with session_scope() as session:
         flowchart_run = session.get(FlowchartRun, run_id)
@@ -1375,6 +1403,8 @@ def run_flowchart_route(flowchart_id: int):
             abort(404)
         flowchart_run.celery_task_id = async_result.id
         flowchart_run_payload = _serialize_flowchart_run(flowchart_run)
+    if start_node_id is not None:
+        flowchart_run_payload["start_node_id"] = int(start_node_id)
     return {
         "flowchart_run": {
             **flowchart_run_payload,

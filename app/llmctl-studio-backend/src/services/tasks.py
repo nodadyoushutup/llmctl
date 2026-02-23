@@ -101,6 +101,7 @@ from core.models import (
     AgentTask,
     Attachment,
     Flowchart,
+    FLOWCHART_EDGE_MODE_DASHED,
     FLOWCHART_EDGE_MODE_DOTTED,
     FLOWCHART_EDGE_MODE_SOLID,
     FlowchartNode,
@@ -205,6 +206,7 @@ from services.execution.agent_runtime import (
     FrontierToolDispatchError,
 )
 from services.instructions.compiler import (
+    INSTRUCTIONS_FILENAME,
     InstructionCompileInput,
     compile_instruction_package,
 )
@@ -240,8 +242,18 @@ EXECUTOR_NODE_TYPE_LLM_CALL = "llm_call"
 EXECUTOR_NODE_TYPE_RAG_CHAT_COMPLETION = "rag_chat_completion"
 MILESTONE_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update"
 MILESTONE_NODE_ACTION_MARK_COMPLETE = "mark_complete"
-PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
-PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
+PLAN_NODE_STORE_MODE_APPEND = "append"
+PLAN_NODE_STORE_MODE_REPLACE = "replace"
+PLAN_NODE_STORE_MODE_UPDATE = "update"
+PLAN_NODE_MODE_LLM_GUIDED = "llm_guided"
+PLAN_NODE_MODE_DETERMINISTIC = "deterministic"
+PLAN_NODE_MODE_CHOICES = (
+    PLAN_NODE_MODE_LLM_GUIDED,
+    PLAN_NODE_MODE_DETERMINISTIC,
+)
+PLAN_NODE_RETRY_COUNT_DEFAULT = 1
+PLAN_NODE_RETRY_COUNT_MAX = 5
+PLAN_NODE_FALLBACK_ENABLED_DEFAULT = True
 MEMORY_NODE_ACTION_ADD = "add"
 MEMORY_NODE_ACTION_RETRIEVE = "retrieve"
 MEMORY_NODE_STORE_MODE_APPEND = "append"
@@ -268,6 +280,14 @@ class _MemoryNodeInvalidResultError(RuntimeError):
 
 
 class _MemoryLlmGuidedValidationError(ValueError):
+    pass
+
+
+class _PlanLlmGuidedValidationError(ValueError):
+    pass
+
+
+class _PlanNodeConfigError(ValueError):
     pass
 
 
@@ -629,6 +649,8 @@ def _resolve_special_node_tool_operation(
     node_config: dict[str, Any],
 ) -> str | None:
     normalized_node_type = str(node_type or "").strip().lower()
+    if normalized_node_type == FLOWCHART_NODE_TYPE_PLAN:
+        return _normalize_plan_node_store_mode(node_config.get("store_mode"))
     explicit_action = str(node_config.get("action") or "").strip()
     cutover_enabled = _agent_runtime_cutover_enabled(node_config)
     if explicit_action:
@@ -694,6 +716,7 @@ def _build_special_node_tool_fallback_payload(
     error: Exception,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     normalized_node_type = str(node_type or "").strip().lower()
+    attachment_entries = _collect_input_context_attachment_entries(input_context)
     resolved_operation = _resolve_special_node_tool_operation(
         node_type=node_type,
         node_config=node_config,
@@ -704,7 +727,7 @@ def _build_special_node_tool_fallback_payload(
         message=warning_message,
         details={
             "node_type": normalized_node_type,
-            "action": action or "unknown",
+            "operation": action or "unknown",
         },
     )
     route_key = str(node_config.get("route_key") or "").strip()
@@ -720,6 +743,7 @@ def _build_special_node_tool_fallback_payload(
             "no_match": True,
             "action": action or "evaluate",
             "action_results": ["Deterministic decision tool fallback contract applied."],
+            "attachments": attachment_entries,
         }
         routing_state["matched_connector_ids"] = []
         routing_state["evaluations"] = []
@@ -752,7 +776,7 @@ def _build_special_node_tool_fallback_payload(
             )
             or None,
             "mcp_server_keys": [INTEGRATED_MCP_LLMCTL_KEY],
-            "attachments": [],
+            "attachments": attachment_entries,
             "retrieved_memories": [],
             "stored_memory": None,
             "execution_index": execution_index,
@@ -777,7 +801,7 @@ def _build_special_node_tool_fallback_payload(
             "checkpoint_hit": False,
             "action_results": ["Deterministic milestone tool fallback contract applied."],
             "mcp_server_keys": [],
-            "attachments": [],
+            "attachments": attachment_entries,
             "before_milestone": {},
             "milestone": {},
         }
@@ -785,13 +809,24 @@ def _build_special_node_tool_fallback_payload(
 
     output_state = {
         "node_type": FLOWCHART_NODE_TYPE_PLAN,
-        "action": action or PLAN_NODE_ACTION_CREATE_OR_UPDATE,
+        "mode": _normalize_plan_node_mode(node_config.get("mode"))
+        or PLAN_NODE_MODE_DETERMINISTIC,
+        "store_mode": _normalize_plan_node_store_mode(
+            node_config.get("store_mode")
+        ),
         "additive_prompt": str(node_config.get("additive_prompt") or "").strip(),
         "action_results": ["Deterministic plan tool fallback contract applied."],
-        "completion_target": {},
+        "operation_counts": {
+            "created": 0,
+            "updated": 0,
+            "replaced": 0,
+            "skipped_missing": 0,
+        },
         "touched": {"stage_ids": [], "task_ids": [], "stages": [], "tasks": []},
+        "warnings": [warning],
+        "errors": [],
         "mcp_server_keys": [],
-        "attachments": [],
+        "attachments": attachment_entries,
         "plan": {},
     }
     return output_state, routing_state, warning
@@ -916,6 +951,8 @@ def _augment_runtime_payload_with_deterministic_tooling(
                 warning_message = str(first_warning or "").strip()
         payload["fallback_reason"] = (
             warning_message
+            or str(output_state.get("fallback_reason") or "").strip()
+            or str(routing_state.get("fallback_reason") or "").strip()
             or str(payload.get("fallback_reason") or "").strip()
             or "deterministic_tool_fallback"
         )
@@ -1016,6 +1053,7 @@ def execute_llm_call_via_execution_router(
     provider: str,
     prompt: str | None,
     mcp_configs: dict[str, dict[str, Any]],
+    system_prompt: str | None = None,
     model_config: dict[str, Any] | None = None,
     request_id: str,
     node_id: int,
@@ -1051,6 +1089,11 @@ def execute_llm_call_via_execution_router(
             node_config={
                 "provider": str(provider or "").strip(),
                 "prompt": prompt if prompt is None or isinstance(prompt, str) else str(prompt),
+                "system_prompt": (
+                    system_prompt
+                    if system_prompt is None or isinstance(system_prompt, str)
+                    else str(system_prompt)
+                ),
                 "mcp_configs": mcp_configs if isinstance(mcp_configs, dict) else {},
                 "model_config": model_config if isinstance(model_config, dict) else {},
             },
@@ -1601,7 +1644,7 @@ def _log_instruction_reference_risk(
     compiled_instruction_package,
     on_log: Callable[[str], None],
 ) -> None:
-    markdown = str(compiled_instruction_package.artifacts.get("INSTRUCTIONS.md") or "")
+    markdown = str(compiled_instruction_package.artifacts.get(INSTRUCTIONS_FILENAME) or "")
     if not markdown:
         return
     matches = re.findall(r"(?<!\w)@([^\s`]+)", markdown)
@@ -1705,6 +1748,22 @@ def _apply_instruction_adapter_policy(
         )
         return downgraded_payload, mode, materialized.adapter, materialized_paths
     return payload, mode, materialized.adapter, materialized_paths
+
+
+def _frontier_system_prompt_from_compiled_instruction(
+    *,
+    provider: str,
+    compiled_instruction_package,
+    instruction_adapter_mode: str | None,
+) -> str | None:
+    if str(provider or "").strip().lower() not in FRONTIER_LLM_PROVIDERS:
+        return None
+    if str(instruction_adapter_mode or "").strip().lower() != "native":
+        return None
+    if compiled_instruction_package is None:
+        return None
+    markdown = str(compiled_instruction_package.artifacts.get(INSTRUCTIONS_FILENAME) or "").strip()
+    return markdown or None
 
 
 def _validate_runtime_isolation_env(
@@ -3587,6 +3646,92 @@ def _merge_attachments(
     return merged
 
 
+def _normalize_attachment_entry(entry: Any) -> dict[str, object] | None:
+    if isinstance(entry, str):
+        cleaned = entry.strip()
+        if not cleaned:
+            return None
+        return {"path": cleaned}
+    if not isinstance(entry, dict):
+        return None
+    normalized: dict[str, object] = {}
+    attachment_id = _parse_optional_int(entry.get("id"), default=0, minimum=1)
+    if attachment_id > 0:
+        normalized["id"] = attachment_id
+    file_name = str(entry.get("file_name") or "").strip()
+    path = str(entry.get("path") or "").strip()
+    if file_name:
+        normalized["file_name"] = file_name
+    if path:
+        normalized["path"] = path
+        try:
+            normalized["path_stem"] = Path(path).stem
+        except (TypeError, ValueError):
+            pass
+    elif file_name:
+        normalized["path"] = file_name
+    content_type = str(entry.get("content_type") or "").strip()
+    if content_type:
+        normalized["content_type"] = content_type
+    size_bytes = _parse_optional_int(entry.get("size_bytes"), default=0, minimum=1)
+    if size_bytes > 0:
+        normalized["size_bytes"] = size_bytes
+    if not normalized.get("path") and not normalized.get("id"):
+        return None
+    return normalized
+
+
+def _normalize_attachment_entries(value: Any) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for entry in value:
+        parsed = _normalize_attachment_entry(entry)
+        if parsed is None:
+            continue
+        normalized.append(parsed)
+    return _merge_attachment_entries([], normalized)
+
+
+def _extract_output_state_attachment_entries(value: Any) -> list[dict[str, object]]:
+    if not isinstance(value, dict):
+        return []
+    return _normalize_attachment_entries(value.get("attachments"))
+
+
+def _collect_input_context_attachment_entries(
+    input_context: dict[str, Any],
+) -> list[dict[str, object]]:
+    propagated = _normalize_attachment_entries(input_context.get("propagated_attachments"))
+    if propagated:
+        return propagated
+    merged: list[dict[str, object]] = []
+    for source_key in ("upstream_nodes", "attachment_only_upstream_nodes"):
+        raw_entries = input_context.get(source_key)
+        if not isinstance(raw_entries, list):
+            continue
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            merged = _merge_attachment_entries(
+                merged,
+                _extract_output_state_attachment_entries(entry.get("output_state")),
+            )
+    return merged
+
+
+def _attachment_ids_from_entries(entries: list[dict[str, object]]) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for entry in entries:
+        attachment_id = _parse_optional_int(entry.get("id"), default=0, minimum=1)
+        if attachment_id <= 0 or attachment_id in seen:
+            continue
+        seen.add(attachment_id)
+        ids.append(attachment_id)
+    return ids
+
+
 def _build_agent_info(agent: Agent) -> AgentInfo:
     return AgentInfo.from_model(agent)
 
@@ -4376,6 +4521,7 @@ def _run_frontier_llm_sdk(
     provider: str,
     prompt: str | None,
     mcp_configs: dict[str, dict[str, Any]],
+    system_prompt: str | None = None,
     model_config: dict[str, Any] | None = None,
     on_update: Callable[[str, str], None] | None = None,
     on_log: Callable[[str], None] | None = None,
@@ -4418,6 +4564,7 @@ def _run_frontier_llm_sdk(
         FrontierAgentRequest(
             provider=provider,
             prompt=prompt,
+            system_prompt=system_prompt,
             mcp_configs=mcp_configs,
             model_config=model_config,
             env=env,
@@ -4434,6 +4581,7 @@ def _run_frontier_llm_via_execution_router(
     provider: str,
     prompt: str | None,
     mcp_configs: dict[str, dict[str, Any]],
+    system_prompt: str | None = None,
     model_config: dict[str, Any] | None = None,
     on_update: Callable[[str, str], None] | None = None,
     on_log: Callable[[str], None] | None = None,
@@ -4458,6 +4606,7 @@ def _run_frontier_llm_via_execution_router(
     execution_result = execute_llm_call_via_execution_router(
         provider=provider,
         prompt=prompt,
+        system_prompt=system_prompt,
         mcp_configs=mcp_configs,
         model_config=model_config,
         request_id=request_id,
@@ -4479,6 +4628,7 @@ def _run_llm(
     provider: str,
     prompt: str | None,
     mcp_configs: dict[str, dict[str, Any]],
+    system_prompt: str | None = None,
     model_config: dict[str, Any] | None = None,
     on_update: Callable[[str, str], None] | None = None,
     on_log: Callable[[str], None] | None = None,
@@ -4503,6 +4653,7 @@ def _run_llm(
             return _run_frontier_llm_via_execution_router(
                 provider=provider,
                 prompt=prompt,
+                system_prompt=system_prompt,
                 mcp_configs=mcp_configs,
                 model_config=model_config,
                 on_update=on_update,
@@ -4511,6 +4662,7 @@ def _run_llm(
         return _run_frontier_llm_sdk(
             provider=provider,
             prompt=prompt,
+            system_prompt=system_prompt,
             mcp_configs=mcp_configs,
             model_config=model_config,
             on_update=on_update,
@@ -5801,6 +5953,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
         _set_stage("llm_query")
         result = None
         try:
+            frontier_system_prompt: str | None = None
             llm_env = os.environ.copy()
             seed_codex_home = _resolve_codex_home_from_env(llm_env)
             runtime_home = _prepare_task_runtime_home(task_id)
@@ -5875,6 +6028,11 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                         task = session.get(AgentTask, task_id)
                         if task is not None:
                             task.prompt = payload
+            frontier_system_prompt = _frontier_system_prompt_from_compiled_instruction(
+                provider=provider,
+                compiled_instruction_package=compiled_instruction_package,
+                instruction_adapter_mode=instruction_adapter_mode,
+            )
             if resolved_skills is not None and resolved_skills.skills:
                 assert workspace is not None
                 assert runtime_home is not None
@@ -5931,6 +6089,7 @@ def _execute_agent_task(task_id: int, celery_task_id: str | None = None) -> None
                 result = _run_llm(
                     provider,
                     payload,
+                    system_prompt=frontier_system_prompt,
                     mcp_configs=mcp_configs,
                     model_config=model_config,
                     on_update=_persist_logs,
@@ -6177,28 +6336,37 @@ def _normalize_milestone_node_action(value: Any) -> str:
     return ""
 
 
-def _normalize_plan_node_action(value: Any) -> str:
+def _normalize_plan_node_store_mode(value: Any) -> str:
     cleaned = str(value or "").strip().lower()
-    if cleaned in {
-        "create",
-        "update",
-        "read",
-        "create_or_update",
-        "create_or_update_plan",
-        "create/update",
-        "create or update plan",
-        "update_completion",
-        "complete",
-    }:
-        return PLAN_NODE_ACTION_CREATE_OR_UPDATE
-    if cleaned in {
-        "complete_plan_item",
-        "complete plan item",
-        "mark_plan_item_complete",
-        "mark_task_complete",
-    }:
-        return PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM
+    if cleaned in {"replace", "overwrite", "set"}:
+        return PLAN_NODE_STORE_MODE_REPLACE
+    if cleaned in {"update", "patch", "mutate"}:
+        return PLAN_NODE_STORE_MODE_UPDATE
+    if cleaned in {"append", "add", "additive", "create", "create_or_update"}:
+        return PLAN_NODE_STORE_MODE_APPEND
+    return PLAN_NODE_STORE_MODE_APPEND
+
+
+def _normalize_plan_node_mode(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in PLAN_NODE_MODE_CHOICES:
+        return cleaned
     return ""
+
+
+def _resolve_plan_node_retry_count(node_config: dict[str, Any]) -> int:
+    retry_count = _parse_optional_int(
+        node_config.get("retry_count"),
+        default=PLAN_NODE_RETRY_COUNT_DEFAULT,
+        minimum=0,
+    )
+    return min(retry_count, PLAN_NODE_RETRY_COUNT_MAX)
+
+
+def _resolve_plan_node_fallback_enabled(node_config: dict[str, Any]) -> bool:
+    if "fallback_enabled" not in node_config:
+        return PLAN_NODE_FALLBACK_ENABLED_DEFAULT
+    return _coerce_bool(node_config.get("fallback_enabled"))
 
 
 def _normalize_plan_item_key(value: Any) -> str:
@@ -6208,62 +6376,99 @@ def _normalize_plan_item_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "_", cleaned).strip("_")
 
 
-def _resolve_plan_completion_target(
+def _resolve_plan_stage_for_update(
     *,
     plan: Plan,
-    plan_item_id: Any,
+    stage_id: Any,
     stage_key: Any,
-    task_key: Any,
-) -> tuple[PlanStage, PlanTask, str, str, str]:
+) -> tuple[PlanStage | None, str]:
     stage_rows = sorted(
         list(plan.stages or []),
         key=lambda item: (item.position, item.id),
     )
-    explicit_task_id = _parse_optional_int(plan_item_id, default=0, minimum=0)
+    explicit_stage_id = _parse_optional_int(stage_id, default=0, minimum=0)
+    if explicit_stage_id > 0:
+        for stage in stage_rows:
+            if int(stage.id) == explicit_stage_id:
+                return stage, "stage_id"
+        return None, "stage_id"
+
+    normalized_stage_key = _normalize_plan_item_key(stage_key)
+    if not normalized_stage_key:
+        return None, ""
+
+    matches: list[PlanStage] = []
+    for stage in stage_rows:
+        if _normalize_plan_item_key(stage.name) == normalized_stage_key:
+            matches.append(stage)
+
+    if not matches:
+        return None, "stage_key"
+    if len(matches) > 1:
+        matched_stage_ids = ", ".join(str(int(stage.id)) for stage in matches)
+        raise ValueError(
+            "Ambiguous update target for "
+            f"stage_key='{normalized_stage_key}'; "
+            f"matched stage ids: {matched_stage_ids}."
+        )
+    return matches[0], "stage_key"
+
+
+def _resolve_plan_task_for_update(
+    *,
+    plan: Plan,
+    task_id: Any,
+    task_key: Any,
+    stage_id: Any = None,
+    stage_key: Any = None,
+) -> tuple[PlanStage | None, PlanTask | None, str]:
+    stage_rows = sorted(
+        list(plan.stages or []),
+        key=lambda item: (item.position, item.id),
+    )
+    explicit_task_id = _parse_optional_int(task_id, default=0, minimum=0)
     if explicit_task_id > 0:
         for stage in stage_rows:
             for task in sorted(list(stage.tasks or []), key=lambda item: (item.position, item.id)):
                 if int(task.id) == explicit_task_id:
-                    return (
-                        stage,
-                        task,
-                        "plan_item_id",
-                        _normalize_plan_item_key(stage.name),
-                        _normalize_plan_item_key(task.name),
-                    )
-        raise ValueError(
-            f"Plan item id {explicit_task_id} was not found in plan {plan.id}."
-        )
+                    return stage, task, "task_id"
+        return None, None, "task_id"
 
-    normalized_stage_key = _normalize_plan_item_key(stage_key)
-    normalized_task_key = _normalize_plan_item_key(task_key)
-    if not normalized_stage_key or not normalized_task_key:
-        raise ValueError(
-            "Complete plan item action requires plan_item_id or stage_key + task_key."
+    target_stage: PlanStage | None = None
+    stage_resolution = ""
+    explicit_stage_id = _parse_optional_int(stage_id, default=0, minimum=0)
+    if explicit_stage_id > 0 or _normalize_plan_item_key(stage_key):
+        target_stage, stage_resolution = _resolve_plan_stage_for_update(
+            plan=plan,
+            stage_id=stage_id,
+            stage_key=stage_key,
         )
+        if target_stage is None:
+            return None, None, stage_resolution or "stage"
+
+    normalized_task_key = _normalize_plan_item_key(task_key)
+    if not normalized_task_key:
+        return target_stage, None, stage_resolution
 
     matches: list[tuple[PlanStage, PlanTask]] = []
-    for stage in stage_rows:
-        if _normalize_plan_item_key(stage.name) != normalized_stage_key:
+    search_stages = [target_stage] if target_stage is not None else stage_rows
+    for stage in search_stages:
+        if stage is None:
             continue
         for task in sorted(list(stage.tasks or []), key=lambda item: (item.position, item.id)):
             if _normalize_plan_item_key(task.name) == normalized_task_key:
                 matches.append((stage, task))
 
     if not matches:
-        raise ValueError(
-            "No plan item matched complete target "
-            f"stage_key='{normalized_stage_key}' task_key='{normalized_task_key}'."
-        )
+        return target_stage, None, "task_key"
     if len(matches) > 1:
         matched_task_ids = ", ".join(str(int(task.id)) for _, task in matches)
         raise ValueError(
-            "Ambiguous complete_plan_item target for "
-            f"stage_key='{normalized_stage_key}' task_key='{normalized_task_key}'; "
-            f"matched task ids: {matched_task_ids}."
+            "Ambiguous update target for "
+            f"task_key='{normalized_task_key}'; matched task ids: {matched_task_ids}."
         )
     stage, task = matches[0]
-    return stage, task, "stage_task_key", normalized_stage_key, normalized_task_key
+    return stage, task, "task_key"
 
 
 def _normalize_memory_node_action(value: Any) -> str:
@@ -6358,9 +6563,11 @@ def _infer_memory_node_prompt(
                 continue
             _append_output_state(item.get("output_state"))
 
-    dotted_upstream_nodes = input_context.get("dotted_upstream_nodes")
-    if isinstance(dotted_upstream_nodes, list):
-        for item in dotted_upstream_nodes:
+    context_only_upstream_nodes = input_context.get("context_only_upstream_nodes")
+    if not isinstance(context_only_upstream_nodes, list):
+        context_only_upstream_nodes = input_context.get("dotted_upstream_nodes")
+    if isinstance(context_only_upstream_nodes, list):
+        for item in context_only_upstream_nodes:
             if not isinstance(item, dict):
                 continue
             _append_output_state(item.get("output_state"))
@@ -7168,14 +7375,21 @@ def _persist_plan_node_artifact(
         ) or None
 
     artifact_payload = {
-        "action": output_state.get("action"),
+        "mode": output_state.get("mode"),
+        "store_mode": output_state.get("store_mode"),
         "action_results": output_state.get("action_results") or [],
         "additive_prompt": output_state.get("additive_prompt") or "",
+        "operation_counts": output_state.get("operation_counts") or {},
         PLAN_LLM_TRANSFORM_SUMMARY_KEY: str(
             output_state.get(PLAN_LLM_TRANSFORM_SUMMARY_KEY) or ""
         ).strip(),
-        "completion_target": output_state.get("completion_target") or {},
         "touched": output_state.get("touched") or {},
+        "warnings": output_state.get("warnings") or [],
+        "errors": output_state.get("errors") or [],
+        "mode_fallback_used": bool(output_state.get("mode_fallback_used")),
+        "failed_mode": str(output_state.get("failed_mode") or "").strip(),
+        "fallback_mode": str(output_state.get("fallback_mode") or "").strip(),
+        "fallback_reason": str(output_state.get("fallback_reason") or "").strip(),
         "plan": plan_payload if isinstance(plan_payload, dict) else {},
         "routing_state": routing_state or {},
     }
@@ -7591,6 +7805,9 @@ def _build_flowchart_input_context(
     # Preserve existing trigger-context behavior for solid activations.
     if upstream_results is not None:
         for upstream in upstream_results:
+            edge_mode = _normalize_flowchart_edge_mode(upstream.get("edge_mode"))
+            if edge_mode != FLOWCHART_EDGE_MODE_SOLID:
+                continue
             source_node_id_raw = _parse_optional_int(
                 upstream.get("source_node_id"),
                 default=0,
@@ -7611,7 +7828,7 @@ def _build_flowchart_input_context(
                 "output_state": upstream.get("output_state") or {},
                 "routing_state": upstream.get("routing_state") or {},
                 "sequence": upstream.get("sequence"),
-                "edge_mode": _normalize_flowchart_edge_mode(upstream.get("edge_mode")),
+                "edge_mode": edge_mode,
             }
             upstream_nodes.append(entry)
             if latest_upstream is None or (
@@ -7647,12 +7864,12 @@ def _build_flowchart_input_context(
 
     dotted_upstream_nodes: list[dict[str, Any]] = []
     for edge in incoming_edges or []:
-        if not _edge_is_dotted(edge):
+        if not _edge_is_context_only(edge):
             continue
         source_node_id = int(edge["source_node_id"])
         previous = (latest_results or {}).get(source_node_id)
         if previous is None:
-            # Dotted sources are optional in v1; missing output contributes no payload.
+            # Context-only sources are optional; missing output contributes no payload.
             continue
         dotted_upstream_nodes.append(
             {
@@ -7668,25 +7885,61 @@ def _build_flowchart_input_context(
             }
         )
 
-    if logger.isEnabledFor(logging.DEBUG):
-        incoming_dotted_edge_count = sum(
-            1 for edge in (incoming_edges or []) if _edge_is_dotted(edge)
+    attachment_only_upstream_nodes: list[dict[str, Any]] = []
+    for edge in incoming_edges or []:
+        if not _edge_is_attachment_only(edge):
+            continue
+        source_node_id = int(edge["source_node_id"])
+        previous = (latest_results or {}).get(source_node_id)
+        if previous is None:
+            # Attachment-only sources are optional; missing output contributes no payload.
+            continue
+        attachment_only_upstream_nodes.append(
+            {
+                "node_id": source_node_id,
+                "source_edge_id": int(edge["id"]),
+                "node_type": previous.get("node_type"),
+                "condition_key": edge.get("condition_key"),
+                "execution_index": previous.get("execution_index"),
+                "output_state": previous.get("output_state") or {},
+                "routing_state": previous.get("routing_state") or {},
+                "sequence": previous.get("sequence"),
+                "edge_mode": FLOWCHART_EDGE_MODE_DASHED,
+            }
         )
-        pulled_sources = [
+
+    if logger.isEnabledFor(logging.DEBUG):
+        incoming_context_only_edge_count = sum(
+            1 for edge in (incoming_edges or []) if _edge_is_context_only(edge)
+        )
+        incoming_attachment_only_edge_count = sum(
+            1 for edge in (incoming_edges or []) if _edge_is_attachment_only(edge)
+        )
+        context_sources = [
             {
                 "source_edge_id": item.get("source_edge_id"),
                 "source_node_id": item.get("node_id"),
             }
             for item in dotted_upstream_nodes
         ]
+        attachment_sources = [
+            {
+                "source_edge_id": item.get("source_edge_id"),
+                "source_node_id": item.get("node_id"),
+            }
+            for item in attachment_only_upstream_nodes
+        ]
         logger.debug(
-            "Flowchart run %s node %s execution %s pulled dotted context %s/%s (available/declared): %s",
+            "Flowchart run %s node %s execution %s pulled context-only %s/%s and attachment-only %s/%s: context=%s attachments=%s",
             run_id,
             node_id,
             execution_index,
             len(dotted_upstream_nodes),
-            incoming_dotted_edge_count,
-            pulled_sources,
+            incoming_context_only_edge_count,
+            len(attachment_only_upstream_nodes),
+            incoming_attachment_only_edge_count,
+            context_sources,
+            attachment_sources,
         )
 
     trigger_sources = [
@@ -7715,6 +7968,29 @@ def _build_flowchart_input_context(
         }
         for entry in dotted_upstream_nodes
     ]
+    pulled_attachment_sources = [
+        {
+            "source_edge_id": entry.get("source_edge_id"),
+            "source_node_id": entry.get("node_id"),
+            "source_node_type": entry.get("node_type"),
+            "condition_key": entry.get("condition_key"),
+            "execution_index": entry.get("execution_index"),
+            "sequence": entry.get("sequence"),
+            "edge_mode": FLOWCHART_EDGE_MODE_DASHED,
+        }
+        for entry in attachment_only_upstream_nodes
+    ]
+    propagated_attachments: list[dict[str, object]] = []
+    for entry in upstream_nodes:
+        propagated_attachments = _merge_attachment_entries(
+            propagated_attachments,
+            _extract_output_state_attachment_entries(entry.get("output_state")),
+        )
+    for entry in attachment_only_upstream_nodes:
+        propagated_attachments = _merge_attachment_entries(
+            propagated_attachments,
+            _extract_output_state_attachment_entries(entry.get("output_state")),
+        )
 
     return {
         "flowchart": {
@@ -7730,8 +8006,16 @@ def _build_flowchart_input_context(
         "upstream_nodes": upstream_nodes,
         "latest_upstream": latest_upstream,
         "dotted_upstream_nodes": dotted_upstream_nodes,
+        "context_only_upstream_nodes": dotted_upstream_nodes,
+        "attachment_only_upstream_nodes": attachment_only_upstream_nodes,
         "trigger_sources": trigger_sources,
         "pulled_dotted_sources": pulled_dotted_sources,
+        "context_only_sources": pulled_dotted_sources,
+        "pulled_attachment_sources": pulled_attachment_sources,
+        "attachment_only_sources": pulled_attachment_sources,
+        "context_only_source_count": len(pulled_dotted_sources),
+        "attachment_only_source_count": len(pulled_attachment_sources),
+        "propagated_attachments": propagated_attachments,
     }
 
 
@@ -8148,6 +8432,8 @@ def _flowchart_task_output_display(output_state: dict[str, Any]) -> str:
 
 def _normalize_flowchart_edge_mode(value: Any) -> str:
     cleaned = str(value or "").strip().lower()
+    if cleaned == FLOWCHART_EDGE_MODE_DASHED:
+        return FLOWCHART_EDGE_MODE_DASHED
     if cleaned == FLOWCHART_EDGE_MODE_DOTTED:
         return FLOWCHART_EDGE_MODE_DOTTED
     return FLOWCHART_EDGE_MODE_SOLID
@@ -8159,6 +8445,14 @@ def _edge_is_solid(edge: dict[str, Any]) -> bool:
 
 def _edge_is_dotted(edge: dict[str, Any]) -> bool:
     return _normalize_flowchart_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_DOTTED
+
+
+def _edge_is_context_only(edge: dict[str, Any]) -> bool:
+    return _normalize_flowchart_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_DOTTED
+
+
+def _edge_is_attachment_only(edge: dict[str, Any]) -> bool:
+    return _normalize_flowchart_edge_mode(edge.get("edge_mode")) == FLOWCHART_EDGE_MODE_DASHED
 
 
 def _normalize_flowchart_fan_in_mode(value: Any) -> str:
@@ -8583,7 +8877,24 @@ def _execute_flowchart_task_node(
         mcp_servers = list(node.mcp_servers)
         node_scripts = list(node.scripts)
         node_attachments = list(node.attachments)
+        input_context_attachment_entries = _collect_input_context_attachment_entries(
+            input_context
+        )
         attachments = list(node_attachments)
+        input_context_attachment_ids = _attachment_ids_from_entries(
+            input_context_attachment_entries
+        )
+        if input_context_attachment_ids:
+            input_context_attachments = (
+                session.execute(
+                    select(Attachment).where(
+                        Attachment.id.in_(input_context_attachment_ids)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            attachments = _merge_attachments(attachments, input_context_attachments)
         if selected_agent_id is not None:
             try:
                 resolved_skills = resolve_agent_skills(session, selected_agent_id)
@@ -8591,8 +8902,11 @@ def _execute_flowchart_task_node(
                 raise ValueError(
                     f"Skill resolution failed for agent {selected_agent_id}: {exc}"
                 ) from exc
-    attachment_ids = [attachment.id for attachment in attachments]
-    attachment_entries = _build_attachment_entries(attachments)
+    attachment_entries = _merge_attachment_entries(
+        _build_attachment_entries(attachments),
+        input_context_attachment_entries,
+    )
+    attachment_ids = _attachment_ids_from_entries(attachment_entries)
 
     provider = model.provider
     llm_settings = load_integration_settings("llm")
@@ -8739,6 +9053,7 @@ def _execute_flowchart_task_node(
         or f"Flowchart task node {node_id}"
     )
     selected_integration_keys: set[str] | None = None
+    selected_integration_warnings: list[str] = []
     raw_integration_keys = node_config.get("integration_keys")
     if raw_integration_keys is not None:
         if not isinstance(raw_integration_keys, list):
@@ -9156,6 +9471,11 @@ def _execute_flowchart_task_node(
             minimum=0,
         )
         llm_payload = payload
+        frontier_system_prompt = _frontier_system_prompt_from_compiled_instruction(
+            provider=provider,
+            compiled_instruction_package=compiled_instruction_package,
+            instruction_adapter_mode=instruction_adapter_mode,
+        )
         for attempt in range(1, schema_retry_attempts + 1):
             last_llm_output = ""
             last_llm_error = ""
@@ -9169,6 +9489,7 @@ def _execute_flowchart_task_node(
                 llm_result = _run_llm(
                     provider,
                     llm_payload,
+                    system_prompt=frontier_system_prompt,
                     mcp_configs=mcp_configs,
                     model_config=model_config,
                     on_update=_capture_llm_updates,
@@ -9303,6 +9624,7 @@ def _execute_flowchart_decision_node(
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     del mcp_server_keys
+    attachment_entries = _collect_input_context_attachment_entries(input_context)
 
     def _stringify(value: Any) -> str:
         if value is None:
@@ -9442,6 +9764,7 @@ def _execute_flowchart_decision_node(
             "matched_connector_ids": matched_connector_ids,
             "evaluations": evaluations,
             "no_match": no_match,
+            "attachments": attachment_entries,
         }
         routing_state: dict[str, Any] = {
             "matched_connector_ids": matched_connector_ids,
@@ -9480,6 +9803,7 @@ def _execute_flowchart_decision_node(
         "matched_connector_ids": matched_connector_ids,
         "evaluations": evaluations,
         "no_match": no_match,
+        "attachments": attachment_entries,
     }
     routing_state = {
         "matched_connector_ids": matched_connector_ids,
@@ -9496,56 +9820,512 @@ def _execute_flowchart_decision_node(
     return output_state, routing_state
 
 
-def _apply_plan_completion_patch(
+def _append_plan_warning(
+    warnings: list[dict[str, Any]],
+    *,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "code": str(code or "").strip() or "plan_warning",
+        "message": str(message or "").strip() or "Plan runtime warning.",
+    }
+    if isinstance(details, dict) and details:
+        payload["details"] = details
+    warnings.append(payload)
+
+
+def _apply_plan_patch_plan_fields(
     *,
     plan: Plan,
     patch: dict[str, Any],
-    action_results: list[str],
     now: datetime,
-    touched_stage_ids: set[int] | None = None,
-    touched_task_ids: set[int] | None = None,
+    operation_counts: dict[str, int],
+    action_results: list[str],
 ) -> None:
-    if _coerce_bool(patch.get("mark_plan_complete")):
-        plan.completed_at = now
-        action_results.append("Marked plan as completed.")
+    if "name" in patch:
+        next_name = str(patch.get("name") or "").strip()
+        if not next_name:
+            raise ValueError("Plan patch field 'name' must be a non-empty string when provided.")
+        if next_name != str(plan.name or "").strip():
+            plan.name = next_name
+            operation_counts["updated"] += 1
+            action_results.append("Updated plan name.")
+    if "description" in patch:
+        description_raw = patch.get("description")
+        next_description = None if description_raw is None else str(description_raw)
+        if next_description != plan.description:
+            plan.description = next_description
+            operation_counts["updated"] += 1
+            action_results.append("Updated plan description.")
+    if "completed" in patch:
+        next_completed = _coerce_bool(patch.get("completed"))
+        if next_completed and plan.completed_at is None:
+            plan.completed_at = now
+            operation_counts["updated"] += 1
+            action_results.append("Marked plan completed.")
+        if not next_completed and plan.completed_at is not None:
+            plan.completed_at = None
+            operation_counts["updated"] += 1
+            action_results.append("Marked plan incomplete.")
 
-    stage_ids_raw = patch.get("complete_stage_ids") or patch.get("stage_ids") or []
-    stage_ids = {
-        _parse_optional_int(value, default=0, minimum=1) for value in stage_ids_raw
-    }
-    stages_by_id = {stage.id: stage for stage in list(plan.stages or [])}
-    for stage_id in sorted(stage_ids):
-        stage = stages_by_id.get(stage_id)
-        if stage is None:
+
+def _apply_plan_patch_task_updates(
+    *,
+    plan: Plan,
+    task_payloads: list[Any],
+    now: datetime,
+    touched_stage_ids: set[int],
+    touched_task_ids: set[int],
+    operation_counts: dict[str, int],
+    action_results: list[str],
+    warnings: list[dict[str, Any]],
+    stage_scope: PlanStage | None = None,
+) -> None:
+    for index, raw_task_payload in enumerate(task_payloads):
+        if not isinstance(raw_task_payload, dict):
+            raise ValueError(f"Plan update task entry at index {index} must be an object.")
+        task_stage_id = raw_task_payload.get("stage_id")
+        task_stage_key = raw_task_payload.get("stage_key")
+        task_id = raw_task_payload.get("task_id", raw_task_payload.get("id"))
+        task_key = raw_task_payload.get("task_key")
+        if task_id is None and not str(task_key or "").strip():
+            raise ValueError(
+                "Plan update task entries require task_id or task_key."
+            )
+        resolved_stage, resolved_task, resolution = _resolve_plan_task_for_update(
+            plan=plan,
+            task_id=task_id,
+            task_key=task_key,
+            stage_id=task_stage_id if stage_scope is None else int(stage_scope.id),
+            stage_key=task_stage_key if stage_scope is None else None,
+        )
+        if resolved_task is None or resolved_stage is None:
+            operation_counts["skipped_missing"] += 1
+            _append_plan_warning(
+                warnings,
+                code="missing_target",
+                message="Update task target was not found; skipping entry.",
+                details={
+                    "resolution": resolution or "task",
+                    "task_id": _parse_optional_int(task_id, default=0, minimum=0) or None,
+                    "task_key": _normalize_plan_item_key(task_key),
+                    "stage_id": _parse_optional_int(task_stage_id, default=0, minimum=0) or None,
+                    "stage_key": _normalize_plan_item_key(task_stage_key),
+                },
+            )
             continue
-        stage.completed_at = now
-        if touched_stage_ids is not None:
+        changed = False
+        if "name" in raw_task_payload:
+            next_name = str(raw_task_payload.get("name") or "").strip()
+            if not next_name:
+                raise ValueError("Plan update task field 'name' must be non-empty when provided.")
+            if next_name != str(resolved_task.name or "").strip():
+                resolved_task.name = next_name
+                changed = True
+        if "description" in raw_task_payload:
+            description_raw = raw_task_payload.get("description")
+            next_description = None if description_raw is None else str(description_raw)
+            if next_description != resolved_task.description:
+                resolved_task.description = next_description
+                changed = True
+        if "position" in raw_task_payload:
+            next_position = _parse_optional_int(
+                raw_task_payload.get("position"),
+                default=0,
+                minimum=1,
+            )
+            if next_position <= 0:
+                raise ValueError("Plan update task field 'position' must be a positive integer.")
+            if next_position != int(resolved_task.position):
+                resolved_task.position = next_position
+                changed = True
+        if "completed" in raw_task_payload:
+            next_completed = _coerce_bool(raw_task_payload.get("completed"))
+            if next_completed and resolved_task.completed_at is None:
+                resolved_task.completed_at = now
+                changed = True
+            if not next_completed and resolved_task.completed_at is not None:
+                resolved_task.completed_at = None
+                changed = True
+        if changed:
+            touched_task_ids.add(int(resolved_task.id))
+            touched_stage_ids.add(int(resolved_stage.id))
+            operation_counts["updated"] += 1
+            action_results.append(
+                f"Updated task {int(resolved_task.id)}."
+            )
+
+
+def _apply_plan_store_mode_patch(
+    session,
+    *,
+    plan: Plan,
+    store_mode: str,
+    patch: dict[str, Any],
+    now: datetime,
+    touched_stage_ids: set[int],
+    touched_task_ids: set[int],
+    operation_counts: dict[str, int],
+    action_results: list[str],
+    warnings: list[dict[str, Any]],
+) -> None:
+    if not isinstance(patch, dict):
+        raise ValueError("Plan patch payload must be a JSON object.")
+    _apply_plan_patch_plan_fields(
+        plan=plan,
+        patch=patch,
+        now=now,
+        operation_counts=operation_counts,
+        action_results=action_results,
+    )
+    stages_payload = patch.get("stages")
+    if stages_payload is None:
+        stages_payload = []
+    if not isinstance(stages_payload, list):
+        raise ValueError("Plan patch field 'stages' must be an array when provided.")
+    tasks_payload = patch.get("tasks")
+    if tasks_payload is None:
+        tasks_payload = []
+    if not isinstance(tasks_payload, list):
+        raise ValueError("Plan patch field 'tasks' must be an array when provided.")
+
+    if store_mode == PLAN_NODE_STORE_MODE_REPLACE:
+        if tasks_payload:
+            raise ValueError(
+                "Replace mode does not accept top-level 'tasks'; nest tasks inside each stage entry."
+            )
+        existing_stages = sorted(list(plan.stages or []), key=lambda item: (item.position, item.id))
+        operation_counts["replaced"] += len(existing_stages)
+        operation_counts["replaced"] += sum(len(list(stage.tasks or [])) for stage in existing_stages)
+        for stage in existing_stages:
+            session.delete(stage)
+        session.flush()
+        for stage_index, raw_stage_payload in enumerate(stages_payload):
+            if not isinstance(raw_stage_payload, dict):
+                raise ValueError(
+                    f"Replace stage entry at index {stage_index} must be a JSON object."
+                )
+            stage_name = str(raw_stage_payload.get("name") or "").strip()
+            if not stage_name:
+                raise ValueError("Replace stage entries require non-empty 'name'.")
+            stage_position = _parse_optional_int(
+                raw_stage_payload.get("position"),
+                default=stage_index + 1,
+                minimum=1,
+            )
+            stage = PlanStage.create(
+                session,
+                plan_id=int(plan.id),
+                name=stage_name,
+                description=(
+                    None
+                    if raw_stage_payload.get("description") is None
+                    else str(raw_stage_payload.get("description"))
+                ),
+                position=stage_position,
+            )
+            if "completed" in raw_stage_payload:
+                stage.completed_at = now if _coerce_bool(raw_stage_payload.get("completed")) else None
             touched_stage_ids.add(int(stage.id))
-        action_results.append(f"Marked stage {stage_id} as completed.")
+            operation_counts["created"] += 1
+            stage_tasks_payload = raw_stage_payload.get("tasks") or []
+            if not isinstance(stage_tasks_payload, list):
+                raise ValueError("Replace stage field 'tasks' must be an array when provided.")
+            for task_index, raw_task_payload in enumerate(stage_tasks_payload):
+                if not isinstance(raw_task_payload, dict):
+                    raise ValueError(
+                        f"Replace task entry at stage index {stage_index}, task index {task_index} must be an object."
+                    )
+                task_name = str(raw_task_payload.get("name") or "").strip()
+                if not task_name:
+                    raise ValueError("Replace task entries require non-empty 'name'.")
+                task_position = _parse_optional_int(
+                    raw_task_payload.get("position"),
+                    default=task_index + 1,
+                    minimum=1,
+                )
+                task = PlanTask.create(
+                    session,
+                    plan_stage_id=int(stage.id),
+                    name=task_name,
+                    description=(
+                        None
+                        if raw_task_payload.get("description") is None
+                        else str(raw_task_payload.get("description"))
+                    ),
+                    position=task_position,
+                )
+                if "completed" in raw_task_payload:
+                    task.completed_at = now if _coerce_bool(raw_task_payload.get("completed")) else None
+                touched_task_ids.add(int(task.id))
+                touched_stage_ids.add(int(stage.id))
+                operation_counts["created"] += 1
+        if stages_payload:
+            action_results.append(
+                f"Replaced plan structure with {len(stages_payload)} stage entries."
+            )
+        return
 
-    task_ids_raw = patch.get("complete_task_ids") or patch.get("task_ids") or []
-    task_ids = {_parse_optional_int(value, default=0, minimum=1) for value in task_ids_raw}
-    tasks_by_id: dict[int, PlanTask] = {}
-    for stage in list(plan.stages or []):
-        for task in list(stage.tasks or []):
-            tasks_by_id[task.id] = task
-    for task_id in sorted(task_ids):
-        task = tasks_by_id.get(task_id)
-        if task is None:
+    if store_mode == PLAN_NODE_STORE_MODE_APPEND:
+        for stage_index, raw_stage_payload in enumerate(stages_payload):
+            if not isinstance(raw_stage_payload, dict):
+                raise ValueError(
+                    f"Append stage entry at index {stage_index} must be a JSON object."
+                )
+            stage_name = str(raw_stage_payload.get("name") or "").strip()
+            stage_id = raw_stage_payload.get("stage_id", raw_stage_payload.get("id"))
+            stage_key = raw_stage_payload.get("stage_key")
+            resolved_stage, stage_resolution = _resolve_plan_stage_for_update(
+                plan=plan,
+                stage_id=stage_id,
+                stage_key=stage_key,
+            )
+            if resolved_stage is None and not str(stage_key or "").strip() and stage_id is None:
+                # In append mode, no explicit target means "create by name unless duplicate".
+                duplicate_stage, _ = _resolve_plan_stage_for_update(
+                    plan=plan,
+                    stage_id=None,
+                    stage_key=stage_name,
+                )
+                resolved_stage = duplicate_stage
+            if stage_id is not None or str(stage_key or "").strip():
+                if resolved_stage is None:
+                    operation_counts["skipped_missing"] += 1
+                    _append_plan_warning(
+                        warnings,
+                        code="missing_target",
+                        message="Append stage target was not found; skipping entry.",
+                        details={
+                            "resolution": stage_resolution or "stage",
+                            "stage_id": _parse_optional_int(stage_id, default=0, minimum=0) or None,
+                            "stage_key": _normalize_plan_item_key(stage_key),
+                        },
+                    )
+                    continue
+                _append_plan_warning(
+                    warnings,
+                    code="existing_target",
+                    message="Append mode does not mutate existing stages; skipping stage-level updates.",
+                    details={"stage_id": int(resolved_stage.id)},
+                )
+                stage = resolved_stage
+            elif resolved_stage is not None:
+                _append_plan_warning(
+                    warnings,
+                    code="existing_target",
+                    message="Append stage already exists; skipping stage creation.",
+                    details={"stage_id": int(resolved_stage.id), "stage_key": _normalize_plan_item_key(stage_name)},
+                )
+                stage = resolved_stage
+            else:
+                if not stage_name:
+                    raise ValueError("Append stage entries require non-empty 'name' when creating a new stage.")
+                next_position = _parse_optional_int(
+                    raw_stage_payload.get("position"),
+                    default=(max((int(item.position) for item in list(plan.stages or [])), default=0) + 1),
+                    minimum=1,
+                )
+                stage = PlanStage.create(
+                    session,
+                    plan_id=int(plan.id),
+                    name=stage_name,
+                    description=(
+                        None
+                        if raw_stage_payload.get("description") is None
+                        else str(raw_stage_payload.get("description"))
+                    ),
+                    position=next_position,
+                )
+                if "completed" in raw_stage_payload:
+                    stage.completed_at = now if _coerce_bool(raw_stage_payload.get("completed")) else None
+                touched_stage_ids.add(int(stage.id))
+                operation_counts["created"] += 1
+                action_results.append(f"Appended stage {int(stage.id)}.")
+
+            stage_tasks_payload = raw_stage_payload.get("tasks") or []
+            if not isinstance(stage_tasks_payload, list):
+                raise ValueError("Append stage field 'tasks' must be an array when provided.")
+            for task_index, raw_task_payload in enumerate(stage_tasks_payload):
+                if not isinstance(raw_task_payload, dict):
+                    raise ValueError(
+                        f"Append task entry at stage index {stage_index}, task index {task_index} must be an object."
+                    )
+                task_id = raw_task_payload.get("task_id", raw_task_payload.get("id"))
+                task_key = raw_task_payload.get("task_key")
+                if task_id is not None or str(task_key or "").strip():
+                    resolved_stage_ref, resolved_task, resolution = _resolve_plan_task_for_update(
+                        plan=plan,
+                        task_id=task_id,
+                        task_key=task_key,
+                        stage_id=int(stage.id),
+                    )
+                    if resolved_task is None or resolved_stage_ref is None:
+                        operation_counts["skipped_missing"] += 1
+                        _append_plan_warning(
+                            warnings,
+                            code="missing_target",
+                            message="Append task target was not found; skipping entry.",
+                            details={
+                                "resolution": resolution or "task",
+                                "task_id": _parse_optional_int(task_id, default=0, minimum=0) or None,
+                                "task_key": _normalize_plan_item_key(task_key),
+                                "stage_id": int(stage.id),
+                            },
+                        )
+                    else:
+                        _append_plan_warning(
+                            warnings,
+                            code="existing_target",
+                            message="Append mode does not mutate existing tasks; skipping task update.",
+                            details={"task_id": int(resolved_task.id)},
+                        )
+                    continue
+                task_name = str(raw_task_payload.get("name") or "").strip()
+                if not task_name:
+                    raise ValueError("Append task entries require non-empty 'name' when creating a new task.")
+                normalized_task_key = _normalize_plan_item_key(task_name)
+                _, existing_task, _ = _resolve_plan_task_for_update(
+                    plan=plan,
+                    task_id=None,
+                    task_key=normalized_task_key,
+                    stage_id=int(stage.id),
+                )
+                if existing_task is not None:
+                    _append_plan_warning(
+                        warnings,
+                        code="existing_target",
+                        message="Append task already exists in target stage; skipping task creation.",
+                        details={"task_id": int(existing_task.id), "stage_id": int(stage.id)},
+                    )
+                    continue
+                task = PlanTask.create(
+                    session,
+                    plan_stage_id=int(stage.id),
+                    name=task_name,
+                    description=(
+                        None
+                        if raw_task_payload.get("description") is None
+                        else str(raw_task_payload.get("description"))
+                    ),
+                    position=_parse_optional_int(
+                        raw_task_payload.get("position"),
+                        default=(max((int(item.position) for item in list(stage.tasks or [])), default=0) + 1),
+                        minimum=1,
+                    ),
+                )
+                if "completed" in raw_task_payload:
+                    task.completed_at = now if _coerce_bool(raw_task_payload.get("completed")) else None
+                touched_task_ids.add(int(task.id))
+                touched_stage_ids.add(int(stage.id))
+                operation_counts["created"] += 1
+                action_results.append(f"Appended task {int(task.id)} to stage {int(stage.id)}.")
+        if tasks_payload:
+            _append_plan_warning(
+                warnings,
+                code="invalid_payload",
+                message="Append mode ignores top-level 'tasks'; provide tasks under each stage entry.",
+            )
+        return
+
+    # Update mode
+    for stage_index, raw_stage_payload in enumerate(stages_payload):
+        if not isinstance(raw_stage_payload, dict):
+            raise ValueError(f"Update stage entry at index {stage_index} must be a JSON object.")
+        stage_id = raw_stage_payload.get("stage_id", raw_stage_payload.get("id"))
+        stage_key = raw_stage_payload.get("stage_key")
+        if stage_id is None and not str(stage_key or "").strip():
+            raise ValueError("Plan update stage entries require stage_id or stage_key.")
+        stage, resolution = _resolve_plan_stage_for_update(
+            plan=plan,
+            stage_id=stage_id,
+            stage_key=stage_key,
+        )
+        if stage is None:
+            operation_counts["skipped_missing"] += 1
+            _append_plan_warning(
+                warnings,
+                code="missing_target",
+                message="Update stage target was not found; skipping entry.",
+                details={
+                    "resolution": resolution or "stage",
+                    "stage_id": _parse_optional_int(stage_id, default=0, minimum=0) or None,
+                    "stage_key": _normalize_plan_item_key(stage_key),
+                },
+            )
             continue
-        task.completed_at = now
-        if touched_task_ids is not None:
-            touched_task_ids.add(int(task.id))
-            if touched_stage_ids is not None:
-                touched_stage_ids.add(int(task.plan_stage_id))
-        action_results.append(f"Marked task {task_id} as completed.")
+        changed = False
+        if "name" in raw_stage_payload:
+            next_name = str(raw_stage_payload.get("name") or "").strip()
+            if not next_name:
+                raise ValueError("Plan update stage field 'name' must be non-empty when provided.")
+            if next_name != str(stage.name or "").strip():
+                stage.name = next_name
+                changed = True
+        if "description" in raw_stage_payload:
+            description_raw = raw_stage_payload.get("description")
+            next_description = None if description_raw is None else str(description_raw)
+            if next_description != stage.description:
+                stage.description = next_description
+                changed = True
+        if "position" in raw_stage_payload:
+            next_position = _parse_optional_int(
+                raw_stage_payload.get("position"),
+                default=0,
+                minimum=1,
+            )
+            if next_position <= 0:
+                raise ValueError("Plan update stage field 'position' must be a positive integer.")
+            if next_position != int(stage.position):
+                stage.position = next_position
+                changed = True
+        if "completed" in raw_stage_payload:
+            next_completed = _coerce_bool(raw_stage_payload.get("completed"))
+            if next_completed and stage.completed_at is None:
+                stage.completed_at = now
+                changed = True
+            if not next_completed and stage.completed_at is not None:
+                stage.completed_at = None
+                changed = True
+        if changed:
+            touched_stage_ids.add(int(stage.id))
+            operation_counts["updated"] += 1
+            action_results.append(f"Updated stage {int(stage.id)}.")
+        nested_tasks_payload = raw_stage_payload.get("tasks")
+        if nested_tasks_payload is not None:
+            if not isinstance(nested_tasks_payload, list):
+                raise ValueError("Plan update stage field 'tasks' must be an array when provided.")
+            _apply_plan_patch_task_updates(
+                plan=plan,
+                task_payloads=nested_tasks_payload,
+                now=now,
+                touched_stage_ids=touched_stage_ids,
+                touched_task_ids=touched_task_ids,
+                operation_counts=operation_counts,
+                action_results=action_results,
+                warnings=warnings,
+                stage_scope=stage,
+            )
+    _apply_plan_patch_task_updates(
+        plan=plan,
+        task_payloads=tasks_payload,
+        now=now,
+        touched_stage_ids=touched_stage_ids,
+        touched_task_ids=touched_task_ids,
+        operation_counts=operation_counts,
+        action_results=action_results,
+        warnings=warnings,
+        stage_scope=None,
+    )
 
 
-PLAN_COMPLETION_PATCH_KEYS = {
-    "mark_plan_complete",
-    "complete_stage_ids",
-    "complete_task_ids",
-    "task_ids",
+PLAN_PATCH_KEYS = {
+    "name",
+    "description",
+    "completed",
+    "stages",
+    "tasks",
 }
 PLAN_LLM_TRANSFORM_SUMMARY_KEY = "llm_transform_summary"
 
@@ -9572,13 +10352,59 @@ def _extract_plan_llm_transform_patch(transform_output: Any) -> dict[str, Any] |
         patch = transform_output
     if not isinstance(patch, dict):
         return None
-    if not any(key in patch for key in PLAN_COMPLETION_PATCH_KEYS):
+    if not any(key in patch for key in PLAN_PATCH_KEYS):
         return None
     return patch
 
 
-def _execute_flowchart_plan_node(
+def _build_plan_llm_guided_patch_inference_prompt(
     *,
+    additive_prompt: str,
+    transform_prompt: str,
+    input_context: dict[str, Any],
+) -> str:
+    flowchart_context = _json_dumps(_json_safe(input_context))
+    guidance = transform_prompt or additive_prompt
+    sections = [
+        "You are executing a flowchart plan node in llm_guided mode.",
+        "Return only a strict JSON object for a plan patch with optional keys:",
+        "- name: string",
+        "- description: string or null",
+        "- completed: boolean",
+        "- stages: array of stage patch objects",
+        "- tasks: array of task patch objects",
+        "Each stage patch object can include stage_id or stage_key and optional updates:",
+        "name, description, position, completed, tasks.",
+        "Each task patch object can include task_id or task_key and optional updates:",
+        "name, description, position, completed, stage_id, stage_key.",
+        "Do not return markdown, fences, or prose.",
+        "Configured additive prompt:",
+        additive_prompt or "(empty)",
+        "Configured transform prompt:",
+        transform_prompt or "(empty)",
+        "Effective guidance:",
+        guidance or "(empty)",
+        "Flowchart input context (JSON):",
+        flowchart_context,
+    ]
+    return "\n\n".join(sections)
+
+
+def _classify_plan_primary_failure_reason(
+    *,
+    mode: str,
+    error: Exception,
+) -> str:
+    if mode == PLAN_NODE_MODE_LLM_GUIDED and isinstance(error, _PlanLlmGuidedValidationError):
+        return "llm_validation_error"
+    if mode == PLAN_NODE_MODE_LLM_GUIDED and isinstance(error, RuntimeError):
+        return "llm_inference_error"
+    return "primary_runtime_error"
+
+
+def _execute_flowchart_plan_node_for_mode(
+    *,
+    mode: str,
     node_id: int,
     node_ref_id: int | None,
     node_config: dict[str, Any],
@@ -9614,49 +10440,60 @@ def _execute_flowchart_plan_node(
         )
         if plan is None:
             raise ValueError(f"Plan {node_ref_id} was not found.")
+        attachment_entries = _merge_attachment_entries(
+            _build_attachment_entries(list(node.attachments)),
+            _collect_input_context_attachment_entries(input_context),
+        )
 
-        action = _normalize_plan_node_action(node_config.get("action"))
-        if not action:
-            raise ValueError(
-                "Plan node action is required: create_or_update_plan or complete_plan_item."
+        if "store_mode" not in node_config:
+            raise _PlanNodeConfigError(
+                "Plan node store_mode is required: append, replace, or update."
             )
+        normalized_mode = _normalize_plan_node_mode(mode)
+        if not normalized_mode:
+            raise ValueError(
+                "Plan node mode is required: llm_guided or deterministic."
+            )
+        store_mode = _normalize_plan_node_store_mode(node_config.get("store_mode"))
         additive_prompt = str(node_config.get("additive_prompt") or "").strip()
         now = _utcnow()
         action_results: list[str] = []
         touched_stage_ids: set[int] = set()
         touched_task_ids: set[int] = set()
-        completion_target: dict[str, Any] = {}
+        warnings: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        operation_counts = {
+            "created": 0,
+            "updated": 0,
+            "replaced": 0,
+            "skipped_missing": 0,
+        }
         llm_transform_summary = ""
-
-        if action == PLAN_NODE_ACTION_CREATE_OR_UPDATE:
+        patch_entries: list[dict[str, Any]] = []
+        if normalized_mode == PLAN_NODE_MODE_DETERMINISTIC:
             direct_patch = node_config.get("patch")
-            if isinstance(direct_patch, dict):
-                _apply_plan_completion_patch(
-                    plan=plan,
-                    patch=direct_patch,
-                    action_results=action_results,
-                    now=now,
-                    touched_stage_ids=touched_stage_ids,
-                    touched_task_ids=touched_task_ids,
-                )
-            completion_source_path = str(
-                node_config.get("completion_source_path") or ""
-            ).strip()
-            if completion_source_path:
-                completion_patch = _extract_path_value(input_context, completion_source_path)
-                if isinstance(completion_patch, dict):
-                    _apply_plan_completion_patch(
-                        plan=plan,
-                        patch=completion_patch,
-                        action_results=action_results,
-                        now=now,
-                        touched_stage_ids=touched_stage_ids,
-                        touched_task_ids=touched_task_ids,
+            if direct_patch is not None:
+                if not isinstance(direct_patch, dict):
+                    raise ValueError("Plan node config.patch must be a JSON object when provided.")
+                patch_entries.append(direct_patch)
+
+            patch_source_path = str(node_config.get("patch_source_path") or "").strip()
+            if patch_source_path:
+                source_patch_payload = _extract_path_value(input_context, patch_source_path)
+                if source_patch_payload is None:
+                    _append_plan_warning(
+                        warnings,
+                        code="missing_patch_source",
+                        message=f"No plan patch found at '{patch_source_path}'.",
+                        details={"patch_source_path": patch_source_path},
+                    )
+                elif not isinstance(source_patch_payload, dict):
+                    raise ValueError(
+                        f"Resolved patch_source_path '{patch_source_path}' to non-object payload."
                     )
                 else:
-                    action_results.append(
-                        f"No completion patch found at '{completion_source_path}'."
-                    )
+                    patch_entries.append(source_patch_payload)
+
             if _coerce_bool(node_config.get("transform_with_llm")):
                 transform_prompt = str(node_config.get("transform_prompt") or "").strip()
                 if transform_prompt:
@@ -9675,65 +10512,55 @@ def _execute_flowchart_plan_node(
                     llm_transform_summary = _extract_plan_llm_transform_summary(llm_patch)
                     normalized_llm_patch = _extract_plan_llm_transform_patch(llm_patch)
                     if normalized_llm_patch is not None:
-                        _apply_plan_completion_patch(
-                            plan=plan,
-                            patch=normalized_llm_patch,
-                            action_results=action_results,
-                            now=now,
-                            touched_stage_ids=touched_stage_ids,
-                            touched_task_ids=touched_task_ids,
-                        )
+                        patch_entries.append(normalized_llm_patch)
                         action_results.append("Applied LLM transform patch to plan.")
                     if llm_transform_summary:
                         action_results.append("Captured optional LLM transform summary.")
-        elif action == PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM:
-            completion_source_path = str(
-                node_config.get("completion_source_path") or ""
-            ).strip()
-            completion_target_payload = (
-                _extract_path_value(input_context, completion_source_path)
-                if completion_source_path
-                else None
-            )
-            plan_item_id = node_config.get("plan_item_id")
-            stage_key = node_config.get("stage_key")
-            task_key = node_config.get("task_key")
-            if isinstance(completion_target_payload, dict):
-                if not str(plan_item_id or "").strip():
-                    plan_item_id = completion_target_payload.get(
-                        "plan_item_id",
-                        completion_target_payload.get(
-                            "task_id", completion_target_payload.get("plan_task_id")
-                        ),
-                    )
-                if not str(stage_key or "").strip():
-                    stage_key = completion_target_payload.get("stage_key")
-                if not str(task_key or "").strip():
-                    task_key = completion_target_payload.get("task_key")
-            stage, task, resolution, normalized_stage_key, normalized_task_key = (
-                _resolve_plan_completion_target(
-                    plan=plan,
-                    plan_item_id=plan_item_id,
-                    stage_key=stage_key,
-                    task_key=task_key,
-                )
-            )
-            task.completed_at = now
-            touched_stage_ids.add(int(stage.id))
-            touched_task_ids.add(int(task.id))
-            completion_target = {
-                "resolution": resolution,
-                "plan_item_id": int(task.id),
-                "stage_id": int(stage.id),
-                "stage_key": normalized_stage_key,
-                "task_key": normalized_task_key,
-            }
-            action_results.append(
-                "Completed plan item "
-                f"{int(task.id)} (stage '{normalized_stage_key}', task '{normalized_task_key}')."
-            )
+            if not patch_entries:
+                action_results.append("No plan patch supplied.")
         else:
-            raise ValueError(f"Unsupported plan node action '{action}'.")
+            transform_prompt = str(node_config.get("transform_prompt") or "").strip()
+            llm_guided_prompt = _build_plan_llm_guided_patch_inference_prompt(
+                additive_prompt=additive_prompt,
+                transform_prompt=transform_prompt,
+                input_context=input_context,
+            )
+            model = _resolve_node_model(
+                session,
+                node=node,
+                default_model_id=default_model_id,
+            )
+            llm_patch = _execute_optional_llm_transform(
+                prompt=llm_guided_prompt,
+                model=model,
+                enabled_providers=enabled_providers,
+                mcp_configs=_build_mcp_config_map(list(node.mcp_servers)),
+                attachments=list(node.attachments),
+            )
+            llm_transform_summary = _extract_plan_llm_transform_summary(llm_patch)
+            normalized_llm_patch = _extract_plan_llm_transform_patch(llm_patch)
+            if normalized_llm_patch is None:
+                raise _PlanLlmGuidedValidationError(
+                    "LLM-guided plan mode must return a strict JSON object patch."
+                )
+            patch_entries.append(normalized_llm_patch)
+            action_results.append("Applied LLM-guided patch to plan.")
+            if llm_transform_summary:
+                action_results.append("Captured optional LLM transform summary.")
+
+        for patch_entry in patch_entries:
+            _apply_plan_store_mode_patch(
+                session,
+                plan=plan,
+                store_mode=store_mode,
+                patch=patch_entry,
+                now=now,
+                touched_stage_ids=touched_stage_ids,
+                touched_task_ids=touched_task_ids,
+                operation_counts=operation_counts,
+                action_results=action_results,
+                warnings=warnings,
+            )
 
         if additive_prompt:
             action_results.append("Captured additive prompt instructions.")
@@ -9776,18 +10603,21 @@ def _execute_flowchart_plan_node(
 
         output_state = {
             "node_type": FLOWCHART_NODE_TYPE_PLAN,
-            "action": action,
+            "mode": normalized_mode,
+            "store_mode": store_mode,
             "additive_prompt": additive_prompt,
             "action_results": action_results,
-            "completion_target": completion_target,
+            "operation_counts": operation_counts,
             "touched": {
                 "stage_ids": sorted(touched_stage_ids),
                 "task_ids": sorted(touched_task_ids),
                 "stages": touched_stages,
                 "tasks": touched_tasks,
             },
+            "warnings": warnings,
+            "errors": errors,
             "mcp_server_keys": list(mcp_server_keys),
-            "attachments": _build_attachment_entries(list(node.attachments)),
+            "attachments": attachment_entries,
             "plan": _serialize_plan_for_node(plan),
         }
         if llm_transform_summary:
@@ -9808,6 +10638,97 @@ def _execute_flowchart_plan_node(
     return output_state, routing_state
 
 
+def _execute_flowchart_plan_node(
+    *,
+    node_id: int,
+    node_ref_id: int | None,
+    node_config: dict[str, Any],
+    input_context: dict[str, Any],
+    enabled_providers: set[str],
+    default_model_id: int | None,
+    mcp_server_keys: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if "mode" not in node_config:
+        raise ValueError("Plan node mode is required: llm_guided or deterministic.")
+    mode = _normalize_plan_node_mode(node_config.get("mode"))
+    if not mode:
+        raise ValueError("Plan node mode is required: llm_guided or deterministic.")
+    retry_count = _resolve_plan_node_retry_count(node_config)
+    fallback_enabled = _resolve_plan_node_fallback_enabled(node_config)
+    primary_attempts = 1 + retry_count
+    primary_error: Exception | None = None
+    fallback_reason = "primary_runtime_error"
+
+    for _attempt in range(primary_attempts):
+        try:
+            return _execute_flowchart_plan_node_for_mode(
+                mode=mode,
+                node_id=node_id,
+                node_ref_id=node_ref_id,
+                node_config=node_config,
+                input_context=input_context,
+                enabled_providers=enabled_providers,
+                default_model_id=default_model_id,
+                mcp_server_keys=mcp_server_keys,
+            )
+        except Exception as exc:
+            if isinstance(exc, _PlanNodeConfigError):
+                raise
+            primary_error = exc
+            fallback_reason = _classify_plan_primary_failure_reason(
+                mode=mode,
+                error=exc,
+            )
+
+    if primary_error is None:
+        raise RuntimeError("Plan node failed without a captured primary error.")
+    if not fallback_enabled:
+        raise primary_error
+
+    fallback_mode = (
+        PLAN_NODE_MODE_LLM_GUIDED
+        if mode == PLAN_NODE_MODE_DETERMINISTIC
+        else PLAN_NODE_MODE_DETERMINISTIC
+    )
+    try:
+        output_state, routing_state = _execute_flowchart_plan_node_for_mode(
+            mode=fallback_mode,
+            node_id=node_id,
+            node_ref_id=node_ref_id,
+            node_config=node_config,
+            input_context=input_context,
+            enabled_providers=enabled_providers,
+            default_model_id=default_model_id,
+            mcp_server_keys=mcp_server_keys,
+        )
+    except Exception as fallback_error:
+        raise RuntimeError(
+            "Plan node fallback failed after primary mode "
+            f"'{mode}' exhausted ({fallback_reason}); "
+            "fallback_runtime_error."
+        ) from fallback_error
+
+    output_state["execution_status"] = DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING
+    output_state["fallback_used"] = True
+    output_state["mode_fallback_used"] = True
+    output_state["failed_mode"] = mode
+    output_state["fallback_reason"] = fallback_reason
+    output_state["fallback_mode"] = fallback_mode
+    action_results = (
+        output_state.get("action_results")
+        if isinstance(output_state.get("action_results"), list)
+        else []
+    )
+    action_results.append(
+        "Primary plan mode failed; succeeded via single-attempt fallback mode."
+    )
+    output_state["action_results"] = action_results
+    routing_state["fallback_used"] = True
+    routing_state["fallback_reason"] = fallback_reason
+    routing_state["mode_fallback_used"] = True
+    return output_state, routing_state
+
+
 def _execute_flowchart_milestone_node(
     *,
     node_id: int,
@@ -9819,6 +10740,9 @@ def _execute_flowchart_milestone_node(
     default_model_id: int | None,
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    input_context_attachment_entries = _collect_input_context_attachment_entries(
+        input_context
+    )
     with session_scope() as session:
         node = (
             session.execute(
@@ -9945,7 +10869,10 @@ def _execute_flowchart_milestone_node(
             "checkpoint_hit": checkpoint_hit,
             "action_results": action_results,
             "mcp_server_keys": list(mcp_server_keys),
-            "attachments": _build_attachment_entries(list(node.attachments)),
+            "attachments": _merge_attachment_entries(
+                _build_attachment_entries(list(node.attachments)),
+                input_context_attachment_entries,
+            ),
             "before_milestone": before_milestone,
             "milestone": _serialize_milestone_for_node(milestone),
         }
@@ -9990,6 +10917,9 @@ def _execute_flowchart_memory_node_deterministic(
     mcp_server_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     _validate_memory_node_mcp_server_keys(mcp_server_keys)
+    input_context_attachment_entries = _collect_input_context_attachment_entries(
+        input_context
+    )
 
     action_value = node_config.get("action")
     action = _normalize_memory_node_action(action_value)
@@ -10026,7 +10956,10 @@ def _execute_flowchart_memory_node_deterministic(
         )
         if node is None:
             raise ValueError(f"Flowchart node {node_id} was not found.")
-        attachment_entries = _build_attachment_entries(list(node.attachments))
+        attachment_entries = _merge_attachment_entries(
+            _build_attachment_entries(list(node.attachments)),
+            input_context_attachment_entries,
+        )
         if action == MEMORY_NODE_ACTION_RETRIEVE:
             if node_ref_id is not None:
                 memory = session.get(Memory, node_ref_id)
@@ -10555,7 +11488,9 @@ def _execute_flowchart_memory_node(
 
 def _execute_flowchart_flowchart_node(
     *,
+    node_id: int,
     node_ref_id: int | None,
+    input_context: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     target_flowchart_id = _parse_optional_int(node_ref_id, default=0, minimum=0)
     if target_flowchart_id <= 0:
@@ -10563,7 +11498,22 @@ def _execute_flowchart_flowchart_node(
 
     target_flowchart_name = f"Flowchart {target_flowchart_id}"
     queued_run_id: int | None = None
+    node_attachment_entries: list[dict[str, object]] = []
+    input_context_attachment_entries = _collect_input_context_attachment_entries(
+        input_context
+    )
     with session_scope() as session:
+        node = (
+            session.execute(
+                select(FlowchartNode)
+                .options(selectinload(FlowchartNode.attachments))
+                .where(FlowchartNode.id == node_id)
+            )
+            .scalars()
+            .first()
+        )
+        if node is not None:
+            node_attachment_entries = _build_attachment_entries(list(node.attachments))
         target_flowchart = session.get(Flowchart, target_flowchart_id)
         if target_flowchart is None:
             raise ValueError(f"Flowchart {target_flowchart_id} was not found.")
@@ -10604,6 +11554,10 @@ def _execute_flowchart_flowchart_node(
             "triggered_flowchart_run_id": queued_run_id,
             "triggered_flowchart_celery_task_id": async_result.id,
             "message": f"Queued flowchart {target_flowchart_id}.",
+            "attachments": _merge_attachment_entries(
+                node_attachment_entries,
+                input_context_attachment_entries,
+            ),
         },
         {},
     )
@@ -10656,12 +11610,15 @@ def _build_flowchart_rag_query_prompt(
     )
     if solid_text:
         parts.append(solid_text)
-    dotted_text = _rag_context_text(
-        input_context.get("dotted_upstream_nodes"),
-        edge_label="Dotted",
+    context_only_entries = input_context.get("context_only_upstream_nodes")
+    if not isinstance(context_only_entries, list):
+        context_only_entries = input_context.get("dotted_upstream_nodes")
+    context_text = _rag_context_text(
+        context_only_entries,
+        edge_label="Context Only",
     )
-    if dotted_text:
-        parts.append(dotted_text)
+    if context_text:
+        parts.append(context_text)
     return "\n\n".join(part for part in parts if part).strip()
 
 
@@ -10674,6 +11631,10 @@ def _execute_flowchart_rag_node(
     execution_task_id: int | None = None,
     default_model_id: int | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    input_context_attachment_entries = _collect_input_context_attachment_entries(
+        input_context
+    )
+    node_attachment_entries: list[dict[str, object]] = []
     mode = str(node_config.get("mode") or "").strip().lower()
     if mode not in {
         RAG_FLOWCHART_MODE_FRESH_INDEX,
@@ -10694,7 +11655,15 @@ def _execute_flowchart_rag_node(
         model_provider = _normalize_quick_rag_model_provider(node_config.get("model_provider"))
     else:
         with session_scope() as session:
-            node = session.get(FlowchartNode, node_id)
+            node = (
+                session.execute(
+                    select(FlowchartNode)
+                    .options(selectinload(FlowchartNode.attachments))
+                    .where(FlowchartNode.id == node_id)
+                )
+                .scalars()
+                .first()
+            )
             if node is None:
                 raise ValueError(f"Flowchart node {node_id} was not found.")
             model = _resolve_node_model(
@@ -10702,6 +11671,7 @@ def _execute_flowchart_rag_node(
                 node=node,
                 default_model_id=default_model_id,
             )
+            node_attachment_entries = _build_attachment_entries(list(node.attachments))
         model_provider = str(model.provider or "").strip().lower()
     model_id = getattr(model, "id", None)
     model_name = str(getattr(model, "name", "") or "")
@@ -10782,6 +11752,10 @@ def _execute_flowchart_rag_node(
             "model_id": model_id,
             "model_name": model_name,
             "model_provider": model_provider,
+            "attachments": _merge_attachment_entries(
+                node_attachment_entries,
+                input_context_attachment_entries,
+            ),
             "task_current_stage": stage_key,
             "task_stage_logs": task_stage_logs,
         }
@@ -10878,6 +11852,10 @@ def _execute_flowchart_rag_node(
         "model_id": model_id,
         "model_name": model_name,
         "model_provider": model_provider,
+        "attachments": _merge_attachment_entries(
+            node_attachment_entries,
+            input_context_attachment_entries,
+        ),
     }
     return output_state, {}
 
@@ -10935,6 +11913,12 @@ def _execute_executor_llm_call_node(
         raise ValueError("Executor llm_call payload is missing provider.")
     prompt_raw = node_config.get("prompt")
     prompt = prompt_raw if prompt_raw is None or isinstance(prompt_raw, str) else str(prompt_raw)
+    system_prompt_raw = node_config.get("system_prompt")
+    system_prompt = (
+        system_prompt_raw
+        if system_prompt_raw is None or isinstance(system_prompt_raw, str)
+        else str(system_prompt_raw)
+    )
     mcp_configs_raw = node_config.get("mcp_configs")
     if mcp_configs_raw is None:
         mcp_configs: dict[str, dict[str, Any]] = {}
@@ -10956,6 +11940,7 @@ def _execute_executor_llm_call_node(
     llm_result = _run_llm(
         provider,
         prompt,
+        system_prompt=system_prompt,
         mcp_configs=mcp_configs,
         model_config=model_config,
         on_update=None,
@@ -11047,7 +12032,9 @@ def _execute_flowchart_node(
         )
     if node_type == FLOWCHART_NODE_TYPE_FLOWCHART:
         return _execute_flowchart_flowchart_node(
+            node_id=node_id,
             node_ref_id=node_ref_id,
+            input_context=input_context,
         )
     if node_type == FLOWCHART_NODE_TYPE_TASK:
         return _execute_flowchart_task_node(
@@ -11209,7 +12196,12 @@ def _queue_followup_flowchart_run(
 
 
 @celery_app.task(bind=True)
-def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
+def run_flowchart(
+    self,
+    flowchart_id: int,
+    run_id: int,
+    start_node_id: int | None = None,
+) -> None:
     init_engine(Config.SQLALCHEMY_DATABASE_URI)
     init_db()
     flowchart_run_request_id = f"flowchart-run-{int(run_id)}"
@@ -11316,7 +12308,19 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             run.status = "failed"
             run.finished_at = _utcnow()
             return
-        start_node_id = start_nodes[0]
+        canonical_start_node_id = start_nodes[0]
+        requested_start_node_id = _parse_optional_int(
+            start_node_id,
+            default=0,
+            minimum=0,
+        )
+        run_entry_node_id = canonical_start_node_id
+        if requested_start_node_id > 0:
+            if requested_start_node_id not in node_specs:
+                run.status = "failed"
+                run.finished_at = _utcnow()
+                return
+            run_entry_node_id = requested_start_node_id
         max_node_executions = flowchart.max_node_executions
         max_runtime_minutes = flowchart.max_runtime_minutes
         max_parallel_nodes = _parse_optional_int(
@@ -11416,7 +12420,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
             parent_id: deque() for parent_id in parent_ids
         }
     ready_queue: deque[dict[str, Any]] = deque(
-        [{"node_id": start_node_id, "upstream_results": []}]
+        [{"node_id": run_entry_node_id, "upstream_results": []}]
     )
     started_monotonic = time.monotonic()
     final_status = "completed"
@@ -12342,7 +13346,7 @@ def run_flowchart(self, flowchart_id: int, run_id: int) -> None:
                 }
                 for edge in emission["selected_edges"]:
                     target_node_id = int(edge["target_node_id"])
-                    if target_node_id == start_node_id:
+                    if target_node_id == canonical_start_node_id:
                         next_run_id, skipped_followup = _queue_followup_flowchart_run(
                             flowchart_id=flowchart_id,
                             source_run_id=run_id,

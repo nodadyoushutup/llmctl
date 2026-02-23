@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFlashState } from '../lib/flashMessages'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import HeaderPagination from '../components/HeaderPagination'
 import PanelHeader from '../components/PanelHeader'
+import TableListEmptyState from '../components/TableListEmptyState'
 import { HttpError } from '../lib/httpClient'
 import { deleteRun, getRuns, stopAgent } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -161,55 +163,16 @@ export default function RunsPage() {
           actionsClassName="workflow-list-panel-header-actions"
           actions={(
             <div className="pagination-bar-actions">
-              <nav className="pagination" aria-label="Autoruns pages">
-                {page > 1 ? (
-                  <button
-                    type="button"
-                    className="pagination-btn"
-                    onClick={() => updateParams({ page: page - 1 })}
-                  >
-                    Prev
-                  </button>
-                ) : (
-                  <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-                )}
-                <div className="pagination-pages">
-                  {paginationItems.map((item, index) => {
-                    const itemType = String(item?.type || '')
-                    if (itemType === 'gap') {
-                      return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
-                    }
-                    const itemPage = Number.parseInt(String(item?.page || ''), 10)
-                    if (!Number.isInteger(itemPage) || itemPage <= 0) {
-                      return null
-                    }
-                    if (itemPage === page) {
-                      return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
-                    }
-                    return (
-                      <button
-                        key={itemPage}
-                        type="button"
-                        className="pagination-link"
-                        onClick={() => updateParams({ page: itemPage })}
-                      >
-                        {itemPage}
-                      </button>
-                    )
-                  })}
-                </div>
-                {page < totalPages ? (
-                  <button
-                    type="button"
-                    className="pagination-btn"
-                    onClick={() => updateParams({ page: page + 1 })}
-                  >
-                    Next
-                  </button>
-                ) : (
-                  <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-                )}
-              </nav>
+              <HeaderPagination
+                ariaLabel="Autoruns pages"
+                canGoPrev={page > 1}
+                canGoNext={page < totalPages}
+                onPrev={() => updateParams({ page: page - 1 })}
+                onNext={() => updateParams({ page: page + 1 })}
+                currentPage={page}
+                pageItems={paginationItems}
+                onPageSelect={(itemPage) => updateParams({ page: itemPage })}
+              />
               <div className="pagination-size">
                 <label htmlFor="runs-per-page">Rows per page</label>
                 <select
@@ -237,83 +200,88 @@ export default function RunsPage() {
           {!state.loading && !state.error ? (
             <p className="toolbar-meta">Total autoruns: {totalRuns}</p>
           ) : null}
-          {!state.loading && !state.error && runs.length === 0 ? <p>No autoruns recorded yet.</p> : null}
-          {!state.loading && !state.error && runs.length > 0 ? (
-            <div className="table-wrap workflow-list-table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Autorun</th>
-                    <th>Agent</th>
-                    <th>Status</th>
-                    <th>Autorun task</th>
-                    <th>Started</th>
-                    <th>Finished</th>
-                    <th className="table-actions-cell">Stop</th>
-                    <th className="table-actions-cell">Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {runs.map((run) => {
-                    const href = `/runs/${run.id}`
-                    const active = isRunActive(run.status)
-                    const busy = Boolean(busyById[run.id])
-                    const taskId = run.task_id || run.last_run_task_id || '-'
-                    const status = runStatusMeta(run.status)
-                    return (
-                      <tr
-                        key={run.id}
-                        className="table-row-link"
-                        data-href={href}
-                        onClick={(event) => handleRowClick(event, href)}
-                      >
-                        <td>
-                          <Link to={href}>{run.name || `Autorun ${run.id}`}</Link>
-                        </td>
-                        <td>
-                          {run.agent_id ? <Link to={`/agents/${run.agent_id}`}>{run.agent_name || `Agent ${run.agent_id}`}</Link> : '-'}
-                        </td>
-                        <td>
-                          <span className={status.className}>{status.label}</span>
-                        </td>
-                        <td className="muted" style={{ fontSize: '12px' }}>{taskId}</td>
-                        <td className="muted">{run.last_started_at || '-'}</td>
-                        <td className="muted">{run.last_stopped_at || '-'}</td>
-                        <td className="table-actions-cell">
-                          <div className="table-actions">
-                            {active ? (
-                              <button
-                                type="button"
-                                className="icon-button"
-                                aria-label="Disable autorun"
-                                title="Disable autorun"
-                                disabled={busy}
-                                onClick={() => handleDisableAutorun(run)}
-                              >
-                                <ActionIcon name="stop" />
-                              </button>
-                            ) : <span className="muted">-</span>}
-                          </div>
-                        </td>
-                        <td className="table-actions-cell">
-                          <div className="table-actions">
-                            <button
-                              type="button"
-                              className="icon-button icon-button-danger"
-                              aria-label="Delete autorun"
-                              title="Delete autorun"
-                              disabled={busy}
-                              onClick={() => handleDelete(run.id)}
-                            >
-                              <ActionIcon name="trash" />
-                            </button>
-                          </div>
-                        </td>
+          {!state.loading && !state.error ? (
+            <div className="workflow-list-table-shell">
+              {runs.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Autorun</th>
+                        <th>Agent</th>
+                        <th>Status</th>
+                        <th>Autorun task</th>
+                        <th>Started</th>
+                        <th>Finished</th>
+                        <th className="table-actions-cell">Stop</th>
+                        <th className="table-actions-cell">Delete</th>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {runs.map((run) => {
+                        const href = `/runs/${run.id}`
+                        const active = isRunActive(run.status)
+                        const busy = Boolean(busyById[run.id])
+                        const taskId = run.task_id || run.last_run_task_id || '-'
+                        const status = runStatusMeta(run.status)
+                        return (
+                          <tr
+                            key={run.id}
+                            className="table-row-link"
+                            data-href={href}
+                            onClick={(event) => handleRowClick(event, href)}
+                          >
+                            <td>
+                              <Link to={href}>{run.name || `Autorun ${run.id}`}</Link>
+                            </td>
+                            <td>
+                              {run.agent_id ? <Link to={`/agents/${run.agent_id}`}>{run.agent_name || `Agent ${run.agent_id}`}</Link> : '-'}
+                            </td>
+                            <td>
+                              <span className={status.className}>{status.label}</span>
+                            </td>
+                            <td className="muted" style={{ fontSize: '12px' }}>{taskId}</td>
+                            <td className="muted">{run.last_started_at || '-'}</td>
+                            <td className="muted">{run.last_stopped_at || '-'}</td>
+                            <td className="table-actions-cell">
+                              <div className="table-actions">
+                                {active ? (
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    aria-label="Disable autorun"
+                                    title="Disable autorun"
+                                    disabled={busy}
+                                    onClick={() => handleDisableAutorun(run)}
+                                  >
+                                    <ActionIcon name="stop" />
+                                  </button>
+                                ) : <span className="muted">-</span>}
+                              </div>
+                            </td>
+                            <td className="table-actions-cell">
+                              <div className="table-actions">
+                                <button
+                                  type="button"
+                                  className="icon-button icon-button-danger"
+                                  aria-label="Delete autorun"
+                                  title="Delete autorun"
+                                  disabled={busy}
+                                  onClick={() => handleDelete(run.id)}
+                                >
+                                  <ActionIcon name="trash" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <TableListEmptyState message="No autoruns recorded yet." />
+              )}
             </div>
           ) : null}
         </div>

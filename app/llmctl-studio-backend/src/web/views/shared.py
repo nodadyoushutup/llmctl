@@ -99,6 +99,8 @@ from core.models import (
     AgentTask,
     Attachment,
     FLOWCHART_EDGE_MODE_CHOICES,
+    FLOWCHART_EDGE_MODE_DASHED,
+    FLOWCHART_EDGE_MODE_DOTTED,
     FLOWCHART_EDGE_MODE_SOLID,
     FLOWCHART_NODE_TYPE_CHOICES,
     FLOWCHART_NODE_TYPE_DECISION,
@@ -575,11 +577,11 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
         "attachments": False,
     },
     FLOWCHART_NODE_TYPE_FLOWCHART: {
-        "model": False,
+        "model": True,
         "mcp": False,
         "scripts": False,
         "skills": False,
-        "attachments": False,
+        "attachments": True,
     },
     FLOWCHART_NODE_TYPE_TASK: {
         "model": True,
@@ -610,18 +612,18 @@ FLOWCHART_NODE_UTILITY_COMPATIBILITY = {
         "attachments": True,
     },
     FLOWCHART_NODE_TYPE_DECISION: {
-        "model": False,
+        "model": True,
         "mcp": False,
         "scripts": False,
         "skills": False,
-        "attachments": False,
+        "attachments": True,
     },
     FLOWCHART_NODE_TYPE_RAG: {
         "model": True,
         "mcp": False,
         "scripts": False,
         "skills": False,
-        "attachments": False,
+        "attachments": True,
     },
 }
 FLOWCHART_END_MAX_OUTGOING_EDGES = 0
@@ -654,12 +656,23 @@ MEMORY_NODE_STORE_MODE_CHOICES = (
 MEMORY_NODE_RETRY_COUNT_DEFAULT = 1
 MEMORY_NODE_RETRY_COUNT_MAX = 5
 MEMORY_NODE_FALLBACK_ENABLED_DEFAULT = True
-PLAN_NODE_ACTION_CREATE_OR_UPDATE = "create_or_update_plan"
-PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM = "complete_plan_item"
-PLAN_NODE_ACTION_CHOICES = (
-    PLAN_NODE_ACTION_CREATE_OR_UPDATE,
-    PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM,
+PLAN_NODE_STORE_MODE_APPEND = "append"
+PLAN_NODE_STORE_MODE_REPLACE = "replace"
+PLAN_NODE_STORE_MODE_UPDATE = "update"
+PLAN_NODE_STORE_MODE_CHOICES = (
+    PLAN_NODE_STORE_MODE_APPEND,
+    PLAN_NODE_STORE_MODE_REPLACE,
+    PLAN_NODE_STORE_MODE_UPDATE,
 )
+PLAN_NODE_MODE_LLM_GUIDED = "llm_guided"
+PLAN_NODE_MODE_DETERMINISTIC = "deterministic"
+PLAN_NODE_MODE_CHOICES = (
+    PLAN_NODE_MODE_LLM_GUIDED,
+    PLAN_NODE_MODE_DETERMINISTIC,
+)
+PLAN_NODE_RETRY_COUNT_DEFAULT = 1
+PLAN_NODE_RETRY_COUNT_MAX = 5
+PLAN_NODE_FALLBACK_ENABLED_DEFAULT = True
 DEFAULT_NODE_ARTIFACT_RETENTION_TTL_SECONDS = 3600
 DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT = 25
 FLOWCHART_FAN_IN_MODE_ALL = "all"
@@ -7279,6 +7292,26 @@ def _serialize_skill(skill: Skill) -> dict[str, object]:
     }
 
 
+def _attachment_binding_counts(attachment: Attachment) -> dict[str, int]:
+    tasks = list(getattr(attachment, "tasks", []) or [])
+    flowchart_nodes = list(getattr(attachment, "flowchart_nodes", []) or [])
+    chat_count = 0
+    quick_count = 0
+    for task in tasks:
+        if is_quick_node_kind(getattr(task, "kind", None)):
+            quick_count += 1
+            continue
+        if getattr(task, "flowchart_node_id", None) is None:
+            chat_count += 1
+    flowchart_count = len(flowchart_nodes)
+    return {
+        "chat": chat_count,
+        "quick": quick_count,
+        "flowchart": flowchart_count,
+        "total": chat_count + quick_count + flowchart_count,
+    }
+
+
 def _serialize_attachment(attachment: Attachment) -> dict[str, object]:
     is_image = _is_image_attachment(attachment)
     preview_url = (
@@ -7286,6 +7319,7 @@ def _serialize_attachment(attachment: Attachment) -> dict[str, object]:
         if is_image and attachment.file_path
         else None
     )
+    binding_counts = _attachment_binding_counts(attachment)
     return {
         "id": attachment.id,
         "file_name": attachment.file_name,
@@ -7294,8 +7328,10 @@ def _serialize_attachment(attachment: Attachment) -> dict[str, object]:
         "size_bytes": attachment.size_bytes,
         "is_image": is_image,
         "preview_url": preview_url,
-        "binding_count": _safe_relationship_count(lambda: attachment.tasks)
-        + _safe_relationship_count(lambda: attachment.flowchart_nodes),
+        "binding_count": int(binding_counts["total"]),
+        "chat_binding_count": int(binding_counts["chat"]),
+        "quick_binding_count": int(binding_counts["quick"]),
+        "flowchart_binding_count": int(binding_counts["flowchart"]),
         "created_at": _human_time(attachment.created_at),
         "updated_at": _human_time(attachment.updated_at),
     }
@@ -7341,7 +7377,7 @@ def _flowchart_serialize_context_source(
         item.get("source_node_type", item.get("node_type")) or ""
     ).strip()
     edge_mode = str(item.get("edge_mode") or default_edge_mode).strip().lower()
-    if edge_mode not in {"solid", "dotted"}:
+    if edge_mode not in FLOWCHART_EDGE_MODE_CHOICES:
         edge_mode = default_edge_mode
     condition_key = str(item.get("condition_key") or "").strip() or None
     return {
@@ -7357,7 +7393,11 @@ def _flowchart_serialize_context_source(
 
 def _flowchart_run_node_context_trace(
     input_context: dict[str, object],
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+) -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
     raw_trigger_sources = input_context.get("trigger_sources")
     if not isinstance(raw_trigger_sources, list):
         raw_trigger_sources = input_context.get("upstream_nodes")
@@ -7374,23 +7414,43 @@ def _flowchart_run_node_context_trace(
                 continue
             trigger_sources.append(serialized)
 
-    raw_pulled_sources = input_context.get("pulled_dotted_sources")
-    if not isinstance(raw_pulled_sources, list):
-        raw_pulled_sources = input_context.get("dotted_upstream_nodes")
-    pulled_dotted_sources: list[dict[str, object]] = []
-    if isinstance(raw_pulled_sources, list):
-        for item in raw_pulled_sources:
+    raw_context_only_sources = input_context.get("context_only_sources")
+    if not isinstance(raw_context_only_sources, list):
+        raw_context_only_sources = input_context.get("pulled_dotted_sources")
+    if not isinstance(raw_context_only_sources, list):
+        raw_context_only_sources = input_context.get("dotted_upstream_nodes")
+    context_only_sources: list[dict[str, object]] = []
+    if isinstance(raw_context_only_sources, list):
+        for item in raw_context_only_sources:
             serialized = _flowchart_serialize_context_source(
                 item,
-                default_edge_mode="dotted",
+                default_edge_mode=FLOWCHART_EDGE_MODE_DOTTED,
             )
             if serialized is None:
                 continue
-            if str(serialized.get("edge_mode")) != "dotted":
+            if str(serialized.get("edge_mode")) != FLOWCHART_EDGE_MODE_DOTTED:
                 continue
-            pulled_dotted_sources.append(serialized)
+            context_only_sources.append(serialized)
 
-    return trigger_sources, pulled_dotted_sources
+    raw_attachment_sources = input_context.get("pulled_attachment_sources")
+    if not isinstance(raw_attachment_sources, list):
+        raw_attachment_sources = input_context.get("attachment_only_sources")
+    if not isinstance(raw_attachment_sources, list):
+        raw_attachment_sources = input_context.get("attachment_only_upstream_nodes")
+    attachment_only_sources: list[dict[str, object]] = []
+    if isinstance(raw_attachment_sources, list):
+        for item in raw_attachment_sources:
+            serialized = _flowchart_serialize_context_source(
+                item,
+                default_edge_mode=FLOWCHART_EDGE_MODE_DASHED,
+            )
+            if serialized is None:
+                continue
+            if str(serialized.get("edge_mode")) != FLOWCHART_EDGE_MODE_DASHED:
+                continue
+            attachment_only_sources.append(serialized)
+
+    return trigger_sources, context_only_sources, attachment_only_sources
 
 
 def _serialize_flowchart_run_node(
@@ -7399,7 +7459,7 @@ def _serialize_flowchart_run_node(
     artifact_history: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     input_context = _parse_json_dict(node_run.input_context_json)
-    trigger_sources, pulled_dotted_sources = _flowchart_run_node_context_trace(
+    trigger_sources, context_only_sources, attachment_only_sources = _flowchart_run_node_context_trace(
         input_context
     )
     run_metadata = _serialize_node_executor_metadata(task)
@@ -7440,9 +7500,15 @@ def _serialize_flowchart_run_node(
         "status": node_run.status,
         "input_context": input_context,
         "trigger_sources": trigger_sources,
-        "pulled_dotted_sources": pulled_dotted_sources,
+        "pulled_dotted_sources": context_only_sources,
+        "context_only_sources": context_only_sources,
+        "pulled_attachment_sources": attachment_only_sources,
+        "attachment_only_sources": attachment_only_sources,
         "trigger_source_count": len(trigger_sources),
-        "pulled_dotted_source_count": len(pulled_dotted_sources),
+        "pulled_dotted_source_count": len(context_only_sources),
+        "context_only_source_count": len(context_only_sources),
+        "pulled_attachment_source_count": len(attachment_only_sources),
+        "attachment_only_source_count": len(attachment_only_sources),
         "output_contract_version": node_run.output_contract_version,
         "routing_contract_version": node_run.routing_contract_version,
         "degraded_status": bool(node_run.degraded_status),
@@ -8108,34 +8174,33 @@ def _sanitize_milestone_node_config(
     return sanitized
 
 
-def _normalize_plan_node_action(
+def _normalize_plan_node_store_mode(
     value: object,
     *,
     field_name: str,
 ) -> str:
     cleaned = str(value or "").strip().lower()
-    if cleaned in {
-        "create",
-        "update",
-        "read",
-        "create_or_update",
-        "create_or_update_plan",
-        "create/update",
-        "create or update plan",
-        "update_completion",
-        "complete",
-    }:
-        return PLAN_NODE_ACTION_CREATE_OR_UPDATE
-    if cleaned in {
-        "complete_plan_item",
-        "complete plan item",
-        "mark_plan_item_complete",
-        "mark_task_complete",
-    }:
-        return PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM
+    if cleaned in {"append", "add", "additive", "create", "create_or_update"}:
+        return PLAN_NODE_STORE_MODE_APPEND
+    if cleaned in {"replace", "overwrite", "set"}:
+        return PLAN_NODE_STORE_MODE_REPLACE
+    if cleaned in {"update", "patch", "mutate"}:
+        return PLAN_NODE_STORE_MODE_UPDATE
     raise ValueError(
-        f"{field_name} must be one of: "
-        f"{PLAN_NODE_ACTION_CREATE_OR_UPDATE}, {PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM}."
+        f"{field_name} must be one of: " + ", ".join(PLAN_NODE_STORE_MODE_CHOICES) + "."
+    )
+
+
+def _normalize_plan_node_mode(
+    value: object,
+    *,
+    field_name: str,
+) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned in PLAN_NODE_MODE_CHOICES:
+        return cleaned
+    raise ValueError(
+        f"{field_name} must be one of: " + ", ".join(PLAN_NODE_MODE_CHOICES) + "."
     )
 
 
@@ -8144,14 +8209,35 @@ def _sanitize_plan_node_config(
     *,
     field_prefix: str,
 ) -> dict[str, object]:
-    if "action" not in config_payload:
+    if "mode" not in config_payload:
         raise ValueError(
-            f"{field_prefix}.action is required for plan nodes."
+            f"{field_prefix}.mode is required for plan nodes."
         )
-    action = _normalize_plan_node_action(
-        config_payload.get("action"),
-        field_name=f"{field_prefix}.action",
+    if "store_mode" not in config_payload:
+        raise ValueError(
+            f"{field_prefix}.store_mode is required for plan nodes."
+        )
+    mode = _normalize_plan_node_mode(
+        config_payload.get("mode"),
+        field_name=f"{field_prefix}.mode",
     )
+    store_mode = _normalize_plan_node_store_mode(
+        config_payload.get("store_mode"),
+        field_name=f"{field_prefix}.store_mode",
+    )
+    retry_count = _coerce_optional_int(
+        config_payload.get("retry_count"),
+        field_name=f"{field_prefix}.retry_count",
+        minimum=0,
+    )
+    if retry_count is None:
+        retry_count = PLAN_NODE_RETRY_COUNT_DEFAULT
+    fallback_enabled = _coerce_optional_bool(
+        config_payload.get("fallback_enabled"),
+        field_name=f"{field_prefix}.fallback_enabled",
+    )
+    if fallback_enabled is None:
+        fallback_enabled = PLAN_NODE_FALLBACK_ENABLED_DEFAULT
     retention_mode = _normalize_node_artifact_retention_mode(
         config_payload.get("retention_mode"),
         field_name=f"{field_prefix}.retention_mode",
@@ -8167,8 +8253,11 @@ def _sanitize_plan_node_config(
         minimum=1,
     )
     sanitized: dict[str, object] = {
-        "action": action,
+        "mode": mode,
+        "store_mode": store_mode,
         "additive_prompt": str(config_payload.get("additive_prompt") or "").strip(),
+        "retry_count": min(retry_count, PLAN_NODE_RETRY_COUNT_MAX),
+        "fallback_enabled": fallback_enabled,
         "retention_mode": retention_mode,
         "retention_ttl_seconds": (
             retention_ttl_seconds
@@ -8181,32 +8270,12 @@ def _sanitize_plan_node_config(
             else DEFAULT_NODE_ARTIFACT_RETENTION_MAX_COUNT
         ),
     }
-    completion_source_path = str(config_payload.get("completion_source_path") or "").strip()
-    if completion_source_path:
-        sanitized["completion_source_path"] = completion_source_path
-    if action == PLAN_NODE_ACTION_COMPLETE_PLAN_ITEM:
-        plan_item_id = _coerce_optional_int(
-            config_payload.get("plan_item_id"),
-            field_name=f"{field_prefix}.plan_item_id",
-            minimum=1,
-        )
-        stage_key = str(config_payload.get("stage_key") or "").strip()
-        task_key = str(config_payload.get("task_key") or "").strip()
-        if plan_item_id is not None:
-            sanitized["plan_item_id"] = plan_item_id
-        if stage_key:
-            sanitized["stage_key"] = stage_key
-        if task_key:
-            sanitized["task_key"] = task_key
-        if plan_item_id is None and not (stage_key and task_key) and not completion_source_path:
-            raise ValueError(
-                f"{field_prefix} requires plan_item_id, or stage_key + task_key, "
-                "or completion_source_path when action is complete_plan_item."
-            )
-    else:
-        patch = config_payload.get("patch")
-        if isinstance(patch, dict):
-            sanitized["patch"] = patch
+    patch = config_payload.get("patch")
+    if isinstance(patch, dict):
+        sanitized["patch"] = patch
+    patch_source_path = str(config_payload.get("patch_source_path") or "").strip()
+    if patch_source_path:
+        sanitized["patch_source_path"] = patch_source_path
     for key in ("route_key", "route_key_on_complete"):
         value = str(config_payload.get(key) or "").strip()
         if value:
@@ -8533,7 +8602,10 @@ def _validate_flowchart_graph_snapshot(
         edge_mode = str(edge.get("edge_mode") or "").strip().lower()
         if edge_mode not in FLOWCHART_EDGE_MODE_CHOICES:
             errors.append(
-                f"Edge {edge_token} must define edge_mode as solid or dotted."
+                "Edge "
+                f"{edge_token} must define edge_mode as "
+                + ", ".join(FLOWCHART_EDGE_MODE_CHOICES)
+                + "."
             )
         source_node_id = int(edge["source_node_id"])
         target_node_id = int(edge["target_node_id"])
@@ -8569,16 +8641,16 @@ def _validate_flowchart_graph_snapshot(
                     "Only decision nodes may define condition_key on solid edges "
                     f"(source node {source_node_id})."
                 )
-        elif edge_mode == "dotted" and condition_key and node_type != FLOWCHART_NODE_TYPE_DECISION:
+        elif edge_mode != FLOWCHART_EDGE_MODE_SOLID and condition_key:
             errors.append(
-                "Only decision nodes may define condition_key on dotted edges "
+                "Only decision nodes may define condition_key on solid edges "
                 f"(source node {source_node_id})."
             )
 
     for (source_node_id, target_node_id), modes in edge_modes_by_pair.items():
-        if "solid" in modes and "dotted" in modes:
+        if len(modes) > 1:
             errors.append(
-                f"Edges {source_node_id}->{target_node_id} cannot mix solid and dotted modes for the same source/target pair."
+                f"Edges {source_node_id}->{target_node_id} cannot mix connector modes for the same source/target pair."
             )
 
     for node in nodes:

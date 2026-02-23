@@ -192,6 +192,9 @@ function collectLegacyCollections({ promptPayload, quickContext, outputPayload }
 function legacyConnectorBlocks(incomingConnectorContext) {
   const triggerNodes = asRecordList(incomingConnectorContext.upstream_nodes)
   const contextOnlyNodes = asRecordList(incomingConnectorContext.dotted_upstream_nodes)
+  const attachmentOnlyNodes = asRecordList(
+    incomingConnectorContext.attachment_only_upstream_nodes,
+  )
   const blocks = []
   for (const [index, node] of triggerNodes.entries()) {
     blocks.push({
@@ -210,6 +213,18 @@ function legacyConnectorBlocks(incomingConnectorContext) {
       id: `context-only-${index + 1}`,
       label: String(node.condition_key || `Context only connector ${index + 1}`),
       classification: 'context_only',
+      source_node_id: node.source_node_id,
+      source_node_type: node.source_node_type,
+      condition_key: node.condition_key,
+      edge_mode: node.edge_mode,
+      output_state: node.output_state,
+    })
+  }
+  for (const [index, node] of attachmentOnlyNodes.entries()) {
+    blocks.push({
+      id: `attachments-only-${index + 1}`,
+      label: String(node.condition_key || `Attachments only connector ${index + 1}`),
+      classification: 'attachments_only',
       source_node_id: node.source_node_id,
       source_node_type: node.source_node_type,
       condition_key: node.condition_key,
@@ -332,6 +347,11 @@ export function resolveNodeLeftPanelPayload(payload) {
         ?? incomingConnectorContext.pulled_dotted_source_count
         ?? asList(incomingConnectorContext.context_only_sources).length,
       ),
+      attachment_only_source_count: asNonNegativeInt(
+        incomingConnectorContext.attachment_only_source_count
+        ?? incomingConnectorContext.pulled_attachment_source_count
+        ?? asList(incomingConnectorContext.attachment_only_sources).length,
+      ),
       connector_blocks: connectorBlocks,
       resolved_input_context: asRecord(incomingConnectorContext.input_context),
     },
@@ -377,6 +397,7 @@ export function inputConnectorSummaryRows(value) {
     { label: 'Context source', value: String(input.source || '-') },
     { label: 'Trigger incoming connectors', value: asNonNegativeInt(input.trigger_source_count) },
     { label: 'Context only incoming connectors', value: asNonNegativeInt(input.context_only_source_count) },
+    { label: 'Attachments only incoming connectors', value: asNonNegativeInt(input.attachment_only_source_count) },
     { label: 'Connector blocks', value: connectorBlocks.length },
   ]
 }

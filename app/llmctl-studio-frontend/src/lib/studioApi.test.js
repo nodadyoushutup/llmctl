@@ -802,6 +802,15 @@ describe('studioApi', () => {
     })
   })
 
+  test('runFlowchart supports optional start node override', () => {
+    runFlowchart(7, { startNodeId: 14 })
+
+    expect(requestJson).toHaveBeenCalledWith('/flowcharts/7/run', {
+      method: 'POST',
+      body: { start_node_id: 14 },
+    })
+  })
+
   test('stage 6 settings endpoints map to expected api paths', () => {
     getSettingsCore()
     getSettingsProvider()
@@ -1379,6 +1388,11 @@ describe('studioApi', () => {
       },
     })
     expect(requestJson).toHaveBeenNthCalledWith(25, '/mcps/8/delete', { method: 'POST' })
+  })
+
+  test('attachments list supports scoped pagination query params', () => {
+    getAttachments({ nodeType: 'flowchart', page: 2, perPage: 10 })
+    expect(requestJson).toHaveBeenCalledWith('/attachments?node_type=flowchart&limit=10&page=2')
   })
 
   test('stage 8 external tool and rag endpoints map to expected api paths', () => {

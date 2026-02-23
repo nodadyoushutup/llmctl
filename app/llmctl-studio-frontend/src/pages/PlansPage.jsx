@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
+import HeaderPagination from '../components/HeaderPagination'
 import PanelHeader from '../components/PanelHeader'
+import TableListEmptyState from '../components/TableListEmptyState'
 import { HttpError } from '../lib/httpClient'
 import { getPlans } from '../lib/studioApi'
 import { shouldIgnoreRowClick } from '../lib/tableRowLink'
@@ -94,109 +96,71 @@ export default function PlansPage() {
           title="Plans"
           actionsClassName="workflow-list-panel-header-actions"
           actions={(
-            <nav className="pagination" aria-label="Plans pages">
-              {page > 1 ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ page: page - 1, per_page: perPage })}
-                >
-                  Prev
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-              )}
-              <div className="pagination-pages">
-                {paginationItems.map((item, index) => {
-                  const itemType = String(item?.type || '')
-                  if (itemType === 'gap') {
-                    return <span key={`gap-${index}`} className="pagination-ellipsis">&hellip;</span>
-                  }
-                  const itemPage = Number.parseInt(String(item?.page || ''), 10)
-                  if (!Number.isInteger(itemPage) || itemPage <= 0) {
-                    return null
-                  }
-                  if (itemPage === page) {
-                    return <span key={itemPage} className="pagination-link is-active" aria-current="page">{itemPage}</span>
-                  }
-                  return (
-                    <button
-                      key={itemPage}
-                      type="button"
-                      className="pagination-link"
-                      onClick={() => updateParams({ page: itemPage, per_page: perPage })}
-                    >
-                      {itemPage}
-                    </button>
-                  )
-                })}
-              </div>
-              {page < totalPages ? (
-                <button
-                  type="button"
-                  className="pagination-btn"
-                  onClick={() => updateParams({ page: page + 1, per_page: perPage })}
-                >
-                  Next
-                </button>
-              ) : (
-                <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-              )}
-            </nav>
+            <HeaderPagination
+              ariaLabel="Plans pages"
+              canGoPrev={page > 1}
+              canGoNext={page < totalPages}
+              onPrev={() => updateParams({ page: page - 1, per_page: perPage })}
+              onNext={() => updateParams({ page: page + 1, per_page: perPage })}
+              currentPage={page}
+              pageItems={paginationItems}
+              onPageSelect={(itemPage) => updateParams({ page: itemPage, per_page: perPage })}
+            />
           )}
         />
         <div className="panel-card-body workflow-fixed-panel-body">
           {state.loading ? <p>Loading plans...</p> : null}
           {state.error ? <p className="error-text">{state.error}</p> : null}
-          {!state.loading && !state.error && plans.length === 0 ? (
-            <p className="muted">
-              No plans found yet. Add a Plan node in a flowchart to create one.
-            </p>
-          ) : null}
-          {!state.loading && !state.error && plans.length > 0 ? (
-            <div className="table-wrap workflow-list-table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Plan</th>
-                    <th>Completed</th>
-                    <th>Stages</th>
-                    <th>Tasks</th>
-                    <th className="table-actions-cell">Edit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plans.map((plan) => {
-                    const href = `/plans/${plan.id}`
-                    return (
-                      <tr
-                        key={plan.id}
-                        className="table-row-link"
-                        data-href={href}
-                        onClick={(event) => handleRowClick(event, href)}
-                      >
-                        <td>
-                          <Link to={href}>{plan.name}</Link>
-                          {plan.description ? <p className="table-note">{truncateText(plan.description)}</p> : null}
-                        </td>
-                        <td className="muted">{plan.completed_at || '-'}</td>
-                        <td className="muted">{plan.stage_count || 0}</td>
-                        <td className="muted">{plan.task_count || 0}</td>
-                        <td className="table-actions-cell">
-                          <Link
-                            to={`/plans/${plan.id}/edit`}
-                            className="icon-button"
-                            aria-label="Edit plan"
-                            title="Edit plan"
-                          >
-                            <ActionIcon name="edit" />
-                          </Link>
-                        </td>
+          {!state.loading && !state.error ? (
+            <div className="workflow-list-table-shell">
+              {plans.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Plan</th>
+                        <th>Completed</th>
+                        <th>Stages</th>
+                        <th>Tasks</th>
+                        <th className="table-actions-cell">Edit</th>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {plans.map((plan) => {
+                        const href = `/plans/${plan.id}`
+                        return (
+                          <tr
+                            key={plan.id}
+                            className="table-row-link"
+                            data-href={href}
+                            onClick={(event) => handleRowClick(event, href)}
+                          >
+                            <td>
+                              <Link to={href}>{plan.name}</Link>
+                              {plan.description ? <p className="table-note">{truncateText(plan.description)}</p> : null}
+                            </td>
+                            <td className="muted">{plan.completed_at || '-'}</td>
+                            <td className="muted">{plan.stage_count || 0}</td>
+                            <td className="muted">{plan.task_count || 0}</td>
+                            <td className="table-actions-cell">
+                              <Link
+                                to={`/plans/${plan.id}/edit`}
+                                className="icon-button"
+                                aria-label="Edit plan"
+                                title="Edit plan"
+                              >
+                                <ActionIcon name="edit" />
+                              </Link>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <TableListEmptyState message="No plans found yet. Add a Plan node in a flowchart to create one." />
+              )}
             </div>
           ) : null}
         </div>

@@ -163,6 +163,7 @@ describe('ChatPage', () => {
     renderPage()
 
     await screen.findByRole('button', { name: /send/i })
+    fireEvent.click(screen.getByRole('button', { name: 'Controls' }))
     fireEvent.change(screen.getByLabelText('complexity'), { target: { value: 'high' } })
     fireEvent.change(screen.getByPlaceholderText('Send a message...'), { target: { value: 'sync me first' } })
     fireEvent.click(screen.getByRole('button', { name: /send/i }))
@@ -176,21 +177,26 @@ describe('ChatPage', () => {
     expect(sendChatTurn).not.toHaveBeenCalled()
   })
 
-  test('uses the session summary icon to expand when closed and save when open', async () => {
-    window.localStorage.setItem('llmctl-ui-details:chat:session-controls', '0')
+  test('toggles sidebar mode and saves controls from controls view', async () => {
     updateChatThreadConfig.mockResolvedValue({ ok: true, thread: buildRuntimePayload().selected_thread })
     renderPage()
 
-    const expandButton = await screen.findByRole('button', { name: /expand session controls/i })
-    fireEvent.click(expandButton)
+    await screen.findByRole('button', { name: /send/i })
+    const controlsButton = screen.getByRole('button', { name: 'Controls' })
+    fireEvent.click(controlsButton)
 
-    const saveButton = await screen.findByRole('button', { name: /save session controls/i })
+    expect(screen.getByRole('heading', { name: 'Controls' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('complexity'), { target: { value: 'high' } })
+    const saveButton = screen.getByRole('button', { name: /save controls/i })
     fireEvent.click(saveButton)
 
     await waitFor(() => {
       expect(updateChatThreadConfig).toHaveBeenCalled()
     })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Threads' }))
+    expect(screen.getByRole('heading', { name: 'Threads' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('complexity')).not.toBeInTheDocument()
   })
 
   test('renders message bubbles without role badge headers', async () => {

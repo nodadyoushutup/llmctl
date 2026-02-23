@@ -33,8 +33,8 @@ DETERMINISTIC_BASE_TOOLS: dict[str, dict[str, Any]] = {
     },
     "plan": {
         "tool_name": "deterministic.plan",
-        "default_operation": "create_or_update_plan",
-        "operations": ("create_or_update_plan", "complete_plan_item"),
+        "default_operation": "append",
+        "operations": ("append", "replace", "update"),
         "artifact_hook_key": "plan_final_state",
     },
 }
@@ -212,22 +212,46 @@ def _attach_trace_to_outputs(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     next_output = dict(output_state or {})
     next_routing = dict(routing_state or {})
+    trace_fallback_used = bool(trace_envelope.get("fallback_used"))
+    existing_fallback_used = bool(next_output.get("fallback_used"))
+    existing_execution_status = _normalize_text(next_output.get("execution_status"))
+    trace_execution_status = _normalize_text(trace_envelope.get("execution_status"))
+    existing_warnings = (
+        list(next_output.get("warnings"))
+        if isinstance(next_output.get("warnings"), list)
+        else []
+    )
+    trace_warnings = list(trace_envelope.get("warnings") or [])
     next_output["deterministic_tooling"] = dict(trace_envelope)
     next_routing["deterministic_tooling"] = {
         "contract_version": trace_envelope.get("contract_version"),
         "tool_name": trace_envelope.get("tool_name"),
         "operation": trace_envelope.get("operation"),
-        "execution_status": trace_envelope.get("execution_status"),
-        "fallback_used": trace_envelope.get("fallback_used"),
-        "warnings": list(trace_envelope.get("warnings") or []),
+        "execution_status": (
+            DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING
+            if existing_execution_status == DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING
+            or existing_fallback_used
+            else trace_execution_status
+        ),
+        "fallback_used": bool(trace_fallback_used or existing_fallback_used),
+        "warnings": trace_warnings,
         "request_id": trace_envelope.get("request_id"),
         "correlation_id": trace_envelope.get("correlation_id"),
         "artifact_hook_key": trace_envelope.get("artifact_hook_key"),
     }
-    next_output["execution_status"] = trace_envelope.get("execution_status")
-    next_output["fallback_used"] = bool(trace_envelope.get("fallback_used"))
-    if trace_envelope.get("warnings"):
-        next_output["warnings"] = list(trace_envelope.get("warnings") or [])
+    next_output["execution_status"] = (
+        DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING
+        if existing_execution_status == DETERMINISTIC_TOOL_STATUS_SUCCESS_WITH_WARNING
+        or existing_fallback_used
+        else trace_execution_status
+    )
+    next_output["fallback_used"] = bool(trace_fallback_used or existing_fallback_used)
+    if trace_warnings:
+        next_output["warnings"] = [*existing_warnings, *trace_warnings]
+    elif existing_warnings:
+        next_output["warnings"] = existing_warnings
+    if next_output.get("fallback_used"):
+        next_routing["fallback_used"] = True
     return next_output, next_routing
 
 

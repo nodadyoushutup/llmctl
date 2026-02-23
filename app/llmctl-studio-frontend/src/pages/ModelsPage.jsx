@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import ActionIcon from '../components/ActionIcon'
-import PanelHeader from '../components/PanelHeader'
+import HeaderPagination from '../components/HeaderPagination'
+import TableListEmptyState from '../components/TableListEmptyState'
+import TwoColumnListShell from '../components/TwoColumnListShell'
 import { useFlash } from '../lib/flashMessages'
 import { HttpError } from '../lib/httpClient'
 import { rememberModelsListScroll, resolveModelsListHref, restoreModelsListScroll } from '../lib/modelsListState'
@@ -13,6 +15,48 @@ const SORT_DIRECTIONS = new Set(['asc', 'desc'])
 const PER_PAGE_OPTIONS = [10, 25, 50]
 const EMPTY_MODELS = []
 const MODEL_LOADING_SKELETON_ROWS = 5
+const MODEL_PROVIDER_SECTIONS = [
+  {
+    id: 'codex',
+    value: 'codex',
+    label: 'Codex',
+    icon: 'fa-solid fa-robot',
+    title: 'Codex Models',
+  },
+  {
+    id: 'gemini',
+    value: 'gemini',
+    label: 'Gemini',
+    icon: 'fa-solid fa-star',
+    title: 'Gemini Models',
+  },
+  {
+    id: 'claude',
+    value: 'claude',
+    label: 'Claude',
+    icon: 'fa-solid fa-brain',
+    title: 'Claude Models',
+  },
+  {
+    id: 'vllm-local',
+    value: 'vllm_local',
+    label: 'vLLM Local',
+    icon: 'fa-solid fa-computer',
+    title: 'vLLM Local Models',
+  },
+  {
+    id: 'vllm-remote',
+    value: 'vllm_remote',
+    label: 'vLLM Remote',
+    icon: 'fa-solid fa-globe',
+    title: 'vLLM Remote Models',
+  },
+]
+const MODEL_PROVIDER_VALUES = new Set(
+  MODEL_PROVIDER_SECTIONS
+    .map((item) => item.value)
+    .filter((value) => value),
+)
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ''), 10)
@@ -40,6 +84,26 @@ function parseDefaultFilter(value) {
     return normalized
   }
   return ''
+}
+
+function parseProviderFilter(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (MODEL_PROVIDER_VALUES.has(normalized)) {
+    return normalized
+  }
+  return ''
+}
+
+function providerSidebarHref(currentSearchParams, providerValue) {
+  const params = new URLSearchParams(currentSearchParams)
+  if (providerValue) {
+    params.set('provider', providerValue)
+  } else {
+    params.delete('provider')
+  }
+  params.delete('page')
+  const nextSearch = params.toString()
+  return nextSearch ? `/models?${nextSearch}` : '/models'
 }
 
 function errorMessage(error, fallback) {
@@ -74,7 +138,7 @@ export default function ModelsPage() {
   const perPage = parsePerPage(searchParams.get('per_page'))
   const sortKey = parseSortKey(searchParams.get('sort'))
   const sortDirection = parseSortDirection(searchParams.get('dir'))
-  const providerFilter = String(searchParams.get('provider') || '').trim().toLowerCase()
+  const providerFilter = parseProviderFilter(searchParams.get('provider'))
   const defaultFilter = parseDefaultFilter(searchParams.get('default'))
   const searchQuery = String(searchParams.get('q') || '').trim()
 
@@ -177,21 +241,19 @@ export default function ModelsPage() {
     [payload],
   )
   const listHref = resolveModelsListHref(`/models${location.search}`)
-
-  const providerOptions = useMemo(() => {
-    const optionsByValue = new Map()
-    models.forEach((model) => {
-      const value = String(model?.provider || '').trim().toLowerCase()
-      if (!value || optionsByValue.has(value)) {
-        return
-      }
-      const label = String(model?.provider_label || model?.provider || value)
-      optionsByValue.set(value, label)
-    })
-    return Array.from(optionsByValue.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((left, right) => left.label.localeCompare(right.label))
-  }, [models])
+  const activeProviderSection = useMemo(
+    () => MODEL_PROVIDER_SECTIONS.find((section) => section.value === providerFilter) || null,
+    [providerFilter],
+  )
+  const providerSidebarItems = useMemo(
+    () => MODEL_PROVIDER_SECTIONS.map((section) => ({
+      id: section.id,
+      to: providerSidebarHref(searchParams, section.value),
+      label: section.label,
+      icon: section.icon,
+    })),
+    [searchParams],
+  )
 
   const filteredModels = useMemo(() => {
     const normalizedSearch = searchQuery.toLowerCase()
@@ -289,7 +351,7 @@ export default function ModelsPage() {
     if (parseSortDirection(updated.get('dir')) === 'asc') {
       updated.delete('dir')
     }
-    if (!String(updated.get('provider') || '').trim()) {
+    if (!parseProviderFilter(updated.get('provider'))) {
       updated.delete('provider')
     }
     if (!parseDefaultFilter(updated.get('default'))) {
@@ -416,19 +478,6 @@ export default function ModelsPage() {
     return (
       <>
         <div className="toolbar-group">
-          <label htmlFor={`${idPrefix}-provider-filter`}>Provider</label>
-          <select
-            id={`${idPrefix}-provider-filter`}
-            value={providerFilter}
-            onChange={(event) => updateParams({ provider: event.target.value, page: 1 })}
-          >
-            <option value="">All providers</option>
-            {providerOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="toolbar-group">
           <label htmlFor={`${idPrefix}-default-filter`}>Default</label>
           <select
             id={`${idPrefix}-default-filter`}
@@ -469,141 +518,251 @@ export default function ModelsPage() {
   }
 
   return (
-    <section className="stack" aria-label="Models">
-      <article className="card">
-        <PanelHeader
-          title="Models"
-          titleTag="h2"
-          actions={(
-            <Link
-              to="/models/new"
-              state={{ from: listHref }}
-              className="button"
-              aria-label="New model"
-              title="New model"
-              onClick={rememberListState}
+    <TwoColumnListShell
+      ariaLabel="Models"
+      className="provider-fixed-page"
+      sidebarAriaLabel="Model providers"
+      sidebarTitle="Providers"
+      sidebarItems={providerSidebarItems}
+      activeSidebarId={activeProviderSection?.id || ''}
+      mainTitle={activeProviderSection ? activeProviderSection.title : 'Models'}
+      mainActions={(
+        <div className="pagination-bar-actions">
+          <HeaderPagination
+            ariaLabel="Models pages"
+            canGoPrev={currentPage > 1}
+            canGoNext={currentPage < totalPages}
+            onPrev={() => updateParams({ page: currentPage - 1 })}
+            onNext={() => updateParams({ page: currentPage + 1 })}
+            currentPage={currentPage}
+            totalPages={totalPages}
+          />
+          <div className="pagination-size">
+            <label htmlFor="models-per-page">Rows per page</label>
+            <select
+              id="models-per-page"
+              value={String(perPage)}
+              onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
             >
-              New Model
-            </Link>
-          )}
-        />
-        <p className="panel-header-copy">Create model profiles that bind provider selection and runtime policies.</p>
-        <div className="models-list-controls" data-testid="models-list-controls">
-          <div className="models-list-controls-left">
-            <div className="toolbar-group">
-              <label htmlFor="models-search">Search</label>
-              <input
-                id="models-search"
-                type="search"
-                value={searchDraft}
-                onChange={(event) => setSearchDraft(event.target.value)}
-                placeholder="Name, provider, model..."
-              />
-            </div>
-            {isNarrowScreen ? (
-              <details className="models-filters-popover">
-                <summary className="models-filters-summary">Filters</summary>
-                <div className="models-filters-popover-body">
-                  {renderFilterControls('models-mobile')}
-                </div>
-              </details>
-            ) : (
-              <div className="models-inline-filters">
-                {renderFilterControls('models')}
-              </div>
-            )}
+              {PER_PAGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </div>
-          {!state.loading && !hasInitialLoadError ? (
-            <div className="models-list-controls-right">
-              <p className="toolbar-meta">Total models: {totalModels}</p>
-              <div className="pagination-size">
-                <label htmlFor="models-per-page">Rows per page</label>
-                <select
-                  id="models-per-page"
-                  value={String(perPage)}
-                  onChange={(event) => updateParams({ per_page: event.target.value, page: 1 })}
-                >
-                  {PER_PAGE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <nav className="pagination" aria-label="Models pages">
-                {currentPage > 1 ? (
-                  <button
-                    type="button"
-                    className="pagination-btn"
-                    onClick={() => updateParams({ page: currentPage - 1 })}
-                  >
-                    Prev
-                  </button>
-                ) : (
-                  <span className="pagination-btn is-disabled" aria-disabled="true">Prev</span>
-                )}
-                <span className="pagination-link is-active" aria-current="page">
-                  {currentPage}
-                </span>
-                <span className="muted">/ {totalPages}</span>
-                {currentPage < totalPages ? (
-                  <button
-                    type="button"
-                    className="pagination-btn"
-                    onClick={() => updateParams({ page: currentPage + 1 })}
-                  >
-                    Next
-                  </button>
-                ) : (
-                  <span className="pagination-btn is-disabled" aria-disabled="true">Next</span>
-                )}
-              </nav>
-            </div>
-          ) : null}
+          <p className="panel-header-meta">Total: {totalModels}</p>
+          <Link
+            to="/models/new"
+            state={{ from: listHref }}
+            className="icon-button"
+            aria-label="New model"
+            title="New model"
+            onClick={rememberListState}
+          >
+            <ActionIcon name="plus" />
+          </Link>
         </div>
-        {state.loading ? (
-          <div className="table-wrap" data-testid="models-loading-skeleton">
-            <table className="data-table models-loading-table" aria-label="Loading models">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Provider</th>
-                  <th>Default Alias</th>
-                  <th>Capability Tags</th>
-                  <th className="table-actions-cell">Actions</th>
+      )}
+    >
+      <p className="panel-header-copy">Create model profiles that bind provider selection and runtime policies.</p>
+      {activeProviderSection ? (
+        <p className="panel-header-meta">Provider scope: {activeProviderSection.label}</p>
+      ) : null}
+      <div className="models-list-controls" data-testid="models-list-controls">
+        <div className="models-list-controls-left">
+          <div className="toolbar-group">
+            <label htmlFor="models-search">Search</label>
+            <input
+              id="models-search"
+              type="search"
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              placeholder="Name, provider, model..."
+            />
+          </div>
+          {isNarrowScreen ? (
+            <details className="models-filters-popover">
+              <summary className="models-filters-summary">Filters</summary>
+              <div className="models-filters-popover-body">
+                {renderFilterControls('models-mobile')}
+              </div>
+            </details>
+          ) : (
+            <div className="models-inline-filters">
+              {renderFilterControls('models')}
+            </div>
+          )}
+        </div>
+      </div>
+      {state.loading ? (
+        <div className="table-wrap workflow-list-table-shell" data-testid="models-loading-skeleton">
+          <table className="data-table models-loading-table" aria-label="Loading models">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Provider</th>
+                <th>Default Alias</th>
+                <th>Capability Tags</th>
+                <th className="table-actions-cell">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: MODEL_LOADING_SKELETON_ROWS }).map((_, index) => (
+                <tr key={`models-loading-row-${index}`} data-testid="models-skeleton-row">
+                  <td><span className="models-skeleton-line models-skeleton-line-primary" /></td>
+                  <td><span className="models-skeleton-line" /></td>
+                  <td><span className="models-skeleton-line" /></td>
+                  <td><span className="models-skeleton-line models-skeleton-line-tags" /></td>
+                  <td className="table-actions-cell">
+                    <div className="table-actions">
+                      <span className="models-skeleton-icon" />
+                      <span className="models-skeleton-icon" />
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: MODEL_LOADING_SKELETON_ROWS }).map((_, index) => (
-                  <tr key={`models-loading-row-${index}`} data-testid="models-skeleton-row">
-                    <td><span className="models-skeleton-line models-skeleton-line-primary" /></td>
-                    <td><span className="models-skeleton-line" /></td>
-                    <td><span className="models-skeleton-line" /></td>
-                    <td><span className="models-skeleton-line models-skeleton-line-tags" /></td>
-                    <td className="table-actions-cell">
-                      <div className="table-actions">
-                        <span className="models-skeleton-icon" />
-                        <span className="models-skeleton-icon" />
-                      </div>
-                    </td>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {hasInitialLoadError ? (
+        <div className="models-error-state" role="alert">
+          <p className="error-text">{state.error}</p>
+          <button type="button" className="btn-link" onClick={() => { void refresh() }}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+      {!state.loading && !hasInitialLoadError ? (
+        <div className="workflow-list-table-shell">
+          {visibleModels.length > 0 ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Provider</th>
+                    <th>Default Alias</th>
+                    <th>Capability Tags</th>
+                    <th className="table-actions-cell">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-        {hasInitialLoadError ? (
-          <div className="models-error-state" role="alert">
-            <p className="error-text">{state.error}</p>
-            <button type="button" className="btn-link" onClick={() => { void refresh() }}>
-              Retry
-            </button>
-          </div>
-        ) : null}
-        {!state.loading && !hasInitialLoadError && visibleModels.length === 0 ? (
-          <div className="stack" style={{ marginTop: '8px' }}>
-            <p>No models matched the current filters.</p>
-            <div>
+                </thead>
+                <tbody>
+                  {visibleModels.map((model) => {
+                    const href = `/models/${model.id}`
+                    const busy = Boolean(busyById[model.id])
+                    const pendingDelete = Boolean(pendingDeleteById[model.id])
+                    const capabilityTags = Array.isArray(model?.capability_tags)
+                      ? model.capability_tags
+                          .map((value) => String(value || '').trim())
+                          .filter(Boolean)
+                      : []
+                    const compatibility = model?.compatibility && typeof model.compatibility === 'object'
+                      ? model.compatibility
+                      : null
+                    const driftDetected = Boolean(compatibility?.drift_detected)
+                    return (
+                      <tr
+                        key={model.id}
+                        className="table-row-link"
+                        data-href={href}
+                        tabIndex={0}
+                        onClick={(event) => handleRowClick(event, href)}
+                        onKeyDown={(event) => handleRowKeyDown(event, href)}
+                      >
+                        <td>
+                          <Link
+                            to={href}
+                            state={{ from: listHref }}
+                            onClick={rememberListState}
+                          >
+                            {model.name || `Model ${model.id}`}
+                          </Link>
+                          {model.description ? (
+                            <p className="muted" style={{ marginTop: '6px', fontSize: '12px' }}>
+                              {model.description}
+                            </p>
+                          ) : null}
+                          {driftDetected ? (
+                            <p className="muted" style={{ marginTop: '6px', fontSize: '12px' }}>
+                              Provider capabilities changed.{' '}
+                              <Link
+                                to={`/models/${model.id}/edit`}
+                                state={{ from: listHref }}
+                                onClick={rememberListState}
+                              >
+                                Review settings
+                              </Link>
+                              .
+                            </p>
+                          ) : null}
+                        </td>
+                        <td>{model.provider_label || model.provider || '-'}</td>
+                        <td>{String(model?.default_alias || '').trim() || '-'}</td>
+                        <td>
+                          {capabilityTags.length ? (
+                            <div className="models-capability-cell">
+                              {capabilityTags.slice(0, 2).map((tag) => (
+                                <span key={`${model.id}-${tag}`} className="chip models-capability-chip">{tag}</span>
+                              ))}
+                              {capabilityTags.length > 2 ? (
+                                <span className="models-capability-overflow-wrap">
+                                  <button
+                                    type="button"
+                                    className="chip models-capability-overflow-btn"
+                                    aria-label={`Show ${capabilityTags.length - 2} more capability tags`}
+                                    title={capabilityTags.join(', ')}
+                                    onClick={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      setCapabilityPopoverModelId((current) => (current === model.id ? null : model.id))
+                                    }}
+                                  >
+                                    +{capabilityTags.length - 2}
+                                  </button>
+                                  {capabilityPopoverModelId === model.id ? (
+                                    <div className="models-capability-popover" role="tooltip">
+                                      {capabilityTags.slice(2).join(', ')}
+                                    </div>
+                                  ) : null}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : '-'}
+                        </td>
+                        <td className="table-actions-cell">
+                          <div className="table-actions">
+                            <button
+                              type="button"
+                              className={`icon-button${model.is_default ? ' icon-button-active' : ''}`}
+                              aria-label={model.is_default ? 'Unset default model' : 'Set default model'}
+                              title={model.is_default ? 'Unset default model' : 'Set default model'}
+                              disabled={busy}
+                              onClick={() => handleDefault(model)}
+                            >
+                              <ActionIcon name={model.is_default ? 'star-filled' : 'star'} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button icon-button-danger"
+                              aria-label={pendingDelete ? 'Confirm delete model' : 'Delete model'}
+                              title={pendingDelete ? 'Confirm delete model' : 'Delete model'}
+                              disabled={busy}
+                              onClick={() => handleDelete(model, pendingDelete)}
+                            >
+                              <ActionIcon name={pendingDelete ? 'check' : 'trash'} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <TableListEmptyState message="No models matched the current filters.">
               <Link
                 to="/models/new"
                 state={{ from: listHref }}
@@ -612,136 +771,10 @@ export default function ModelsPage() {
               >
                 New Model
               </Link>
-            </div>
-          </div>
-        ) : null}
-        {!state.loading && !hasInitialLoadError && visibleModels.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Provider</th>
-                  <th>Default Alias</th>
-                  <th>Capability Tags</th>
-                  <th className="table-actions-cell">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleModels.map((model) => {
-                  const href = `/models/${model.id}`
-                  const busy = Boolean(busyById[model.id])
-                  const pendingDelete = Boolean(pendingDeleteById[model.id])
-                  const capabilityTags = Array.isArray(model?.capability_tags)
-                    ? model.capability_tags
-                        .map((value) => String(value || '').trim())
-                        .filter(Boolean)
-                    : []
-                  const compatibility = model?.compatibility && typeof model.compatibility === 'object'
-                    ? model.compatibility
-                    : null
-                  const driftDetected = Boolean(compatibility?.drift_detected)
-                  return (
-                    <tr
-                      key={model.id}
-                      className="table-row-link"
-                      data-href={href}
-                      tabIndex={0}
-                      onClick={(event) => handleRowClick(event, href)}
-                      onKeyDown={(event) => handleRowKeyDown(event, href)}
-                    >
-                      <td>
-                        <Link
-                          to={href}
-                          state={{ from: listHref }}
-                          onClick={rememberListState}
-                        >
-                          {model.name || `Model ${model.id}`}
-                        </Link>
-                        {model.description ? (
-                          <p className="muted" style={{ marginTop: '6px', fontSize: '12px' }}>
-                            {model.description}
-                          </p>
-                        ) : null}
-                        {driftDetected ? (
-                          <p className="muted" style={{ marginTop: '6px', fontSize: '12px' }}>
-                            Provider capabilities changed.{' '}
-                            <Link
-                              to={`/models/${model.id}/edit`}
-                              state={{ from: listHref }}
-                              onClick={rememberListState}
-                            >
-                              Review settings
-                            </Link>
-                            .
-                          </p>
-                        ) : null}
-                      </td>
-                      <td>{model.provider_label || model.provider || '-'}</td>
-                      <td>{String(model?.default_alias || '').trim() || '-'}</td>
-                      <td>
-                        {capabilityTags.length ? (
-                          <div className="models-capability-cell">
-                            {capabilityTags.slice(0, 2).map((tag) => (
-                              <span key={`${model.id}-${tag}`} className="chip models-capability-chip">{tag}</span>
-                            ))}
-                            {capabilityTags.length > 2 ? (
-                              <span className="models-capability-overflow-wrap">
-                                <button
-                                  type="button"
-                                  className="chip models-capability-overflow-btn"
-                                  aria-label={`Show ${capabilityTags.length - 2} more capability tags`}
-                                  title={capabilityTags.join(', ')}
-                                  onClick={(event) => {
-                                    event.preventDefault()
-                                    event.stopPropagation()
-                                    setCapabilityPopoverModelId((current) => (current === model.id ? null : model.id))
-                                  }}
-                                >
-                                  +{capabilityTags.length - 2}
-                                </button>
-                                {capabilityPopoverModelId === model.id ? (
-                                  <div className="models-capability-popover" role="tooltip">
-                                    {capabilityTags.slice(2).join(', ')}
-                                  </div>
-                                ) : null}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : '-'}
-                      </td>
-                      <td className="table-actions-cell">
-                        <div className="table-actions">
-                          <button
-                            type="button"
-                            className={`icon-button${model.is_default ? ' icon-button-active' : ''}`}
-                            aria-label={model.is_default ? 'Unset default model' : 'Set default model'}
-                            title={model.is_default ? 'Unset default model' : 'Set default model'}
-                            disabled={busy}
-                            onClick={() => handleDefault(model)}
-                          >
-                            <ActionIcon name={model.is_default ? 'star-filled' : 'star'} />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-button icon-button-danger"
-                            aria-label={pendingDelete ? 'Confirm delete model' : 'Delete model'}
-                            title={pendingDelete ? 'Confirm delete model' : 'Delete model'}
-                            disabled={busy}
-                            onClick={() => handleDelete(model, pendingDelete)}
-                          >
-                            <ActionIcon name={pendingDelete ? 'check' : 'trash'} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </article>
-    </section>
+            </TableListEmptyState>
+          )}
+        </div>
+      ) : null}
+    </TwoColumnListShell>
   )
 }

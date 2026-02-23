@@ -43,7 +43,7 @@ class DeterministicToolingStage6Tests(unittest.TestCase):
 
         plan = resolve_base_tool_scaffold(node_type="plan")
         self.assertEqual("deterministic.plan", plan.get("tool_name"))
-        self.assertEqual("create_or_update_plan", plan.get("operation"))
+        self.assertEqual("append", plan.get("operation"))
 
     def test_resolve_base_tool_scaffold_falls_back_to_default_operation(self) -> None:
         scaffold = resolve_base_tool_scaffold(
@@ -105,7 +105,12 @@ class DeterministicToolingStage6Tests(unittest.TestCase):
             if attempts["count"] == 1:
                 raise RuntimeError("transient failure")
             return (
-                {"node_type": "plan", "action": "create_or_update_plan", "action_results": []},
+                {
+                    "node_type": "plan",
+                    "mode": "deterministic",
+                    "store_mode": "append",
+                    "action_results": [],
+                },
                 {},
             )
 
@@ -113,7 +118,7 @@ class DeterministicToolingStage6Tests(unittest.TestCase):
             config=ToolInvocationConfig(
                 node_type="plan",
                 tool_name="deterministic.plan",
-                operation="create_or_update_plan",
+                operation="append",
                 max_attempts=2,
             ),
             invoke=_invoke,

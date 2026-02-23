@@ -2,6 +2,58 @@ from .shared import *  # noqa: F401,F403
 
 __all__ = ['list_plan_artifacts', 'view_plan_artifact', 'delete_plan_artifact', 'list_memory_artifacts', 'view_memory_artifact', 'delete_memory_artifact', 'list_milestone_artifacts', 'view_milestone_artifact', 'delete_milestone_artifact', 'list_node_artifacts', 'view_node_artifact', 'list_attachments', 'view_attachment', 'view_attachment_file', 'delete_attachment']
 
+ATTACHMENT_NODE_TYPE_CHOICES = ("chat", "quick", "flowchart")
+
+
+def _parse_attachment_list_query() -> dict[str, object]:
+    raw_node_type = str(
+        request.args.get("node_type") or request.args.get("scope") or ""
+    ).strip().lower()
+    node_type = raw_node_type if raw_node_type in ATTACHMENT_NODE_TYPE_CHOICES else ""
+    if raw_node_type and not node_type:
+        raise ValueError(
+            "node_type must be one of chat, quick, or flowchart."
+        )
+    limit = _coerce_optional_int(
+        request.args.get("limit") or request.args.get("per_page"),
+        field_name="limit",
+        minimum=1,
+    )
+    offset = _coerce_optional_int(
+        request.args.get("offset"),
+        field_name="offset",
+        minimum=0,
+    )
+    page = _coerce_optional_int(
+        request.args.get("page"),
+        field_name="page",
+        minimum=1,
+    )
+    if limit is None:
+        limit = 25
+    limit = min(int(limit), 200)
+    if offset is None:
+        offset = 0
+    if page is not None:
+        offset = (int(page) - 1) * int(limit)
+    return {
+        "node_type": node_type,
+        "limit": int(limit),
+        "offset": int(offset),
+    }
+
+
+def _attachment_matches_scope(attachment_payload: dict[str, object], node_type: str) -> bool:
+    if not node_type:
+        return True
+    if node_type == "chat":
+        return int(attachment_payload.get("chat_binding_count") or 0) > 0
+    if node_type == "quick":
+        return int(attachment_payload.get("quick_binding_count") or 0) > 0
+    if node_type == "flowchart":
+        return int(attachment_payload.get("flowchart_binding_count") or 0) > 0
+    return True
+
 @bp.get("/plans/<int:plan_id>/artifacts")
 def list_plan_artifacts(plan_id: int):
     request_id = _workflow_request_id()
@@ -629,11 +681,47 @@ def view_node_artifact(artifact_id: int):
 
 @bp.get("/attachments")
 def list_attachments():
+    request_id = _workflow_request_id()
+    correlation_id = _workflow_correlation_id()
     attachments = _load_attachments()
+    attachment_rows = [_serialize_attachment(attachment) for attachment in attachments]
     if _workflow_wants_json():
-        return {
-            "attachments": [_serialize_attachment(attachment) for attachment in attachments],
+        try:
+            query = _parse_attachment_list_query()
+        except ValueError as exc:
+            return _workflow_error_envelope(
+                code="invalid_request",
+                message=str(exc),
+                details={},
+                request_id=request_id,
+                correlation_id=correlation_id,
+            ), 400
+        node_type = str(query["node_type"] or "")
+        filtered = [
+            item
+            for item in attachment_rows
+            if _attachment_matches_scope(item, node_type)
+        ]
+        total_count = len(filtered)
+        offset = int(query["offset"])
+        limit = int(query["limit"])
+        items = filtered[offset: offset + limit]
+        payload: dict[str, object] = {
+            "ok": True,
+            "items": items,
+            "attachments": items,
+            "count": len(items),
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "node_type": node_type or None,
+            },
+            "request_id": request_id,
         }
+        if correlation_id:
+            payload["correlation_id"] = correlation_id
+        return payload
     return render_template(
         "attachments.html",
         attachments=attachments,

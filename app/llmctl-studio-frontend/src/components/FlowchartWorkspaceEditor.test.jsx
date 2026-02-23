@@ -238,8 +238,9 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
 
     expect(screen.getByLabelText('Save graph')).toBeTruthy()
     expect(screen.getByLabelText('Delete connector')).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'Trigger + Context' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Trigger + Context + Attachments' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'Context Only' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Attachments Only' })).toBeTruthy()
     expect(screen.queryByText('condition key')).toBeNull()
     expect(screen.queryByText('connector id')).toBeNull()
     expect(screen.queryByText('bend points')).toBeNull()
@@ -251,6 +252,235 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     await waitFor(() => {
       const payload = lastGraphPayload(onGraphChange)
       expect(payload?.edges).toHaveLength(0)
+    })
+  })
+
+  test('shows node context menu and deletes the node via Delete action', async () => {
+    const onGraphChange = vi.fn()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, config: { task_prompt: 'run task' } },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1' }]}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    const taskNode = container.querySelector('.flow-ws-node[data-node-token="id:2"]')
+    fireEvent.contextMenu(taskNode, { clientX: 320, clientY: 220 })
+
+    const deleteNodeAction = screen.getByRole('menuitem', { name: 'Delete node' })
+    expect(deleteNodeAction).toBeTruthy()
+    fireEvent.click(deleteNodeAction)
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      expect(payload?.nodes?.find((node) => node.id === 2)).toBeFalsy()
+      expect(payload?.edges || []).toHaveLength(0)
+    })
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    confirmSpy.mockRestore()
+  })
+
+  test('shows connector context menu and deletes connector via Delete action', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, config: { task_prompt: 'run task' } },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1' }]}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-edge-hit')).toBeTruthy()
+    })
+
+    const edgeHit = container.querySelector('.flow-ws-edge-hit')
+    fireEvent.contextMenu(edgeHit, { clientX: 320, clientY: 220 })
+
+    const deleteConnectorAction = screen.getByRole('menuitem', { name: 'Delete connector' })
+    expect(deleteConnectorAction).toBeTruthy()
+    fireEvent.click(deleteConnectorAction)
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      expect(payload?.edges || []).toHaveLength(0)
+    })
+  })
+
+  test('supports duplicate, reset connectors, run from here, and quick node in node context menu', async () => {
+    const onGraphChange = vi.fn()
+    const onRunFromNode = vi.fn()
+    const onQuickNodeFromNode = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, title: 'Task Alpha', config: { task_prompt: 'run task' } },
+        ]}
+        initialEdges={[{ source_node_id: 1, target_node_id: 2, source_handle_id: 'r1', target_handle_id: 'l1' }]}
+        onGraphChange={onGraphChange}
+        onRunFromNode={onRunFromNode}
+        onQuickNodeFromNode={onQuickNodeFromNode}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    const taskNode = container.querySelector('.flow-ws-node[data-node-token="id:2"]')
+    fireEvent.contextMenu(taskNode, { clientX: 320, clientY: 220 })
+    expect(screen.getByRole('menuitem', { name: 'Duplicate node' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Reset connectors' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Run From Here' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Quick Node' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Run From Here' }))
+    expect(onRunFromNode).toHaveBeenCalledTimes(1)
+    expect(onRunFromNode.mock.calls[0][0]).toMatchObject({ persistedId: 2, node_type: 'task' })
+
+    fireEvent.contextMenu(taskNode, { clientX: 320, clientY: 220 })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Quick Node' }))
+    expect(onQuickNodeFromNode).toHaveBeenCalledTimes(1)
+    expect(onQuickNodeFromNode.mock.calls[0][0]).toMatchObject({ persistedId: 2, node_type: 'task' })
+
+    fireEvent.contextMenu(taskNode, { clientX: 320, clientY: 220 })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate node' }))
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const taskNodes = (payload?.nodes || []).filter((node) => node.node_type === 'task')
+      expect(taskNodes.length).toBe(2)
+    })
+
+    fireEvent.contextMenu(taskNode, { clientX: 320, clientY: 220 })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reset connectors' }))
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      expect(payload?.edges || []).toHaveLength(0)
+    })
+  })
+
+  test('duplicates selected node from inspector header action', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, title: 'Task Alpha', config: { task_prompt: 'run task' } },
+        ]}
+        initialEdges={[]}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    fireEvent.click(screen.getByLabelText('Duplicate node'))
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const taskNodes = (payload?.nodes || []).filter((node) => node.node_type === 'task')
+      expect(taskNodes.length).toBe(2)
+    })
+  })
+
+  test('copies and pastes selected node with Ctrl+C/Ctrl+V', async () => {
+    const onGraphChange = vi.fn()
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, title: 'Task Alpha', config: { task_prompt: 'run task' } },
+        ]}
+        initialEdges={[]}
+        onGraphChange={onGraphChange}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    fireEvent.keyDown(window, { key: 'c', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 'v', ctrlKey: true })
+
+    await waitFor(() => {
+      const payload = lastGraphPayload(onGraphChange)
+      const taskNodes = (payload?.nodes || []).filter((node) => node.node_type === 'task')
+      expect(taskNodes.length).toBe(2)
+    })
+  })
+
+  test('shows node artifacts header action for persisted nodes and disables it for draft nodes', async () => {
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'memory', x: 520, y: 220, title: 'Saved Memory' },
+          { client_id: 41, node_type: 'task', x: 760, y: 220, title: 'Draft Task' },
+        ]}
+        initialEdges={[]}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+      expect(container.querySelector('.flow-ws-node[data-node-token="client:41"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    const persistedArtifactsAction = screen.getByLabelText('View node artifacts')
+    expect(persistedArtifactsAction.tagName).toBe('A')
+    expect(persistedArtifactsAction.getAttribute('href')).toBe('/artifacts/type/memory?flowchart_node_id=2')
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="client:41"]'))
+    const draftArtifactsAction = screen.getByLabelText('View node artifacts')
+    expect(draftArtifactsAction.tagName).toBe('BUTTON')
+    expect(draftArtifactsAction).toBeDisabled()
+  })
+
+  test('clears inspector selection when clicking empty workspace area', async () => {
+    const { container } = render(
+      <FlowchartWorkspaceEditor
+        initialNodes={[
+          { id: 1, node_type: 'start', x: 200, y: 200 },
+          { id: 2, node_type: 'task', x: 520, y: 220, config: { task_prompt: 'run task' } },
+        ]}
+        initialEdges={[]}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.flow-ws-node[data-node-token="id:2"]')).toBeTruthy()
+    })
+
+    fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
+    expect(screen.queryByText('Select a node or edge to edit.')).toBeNull()
+
+    const viewport = container.querySelector('.flow-ws-viewport')
+    expect(viewport).toBeTruthy()
+    fireEvent.pointerDown(viewport, { button: 0, clientX: 40, clientY: 120 })
+    fireEvent.pointerUp(window, { button: 0, clientX: 40, clientY: 120 })
+
+    await waitFor(() => {
+      expect(screen.getByText('Select a node or edge to edit.')).toBeTruthy()
     })
   })
 
@@ -589,7 +819,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('Mark milestone complete')).toBeTruthy()
     expect(screen.getByText('optional additive prompt')).toBeTruthy()
     expect(screen.queryByText(/^ref$/i)).toBeFalsy()
-    expect(screen.queryByText('model')).toBeFalsy()
+    expect(screen.getByText('model')).toBeTruthy()
     expect(screen.getByText('agent')).toBeTruthy()
 
     const actionField = screen.getByText('action').closest('label')
@@ -618,7 +848,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
   })
 
-  test('renders plan specialized controls and emits complete-plan-item config', async () => {
+  test('renders plan specialized controls and emits plan store_mode config', async () => {
     const onGraphChange = vi.fn()
     const { container } = render(
       <FlowchartWorkspaceEditor
@@ -636,29 +866,44 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     })
 
     fireEvent.click(container.querySelector('.flow-ws-node[data-node-token="id:2"]'))
-    expect(screen.getByText('Create or update plan')).toBeTruthy()
-    expect(screen.getByText('Complete plan item')).toBeTruthy()
+    expect(screen.getByText('Append')).toBeTruthy()
+    expect(screen.getByText('Replace')).toBeTruthy()
+    expect(screen.getByText('Update')).toBeTruthy()
+    expect(screen.getByText('LLM-guided')).toBeTruthy()
+    expect(screen.getByText('Deterministic')).toBeTruthy()
     expect(screen.getByText('optional additive prompt')).toBeTruthy()
+    expect(screen.getByText('Failure')).toBeTruthy()
+    expect(screen.getByText('retry count')).toBeTruthy()
+    expect(screen.getByText('fallback enabled')).toBeTruthy()
     expect(screen.queryByText(/^ref$/i)).toBeFalsy()
-    expect(screen.queryByText('model')).toBeFalsy()
+    expect(screen.getByText('model')).toBeTruthy()
     expect(screen.getByText('agent')).toBeTruthy()
 
-    const actionField = screen.getByText('action').closest('label')
-    const actionSelect = actionField?.querySelector('select')
-    expect(actionSelect).toBeTruthy()
-    expect(actionSelect).toHaveAttribute('required')
-    fireEvent.change(actionSelect, { target: { value: 'complete_plan_item' } })
-    expect(screen.getByText('Complete plan item requires plan item id, stage+task keys, or completion source path.')).toBeTruthy()
+    const modeField = screen.getByText('store mode').closest('label')
+    const modeSelect = modeField?.querySelector('select')
+    expect(modeSelect).toBeTruthy()
+    expect(modeSelect).toHaveAttribute('required')
+    fireEvent.change(modeSelect, { target: { value: 'update' } })
+
+    const planModeField = screen.getByText('mode').closest('label')
+    const planModeSelect = planModeField?.querySelector('select')
+    expect(planModeSelect).toBeTruthy()
+    fireEvent.change(planModeSelect, { target: { value: 'llm_guided' } })
 
     const additivePromptField = screen.getByText('optional additive prompt').closest('label')
     const additivePromptInput = additivePromptField?.querySelector('textarea')
     expect(additivePromptInput).toBeTruthy()
     fireEvent.change(additivePromptInput, { target: { value: 'mark only validated item' } })
 
-    const planItemIdField = screen.getByText('plan item id (preferred)').closest('label')
-    const planItemIdInput = planItemIdField?.querySelector('input')
-    expect(planItemIdInput).toBeTruthy()
-    fireEvent.change(planItemIdInput, { target: { value: '17' } })
+    const retryCountField = screen.getByText('retry count').closest('label')
+    const retryCountInput = retryCountField?.querySelector('input')
+    expect(retryCountInput).toBeTruthy()
+    fireEvent.change(retryCountInput, { target: { value: '2' } })
+
+    const fallbackField = screen.getByText('fallback enabled').closest('label')
+    const fallbackSelect = fallbackField?.querySelector('select')
+    expect(fallbackSelect).toBeTruthy()
+    fireEvent.change(fallbackSelect, { target: { value: 'false' } })
 
     const retentionField = screen.getByText('artifact retention').closest('label')
     const retentionSelect = retentionField?.querySelector('select')
@@ -669,9 +914,11 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
       const payload = lastGraphPayload(onGraphChange)
       const planNode = payload?.nodes?.find((node) => node.node_type === 'plan')
       expect(planNode).toBeTruthy()
-      expect(planNode?.config?.action).toBe('complete_plan_item')
+      expect(planNode?.config?.store_mode).toBe('update')
+      expect(planNode?.config?.mode).toBe('llm_guided')
       expect(planNode?.config?.additive_prompt).toBe('mark only validated item')
-      expect(planNode?.config?.plan_item_id).toBe(17)
+      expect(planNode?.config?.retry_count).toBe(2)
+      expect(planNode?.config?.fallback_enabled).toBe(false)
       expect(planNode?.config?.retention_mode).toBe('max_count')
     })
   })
@@ -718,7 +965,7 @@ describe('FlowchartWorkspaceEditor start positioning', () => {
     expect(screen.getByText('artifact retention')).toBeTruthy()
     expect(screen.getByLabelText(/LLMCTL MCP/)).toBeChecked()
     expect(screen.getByLabelText(/LLMCTL MCP/)).toBeDisabled()
-    expect(screen.queryByText('model')).toBeFalsy()
+    expect(screen.getByText('model')).toBeTruthy()
     expect(screen.getByText('agent')).toBeTruthy()
     expect(screen.getByText('MCP servers')).toBeTruthy()
 
